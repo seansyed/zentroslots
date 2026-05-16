@@ -1,0 +1,110 @@
+import { NextRequest, NextResponse } from "next/server";
+import { and, eq, inArray } from "drizzle-orm";
+import { z } from "zod";
+
+import { db } from "@/db/client";
+import { bookings, serviceStaff, services, users } from "@/db/schema";
+import { errorResponse, HttpError, requireRole } from "@/lib/auth";
+
+const patchSchema = z.object({
+  name: z.string().min(1).max(120).optional(),
+  slug: z.string().regex(/^[a-z0-9-]+$/).min(1).max(80).optional(),
+  description: z.string().nullable().optional(),
+  durationMinutes: z.number().int().min(5).max(8 * 60).optional(),
+  price: z.number().int().min(0).optional(),
+  bufferBefore: z.number().int().min(0).max(240).optional(),
+  bufferAfter: z.number().int().min(0).max(240).optional(),
+  color: z.string().regex(/^#[0-9a-fA-F]{6}$/).nullable().optional(),
+  isActive: z.union([z.number().int().min(0).max(1), z.boolean()]).optional(),
+  videoProvider: z.enum(["google_meet", "zoom", "teams", "none"]).optional(),
+  staffUserIds: z.array(z.string().uuid()).optional(),
+});
+
+export async function PATCH(
+  req: NextRequest,
+  context: { params: Promise<{ id: string }> }
+) {
+  try {
+    const admin = await requireRole(["admin"]);
+    const { id } = await context.params;
+    const body = patchSchema.parse(await req.json());
+
+    const existing = await db.query.services.findFirst({
+      where: and(eq(services.id, id), eq(services.tenantId, admin.tenantId)),
+    });
+    if (!existing) throw new HttpError(404, "Service not found");
+
+    const { staffUserIds, isActive, ...rest } = body;
+    const updates: Record<string, unknown> = { ...rest, updatedAt: new Date() };
+    if (typeof isActive === "boolean") updates.isActive = isActive ? 1 : 0;
+    else if (typeof isActive === "number") updates.isActive = isActive;
+
+    if (Object.keys(updates).length > 1) {
+      await db
+        .update(services)
+        .set(updates)
+        .where(and(eq(services.id, id), eq(services.tenantId, admin.tenantId)));
+    }
+
+    if (staffUserIds) {
+      // Validate staff in tenant
+      const own = await db
+        .select({ id: users.id })
+        .from(users)
+        .where(and(eq(users.tenantId, admin.tenantId), inArray(users.id, staffUserIds)));
+      if (own.length !== staffUserIds.length) throw new HttpError(400, "Staff not in workspace");
+      await db.transaction(async (tx) => {
+        await tx
+          .delete(serviceStaff)
+          .where(and(eq(serviceStaff.serviceId, id), eq(serviceStaff.tenantId, admin.tenantId)));
+        if (staffUserIds.length > 0) {
+          await tx.insert(serviceStaff).values(
+            staffUserIds.map((u) => ({ serviceId: id, userId: u, tenantId: admin.tenantId }))
+          );
+        }
+      });
+    }
+
+    const fresh = await db.query.services.findFirst({
+      where: and(eq(services.id, id), eq(services.tenantId, admin.tenantId)),
+    });
+    return NextResponse.json(fresh);
+  } catch (err) {
+    return errorResponse(err);
+  }
+}
+
+export async function DELETE(
+  _req: NextRequest,
+  context: { params: Promise<{ id: string }> }
+) {
+  try {
+    const admin = await requireRole(["admin"]);
+    const { id } = await context.params;
+
+    const existing = await db.query.services.findFirst({
+      where: and(eq(services.id, id), eq(services.tenantId, admin.tenantId)),
+    });
+    if (!existing) throw new HttpError(404, "Service not found");
+
+    // Soft-delete if any bookings exist; hard-delete only when safe.
+    const linked = await db
+      .select({ id: bookings.id })
+      .from(bookings)
+      .where(and(eq(bookings.tenantId, admin.tenantId), eq(bookings.serviceId, id)))
+      .limit(1);
+
+    if (linked.length > 0) {
+      await db
+        .update(services)
+        .set({ isActive: 0, updatedAt: new Date() })
+        .where(eq(services.id, id));
+      return NextResponse.json({ ok: true, archived: true });
+    }
+
+    await db.delete(services).where(eq(services.id, id));
+    return NextResponse.json({ ok: true, deleted: true });
+  } catch (err) {
+    return errorResponse(err);
+  }
+}
