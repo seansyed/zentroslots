@@ -56,9 +56,13 @@ export async function verifyToken(token: string): Promise<SessionPayload | null>
 
 export async function setSessionCookie(token: string): Promise<void> {
   const jar = await cookies();
+  // `Secure` is mandatory under HTTPS but breaks plain-HTTP deployments
+  // (browsers silently drop the cookie). Allow ops to opt out *only* if
+  // they explicitly set COOKIE_INSECURE=1 — never default to off.
+  const allowInsecure = process.env.COOKIE_INSECURE === "1";
   jar.set(COOKIE_NAME, token, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
+    secure: process.env.NODE_ENV === "production" && !allowInsecure,
     sameSite: "lax",
     path: "/",
     maxAge: 60 * 60 * 24 * 7,
