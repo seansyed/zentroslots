@@ -109,6 +109,7 @@ function buildNav(variant: SidebarVariant, role: Role): Group[] {
           { label: "Billing",      href: "/dashboard/billing",              icon: I.receipt },
           { label: "Branding",     href: "/dashboard/settings/branding",    icon: I.palette },
           { label: "Integrations", href: "/dashboard/settings/integrations", icon: I.link },
+          { label: "Communications", href: "/dashboard/settings/communications", icon: I.bell },
         ]
       : []),
   ];

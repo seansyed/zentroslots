@@ -560,6 +560,37 @@ export const auditLogsRelations = relations(auditLogs, ({ one }) => ({
   actor: one(users, { fields: [auditLogs.actorUserId], references: [users.id] }),
 }));
 
+// ─── Tenant SMS provider connections ────────────────────────────────────
+// One active provider per tenant. Secrets are AES-256-GCM encrypted —
+// never store or return plaintext. See lib/crypto.ts for envelope shape.
+export const tenantSmsProviders = pgTable(
+  "tenant_sms_providers",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    // 'twilio' | 'telnyx'
+    provider: varchar("provider", { length: 20 }).notNull(),
+    accountId: varchar("account_id", { length: 120 }),
+    authTokenEncrypted: text("auth_token_encrypted").notNull(),
+    senderId: varchar("sender_id", { length: 40 }).notNull(),
+    webhookSecretEncrypted: text("webhook_secret_encrypted"),
+    active: boolean("active").notNull().default(true),
+    totalSent: integer("total_sent").notNull().default(0),
+    totalFailed: integer("total_failed").notNull().default(0),
+    lastSendAt: timestamp("last_send_at", { withTimezone: true }),
+    lastError: text("last_error"),
+    lastErrorAt: timestamp("last_error_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    tenantUnique: uniqueIndex("tenant_sms_providers_tenant_unique").on(t.tenantId),
+    activeIdx: index("tenant_sms_providers_active_idx").on(t.active),
+  })
+);
+
 // ─── Plans (super-admin managed pricing catalog) ────────────────────────
 // Edited via /admin/plans. Tenants link to a plan by slug through
 // `tenants.current_plan` — no FK so legacy slugs don't break upgrades.
@@ -675,6 +706,8 @@ export type TenantDomain = typeof tenantDomains.$inferSelect;
 export type NewTenantDomain = typeof tenantDomains.$inferInsert;
 export type EmbedEvent = typeof embedEvents.$inferSelect;
 export type NewEmbedEvent = typeof embedEvents.$inferInsert;
+export type TenantSmsProvider = typeof tenantSmsProviders.$inferSelect;
+export type NewTenantSmsProvider = typeof tenantSmsProviders.$inferInsert;
 export type Plan = typeof plans.$inferSelect;
 export type NewPlan = typeof plans.$inferInsert;
 export type Promotion = typeof promotions.$inferSelect;
