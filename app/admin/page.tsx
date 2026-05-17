@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { and, count, desc, eq, gte, inArray, sql } from "drizzle-orm";
 import { db } from "@/db/client";
-import { auditLogs, bookings, tenants, users } from "@/db/schema";
+import { auditLogs, bookings, plans, tenants, users } from "@/db/schema";
 import { getSession } from "@/lib/auth";
 import { isSuperAdminEmail } from "@/lib/super-admin";
 import Shell from "@/components/dashboard/Shell";
@@ -18,6 +18,7 @@ export default async function AdminPage() {
   const me = await db.query.users.findFirst({ where: eq(users.id, session.sub) });
 
   const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
   const [
     allTenants,
     [usersTotal],
@@ -27,6 +28,11 @@ export default async function AdminPage() {
     [emailSent],
     expiredGoogleTenants,
     [recentBookings],
+    planRows,
+    tenantPlanDistribution,
+    [tenantsNew30d],
+    [newTrialsLast30d],
+    [convertedLast30d],
   ] = await Promise.all([
     db
       .select({
@@ -77,7 +83,54 @@ export default async function AdminPage() {
       )
       .limit(20),
     db.select({ n: count() }).from(bookings).where(gte(bookings.createdAt, sevenDaysAgo)),
+    // Plan catalog — for MRR pricing lookups.
+    db.select({ slug: plans.slug, priceMonthlyCents: plans.priceMonthlyCents }).from(plans),
+    // Plan + sub-status distribution. We compute MRR + revenue widgets
+    // from this single grouped query rather than per-plan round trips.
+    db
+      .select({
+        plan: tenants.currentPlan,
+        status: tenants.subscriptionStatus,
+        n: sql<number>`COUNT(*)::int`,
+      })
+      .from(tenants)
+      .groupBy(tenants.currentPlan, tenants.subscriptionStatus),
+    // 30-day signup rate
+    db.select({ n: count() }).from(tenants).where(gte(tenants.createdAt, thirtyDaysAgo)),
+    // Trial → conversion proxy: count of tenants currently trialing
+    // (window: those whose trial started in the last 30d).
+    db
+      .select({ n: count() })
+      .from(tenants)
+      .where(and(eq(tenants.subscriptionStatus, "trialing"), gte(tenants.createdAt, thirtyDaysAgo))),
+    db
+      .select({ n: count() })
+      .from(tenants)
+      .where(and(eq(tenants.subscriptionStatus, "active"), gte(tenants.createdAt, thirtyDaysAgo))),
   ]);
+
+  // MRR: for each (plan, status='active') row, multiply tenant count by
+  // the plan's monthly price. Trialing / past_due not counted as MRR.
+  const priceBySlug = new Map(planRows.map((p) => [p.slug, p.priceMonthlyCents]));
+  const mrrCents = tenantPlanDistribution.reduce((sum, row) => {
+    if (row.status !== "active") return sum;
+    const price = priceBySlug.get(row.plan) ?? 0;
+    return sum + price * Number(row.n);
+  }, 0);
+  const planTotals: Record<string, number> = {};
+  let trialingTotal = 0;
+  let pastDueTotal = 0;
+  for (const row of tenantPlanDistribution) {
+    planTotals[row.plan] = (planTotals[row.plan] ?? 0) + Number(row.n);
+    if (row.status === "trialing") trialingTotal += Number(row.n);
+    if (row.status === "past_due") pastDueTotal += Number(row.n);
+  }
+  const newTrials = Number(newTrialsLast30d?.n ?? 0);
+  const newConverted = Number(convertedLast30d?.n ?? 0);
+  const trialDenominator = newTrials + newConverted;
+  const trialConversionPct = trialDenominator > 0
+    ? Math.round((newConverted / trialDenominator) * 100)
+    : null;
 
   return (
     <Shell
@@ -89,10 +142,59 @@ export default async function AdminPage() {
       <div className="text-xs font-medium uppercase tracking-wider text-red-700">Internal — superuser only</div>
       <h1 className="mt-1 text-heading font-semibold text-ink">Operations</h1>
 
-      <div className="mt-6 grid grid-cols-3 gap-3">
+      {/* Revenue snapshot — local computation from plans + tenants. Stripe
+          is not queried; if a tenant's status is wrong in our DB it'll
+          show wrong here, but the source of truth for invoicing is still
+          Stripe itself. */}
+      <h2 className="mt-6 text-lg font-medium">Revenue snapshot</h2>
+      <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-4">
+        <Stat label="MRR (active subs)" value={formatCents(mrrCents)} />
+        <Stat label="ARR estimate" value={formatCents(mrrCents * 12)} />
+        <Stat label="Trial → paid (30d)" value={trialConversionPct != null ? `${trialConversionPct}%` : "—"} />
+        <Stat label="Tenants joined (30d)" value={String(Number(tenantsNew30d?.n ?? 0))} />
+      </div>
+
+      <h2 className="mt-8 text-lg font-medium">Plan distribution</h2>
+      <div className="mt-3 overflow-hidden rounded-lg border bg-white shadow-sm">
+        <table className="w-full text-sm">
+          <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
+            <tr>
+              <th className="px-4 py-2">Plan</th>
+              <th className="px-4 py-2 text-right">Tenants</th>
+              <th className="px-4 py-2 text-right">Active</th>
+              <th className="px-4 py-2 text-right">Trialing</th>
+              <th className="px-4 py-2 text-right">Past due</th>
+              <th className="px-4 py-2 text-right">$ / mo</th>
+            </tr>
+          </thead>
+          <tbody>
+            {Object.entries(planTotals).sort(([, a], [, b]) => b - a).map(([plan, total]) => {
+              const active = tenantPlanDistribution.find((r) => r.plan === plan && r.status === "active");
+              const trial  = tenantPlanDistribution.find((r) => r.plan === plan && r.status === "trialing");
+              const past   = tenantPlanDistribution.find((r) => r.plan === plan && r.status === "past_due");
+              const price  = priceBySlug.get(plan) ?? 0;
+              return (
+                <tr key={plan} className="border-t">
+                  <td className="px-4 py-2 font-medium">{plan}</td>
+                  <td className="px-4 py-2 text-right tabular-nums">{total}</td>
+                  <td className="px-4 py-2 text-right tabular-nums">{Number(active?.n ?? 0)}</td>
+                  <td className="px-4 py-2 text-right tabular-nums">{Number(trial?.n ?? 0)}</td>
+                  <td className="px-4 py-2 text-right tabular-nums">{Number(past?.n ?? 0)}</td>
+                  <td className="px-4 py-2 text-right text-xs text-ink-muted">{formatCents(price)}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      <h2 className="mt-10 text-lg font-medium">Footprint</h2>
+      <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-5">
         <Stat label="Tenants" value={String(allTenants.length)} />
         <Stat label="Users (total)" value={String(Number(usersTotal?.n ?? 0))} />
         <Stat label="Bookings (total)" value={String(Number(bookingsTotal?.n ?? 0))} />
+        <Stat label="Trialing now" value={String(trialingTotal)} />
+        <Stat label="Past-due" value={String(pastDueTotal)} />
       </div>
 
       {/* Ops health — 7-day rolling window */}
@@ -205,4 +307,10 @@ function Stat({ label, value }: { label: string; value: string }) {
       <div className="mt-1 text-2xl font-semibold">{value}</div>
     </div>
   );
+}
+
+function formatCents(cents: number): string {
+  // Whole-dollar rendering — admin dashboard, no need for cent precision
+  // and easier to scan.
+  return "$" + Math.round(cents / 100).toLocaleString();
 }

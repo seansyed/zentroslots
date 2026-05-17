@@ -83,8 +83,17 @@ export default async function AdminTenantsPage({
         </Link>
       </form>
 
-      <div className="mt-2 text-xs text-ink-subtle">
-        {rows.length} tenant{rows.length === 1 ? "" : "s"} {q || plan || status ? "matching filters" : "total"}
+      <div className="mt-2 flex items-center justify-between gap-3 text-xs text-ink-subtle">
+        <div>
+          {rows.length} tenant{rows.length === 1 ? "" : "s"} {q || plan || status ? "matching filters" : "total"}
+        </div>
+        <a
+          href="/api/admin/exports/tenants"
+          download
+          className="rounded-md border border-border bg-white px-3 py-1 text-xs font-medium text-ink hover:bg-surface-subtle"
+        >
+          ↓ Export CSV
+        </a>
       </div>
 
       <div className="mt-3 overflow-hidden rounded-lg border bg-white shadow-sm">

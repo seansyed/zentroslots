@@ -1,6 +1,7 @@
 import "./globals.css";
 import type { Metadata } from "next";
 import { ToastHost } from "@/components/ui/primitives";
+import ImpersonationBanner from "@/components/ImpersonationBanner";
 
 const APP_BASE_URL = process.env.APP_BASE_URL ?? "http://localhost:3001";
 
@@ -30,6 +31,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         >
           Skip to content
         </a>
+        <ImpersonationBanner />
         <main id="main" className="min-h-screen">{children}</main>
         <ToastHost />
       </body>

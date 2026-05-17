@@ -61,7 +61,17 @@ export default async function AdminSubscriptionsPage({
       title="Subscriptions"
       crumbs={[{ label: "Super-admin", href: "/admin" }, { label: "Subscriptions" }]}
     >
-      <div className="mt-4 flex flex-wrap gap-1.5 text-sm">
+      <div className="mt-4 flex items-center justify-between gap-3">
+        <div className="text-xs text-ink-subtle">{rows.length} in bucket</div>
+        <a
+          href="/api/admin/exports/subscriptions"
+          download
+          className="rounded-md border border-border bg-white px-3 py-1 text-xs font-medium text-ink hover:bg-surface-subtle"
+        >
+          ↓ Export CSV
+        </a>
+      </div>
+      <div className="mt-3 flex flex-wrap gap-1.5 text-sm">
         {FILTERS.map((f) => {
           const n = (counts as Record<string, number>)?.[f.slug] ?? 0;
           const isActive = f.slug === active.slug;

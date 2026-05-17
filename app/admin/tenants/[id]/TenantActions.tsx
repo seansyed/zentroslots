@@ -47,9 +47,36 @@ export default function TenantActions({
     }
   }
 
+  async function impersonate() {
+    if (!confirm("Impersonate this tenant? You'll be logged in as their admin and every action is audit-logged.")) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      const res = await fetch(`/api/admin/tenants/${tenantId}/impersonate`, { method: "POST" });
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(data.error || `HTTP ${res.status}`);
+      }
+      const data = (await res.json()) as { redirectTo?: string };
+      window.location.href = data.redirectTo ?? "/dashboard";
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Failed");
+      setBusy(false);
+    }
+  }
+
   return (
     <div className="mt-4 space-y-4 text-sm">
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
+        {active && (
+          <button
+            disabled={busy}
+            onClick={impersonate}
+            className="rounded-md bg-violet-600 px-3 py-1.5 font-medium text-white hover:bg-violet-700 disabled:opacity-50"
+          >
+            Impersonate tenant
+          </button>
+        )}
         {active ? (
           <button
             disabled={busy}
