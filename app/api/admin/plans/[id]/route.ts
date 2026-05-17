@@ -15,6 +15,7 @@ const patchInput = z.object({
   stripePriceIdMonthly: z.string().max(120).nullish(),
   stripePriceIdYearly: z.string().max(120).nullish(),
   quotaStaff: z.number().int().min(0).optional(),
+  quotaManagers: z.number().int().min(-1).optional(),
   quotaBookingsPerMonth: z.number().int().min(0).optional(),
   quotaServices: z.number().int().min(0).optional(),
   features: z.array(z.string().min(1).max(120)).optional(),

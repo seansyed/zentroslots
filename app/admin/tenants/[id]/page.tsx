@@ -204,7 +204,7 @@ async function BillingTab({ tenant }: { tenant: typeof tenants.$inferSelect }) {
 async function UsageTab({ tenant }: { tenant: typeof tenants.$inferSelect }) {
   const oneMonthAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
 
-  const [byStatus, [last30], staffCount, serviceCountRow] = await Promise.all([
+  const [byStatus, [last30], staffCount, managerCount, serviceCountRow] = await Promise.all([
     db
       .select({
         status: bookings.status,
@@ -215,6 +215,7 @@ async function UsageTab({ tenant }: { tenant: typeof tenants.$inferSelect }) {
       .groupBy(bookings.status),
     db.select({ n: count() }).from(bookings).where(and(eq(bookings.tenantId, tenant.id), gte(bookings.createdAt, oneMonthAgo))),
     db.select({ n: count() }).from(users).where(and(eq(users.tenantId, tenant.id), eq(users.role, "staff"))).then((r) => Number(r[0]?.n ?? 0)),
+    db.select({ n: count() }).from(users).where(and(eq(users.tenantId, tenant.id), eq(users.role, "manager"))).then((r) => Number(r[0]?.n ?? 0)),
     db.execute(sql`SELECT COUNT(*)::int AS n FROM services WHERE tenant_id = ${tenant.id}`),
   ]);
 
@@ -225,8 +226,9 @@ async function UsageTab({ tenant }: { tenant: typeof tenants.$inferSelect }) {
 
   return (
     <>
-      <div className="grid gap-4 md:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-5">
         <Stat label="Staff" value={String(staffCount)} />
+        <Stat label="Managers" value={String(managerCount)} />
         <Stat label="Services" value={String(serviceCount)} />
         <Stat label="Bookings total" value={String(totalBookings)} />
         <Stat label="Bookings (30d)" value={String(Number(last30?.n ?? 0))} />

@@ -5,6 +5,7 @@ import { z } from "zod";
 import { db } from "@/db/client";
 import { users } from "@/db/schema";
 import { errorResponse, HttpError, requireRole } from "@/lib/auth";
+import { assertCanAddManager } from "@/lib/quotas";
 import { audit, ipFromHeaders } from "@/lib/audit";
 
 // Admin-only. Promotes/demotes a workspace user between staff ↔ manager.
@@ -42,6 +43,12 @@ export async function POST(
     if (target.role === newRole) {
       // No-op — return current state without writing/auditing.
       return NextResponse.json({ ok: true, role: target.role, changed: false });
+    }
+
+    // Only check the seat quota on PROMOTIONS (staff → manager).
+    // Demotions free a seat so they never block.
+    if (newRole === "manager" && target.role !== "manager") {
+      await assertCanAddManager(caller.tenantId);
     }
 
     const [updated] = await db

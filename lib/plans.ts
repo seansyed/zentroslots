@@ -14,6 +14,7 @@ export type Plan = {
   features: string[];
   limits: {
     maxStaff: number;            // -1 = unlimited
+    maxManagers: number;         // -1 = unlimited; 0 = manager role unavailable on this plan
     maxBookingsPerMonth: number; // -1 = unlimited
     customBranding: boolean;
     publicProfile: boolean;
@@ -30,7 +31,7 @@ export const PLANS: Record<PlanId, Plan> = {
     interval: "month",
     description: "Get started with the essentials.",
     features: ["1 staff member", "50 bookings / month", "Public booking page"],
-    limits: { maxStaff: 1, maxBookingsPerMonth: 50, customBranding: false, publicProfile: true, analytics: false },
+    limits: { maxStaff: 1, maxManagers: 0, maxBookingsPerMonth: 50, customBranding: false, publicProfile: true, analytics: false },
   },
   pro: {
     id: "pro",
@@ -38,8 +39,8 @@ export const PLANS: Record<PlanId, Plan> = {
     priceCents: 1900,
     interval: "month",
     description: "For growing teams.",
-    features: ["Up to 5 staff", "1,000 bookings / month", "Custom branding", "Analytics dashboard"],
-    limits: { maxStaff: 5, maxBookingsPerMonth: 1000, customBranding: true, publicProfile: true, analytics: true },
+    features: ["Up to 5 staff", "2 manager seats", "1,000 bookings / month", "Custom branding", "Analytics dashboard"],
+    limits: { maxStaff: 5, maxManagers: 2, maxBookingsPerMonth: 1000, customBranding: true, publicProfile: true, analytics: true },
     stripePriceEnvVar: "STRIPE_PRICE_PRO",
   },
   team: {
@@ -48,8 +49,8 @@ export const PLANS: Record<PlanId, Plan> = {
     priceCents: 4900,
     interval: "month",
     description: "Scale without limits.",
-    features: ["Unlimited staff", "Unlimited bookings", "Custom branding", "Analytics", "Priority support"],
-    limits: { maxStaff: -1, maxBookingsPerMonth: -1, customBranding: true, publicProfile: true, analytics: true },
+    features: ["Unlimited staff", "5 manager seats", "Unlimited bookings", "Custom branding", "Analytics", "Priority support"],
+    limits: { maxStaff: -1, maxManagers: 5, maxBookingsPerMonth: -1, customBranding: true, publicProfile: true, analytics: true },
     stripePriceEnvVar: "STRIPE_PRICE_TEAM",
   },
   enterprise: {
@@ -58,8 +59,8 @@ export const PLANS: Record<PlanId, Plan> = {
     priceCents: null,
     interval: null,
     description: "SSO, SLAs, dedicated support.",
-    features: ["Everything in Team", "SSO / SAML", "99.9% uptime SLA", "Dedicated CSM"],
-    limits: { maxStaff: -1, maxBookingsPerMonth: -1, customBranding: true, publicProfile: true, analytics: true },
+    features: ["Everything in Team", "Unlimited manager seats", "SSO / SAML", "99.9% uptime SLA", "Dedicated CSM"],
+    limits: { maxStaff: -1, maxManagers: -1, maxBookingsPerMonth: -1, customBranding: true, publicProfile: true, analytics: true },
   },
 };
 

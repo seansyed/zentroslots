@@ -45,10 +45,37 @@ export default async function BillingPage() {
       )}
 
       {/* Usage meters */}
-      <div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-2">
+      <div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-3">
         <Meter label="Staff seats" used={usage.staff.used} limit={usage.staff.limit} />
+        <Meter label="Manager seats" used={usage.managers.used} limit={usage.managers.limit} />
         <Meter label="Bookings this month" used={usage.bookingsThisMonth.used} limit={usage.bookingsThisMonth.limit} />
       </div>
+
+      {/* Manager seat callout — only shown when relevant: either the plan
+          includes seats (informational) or seats are at/above quota
+          (paywall hint). Stays hidden on free plan with 0 seats used. */}
+      {(usage.managers.limit !== 0 || usage.managers.used > 0) && (
+        <div className="mt-4 rounded-lg border border-violet-200 bg-violet-50 p-4 text-sm text-violet-900">
+          <div className="flex items-baseline justify-between gap-3">
+            <div>
+              <div className="font-medium">Manager seats</div>
+              <div className="mt-0.5 text-xs">
+                Managers see workspace-wide bookings + reports and can manage staff records. They cannot change billing or tenant settings.
+              </div>
+            </div>
+            <div className="shrink-0 text-right text-xs">
+              {isUnlimited(usage.managers.limit)
+                ? <span>Unlimited on {current.name}</span>
+                : <span><b>{usage.managers.used}</b> of {usage.managers.limit} used</span>}
+            </div>
+          </div>
+          {!isUnlimited(usage.managers.limit) && usage.managers.used >= usage.managers.limit && (
+            <div className="mt-2 text-xs">
+              Seats full. Demote an existing manager on the Staff page, or upgrade your plan for more seats.
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Plan grid */}
       <h2 className="mt-10 text-lg font-medium">Plans</h2>

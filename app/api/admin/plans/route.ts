@@ -16,6 +16,7 @@ const planInput = z.object({
   stripePriceIdMonthly: z.string().max(120).nullish(),
   stripePriceIdYearly: z.string().max(120).nullish(),
   quotaStaff: z.number().int().min(0).default(1),
+  quotaManagers: z.number().int().min(-1).default(0),
   quotaBookingsPerMonth: z.number().int().min(0).default(100),
   quotaServices: z.number().int().min(0).default(5),
   features: z.array(z.string().min(1).max(120)).default([]),

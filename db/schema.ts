@@ -575,6 +575,7 @@ export const plans = pgTable(
     stripePriceIdMonthly: varchar("stripe_price_id_monthly", { length: 120 }),
     stripePriceIdYearly: varchar("stripe_price_id_yearly", { length: 120 }),
     quotaStaff: integer("quota_staff").notNull().default(1),
+    quotaManagers: integer("quota_managers").notNull().default(0),
     quotaBookingsPerMonth: integer("quota_bookings_per_month").notNull().default(100),
     quotaServices: integer("quota_services").notNull().default(5),
     features: jsonb("features").notNull().default([]),

@@ -13,6 +13,7 @@ type PlanRow = {
   stripePriceIdMonthly: string | null;
   stripePriceIdYearly: string | null;
   quotaStaff: number;
+  quotaManagers: number;
   quotaBookingsPerMonth: number;
   quotaServices: number;
   features: string[];
@@ -66,6 +67,7 @@ function PlanCard({ plan, onChanged }: { plan: PlanRow; onChanged: () => void })
     priceMonthlyDollars: (plan.priceMonthlyCents / 100).toFixed(2),
     priceYearlyDollars: (plan.priceYearlyCents / 100).toFixed(2),
     quotaStaff: plan.quotaStaff,
+    quotaManagers: plan.quotaManagers,
     quotaBookingsPerMonth: plan.quotaBookingsPerMonth,
     quotaServices: plan.quotaServices,
     features: plan.features.join("\n"),
@@ -85,6 +87,7 @@ function PlanCard({ plan, onChanged }: { plan: PlanRow; onChanged: () => void })
           priceMonthlyCents: Math.round(parseFloat(draft.priceMonthlyDollars || "0") * 100),
           priceYearlyCents: Math.round(parseFloat(draft.priceYearlyDollars || "0") * 100),
           quotaStaff: Number(draft.quotaStaff),
+          quotaManagers: Number(draft.quotaManagers),
           quotaBookingsPerMonth: Number(draft.quotaBookingsPerMonth),
           quotaServices: Number(draft.quotaServices),
           features: draft.features.split("\n").map((s) => s.trim()).filter(Boolean),
@@ -131,6 +134,7 @@ function PlanCard({ plan, onChanged }: { plan: PlanRow; onChanged: () => void })
         {plan.description && <p className="mt-2 text-sm text-ink-muted">{plan.description}</p>}
         <ul className="mt-3 space-y-1 text-sm">
           <li>• {plan.quotaStaff.toLocaleString()} staff</li>
+          <li>• {plan.quotaManagers === -1 ? "Unlimited" : plan.quotaManagers.toLocaleString()} manager seats</li>
           <li>• {plan.quotaBookingsPerMonth.toLocaleString()} bookings/mo</li>
           <li>• {plan.quotaServices.toLocaleString()} services</li>
           {plan.features.map((f, i) => <li key={i}>• {f}</li>)}
@@ -157,8 +161,9 @@ function PlanCard({ plan, onChanged }: { plan: PlanRow; onChanged: () => void })
           <L label="$ / month"><input type="number" min={0} step="0.01" className={INPUT} value={draft.priceMonthlyDollars} onChange={(e) => setDraft({ ...draft, priceMonthlyDollars: e.target.value })} /></L>
           <L label="$ / year"><input type="number" min={0} step="0.01" className={INPUT} value={draft.priceYearlyDollars} onChange={(e) => setDraft({ ...draft, priceYearlyDollars: e.target.value })} /></L>
         </div>
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
           <L label="Staff"><input type="number" min={0} className={INPUT} value={draft.quotaStaff} onChange={(e) => setDraft({ ...draft, quotaStaff: Number(e.target.value) })} /></L>
+          <L label="Manager seats (-1 = ∞)"><input type="number" min={-1} className={INPUT} value={draft.quotaManagers} onChange={(e) => setDraft({ ...draft, quotaManagers: Number(e.target.value) })} /></L>
           <L label="Bookings/mo"><input type="number" min={0} className={INPUT} value={draft.quotaBookingsPerMonth} onChange={(e) => setDraft({ ...draft, quotaBookingsPerMonth: Number(e.target.value) })} /></L>
           <L label="Services"><input type="number" min={0} className={INPUT} value={draft.quotaServices} onChange={(e) => setDraft({ ...draft, quotaServices: Number(e.target.value) })} /></L>
         </div>
@@ -187,6 +192,7 @@ function NewPlanForm({ onClose, onCreated }: { onClose: () => void; onCreated: (
     priceMonthlyDollars: "0",
     priceYearlyDollars: "0",
     quotaStaff: 1,
+    quotaManagers: 0,
     quotaBookingsPerMonth: 100,
     quotaServices: 5,
     features: "",
@@ -207,6 +213,7 @@ function NewPlanForm({ onClose, onCreated }: { onClose: () => void; onCreated: (
           priceMonthlyCents: Math.round(parseFloat(draft.priceMonthlyDollars || "0") * 100),
           priceYearlyCents: Math.round(parseFloat(draft.priceYearlyDollars || "0") * 100),
           quotaStaff: Number(draft.quotaStaff),
+          quotaManagers: Number(draft.quotaManagers),
           quotaBookingsPerMonth: Number(draft.quotaBookingsPerMonth),
           quotaServices: Number(draft.quotaServices),
           features: draft.features.split("\n").map((s) => s.trim()).filter(Boolean),
@@ -234,6 +241,7 @@ function NewPlanForm({ onClose, onCreated }: { onClose: () => void; onCreated: (
         <L label="$ / month"><input type="number" min={0} step="0.01" className={INPUT} value={draft.priceMonthlyDollars} onChange={(e) => setDraft({ ...draft, priceMonthlyDollars: e.target.value })} /></L>
         <L label="$ / year"><input type="number" min={0} step="0.01" className={INPUT} value={draft.priceYearlyDollars} onChange={(e) => setDraft({ ...draft, priceYearlyDollars: e.target.value })} /></L>
         <L label="Staff"><input type="number" min={0} className={INPUT} value={draft.quotaStaff} onChange={(e) => setDraft({ ...draft, quotaStaff: Number(e.target.value) })} /></L>
+        <L label="Manager seats (-1 = ∞)"><input type="number" min={-1} className={INPUT} value={draft.quotaManagers} onChange={(e) => setDraft({ ...draft, quotaManagers: Number(e.target.value) })} /></L>
         <L label="Bookings/mo"><input type="number" min={0} className={INPUT} value={draft.quotaBookingsPerMonth} onChange={(e) => setDraft({ ...draft, quotaBookingsPerMonth: Number(e.target.value) })} /></L>
         <L label="Services"><input type="number" min={0} className={INPUT} value={draft.quotaServices} onChange={(e) => setDraft({ ...draft, quotaServices: Number(e.target.value) })} /></L>
         <L label="Sort order"><input type="number" className={INPUT} value={draft.sortOrder} onChange={(e) => setDraft({ ...draft, sortOrder: Number(e.target.value) })} /></L>
