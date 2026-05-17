@@ -45,7 +45,7 @@ export async function POST(
       timeZone: staff.timezone, year: "numeric", month: "2-digit", day: "2-digit",
     }).format(newStart);
 
-    let updated;
+    let updated: typeof bookings.$inferSelect | undefined;
     try {
       await db.transaction(async (tx) => {
         // Free the slot the current booking holds so the engine sees it as open.

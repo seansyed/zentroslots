@@ -51,7 +51,7 @@ export async function POST(
 
     // Quick: free the slot by temporarily setting status to 'pending'
     // (which the constraint ignores), re-check availability, then commit.
-    let updated;
+    let updated: typeof bookings.$inferSelect | undefined;
     try {
       await db.transaction(async (tx) => {
         await tx

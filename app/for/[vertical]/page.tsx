@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
 import MarketingNav from "@/components/MarketingNav";
-import { Footer } from "@/app/page";
+import Footer from "@/components/Footer";
 import { TEMPLATES, getTemplate } from "@/lib/templates";
 
 const SLUG_TO_ID: Record<string, string> = {
