@@ -1,7 +1,7 @@
 import Link from "next/link";
 import type { Metadata } from "next";
 import MarketingNav from "@/components/MarketingNav";
-import { Footer } from "@/app/page";
+import Footer from "@/components/Footer";
 import { PLANS, formatPrice } from "@/lib/plans";
 
 export const metadata: Metadata = {

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import MarketingNav from "@/components/MarketingNav";
+import Footer from "@/components/Footer";
 
 export default function HomePage() {
   return (
@@ -90,10 +91,3 @@ function Feature({ title, body }: { title: string; body: string }) {
   );
 }
 
-export function Footer() {
-  return (
-    <footer className="border-t bg-white py-10 text-center text-xs text-slate-500">
-      © {new Date().getFullYear()} Scheduling SaaS · Built with Next.js
-    </footer>
-  );
-}

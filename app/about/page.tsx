@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import MarketingNav from "@/components/MarketingNav";
-import { Footer } from "@/app/page";
+import Footer from "@/components/Footer";
 
 export const metadata: Metadata = {
   title: "About",
