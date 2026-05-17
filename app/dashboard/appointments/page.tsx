@@ -75,12 +75,49 @@ export default async function AppointmentsPage(props: {
           <h1 className="text-heading font-semibold text-ink">Appointments</h1>
           <p className="mt-1 text-sm text-ink-muted">Manage every booking across your workspace.</p>
         </div>
-        <a
-          href="/dashboard/calendar"
-          className="rounded-md border border-border bg-surface px-3 py-1.5 text-sm text-ink hover:bg-surface-inset"
-        >
-          Open calendar
-        </a>
+        <div className="flex flex-wrap gap-2">
+          <a
+            href={`/api/bookings/export${status ? `?status=${status}` : ""}`}
+            download
+            className="rounded-md border border-border bg-surface px-3 py-1.5 text-sm text-ink hover:bg-surface-inset"
+          >
+            ↓ Export CSV
+          </a>
+          <a
+            href="/dashboard/calendar"
+            className="rounded-md border border-border bg-surface px-3 py-1.5 text-sm text-ink hover:bg-surface-inset"
+          >
+            Open calendar
+          </a>
+        </div>
+      </div>
+
+      <div className="mt-4 flex flex-wrap gap-1.5 text-sm">
+        {[
+          { slug: "",          label: "All" },
+          { slug: "confirmed", label: "Confirmed" },
+          { slug: "pending",   label: "Pending" },
+          { slug: "cancelled", label: "Cancelled" },
+          { slug: "completed", label: "Completed" },
+          { slug: "no_show",   label: "No-show" },
+        ].map((chip) => {
+          const isActive = (status || "") === chip.slug;
+          const href = chip.slug ? `/dashboard/appointments?status=${chip.slug}` : "/dashboard/appointments";
+          return (
+            <a
+              key={chip.slug || "all"}
+              href={href}
+              className={
+                "rounded-md border px-3 py-1.5 " +
+                (isActive
+                  ? "border-brand-accent bg-brand-accent text-white"
+                  : "border-border bg-surface text-ink-muted hover:bg-surface-inset")
+              }
+            >
+              {chip.label}
+            </a>
+          );
+        })}
       </div>
 
       <AppointmentsTable

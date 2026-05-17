@@ -1,12 +1,13 @@
 import { redirect } from "next/navigation";
-import { and, count, desc, eq, gte, lt, sql } from "drizzle-orm";
+import { and, count, desc, eq, gte, inArray, lt, or, sql } from "drizzle-orm";
 
 import { db } from "@/db/client";
-import { availability, bookings, services, tenants, users } from "@/db/schema";
+import { announcements, availability, bookings, services, tasks, tenants, users } from "@/db/schema";
 import { getSession } from "@/lib/auth";
 import DashboardBookings from "@/components/DashboardBookings";
 import Shell from "@/components/dashboard/Shell";
 import OnboardingChecklist, { type ChecklistItem } from "@/components/dashboard/OnboardingChecklist";
+import TenantAnnouncementBanner from "@/components/dashboard/TenantAnnouncementBanner";
 
 export default async function DashboardPage(props: {
   searchParams: Promise<{ tab?: string }>;
@@ -51,6 +52,13 @@ export default async function DashboardPage(props: {
     [staffCountRow],
     [bookingCountRow],
     [bookedSecondsRow],
+    [noShowCount],
+    [confirmed30dCount],
+    [weekRevenueRow],
+    [pendingTasksRow],
+    pendingTasks,
+    topServices,
+    activeAnnouncements,
   ] = await Promise.all([
     db.select({ n: count() }).from(bookings).where(and(visibility, eq(bookings.status, "confirmed"), gte(bookings.startAt, startOfToday), lt(bookings.startAt, startOfTomorrow))),
     db.select({ n: count() }).from(bookings).where(and(visibility, eq(bookings.status, "confirmed"), gte(bookings.startAt, startOfWeek), lt(bookings.startAt, endOfWeek))),
@@ -63,7 +71,77 @@ export default async function DashboardPage(props: {
       })
       .from(bookings)
       .where(and(visibility, eq(bookings.status, "confirmed"), gte(bookings.startAt, startOfWeek), lt(bookings.startAt, endOfWeek))),
+    db.select({ n: count() }).from(bookings).where(and(visibility, eq(bookings.status, "no_show"), gte(bookings.startAt, thirtyDaysAgo))),
+    // Denominator for no-show rate: actually-occurred meetings (completed
+    // + no_show). Excludes cancellations since they were never expected
+    // to happen.
+    db.select({ n: count() }).from(bookings).where(and(visibility, inArray(bookings.status, ["completed", "no_show"]), gte(bookings.startAt, thirtyDaysAgo))),
+    // Revenue estimate this week: sum of service.price for confirmed
+    // bookings whose start is in this week. Price is stored as cents.
+    db
+      .select({ sum: sql<number>`COALESCE(SUM(${services.price}), 0)::int` })
+      .from(bookings)
+      .innerJoin(services, eq(services.id, bookings.serviceId))
+      .where(and(visibility, eq(bookings.status, "confirmed"), gte(bookings.startAt, startOfWeek), lt(bookings.startAt, endOfWeek))),
+    db.select({ n: count() }).from(tasks).where(and(eq(tasks.tenantId, user.tenantId), eq(tasks.status, "open"))),
+    // Show up to 5 most-relevant pending tasks: ones assigned to me, plus
+    // overdue ones. Admins see everything; staff see only their own.
+    db
+      .select({
+        id: tasks.id,
+        title: tasks.title,
+        dueAt: tasks.dueAt,
+        assignedUserId: tasks.assignedUserId,
+      })
+      .from(tasks)
+      .where(and(
+        eq(tasks.tenantId, user.tenantId),
+        eq(tasks.status, "open"),
+        ...(user.role === "admin" ? [] : [or(eq(tasks.assignedUserId, user.id), eq(tasks.createdByUserId, user.id))!]),
+      ))
+      .orderBy(sql`${tasks.dueAt} ASC NULLS LAST`)
+      .limit(5),
+    // Top 5 services in last 30d by confirmed booking count.
+    db
+      .select({
+        id: services.id,
+        name: services.name,
+        n: sql<number>`COUNT(*)::int`,
+        revenue: sql<number>`SUM(${services.price})::int`,
+      })
+      .from(bookings)
+      .innerJoin(services, eq(services.id, bookings.serviceId))
+      .where(and(eq(bookings.tenantId, user.tenantId), eq(bookings.status, "confirmed"), gte(bookings.startAt, thirtyDaysAgo)))
+      .groupBy(services.id, services.name)
+      .orderBy(sql`COUNT(*) DESC`)
+      .limit(5),
+    // Active announcements targeting this tenant's plan or 'all'.
+    // Newest first; the banner component shows just the top one.
+    db
+      .select({
+        id: announcements.id,
+        title: announcements.title,
+        body: announcements.body,
+        severity: announcements.severity,
+        linkUrl: announcements.linkUrl,
+        linkLabel: announcements.linkLabel,
+      })
+      .from(announcements)
+      .where(and(
+        eq(announcements.active, true),
+        or(eq(announcements.audience, "all"), eq(announcements.audience, tenant?.currentPlan ?? "free"))!,
+        or(sql`${announcements.expiresAt} IS NULL`, sql`${announcements.expiresAt} > NOW()`)!,
+      ))
+      .orderBy(desc(announcements.publishedAt))
+      .limit(1),
   ]);
+
+  const noShow30d = Number(noShowCount?.n ?? 0);
+  const confirmed30d = Number(confirmed30dCount?.n ?? 0);
+  const noShowRatePct = confirmed30d > 0 ? Math.round((noShow30d / confirmed30d) * 100) : null;
+  const weekRevenueCents = Number(weekRevenueRow?.sum ?? 0);
+  const pendingTasksCount = Number(pendingTasksRow?.n ?? 0);
+  const topAnnouncement = activeAnnouncements[0] ?? null;
 
   // Utilization = booked hours / available hours this week (weekly rule only).
   let availableSeconds = 0;
@@ -146,6 +224,8 @@ export default async function DashboardPage(props: {
       title="Dashboard"
       subtitle={`${user.role} · ${user.timezone}`}
     >
+      <TenantAnnouncementBanner announcement={topAnnouncement} />
+
       {showGoogleReconnect && (
         <div className="mb-4 flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="mt-0.5 h-4 w-4 shrink-0" aria-hidden>
@@ -195,16 +275,84 @@ export default async function DashboardPage(props: {
         </div>
       </div>
 
-      {/* KPI cards */}
+      {/* KPI cards — operations row */}
       <div className="mt-8 grid grid-cols-2 gap-3 sm:grid-cols-4">
         <KpiCard label="Today" value={String(Number(todayCount?.n ?? 0))} />
         <KpiCard label="This week" value={String(Number(weekCount?.n ?? 0))} />
-        <KpiCard label="Cancellations (30d)" value={String(Number(cancelledCount?.n ?? 0))} />
         <KpiCard label="Utilization" value={`${utilizationPct}%`} />
+        <KpiCard
+          label="Revenue est (week)"
+          value={"$" + Math.round(weekRevenueCents / 100).toLocaleString()}
+        />
       </div>
-      <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-3">
-        <KpiCard label="Plan" value={tenant?.plan ?? "free"} muted />
+      {/* KPI cards — quality / pipeline row */}
+      <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <KpiCard label="Cancellations (30d)" value={String(Number(cancelledCount?.n ?? 0))} />
+        <KpiCard label="No-show rate (30d)" value={noShowRatePct != null ? `${noShowRatePct}%` : "—"} />
+        <KpiCard label="Open tasks" value={String(pendingTasksCount)} />
         <KpiCard label="Staff" value={String(staffCount)} muted />
+      </div>
+
+      {/* Operational widgets row */}
+      <div className="mt-6 grid gap-4 lg:grid-cols-2">
+        <section className="rounded-lg border bg-white p-5 shadow-sm">
+          <div className="flex items-baseline justify-between">
+            <h3 className="text-base font-medium">Pending tasks</h3>
+            <a href="/dashboard/tasks" className="text-xs text-brand-accent hover:underline">View all →</a>
+          </div>
+          {pendingTasks.length === 0 ? (
+            <p className="mt-3 text-sm text-ink-muted">No open tasks. Nice work.</p>
+          ) : (
+            <ul className="mt-3 divide-y text-sm">
+              {pendingTasks.map((t) => {
+                const overdue = t.dueAt ? t.dueAt.getTime() < Date.now() : false;
+                return (
+                  <li key={t.id} className="flex items-center justify-between gap-3 py-2">
+                    <span className="min-w-0 truncate">{t.title}</span>
+                    <span
+                      className={
+                        "shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium " +
+                        (overdue ? "bg-red-100 text-red-700"
+                                : t.dueAt ? "bg-amber-100 text-amber-800"
+                                          : "bg-slate-100 text-slate-600")
+                      }
+                    >
+                      {t.dueAt
+                        ? `${overdue ? "Overdue · " : "Due "}${t.dueAt.toISOString().slice(0, 10)}`
+                        : "No due date"}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </section>
+
+        <section className="rounded-lg border bg-white p-5 shadow-sm">
+          <div className="flex items-baseline justify-between">
+            <h3 className="text-base font-medium">Top services (30d)</h3>
+            <a href="/dashboard/services" className="text-xs text-brand-accent hover:underline">Manage →</a>
+          </div>
+          {topServices.length === 0 ? (
+            <p className="mt-3 text-sm text-ink-muted">No confirmed bookings in the last 30 days.</p>
+          ) : (
+            <ul className="mt-3 divide-y text-sm">
+              {topServices.map((s) => (
+                <li key={s.id} className="flex items-center justify-between gap-3 py-2">
+                  <span className="min-w-0 truncate">{s.name}</span>
+                  <span className="shrink-0 text-xs text-ink-muted">
+                    <span className="font-medium text-ink">{Number(s.n)}</span> bookings ·{" "}
+                    ${Math.round(Number(s.revenue) / 100).toLocaleString()}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      </div>
+
+      <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
+        <KpiCard label="Plan" value={tenant?.plan ?? "free"} muted />
         <KpiCard label="Bookings total" value={String(bookingCount)} muted />
       </div>
 

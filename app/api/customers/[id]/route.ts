@@ -11,6 +11,9 @@ const patchSchema = z.object({
   phone: z.string().max(40).nullable().optional(),
   notes: z.string().max(5000).nullable().optional(),
   status: z.enum(["active", "vip", "archived"]).optional(),
+  // Free-form labels: dedup + lowercase happens server-side so the UI
+  // doesn't have to. Cap arbitrary count for safety.
+  tags: z.array(z.string().min(1).max(40)).max(50).optional(),
 });
 
 export async function GET(
@@ -64,9 +67,18 @@ export async function PATCH(
     });
     if (!existing) throw new HttpError(404, "Customer not found");
 
+    // Normalize tags: trim, lowercase, dedup, drop empty.
+    const patch: Record<string, unknown> = { ...body, updatedAt: new Date() };
+    if (body.tags) {
+      const seen = new Set<string>();
+      patch.tags = body.tags
+        .map((t) => t.trim().toLowerCase())
+        .filter((t) => t && !seen.has(t) && (seen.add(t), true));
+    }
+
     const [row] = await db
       .update(customers)
-      .set({ ...body, updatedAt: new Date() })
+      .set(patch)
       .where(and(eq(customers.id, id), eq(customers.tenantId, caller.tenantId)))
       .returning();
     return NextResponse.json(row);

@@ -30,6 +30,7 @@ export async function GET(req: NextRequest) {
         email: customers.email,
         phone: customers.phone,
         status: customers.status,
+        tags: customers.tags,
         createdAt: customers.createdAt,
       })
       .from(customers)

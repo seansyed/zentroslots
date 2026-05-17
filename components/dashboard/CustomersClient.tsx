@@ -13,6 +13,7 @@ type Row = {
   email: string;
   phone: string | null;
   status: string;
+  tags: string[];
   totalBookings: number;
   cancelled: number;
   completed: number;
@@ -27,6 +28,7 @@ type CustomerDetail = {
     phone: string | null;
     notes: string | null;
     status: string;
+    tags: string[];
   };
   history: Array<{
     id: string;
@@ -113,7 +115,21 @@ export default function CustomersClient({ userTimezone, canManage }: { userTimez
                     {r.lastAppointmentAt ? formatInTimeZone(r.lastAppointmentAt, userTimezone, "MMM d, yyyy") : "—"}
                   </td>
                   <td className="px-4 py-3">
-                    <Badge tone={r.status === "vip" ? "violet" : r.status === "archived" ? "neutral" : "green"} className="capitalize">{r.status}</Badge>
+                    <div className="flex flex-col gap-1.5">
+                      <Badge tone={r.status === "vip" ? "violet" : r.status === "archived" ? "neutral" : "green"} className="capitalize">{r.status}</Badge>
+                      {Array.isArray(r.tags) && r.tags.length > 0 && (
+                        <div className="flex flex-wrap gap-1">
+                          {r.tags.slice(0, 3).map((tag) => (
+                            <span key={tag} className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] text-slate-700">
+                              {tag}
+                            </span>
+                          ))}
+                          {r.tags.length > 3 && (
+                            <span className="text-[10px] text-ink-subtle">+{r.tags.length - 3}</span>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -243,11 +259,21 @@ function CustomerDrawer({
           {/* Tab body */}
           <div className="flex-1 overflow-y-auto p-5">
             {tab === "overview" && (
-              <div className="grid grid-cols-2 gap-3">
-                <Stat label="Total bookings" value={String(data.history.length)} />
-                <Stat label="Completed" value={String(data.history.filter((h) => h.status === "completed").length)} />
-                <Stat label="Cancelled" value={String(data.history.filter((h) => h.status === "cancelled").length)} />
-                <Stat label="No-shows" value={String(data.history.filter((h) => h.status === "no_show").length)} />
+              <div>
+                <div className="grid grid-cols-2 gap-3">
+                  <Stat label="Total bookings" value={String(data.history.length)} />
+                  <Stat label="Completed" value={String(data.history.filter((h) => h.status === "completed").length)} />
+                  <Stat label="Cancelled" value={String(data.history.filter((h) => h.status === "cancelled").length)} />
+                  <Stat label="No-shows" value={String(data.history.filter((h) => h.status === "no_show").length)} />
+                </div>
+                <div className="mt-6">
+                  <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">Tags</div>
+                  <TagEditor
+                    customerId={data.customer.id}
+                    initial={Array.isArray(data.customer.tags) ? data.customer.tags : []}
+                    canManage={canManage}
+                  />
+                </div>
               </div>
             )}
 
@@ -307,5 +333,107 @@ function Stat({ label, value }: { label: string; value: string }) {
       <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">{label}</div>
       <div className="mt-1 text-2xl font-semibold text-ink">{value}</div>
     </Card>
+  );
+}
+
+function TagEditor({
+  customerId,
+  initial,
+  canManage,
+}: {
+  customerId: string;
+  initial: string[];
+  canManage: boolean;
+}) {
+  const [tags, setTags] = React.useState<string[]>(initial);
+  const [draft, setDraft] = React.useState("");
+  const [saving, setSaving] = React.useState(false);
+
+  async function persist(next: string[]) {
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/customers/${customerId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tags: next }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d?.error ?? "Failed");
+      // Trust the server's normalization (lowercase + dedup).
+      if (Array.isArray(d.tags)) setTags(d.tags as string[]);
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed to save tags", "error");
+      // Roll back on failure.
+      setTags(initial);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function addTag() {
+    const t = draft.trim().toLowerCase();
+    if (!t) return;
+    if (tags.includes(t)) {
+      setDraft("");
+      return;
+    }
+    const next = [...tags, t];
+    setTags(next);
+    setDraft("");
+    persist(next);
+  }
+
+  function removeTag(t: string) {
+    const next = tags.filter((x) => x !== t);
+    setTags(next);
+    persist(next);
+  }
+
+  return (
+    <div className="mt-2">
+      <div className="flex flex-wrap items-center gap-1.5">
+        {tags.length === 0 && (
+          <span className="text-xs text-ink-subtle">No tags yet.</span>
+        )}
+        {tags.map((t) => (
+          <span
+            key={t}
+            className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1 text-xs text-slate-700"
+          >
+            {t}
+            {canManage && (
+              <button
+                onClick={() => removeTag(t)}
+                aria-label={`Remove tag ${t}`}
+                disabled={saving}
+                className="text-slate-500 hover:text-red-600 disabled:opacity-50"
+              >
+                ×
+              </button>
+            )}
+          </span>
+        ))}
+      </div>
+      {canManage && (
+        <div className="mt-3 flex gap-2">
+          <input
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                addTag();
+              }
+            }}
+            placeholder="Add a tag (e.g. vip, new, repeat)…"
+            className="flex-1 rounded-md border border-border bg-surface px-3 py-1.5 text-sm"
+            maxLength={40}
+          />
+          <Button onClick={addTag} disabled={saving || !draft.trim()}>
+            Add
+          </Button>
+        </div>
+      )}
+    </div>
   );
 }
