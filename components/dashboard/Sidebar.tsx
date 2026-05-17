@@ -56,14 +56,21 @@ function buildNav(variant: SidebarVariant, role: Role): Group[] {
   if (variant === "super") {
     return [
       {
+        label: "Platform",
         items: [
-          { label: "Overview",     href: "/admin",              icon: I.home },
-          { label: "Tenants",      href: "/admin#tenants",      icon: I.briefcase, soon: true },
-          { label: "Subscriptions", href: "/admin#subs",        icon: I.credit,    soon: true },
-          { label: "Audit logs",   href: "/admin#audit",        icon: I.list },
-          { label: "Webhooks",     href: "/admin#webhooks",     icon: I.link,      soon: true },
-          { label: "Failed emails", href: "/admin#email",       icon: I.bell,      soon: true },
-          { label: "System health", href: "/admin#health",      icon: I.shield,    soon: true },
+          { label: "Overview",      href: "/admin",                 icon: I.home },
+          { label: "Tenants",       href: "/admin/tenants",         icon: I.briefcase },
+          { label: "Subscriptions", href: "/admin/subscriptions",   icon: I.credit },
+          { label: "Plans",         href: "/admin/plans",           icon: I.cube },
+          { label: "Promotions",    href: "/admin/promotions",      icon: I.flag },
+          { label: "Announcements", href: "/admin/announcements",   icon: I.bell },
+        ],
+      },
+      {
+        label: "Operations",
+        items: [
+          { label: "Audit logs",    href: "/admin#audit",           icon: I.list },
+          { label: "System health", href: "/admin/health",          icon: I.shield },
         ],
       },
     ];

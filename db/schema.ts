@@ -557,6 +557,88 @@ export const auditLogsRelations = relations(auditLogs, ({ one }) => ({
   actor: one(users, { fields: [auditLogs.actorUserId], references: [users.id] }),
 }));
 
+// ─── Plans (super-admin managed pricing catalog) ────────────────────────
+// Edited via /admin/plans. Tenants link to a plan by slug through
+// `tenants.current_plan` — no FK so legacy slugs don't break upgrades.
+export const plans = pgTable(
+  "plans",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    slug: varchar("slug", { length: 40 }).notNull(),
+    name: varchar("name", { length: 120 }).notNull(),
+    description: text("description"),
+    priceMonthlyCents: integer("price_monthly_cents").notNull().default(0),
+    priceYearlyCents: integer("price_yearly_cents").notNull().default(0),
+    stripePriceIdMonthly: varchar("stripe_price_id_monthly", { length: 120 }),
+    stripePriceIdYearly: varchar("stripe_price_id_yearly", { length: 120 }),
+    quotaStaff: integer("quota_staff").notNull().default(1),
+    quotaBookingsPerMonth: integer("quota_bookings_per_month").notNull().default(100),
+    quotaServices: integer("quota_services").notNull().default(5),
+    features: jsonb("features").notNull().default([]),
+    active: boolean("active").notNull().default(true),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    slugUnique: uniqueIndex("plans_slug_unique").on(t.slug),
+    activeIdx: index("plans_active_idx").on(t.active),
+    sortIdx: index("plans_sort_idx").on(t.sortOrder),
+  })
+);
+
+// ─── Promotions / coupons (super-admin managed) ─────────────────────────
+export const promotions = pgTable(
+  "promotions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    code: varchar("code", { length: 40 }).notNull(),
+    description: text("description"),
+    // 'percent' | 'fixed' | 'trial_extension'
+    kind: varchar("kind", { length: 20 }).notNull(),
+    percentOff: smallint("percent_off"),
+    amountOffCents: integer("amount_off_cents"),
+    trialExtensionDays: smallint("trial_extension_days"),
+    appliesToPlan: varchar("applies_to_plan", { length: 40 }),
+    maxRedemptions: integer("max_redemptions"),
+    redemptionCount: integer("redemption_count").notNull().default(0),
+    startsAt: timestamp("starts_at", { withTimezone: true }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    active: boolean("active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    codeUnique: uniqueIndex("promotions_code_unique").on(t.code),
+    activeIdx: index("promotions_active_idx").on(t.active),
+    expiresIdx: index("promotions_expires_idx").on(t.expiresAt),
+  })
+);
+
+// ─── Announcements (platform-wide notices) ──────────────────────────────
+export const announcements = pgTable(
+  "announcements",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    title: varchar("title", { length: 200 }).notNull(),
+    body: text("body").notNull(),
+    // 'info' | 'warning' | 'critical'
+    severity: varchar("severity", { length: 20 }).notNull().default("info"),
+    // 'all' | plan slug
+    audience: varchar("audience", { length: 40 }).notNull().default("all"),
+    linkUrl: text("link_url"),
+    linkLabel: varchar("link_label", { length: 80 }),
+    publishedAt: timestamp("published_at", { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    active: boolean("active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    activeIdx: index("announcements_active_idx").on(t.active),
+    audienceIdx: index("announcements_audience_idx").on(t.audience),
+    publishedIdx: index("announcements_published_idx").on(t.publishedAt),
+  })
+);
+
 // ─── Types ──────────────────────────────────────────────────────────────
 
 export type Tenant = typeof tenants.$inferSelect;
@@ -589,5 +671,11 @@ export type TenantDomain = typeof tenantDomains.$inferSelect;
 export type NewTenantDomain = typeof tenantDomains.$inferInsert;
 export type EmbedEvent = typeof embedEvents.$inferSelect;
 export type NewEmbedEvent = typeof embedEvents.$inferInsert;
+export type Plan = typeof plans.$inferSelect;
+export type NewPlan = typeof plans.$inferInsert;
+export type Promotion = typeof promotions.$inferSelect;
+export type NewPromotion = typeof promotions.$inferInsert;
+export type Announcement = typeof announcements.$inferSelect;
+export type NewAnnouncement = typeof announcements.$inferInsert;
 export type Role = (typeof roleEnum.enumValues)[number];
 export type BookingStatus = (typeof bookingStatusEnum.enumValues)[number];
