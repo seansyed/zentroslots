@@ -100,6 +100,7 @@ function buildNav(variant: SidebarVariant, role: Role): Group[] {
 
   const insightAndSettings: Item[] = [
     { label: "Analytics",    href: "/dashboard/analytics",           icon: I.bar },
+    { label: "Reports",      href: "/dashboard/reports",             icon: I.receipt },
     ...(role === "admin"
       ? [
           { label: "Email log",    href: "/dashboard/emails",               icon: I.bell },
