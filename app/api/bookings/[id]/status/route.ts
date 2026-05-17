@@ -3,7 +3,7 @@ import { and, eq } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import { bookings } from "@/db/schema";
-import { errorResponse, requireUser, HttpError } from "@/lib/auth";
+import { errorResponse, isManagerial, requireUser, HttpError } from "@/lib/auth";
 import { bookingStatusSchema } from "@/lib/validation";
 
 // Used to mark completed / no_show / re-confirm. Tenant + role gated.
@@ -20,7 +20,7 @@ export async function POST(
       where: and(eq(bookings.id, id), eq(bookings.tenantId, caller.tenantId)),
     });
     if (!booking) throw new HttpError(404, "Booking not found");
-    if (caller.role !== "admin" && booking.staffUserId !== caller.id) {
+    if (!isManagerial(caller.role) && booking.staffUserId !== caller.id) {
       throw new HttpError(403, "Forbidden");
     }
 

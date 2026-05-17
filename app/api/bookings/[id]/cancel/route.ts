@@ -3,7 +3,7 @@ import { and, eq } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import { bookings, services, tenants, users } from "@/db/schema";
-import { errorResponse, requireUser, HttpError } from "@/lib/auth";
+import { errorResponse, isManagerial, requireUser, HttpError } from "@/lib/auth";
 import { renderCancellation, sendEmail, type BookingForEmail } from "@/lib/email";
 import { audit } from "@/lib/audit";
 import { notify } from "@/lib/notify";
@@ -22,8 +22,8 @@ export async function POST(
     });
     if (!booking) throw new HttpError(404, "Booking not found");
 
-    // Staff can cancel their own; admins can cancel any in tenant.
-    if (caller.role !== "admin" && booking.staffUserId !== caller.id) {
+    // Staff can cancel their own; admins + managers can cancel any in tenant.
+    if (!isManagerial(caller.role) && booking.staffUserId !== caller.id) {
       throw new HttpError(403, "Forbidden");
     }
 

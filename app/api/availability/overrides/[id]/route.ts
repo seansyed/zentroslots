@@ -3,7 +3,7 @@ import { and, eq } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import { availabilityOverrides } from "@/db/schema";
-import { errorResponse, requireUser, HttpError } from "@/lib/auth";
+import { errorResponse, isManagerial, requireUser, HttpError } from "@/lib/auth";
 
 export async function DELETE(
   _req: NextRequest,
@@ -21,7 +21,7 @@ export async function DELETE(
       ),
     });
     if (!row) throw new HttpError(404, "Override not found");
-    if (row.userId !== caller.id && caller.role !== "admin") {
+    if (row.userId !== caller.id && !isManagerial(caller.role)) {
       throw new HttpError(403, "Forbidden");
     }
 

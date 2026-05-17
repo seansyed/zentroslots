@@ -3,7 +3,7 @@ import { and, desc, eq, gte, lt } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import { bookings, services, tenants, users } from "@/db/schema";
-import { getSession } from "@/lib/auth";
+import { getSession, isManagerial } from "@/lib/auth";
 import Shell from "@/components/dashboard/Shell";
 import AppointmentsTable from "@/components/dashboard/AppointmentsTable";
 
@@ -24,7 +24,7 @@ export default async function AppointmentsPage(props: {
 
   const tenantOnly = eq(bookings.tenantId, user.tenantId);
   const visibility =
-    user.role === "admin" ? tenantOnly : and(tenantOnly, eq(bookings.staffUserId, user.id));
+    isManagerial(user.role) ? tenantOnly : and(tenantOnly, eq(bookings.staffUserId, user.id));
 
   const ninetyDaysAgo = new Date(Date.now() - 1000 * 60 * 60 * 24 * 90);
 
@@ -128,7 +128,7 @@ export default async function AppointmentsPage(props: {
           status: r.status as "pending" | "confirmed" | "cancelled" | "completed" | "no_show",
         }))}
         timezone={user.timezone}
-        canManage={user.role === "admin" || user.role === "staff"}
+        canManage={user.role === "admin" || user.role === "staff" || user.role === "manager"}
         currentStatus={status}
         nextCursor={nextCursor}
       />

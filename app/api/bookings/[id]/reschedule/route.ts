@@ -3,7 +3,7 @@ import { and, eq } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import { bookings, services, tenants, users } from "@/db/schema";
-import { errorResponse, requireUser, HttpError } from "@/lib/auth";
+import { errorResponse, isManagerial, requireUser, HttpError } from "@/lib/auth";
 import { bookingRescheduleSchema } from "@/lib/validation";
 import { getAvailableSlots } from "@/lib/availability";
 import { renderReschedule, sendEmail, type BookingForEmail } from "@/lib/email";
@@ -24,7 +24,7 @@ export async function POST(
       where: and(eq(bookings.id, id), eq(bookings.tenantId, caller.tenantId)),
     });
     if (!booking) throw new HttpError(404, "Booking not found");
-    if (caller.role !== "admin" && booking.staffUserId !== caller.id) {
+    if (!isManagerial(caller.role) && booking.staffUserId !== caller.id) {
       throw new HttpError(403, "Forbidden");
     }
     if (booking.status === "cancelled" || booking.status === "completed") {

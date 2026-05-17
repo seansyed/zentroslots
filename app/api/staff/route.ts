@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { and, eq, gte, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, sql } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import { bookings, users } from "@/db/schema";
@@ -23,7 +23,10 @@ export async function GET() {
         createdAt: users.createdAt,
       })
       .from(users)
-      .where(and(eq(users.tenantId, caller.tenantId), eq(users.role, "staff")));
+      // Show both 'staff' and 'manager' rows here — managers are an
+      // ops-team member with extra power, but UI-wise live in the same
+      // "Staff" page.
+      .where(and(eq(users.tenantId, caller.tenantId), inArray(users.role, ["staff", "manager"])));
 
     // Stats: upcoming + completed counts per staff member.
     const now = new Date();

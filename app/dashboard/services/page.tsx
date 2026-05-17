@@ -36,7 +36,7 @@ export default async function ServicesPage() {
       </div>
 
       <ServicesClient
-        isAdmin={user.role === "admin"}
+        isAdmin={user.role === "admin" || user.role === "manager"}
         allStaff={staffRows}
       />
     </Shell>

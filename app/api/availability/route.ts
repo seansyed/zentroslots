@@ -3,19 +3,21 @@ import { and, eq } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import { availability, users } from "@/db/schema";
-import { errorResponse, requireUser, HttpError } from "@/lib/auth";
+import { errorResponse, isManagerial, requireUser, HttpError } from "@/lib/auth";
+import type { Role } from "@/db/schema";
 import { availabilityPutSchema } from "@/lib/validation";
 
 async function resolveTargetUserId(
   reqUrl: URL,
-  caller: { id: string; role: string; tenantId: string }
+  caller: { id: string; role: Role; tenantId: string }
 ): Promise<string> {
   const targetUserId = reqUrl.searchParams.get("userId") ?? caller.id;
 
   if (targetUserId === caller.id) return caller.id;
 
-  // Non-self read/write — must be admin in the same tenant as target.
-  if (caller.role !== "admin") {
+  // Non-self read/write — must be admin or manager in the same tenant
+  // as target. Managers can edit anyone's availability in their workspace.
+  if (!isManagerial(caller.role)) {
     throw new HttpError(403, "Forbidden");
   }
   const target = await db.query.users.findFirst({

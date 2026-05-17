@@ -3,7 +3,7 @@ import { and, eq } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import { availabilityOverrides, users } from "@/db/schema";
-import { errorResponse, requireUser, HttpError } from "@/lib/auth";
+import { errorResponse, isManagerial, requireUser, HttpError } from "@/lib/auth";
 import { overrideBulkSchema } from "@/lib/validation";
 
 export async function POST(req: NextRequest) {
@@ -13,7 +13,7 @@ export async function POST(req: NextRequest) {
 
     let targetUserId = body.userId ?? caller.id;
     if (targetUserId !== caller.id) {
-      if (caller.role !== "admin") throw new HttpError(403, "Forbidden");
+      if (!isManagerial(caller.role)) throw new HttpError(403, "Forbidden");
       const exists = await db.query.users.findFirst({
         where: and(eq(users.id, targetUserId), eq(users.tenantId, caller.tenantId)),
       });

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, count, desc, eq, gte, sql } from "drizzle-orm";
+import { and, count, desc, eq, gte, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "@/db/client";
@@ -26,7 +26,7 @@ export async function GET(
     const { id } = await context.params;
 
     const staff = await db.query.users.findFirst({
-      where: and(eq(users.id, id), eq(users.tenantId, caller.tenantId), eq(users.role, "staff")),
+      where: and(eq(users.id, id), eq(users.tenantId, caller.tenantId), inArray(users.role, ["staff", "manager"])),
     });
     if (!staff) throw new HttpError(404, "Staff not found");
 
@@ -118,12 +118,12 @@ export async function PATCH(
   context: { params: Promise<{ id: string }> }
 ) {
   try {
-    const admin = await requireRole(["admin"]);
+    const admin = await requireRole(["admin", "manager"]);
     const { id } = await context.params;
     const body = patchSchema.parse(await req.json());
 
     const staff = await db.query.users.findFirst({
-      where: and(eq(users.id, id), eq(users.tenantId, admin.tenantId), eq(users.role, "staff")),
+      where: and(eq(users.id, id), eq(users.tenantId, admin.tenantId), inArray(users.role, ["staff", "manager"])),
     });
     if (!staff) throw new HttpError(404, "Staff not found");
 

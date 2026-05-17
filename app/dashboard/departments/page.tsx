@@ -30,7 +30,7 @@ export default async function DepartmentsPage() {
       <p className="mt-1 text-sm text-ink-muted">Group services and staff by business unit — Sales, Consultation, Hair Styling, etc.</p>
 
       <DepartmentsManager
-        isAdmin={user.role === "admin"}
+        isAdmin={user.role === "admin" || user.role === "manager"}
         initial={rows.map((r) => ({
           id: r.id,
           name: r.name,

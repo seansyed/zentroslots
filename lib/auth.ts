@@ -96,6 +96,16 @@ export async function requireRole(roles: Role[]): Promise<User> {
 }
 
 /**
+ * "Managerial" = can see workspace-wide data (all bookings, all staff
+ * records, full reports) but is NOT necessarily allowed to touch billing
+ * or tenant settings. Use this for visibility/scoping checks. Use
+ * requireRole(["admin"]) for hard admin-only routes.
+ */
+export function isManagerial(role: Role): boolean {
+  return role === "admin" || role === "manager";
+}
+
+/**
  * Cheap (cookie-only) read of the current tenant id, when a route
  * needs the tenant scope but doesn't otherwise need the full user row.
  * For anything that mutates state, prefer requireUser() so a deleted

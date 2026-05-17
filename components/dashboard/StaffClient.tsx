@@ -15,12 +15,13 @@ type StaffRow = {
   googleConnected: boolean;
   upcomingCount: number;
   completedThisMonth: number;
+  role?: "staff" | "manager";
 };
 
 type ServiceItem = { id: string; name: string; durationMinutes: number; color: string | null };
 
 type StaffDetail = {
-  staff: StaffRow & { primaryLocationId: string | null; departmentId: string | null };
+  staff: StaffRow & { primaryLocationId: string | null; departmentId: string | null; role: "staff" | "manager" };
   assignedServices: { id: string; name: string }[];
   weeklyAvailability: { dayOfWeek: number; startTime: string; endTime: string }[];
   stats: { completed30d: number; cancelled30d: number };
@@ -37,10 +38,15 @@ const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 export default function StaffClient({
   isAdmin,
+  canChangeRoles,
   allServices,
 }: {
   userTimezone: string;
+  // `isAdmin` here is the legacy name; it now means "admin OR manager" —
+  // i.e. who can edit staff records & service assignments.
   isAdmin: boolean;
+  // Strictly admin-only: who can promote/demote between staff and manager.
+  canChangeRoles: boolean;
   allServices: ServiceItem[];
 }) {
   const [rows, setRows] = React.useState<StaffRow[] | null>(null);
@@ -114,23 +120,26 @@ export default function StaffClient({
         onClose={() => setOpenId(null)}
         allServices={allServices}
         isAdmin={isAdmin}
+        canChangeRoles={canChangeRoles}
       />
     </div>
   );
 }
 
 function StaffDrawer({
-  id, onClose, allServices, isAdmin,
+  id, onClose, allServices, isAdmin, canChangeRoles,
 }: {
   id: string | null;
   onClose: () => void;
   allServices: ServiceItem[];
   isAdmin: boolean;
+  canChangeRoles: boolean;
 }) {
   const [data, setData] = React.useState<StaffDetail | null>(null);
   const [tab, setTab] = React.useState<Tab>("overview");
   const [savingServices, setSavingServices] = React.useState(false);
   const [selected, setSelected] = React.useState<Set<string>>(new Set());
+  const [roleSaving, setRoleSaving] = React.useState(false);
 
   React.useEffect(() => {
     if (!id) { setData(null); return; }
@@ -171,6 +180,26 @@ function StaffDrawer({
       else next.add(sid);
       return next;
     });
+  }
+
+  async function changeRole(next: "staff" | "manager") {
+    if (!id || !data || data.staff.role === next) return;
+    setRoleSaving(true);
+    try {
+      const res = await fetch(`/api/staff/${id}/role`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role: next }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d?.error ?? "Failed");
+      setData((prev) => prev ? { ...prev, staff: { ...prev.staff, role: d.role } } : prev);
+      toast(`Role changed to ${d.role}`, "success");
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed", "error");
+    } finally {
+      setRoleSaving(false);
+    }
   }
 
   const open = Boolean(id);
@@ -222,6 +251,32 @@ function StaffDrawer({
           <div className="flex-1 overflow-y-auto p-5">
             {tab === "overview" && (
               <div className="space-y-4">
+                <Card>
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">Role</div>
+                      <div className="mt-1 flex items-center gap-2">
+                        <Badge tone={data.staff.role === "manager" ? "violet" : "neutral"} className="capitalize">{data.staff.role}</Badge>
+                        {data.staff.role === "manager" && (
+                          <span className="text-xs text-ink-muted">Sees all bookings & manages workspace ops.</span>
+                        )}
+                      </div>
+                    </div>
+                    {canChangeRoles && (
+                      <div className="flex items-center gap-2">
+                        <select
+                          value={data.staff.role}
+                          disabled={roleSaving}
+                          onChange={(e) => changeRole(e.target.value as "staff" | "manager")}
+                          className="rounded-md border border-border bg-surface px-2 py-1.5 text-sm"
+                        >
+                          <option value="staff">Staff</option>
+                          <option value="manager">Manager</option>
+                        </select>
+                      </div>
+                    )}
+                  </div>
+                </Card>
                 <div className="grid grid-cols-2 gap-3">
                   <Stat label="Upcoming" value={String(data.upcoming.length)} />
                   <Stat label="Completed (30d)" value={String(data.stats.completed30d)} />

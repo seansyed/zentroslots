@@ -25,7 +25,7 @@ export async function PATCH(
   context: { params: Promise<{ id: string }> }
 ) {
   try {
-    const admin = await requireRole(["admin"]);
+    const admin = await requireRole(["admin", "manager"]);
     const { id } = await context.params;
     const body = patchSchema.parse(await req.json());
 
@@ -79,7 +79,7 @@ export async function DELETE(
   context: { params: Promise<{ id: string }> }
 ) {
   try {
-    const admin = await requireRole(["admin"]);
+    const admin = await requireRole(["admin", "manager"]);
     const { id } = await context.params;
 
     const existing = await db.query.services.findFirst({

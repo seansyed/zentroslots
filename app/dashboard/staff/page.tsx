@@ -33,7 +33,8 @@ export default async function StaffPage() {
 
       <StaffClient
         userTimezone={user.timezone}
-        isAdmin={user.role === "admin"}
+        isAdmin={user.role === "admin" || user.role === "manager"}
+        canChangeRoles={user.role === "admin"}
         allServices={serviceRows.map((r) => ({ id: r.id, name: r.name, durationMinutes: r.durationMinutes, color: r.color ?? null }))}
       />
     </Shell>

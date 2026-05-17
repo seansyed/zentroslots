@@ -30,7 +30,7 @@ export default async function LocationsPage() {
       <p className="mt-1 text-sm text-ink-muted">Physical or virtual places where services are delivered.</p>
 
       <LocationsManager
-        isAdmin={user.role === "admin"}
+        isAdmin={user.role === "admin" || user.role === "manager"}
         defaultTimezone={user.timezone}
         initial={rows.map((r) => ({
           id: r.id,

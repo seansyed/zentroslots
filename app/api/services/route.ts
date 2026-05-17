@@ -71,7 +71,7 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
-    const admin = await requireRole(["admin"]);
+    const admin = await requireRole(["admin", "manager"]);
     const body = serviceSchema.parse(await req.json());
 
     // Verify all staff being assigned belong to this admin's tenant.

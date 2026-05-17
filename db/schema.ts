@@ -17,7 +17,10 @@ import {
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 
-export const roleEnum = pgEnum("user_role", ["admin", "staff", "client"]);
+// Roles: 'admin' = tenant owner, 'manager' = ops lieutenant (can see all
+// bookings/services/customers but cannot touch billing/tenant settings),
+// 'staff' = scoped to own bookings, 'client' = external (booking only).
+export const roleEnum = pgEnum("user_role", ["admin", "manager", "staff", "client"]);
 export const bookingStatusEnum = pgEnum("booking_status", [
   "pending",
   "confirmed",

@@ -27,7 +27,7 @@ export default async function CustomersPage() {
           <p className="mt-1 text-sm text-ink-muted">Everyone who's booked with you, with full history.</p>
         </div>
       </div>
-      <CustomersClient userTimezone={user.timezone} canManage={user.role === "admin" || user.role === "staff"} />
+      <CustomersClient userTimezone={user.timezone} canManage={user.role === "admin" || user.role === "staff" || user.role === "manager"} />
     </Shell>
   );
 }

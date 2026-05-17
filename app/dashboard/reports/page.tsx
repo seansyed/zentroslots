@@ -3,7 +3,7 @@ import { and, count, eq, gte, lt, sql } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import { bookings, customers, services, tenants, users } from "@/db/schema";
-import { getSession } from "@/lib/auth";
+import { getSession, isManagerial } from "@/lib/auth";
 import Shell from "@/components/dashboard/Shell";
 
 export const metadata = { title: "Reports" };
@@ -49,7 +49,7 @@ export default async function ReportsPage(props: {
 
   // Staff are scoped to their own bookings — admin sees the whole tenant.
   // Same convention as the /dashboard home and /api/bookings/export.
-  const visibility = user.role === "admin"
+  const visibility = isManagerial(user.role)
     ? eq(bookings.tenantId, user.tenantId)
     : and(eq(bookings.tenantId, user.tenantId), eq(bookings.staffUserId, user.id));
 

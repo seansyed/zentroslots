@@ -5,7 +5,7 @@ import { db } from "@/db/client";
 import { bookings, customers, intakeForms, serviceStaff, services, tenants, users } from "@/db/schema";
 import { sql, asc } from "drizzle-orm";
 import { validateResponses, type IntakeField } from "@/lib/intake";
-import { errorResponse, getSession, HttpError } from "@/lib/auth";
+import { errorResponse, getSession, HttpError, isManagerial } from "@/lib/auth";
 import { assertResourcesShareTenant } from "@/lib/tenant";
 import { createBookingSchema } from "@/lib/validation";
 import { getAvailableSlots } from "@/lib/availability";
@@ -41,7 +41,7 @@ export async function GET(req: NextRequest) {
       eq(bookings.tenantId, session.tenantId),
       gte(bookings.startAt, ninetyDaysAgo),
     ];
-    if (session.role !== "admin") {
+    if (!isManagerial(session.role)) {
       conds.push(eq(bookings.staffUserId, session.sub));
     }
     if (statusFilter && (validStatuses as readonly string[]).includes(statusFilter)) {

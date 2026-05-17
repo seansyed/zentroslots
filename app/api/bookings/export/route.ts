@@ -3,7 +3,7 @@ import { and, desc, eq, gte, lt } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import { bookings, customers, services, users } from "@/db/schema";
-import { errorResponse, requireUser } from "@/lib/auth";
+import { errorResponse, isManagerial, requireUser } from "@/lib/auth";
 import { csvResponse, toCsv } from "@/lib/csv";
 
 export async function GET(req: NextRequest) {
@@ -16,7 +16,7 @@ export async function GET(req: NextRequest) {
 
     const conds = [eq(bookings.tenantId, caller.tenantId)];
     // Staff are scoped to their own bookings — admin sees the whole tenant.
-    if (caller.role !== "admin") conds.push(eq(bookings.staffUserId, caller.id));
+    if (!isManagerial(caller.role)) conds.push(eq(bookings.staffUserId, caller.id));
 
     if (status && ["pending", "confirmed", "cancelled", "completed", "no_show"].includes(status)) {
       conds.push(eq(bookings.status, status as "pending" | "confirmed" | "cancelled" | "completed" | "no_show"));

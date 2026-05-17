@@ -3,7 +3,7 @@ import { and, desc, eq, gte, lt } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import { bookings, services, tenants, users } from "@/db/schema";
-import { getSession } from "@/lib/auth";
+import { getSession, isManagerial } from "@/lib/auth";
 import CalendarView from "@/components/CalendarView";
 import Shell from "@/components/dashboard/Shell";
 
@@ -23,7 +23,7 @@ export default async function CalendarPage() {
 
   const tenantOnly = eq(bookings.tenantId, user.tenantId);
   const visibility =
-    user.role === "admin"
+    isManagerial(user.role)
       ? tenantOnly
       : and(tenantOnly, eq(bookings.staffUserId, user.id));
 
@@ -58,7 +58,7 @@ export default async function CalendarPage() {
     >
       <CalendarView
         timezone={user.timezone}
-        canManage={user.role === "admin" || user.role === "staff"}
+        canManage={user.role === "admin" || user.role === "staff" || user.role === "manager"}
         bookings={rows.map((r) => ({
           id: r.id,
           startAt: r.startAt.toISOString(),

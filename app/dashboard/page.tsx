@@ -3,7 +3,7 @@ import { and, count, desc, eq, gte, inArray, lt, or, sql } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import { announcements, availability, bookings, services, tasks, tenants, users } from "@/db/schema";
-import { getSession } from "@/lib/auth";
+import { getSession, isManagerial } from "@/lib/auth";
 import DashboardBookings from "@/components/DashboardBookings";
 import Shell from "@/components/dashboard/Shell";
 import OnboardingChecklist, { type ChecklistItem } from "@/components/dashboard/OnboardingChecklist";
@@ -43,7 +43,7 @@ export default async function DashboardPage(props: {
   thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
   const tenantOnly = eq(bookings.tenantId, user.tenantId);
-  const visibility = user.role === "admin" ? tenantOnly : and(tenantOnly, eq(bookings.staffUserId, user.id));
+  const visibility = isManagerial(user.role) ? tenantOnly : and(tenantOnly, eq(bookings.staffUserId, user.id));
 
   const [
     [todayCount],
@@ -97,7 +97,7 @@ export default async function DashboardPage(props: {
       .where(and(
         eq(tasks.tenantId, user.tenantId),
         eq(tasks.status, "open"),
-        ...(user.role === "admin" ? [] : [or(eq(tasks.assignedUserId, user.id), eq(tasks.createdByUserId, user.id))!]),
+        ...(isManagerial(user.role) ? [] : [or(eq(tasks.assignedUserId, user.id), eq(tasks.createdByUserId, user.id))!]),
       ))
       .orderBy(sql`${tasks.dueAt} ASC NULLS LAST`)
       .limit(5),
@@ -151,7 +151,7 @@ export default async function DashboardPage(props: {
       endTime: availability.endTime,
     })
     .from(availability)
-    .where(user.role === "admin" ? eq(availability.tenantId, user.tenantId) : and(eq(availability.tenantId, user.tenantId), eq(availability.userId, user.id)));
+    .where(isManagerial(user.role) ? eq(availability.tenantId, user.tenantId) : and(eq(availability.tenantId, user.tenantId), eq(availability.userId, user.id)));
   for (const r of rules) {
     const [sh, sm] = r.startTime.split(":").map(Number);
     const [eh, em] = r.endTime.split(":").map(Number);
@@ -366,7 +366,7 @@ export default async function DashboardPage(props: {
 
       <DashboardBookings
         rows={rows.map((r) => ({ ...r, startAt: r.startAt.toISOString(), endAt: r.endAt.toISOString() }))}
-        canManage={user.role === "admin" || user.role === "staff"}
+        canManage={user.role === "admin" || user.role === "staff" || user.role === "manager"}
         userTimezone={user.timezone}
       />
     </Shell>

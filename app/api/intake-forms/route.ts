@@ -22,7 +22,7 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
-    const admin = await requireRole(["admin"]);
+    const admin = await requireRole(["admin", "manager"]);
     const body = intakeFormSchema.parse(await req.json());
 
     const [row] = await db

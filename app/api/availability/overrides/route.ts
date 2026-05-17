@@ -3,16 +3,18 @@ import { and, asc, eq, gte } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import { availabilityOverrides, users } from "@/db/schema";
-import { errorResponse, requireUser, HttpError } from "@/lib/auth";
+import { errorResponse, isManagerial, requireUser, HttpError } from "@/lib/auth";
 import { overrideCreateSchema } from "@/lib/validation";
+import type { Role } from "@/db/schema";
 
 async function resolveTargetUserId(
   bodyOrQueryUserId: string | undefined,
-  caller: { id: string; role: string; tenantId: string }
+  caller: { id: string; role: Role; tenantId: string }
 ): Promise<string> {
   const target = bodyOrQueryUserId ?? caller.id;
   if (target === caller.id) return caller.id;
-  if (caller.role !== "admin") throw new HttpError(403, "Forbidden");
+  // Managers may edit any staff member's overrides in their workspace.
+  if (!isManagerial(caller.role)) throw new HttpError(403, "Forbidden");
   const exists = await db.query.users.findFirst({
     where: and(eq(users.id, target), eq(users.tenantId, caller.tenantId)),
   });
