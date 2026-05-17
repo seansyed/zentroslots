@@ -119,10 +119,11 @@ export async function POST(req: NextRequest) {
     }
 
     // ─── Round-robin assignment ─────────────────────────────────────────
-    let staffUserId = body.staffUserId;
+    let staffUserId: string = body.staffUserId;
     if (staffUserId === "auto") {
-      staffUserId = await pickRoundRobinStaff(service.tenantId, service.id);
-      if (!staffUserId) throw new HttpError(404, "No staff available to deliver this service");
+      const picked = await pickRoundRobinStaff(service.tenantId, service.id);
+      if (!picked) throw new HttpError(404, "No staff available to deliver this service");
+      staffUserId = picked;
     }
 
     const staff = await db.query.users.findFirst({ where: eq(users.id, staffUserId) });
