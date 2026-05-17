@@ -61,9 +61,9 @@ export function assertSameTenant<
  * that the provided resources all share the same tenant. Returns that
  * tenant id, throws otherwise.
  */
-export function assertResourcesShareTenant<
-  T extends { tenantId: string },
->(...resources: T[]): string {
+export function assertResourcesShareTenant(
+  ...resources: Array<{ tenantId: string }>
+): string {
   if (resources.length === 0) throw new HttpError(400, "No resources provided");
   const first = resources[0].tenantId;
   for (const r of resources) {
