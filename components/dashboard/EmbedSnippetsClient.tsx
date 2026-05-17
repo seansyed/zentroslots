@@ -3,7 +3,7 @@
 import * as React from "react";
 import { Card, Button, toast } from "@/components/ui/primitives";
 
-type Service = { id: string; name: string; slug: string };
+type Service = { id: string; name: string; slug: string; hasStaff: boolean };
 
 export default function EmbedSnippetsClient({
   baseUrl,
@@ -17,6 +17,9 @@ export default function EmbedSnippetsClient({
   const [serviceSlug, setServiceSlug] = React.useState<string>(services[0]?.slug ?? "");
   const [height, setHeight] = React.useState(720);
   const [mode, setMode] = React.useState<"inline" | "popup">("inline");
+
+  const selectedService = services.find((s) => s.slug === serviceSlug) ?? null;
+  const selectedHasStaff = selectedService?.hasStaff ?? false;
 
   const embedUrl = `${baseUrl}/embed/${tenantSlug}/${serviceSlug || "—"}`;
 
@@ -66,8 +69,22 @@ export default function EmbedSnippetsClient({
             className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm"
           >
             {services.length === 0 && <option value="">No services</option>}
-            {services.map((s) => <option key={s.id} value={s.slug}>{s.name}</option>)}
+            {services.map((s) => (
+              <option key={s.id} value={s.slug}>
+                {s.name}{s.hasStaff ? "" : " — no staff assigned"}
+              </option>
+            ))}
           </select>
+          {selectedService && !selectedHasStaff && (
+            <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+              <div className="font-medium">This service can&rsquo;t take bookings yet.</div>
+              <div className="mt-1">
+                No staff member is assigned to deliver <b>{selectedService.name}</b>. The widget below will
+                show a &ldquo;not bookable&rdquo; message until you assign someone on the{" "}
+                <a href="/dashboard/services" className="underline">Services page</a>.
+              </div>
+            </div>
+          )}
         </Field>
 
         <Field label="Widget style">

@@ -28,7 +28,31 @@ export default async function EmbedPage(props: {
     .from(serviceStaff)
     .innerJoin(users, eq(users.id, serviceStaff.userId))
     .where(and(eq(serviceStaff.serviceId, service.id), eq(serviceStaff.tenantId, tenant.id)));
-  if (assignments.length === 0) notFound();
+
+  // Service exists but no one is assigned to deliver it. Render a
+  // friendly "not bookable" panel instead of a hard 404 — the tenant's
+  // marketing site already linked here, so a blunt 404 looks broken.
+  if (assignments.length === 0) {
+    return (
+      <div
+        className="min-h-screen bg-surface"
+        style={{ "--color-accent": tenant.primaryColor } as React.CSSProperties}
+      >
+        <div className="border-t-4 border-brand-accent">
+          <div className="mx-auto max-w-2xl px-4 py-10 text-center">
+            <div className="text-sm font-semibold text-ink">{tenant.name}</div>
+            <h1 className="mt-2 text-xl font-semibold text-ink">{service.name} isn&rsquo;t accepting bookings right now</h1>
+            <p className="mt-2 text-sm text-ink-muted">
+              No staff member is currently assigned to deliver this service. Please contact {tenant.name} directly.
+            </p>
+            {!tenant.hidePoweredBy && (
+              <div className="mt-8 text-[10px] text-ink-subtle">Powered by Scheduling SaaS</div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const staff = sp.staff
     ? assignments.find((a) => a.userId === sp.staff) ?? assignments[0]

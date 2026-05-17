@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import { services, tenants, users } from "@/db/schema";
@@ -17,8 +17,17 @@ export default async function EmbedSettingsPage() {
   const tenant = await db.query.tenants.findFirst({ where: eq(tenants.id, user.tenantId) });
   if (!tenant) redirect("/dashboard");
 
+  // Per-service staff count powers a "not bookable" warning in the
+  // snippet UI. Embed page hard-blocks rendering when staffCount=0, so
+  // copying a snippet for an empty service would result in a broken
+  // embed on the customer's site — warn before the copy, not after.
   const serviceList = await db
-    .select({ id: services.id, name: services.name, slug: services.slug })
+    .select({
+      id: services.id,
+      name: services.name,
+      slug: services.slug,
+      staffCount: sql<number>`(SELECT COUNT(*)::int FROM service_staff WHERE service_staff.service_id = ${services.id})`,
+    })
     .from(services)
     .where(and(eq(services.tenantId, tenant.id), eq(services.isActive, 1)))
     .orderBy(asc(services.name));
@@ -36,7 +45,7 @@ export default async function EmbedSettingsPage() {
       <EmbedSnippetsClient
         baseUrl={APP_BASE_URL}
         tenantSlug={tenant.slug}
-        services={serviceList}
+        services={serviceList.map((s) => ({ id: s.id, name: s.name, slug: s.slug, hasStaff: Number(s.staffCount) > 0 }))}
       />
     </Shell>
   );
