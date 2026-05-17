@@ -6,7 +6,7 @@ import { usePathname } from "next/navigation";
 
 import { Avatar, Badge } from "@/components/ui/primitives";
 
-type Role = "admin" | "staff" | "client";
+type Role = "admin" | "manager" | "staff" | "client";
 
 export type SidebarVariant = "tenant" | "super";
 
