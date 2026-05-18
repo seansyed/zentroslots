@@ -144,12 +144,20 @@ describe("template resolver — system fallback", () => {
     }
   });
 
-  it("each system default subject mentions the service name", () => {
+  it("each system default subject mentions either the service or the business name", () => {
+    // The post-completion templates (review_request, followup,
+    // appointment_completed, appointment_no_show) deliberately lead
+    // with the BUSINESS name — customers recognize the business by
+    // name at review/followup time, not by the service. The original
+    // five templates lead with the service name for "what just happened"
+    // clarity. Either is acceptable.
     for (const type of TEMPLATE_TYPES) {
       const out = systemFallbackFor(type, samplePayload());
+      const hasServiceName = out.subject.includes("Test Service");
+      const hasBusinessName = out.subject.includes("Test Workspace");
       assert.ok(
-        out.subject.includes("Test Service"),
-        `${type} subject lacks service name: ${out.subject}`
+        hasServiceName || hasBusinessName,
+        `${type} subject lacks both service and business name: ${out.subject}`
       );
     }
   });

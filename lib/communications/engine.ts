@@ -65,7 +65,11 @@ export type AutomationEvent =
   | "appointment.cancelled"
   | "appointment.rescheduled"
   | "appointment.reminder_24h"
-  | "appointment.reminder_1h";
+  | "appointment.reminder_1h"
+  | "appointment.completed"
+  | "appointment.no_show"
+  | "appointment.review_request"
+  | "appointment.followup";
 
 export type TriggerArgs = {
   tenantId: string;
@@ -79,6 +83,11 @@ export type TriggerArgs = {
    *  Plain optional flag rather than a generic `attachments` array —
    *  the engine deliberately keeps the public surface tight. */
   attachIcs?: boolean;
+  /** Optional event-specific extras merged into the rendering context.
+   *  Used by the review-request automation to inject {{review_url}} +
+   *  {{review_platform}}. The engine never invents these values; the
+   *  caller is the source of truth. */
+  contextExtras?: Partial<Record<string, string>>;
 };
 
 export type TriggerResult =
@@ -238,9 +247,15 @@ export async function triggerAutomation(args: TriggerArgs): Promise<TriggerResul
       rescheduleToken,
     };
 
-    const context: TemplateContext = buildContext({
+    const baseContext: TemplateContext = buildContext({
       booking, service, staff, tenant, cancelToken, rescheduleToken, tz,
     });
+    // Caller-provided extras (review_url, review_platform) merged on
+    // top. Unknown keys are silently dropped by the renderer's
+    // whitelist — adding a fake variable here can't poison templates.
+    const context: TemplateContext = args.contextExtras
+      ? { ...baseContext, ...args.contextExtras }
+      : baseContext;
 
     const rendered = await resolveAndRenderTemplate({
       tenantId: args.tenantId,
@@ -315,21 +330,29 @@ export async function triggerAutomation(args: TriggerArgs): Promise<TriggerResul
 
 function eventToTemplateType(e: AutomationEvent): TemplateType {
   switch (e) {
-    case "appointment.created":      return "booking_confirmation";
-    case "appointment.cancelled":    return "booking_cancelled";
-    case "appointment.rescheduled":  return "booking_rescheduled";
-    case "appointment.reminder_24h": return "reminder_24h";
-    case "appointment.reminder_1h":  return "reminder_1h";
+    case "appointment.created":        return "booking_confirmation";
+    case "appointment.cancelled":      return "booking_cancelled";
+    case "appointment.rescheduled":    return "booking_rescheduled";
+    case "appointment.reminder_24h":   return "reminder_24h";
+    case "appointment.reminder_1h":    return "reminder_1h";
+    case "appointment.completed":      return "appointment_completed";
+    case "appointment.no_show":        return "appointment_no_show";
+    case "appointment.review_request": return "review_request";
+    case "appointment.followup":       return "followup";
   }
 }
 
 function eventToSchedulingEmailKind(e: AutomationEvent): SchedulingEmailKind {
   switch (e) {
-    case "appointment.created":      return "appointment_confirmation";
-    case "appointment.cancelled":    return "appointment_cancelled";
-    case "appointment.rescheduled":  return "appointment_rescheduled";
-    case "appointment.reminder_24h": return "appointment_reminder_24h";
-    case "appointment.reminder_1h":  return "appointment_reminder_1h";
+    case "appointment.created":        return "appointment_confirmation";
+    case "appointment.cancelled":      return "appointment_cancelled";
+    case "appointment.rescheduled":    return "appointment_rescheduled";
+    case "appointment.reminder_24h":   return "appointment_reminder_24h";
+    case "appointment.reminder_1h":    return "appointment_reminder_1h";
+    case "appointment.completed":      return "appointment_completed";
+    case "appointment.no_show":        return "appointment_no_show";
+    case "appointment.review_request": return "appointment_review_request";
+    case "appointment.followup":       return "appointment_followup";
   }
 }
 

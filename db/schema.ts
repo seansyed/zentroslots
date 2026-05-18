@@ -735,6 +735,92 @@ export const calendarSyncLogs = pgTable(
   })
 );
 
+// ─── Review-request rules + follow-up automations + pending queue ──────
+// review_request_rules: per-(tenant, service) configuration for the
+// post-completion review-request automation. Without a row, no review
+// request fires — preserves byte-identical pre-feature behavior.
+// followup_automation_rules: generic "send a custom template N minutes
+// after event X for this service" rule. Conditions are evaluated at
+// queue-drain time, not enqueue time.
+// pending_automations: cron-scanned queue for delayed sends.
+//
+// Idempotency for actual delivery is at communication_logs (existing
+// partial unique index). The queue's status field is lifecycle only.
+export const reviewRequestRules = pgTable(
+  "review_request_rules",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    serviceId: uuid("service_id").references(() => services.id, { onDelete: "cascade" }),
+    enabled: boolean("enabled").notNull().default(true),
+    delayMinutes: integer("delay_minutes").notNull().default(60),
+    reviewPlatform: varchar("review_platform", { length: 20 }).notNull().default("google"),
+    reviewUrl: text("review_url"),
+    suppressIfCancelled: boolean("suppress_if_cancelled").notNull().default(true),
+    suppressIfNoShow: boolean("suppress_if_no_show").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    tenantIdx: index("review_request_rules_tenant_idx").on(t.tenantId),
+    serviceIdx: index("review_request_rules_service_idx").on(t.serviceId),
+  })
+);
+
+export const followupAutomationRules = pgTable(
+  "followup_automation_rules",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    serviceId: uuid("service_id").references(() => services.id, { onDelete: "cascade" }),
+    enabled: boolean("enabled").notNull().default(true),
+    triggerEvent: varchar("trigger_event", { length: 60 }).notNull(),
+    delayMinutes: integer("delay_minutes").notNull().default(0),
+    templateId: uuid("template_id").references(() => communicationTemplates.id, {
+      onDelete: "set null",
+    }),
+    onlyFirstTimeCustomers: boolean("only_first_time_customers").notNull().default(false),
+    onlyCompletedBookings: boolean("only_completed_bookings").notNull().default(false),
+    requireSuccessfulPayment: boolean("require_successful_payment").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    tenantIdx: index("followup_automation_rules_tenant_idx").on(t.tenantId),
+    serviceIdx: index("followup_automation_rules_service_idx").on(t.serviceId),
+    eventIdx: index("followup_automation_rules_event_idx").on(t.tenantId, t.triggerEvent),
+  })
+);
+
+export const pendingAutomations = pgTable(
+  "pending_automations",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    bookingId: uuid("booking_id").notNull(),
+    eventType: varchar("event_type", { length: 60 }).notNull(),
+    ruleKind: varchar("rule_kind", { length: 20 }).notNull(),
+    ruleId: uuid("rule_id"),
+    dueAt: timestamp("due_at", { withTimezone: true }).notNull(),
+    status: varchar("status", { length: 20 }).notNull().default("pending"),
+    reason: varchar("reason", { length: 60 }),
+    attempts: integer("attempts").notNull().default(0),
+    lastAttemptAt: timestamp("last_attempt_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    tenantIdx: index("pending_automations_tenant_idx").on(t.tenantId),
+    bookingIdx: index("pending_automations_booking_idx").on(t.bookingId),
+  })
+);
+
 // ─── Booking rules (notice / advance / caps / cooldown / blackouts) ────
 // One rule per scope bucket: service > location > tenant default.
 // Tenants without a row continue to use the legacy fields on `services`

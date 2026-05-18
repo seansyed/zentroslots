@@ -28,6 +28,9 @@ export const SUPPORTED_VARIABLES = [
   "business_phone",
   "business_email",
   "notes",
+  // Added with the review-request + follow-up automations:
+  "review_url",
+  "review_platform",
 ] as const;
 
 export type TemplateVariable = (typeof SUPPORTED_VARIABLES)[number];

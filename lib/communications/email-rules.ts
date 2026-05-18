@@ -29,7 +29,11 @@ export type SchedulingEmailKind =
   | "appointment_cancelled"
   | "appointment_rescheduled"
   | "appointment_reminder_24h"
-  | "appointment_reminder_1h";
+  | "appointment_reminder_1h"
+  | "appointment_completed"
+  | "appointment_no_show"
+  | "appointment_review_request"
+  | "appointment_followup";
 
 export type GateDecision =
   | { allowed: true; reason?: never }
