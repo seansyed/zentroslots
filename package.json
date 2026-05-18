@@ -14,7 +14,8 @@
     "test": "tsx --import ./tests/setup.ts --test tests/**/*.test.ts",
     "reminders:send": "tsx scripts/send-reminders.ts",
     "automations:run": "tsx scripts/run-automations.ts",
-    "waitlists:expire": "tsx scripts/expire-waitlist-reservations.ts"
+    "waitlists:expire": "tsx scripts/expire-waitlist-reservations.ts",
+    "recurring:materialize": "tsx scripts/materialize-recurring.ts"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

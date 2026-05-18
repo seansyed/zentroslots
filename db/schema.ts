@@ -234,6 +234,11 @@ export const bookings = pgTable(
     reminder24hSentAt: timestamp("reminder_24h_sent_at", { withTimezone: true }),
     reminder1hSentAt: timestamp("reminder_1h_sent_at", { withTimezone: true }),
 
+    // Back-pointers when this booking was materialized from a series.
+    // NULL on one-off bookings (default). Set by the materializer.
+    bookingSeriesId: uuid("booking_series_id"),
+    bookingOccurrenceId: uuid("booking_occurrence_id"),
+
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -732,6 +737,76 @@ export const calendarSyncLogs = pgTable(
     tenantIdx: index("calendar_sync_logs_tenant_idx").on(t.tenantId, t.createdAt),
     connectionIdx: index("calendar_sync_logs_connection_idx").on(t.connectionId, t.createdAt),
     bookingIdx: index("calendar_sync_logs_booking_idx").on(t.bookingId),
+  })
+);
+
+// ─── Recurring bookings (series + occurrences) ─────────────────────────
+// One series per recurring appointment. The materialization worker
+// rolls a 30-day window forward, generating occurrence rows and
+// inserting real bookings (via the existing booking validation chain).
+// Tenants without any active series see byte-identical behavior.
+//
+// overrides jsonb on booking_occurrences carries per-occurrence
+// deviations (different start_at / staff_user_id / skip flag) so
+// "edit this occurrence only" doesn't have to mutate the series rule.
+export const bookingSeries = pgTable(
+  "booking_series",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    serviceId: uuid("service_id")
+      .notNull()
+      .references(() => services.id, { onDelete: "cascade" }),
+    staffUserId: uuid("staff_user_id").references(() => users.id, { onDelete: "set null" }),
+    locationId: uuid("location_id"),
+    customerId: uuid("customer_id"),
+    customerEmail: varchar("customer_email", { length: 255 }).notNull(),
+    customerName: varchar("customer_name", { length: 120 }).notNull(),
+    recurrenceRule: text("recurrence_rule").notNull(),
+    startLocal: varchar("start_local", { length: 19 }).notNull(),
+    timezone: varchar("timezone", { length: 64 }).notNull().default("UTC"),
+    endDate: date("end_date"),
+    occurrenceCount: integer("occurrence_count"),
+    status: varchar("status", { length: 20 }).notNull().default("active"),
+    lastMaterializedIndex: integer("last_materialized_index").notNull().default(-1),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    tenantIdx: index("booking_series_tenant_idx").on(t.tenantId),
+    statusIdx: index("booking_series_status_idx").on(t.status),
+  })
+);
+
+export const bookingOccurrences = pgTable(
+  "booking_occurrences",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    bookingSeriesId: uuid("booking_series_id")
+      .notNull()
+      .references(() => bookingSeries.id, { onDelete: "cascade" }),
+    bookingId: uuid("booking_id"),
+    occurrenceIndex: integer("occurrence_index").notNull(),
+    occurrenceStartAt: timestamp("occurrence_start_at", { withTimezone: true }).notNull(),
+    status: varchar("status", { length: 20 }).notNull().default("scheduled"),
+    overrides: jsonb("overrides").notNull().default({}),
+    failureReason: text("failure_reason"),
+    attempts: integer("attempts").notNull().default(0),
+    lastAttemptAt: timestamp("last_attempt_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    seriesIdx: index("booking_occurrences_series_idx").on(t.bookingSeriesId),
+    tenantIdx: index("booking_occurrences_tenant_idx").on(t.tenantId),
+    statusIdx: index("booking_occurrences_status_idx").on(t.status),
+    startIdx: index("booking_occurrences_start_idx").on(t.occurrenceStartAt),
   })
 );
 

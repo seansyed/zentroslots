@@ -116,6 +116,7 @@ function buildNav(variant: SidebarVariant, role: Role): Group[] {
           { label: "Booking rules", href: "/dashboard/settings/booking-rules", icon: I.clock },
           { label: "Follow-up automations", href: "/dashboard/settings/automations", icon: I.bell },
           { label: "Waitlists", href: "/dashboard/settings/waitlists", icon: I.users },
+          { label: "Recurring bookings", href: "/dashboard/settings/recurring", icon: I.clock },
         ]
       : []),
   ];
