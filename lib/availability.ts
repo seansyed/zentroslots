@@ -10,6 +10,7 @@ import {
   services,
   users,
 } from "@/db/schema";
+import { getExternalBusyForUser } from "@/lib/calendar/sync";
 
 const SLOT_INTERVAL_MINUTES = 15;
 
@@ -48,7 +49,16 @@ export async function getAvailableSlots(params: {
     .filter((w): w is Interval => w !== null);
   if (bookable.length === 0) return [];
 
-  const existing = await getBookingsInRange(staffUserId, viewerDay);
+  // Combine internal bookings + external calendar busy time. The
+  // external lookup is no-op for staff without an active Google
+  // connection — output is then byte-identical to the pre-feature
+  // behavior. Freebusy is also wrapped in try/catch inside the
+  // orchestrator so a Google API failure can't break availability.
+  const [existing, externalBusy] = await Promise.all([
+    getBookingsInRange(staffUserId, viewerDay),
+    getExternalBusyForUser(staffUserId, viewerDay.start, viewerDay.end),
+  ]);
+  const combinedBusy: Interval[] = [...existing, ...externalBusy];
 
   // Walk every window independently and concatenate.
   const all: string[] = [];
@@ -58,7 +68,7 @@ export async function getAvailableSlots(params: {
       durationMinutes: service.durationMinutes,
       bufferBefore: service.bufferBefore,
       bufferAfter: service.bufferAfter,
-      existing,
+      existing: combinedBusy,
     });
     all.push(...slots);
   }

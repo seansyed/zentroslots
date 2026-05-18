@@ -10,7 +10,7 @@ import { loadTenantFeatures } from "@/lib/features";
 import { assertResourcesShareTenant } from "@/lib/tenant";
 import { createBookingSchema } from "@/lib/validation";
 import { getAvailableSlots } from "@/lib/availability";
-import { createCalendarEventForStaff } from "@/lib/google";
+import { onBookingCreated } from "@/lib/calendar/sync";
 import { triggerAutomation } from "@/lib/communications/engine";
 import { assertCanCreateBooking } from "@/lib/quotas";
 import { audit, ipFromHeaders } from "@/lib/audit";
@@ -210,33 +210,35 @@ export async function POST(req: NextRequest) {
       throw e;
     }
 
-    // Video provider: only create a Google Calendar event when the
-    // service is configured for Google Meet AND the tenant hasn't
-    // disabled the googleMeet feature toggle. Other providers
-    // (Zoom/Teams) are wired in a future phase — keeping their
-    // booking flows clean (no Meet link) until OAuth is configured.
-    if (service.videoProvider === "google_meet" && features.googleMeet) {
-      try {
-        const ev = await createCalendarEventForStaff({
-          staff,
-          serviceName: service.name,
-          clientName: body.clientName,
-          clientEmail: body.clientEmail,
-          startAt,
-          endAt,
-          notes: body.notes,
-        });
-        if (ev) {
-          await db
-            .update(bookings)
-            .set({ googleEventId: ev.eventId, meetLink: ev.meetLink })
-            .where(eq(bookings.id, row.id));
-          row.googleEventId = ev.eventId;
-          row.meetLink = ev.meetLink;
-        }
-      } catch (gErr) {
-        console.error("Google Calendar create failed (booking kept):", gErr);
+    // External calendar sync. Routes through the orchestrator which:
+    //   - skips when staff has no active connection (returns early)
+    //   - encrypts/decrypts tokens via lib/crypto.ts
+    //   - logs the attempt to calendar_sync_logs (ok/failed/skipped)
+    //   - flips connection status to 'needs_reconnect' on auth failure
+    //   - updates bookings.externalEventId + meetLink on success
+    // ALWAYS best-effort — wrapped in try/catch so the booking commits
+    // regardless of the calendar provider's state. Meet link gating
+    // applies only when the service is video-enabled.
+    const wantMeet = service.videoProvider === "google_meet" && features.googleMeet;
+    try {
+      const result = await onBookingCreated({
+        booking: row,
+        staff,
+        serviceName: service.name,
+        videoConference: wantMeet,
+      });
+      if (result.status === "ok" && result.eventId) {
+        // Reflect orchestrator's writes back onto the in-memory row so
+        // the response carries them.
+        row.googleEventId = result.eventId;
+        row.externalEventId = result.eventId;
+        row.externalEventProvider = "google";
+        if (result.meetLink) row.meetLink = result.meetLink;
       }
+    } catch (gErr) {
+      // Defense in depth: the orchestrator never throws, but if a bug
+      // makes it, the booking still stays committed.
+      console.error("Calendar sync create failed (booking kept):", gErr);
     }
 
     // Confirmation email routed through the central automation engine,

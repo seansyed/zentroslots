@@ -5,6 +5,7 @@ import { db } from "@/db/client";
 import { bookings, services, tenants, users } from "@/db/schema";
 import { errorResponse, HttpError } from "@/lib/auth";
 import { isFeatureEnabled } from "@/lib/features";
+import { onBookingRescheduled } from "@/lib/calendar/sync";
 import { signBookingToken, verifyBookingToken } from "@/lib/tokens";
 import { publicRescheduleSchema } from "@/lib/validation";
 import { getAvailableSlots } from "@/lib/availability";
@@ -107,6 +108,14 @@ export async function POST(
     }
 
     if (!updated) throw new HttpError(500, "Reschedule failed");
+
+    // External calendar sync — patch the existing event. Best-effort;
+    // no-op if no active connection or no external event id on file.
+    try {
+      await onBookingRescheduled({ booking: updated, staff, serviceName: service.name });
+    } catch (gErr) {
+      console.error("Public calendar sync reschedule failed (booking kept):", gErr);
+    }
 
     // Best-effort email with fresh tokens for the new booking time.
     // The reschedule landed in the DB already — the gate only decides

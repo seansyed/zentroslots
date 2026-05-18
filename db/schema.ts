@@ -216,6 +216,11 @@ export const bookings = pgTable(
     status: bookingStatusEnum("status").notNull().default("confirmed"),
 
     googleEventId: varchar("google_event_id", { length: 255 }),
+    // Provider-agnostic event id (set by the sync orchestrator). Kept
+    // separately from googleEventId for backward compat with existing
+    // bookings; new code writes to both for now.
+    externalEventId: varchar("external_event_id", { length: 255 }),
+    externalEventProvider: varchar("external_event_provider", { length: 20 }),
     meetLink: text("meet_link"),
     notes: text("notes"),
 
@@ -662,6 +667,71 @@ export const tenantFeatureSettings = pgTable(
   },
   (t) => ({
     tenantUnique: uniqueIndex("tenant_feature_settings_tenant_unique").on(t.tenantId),
+  })
+);
+
+// ─── Calendar connections + sync logs ───────────────────────────────────
+// One row per (user, provider) when active; reconnect updates in place,
+// disconnect flips status to 'disconnected' but keeps the row for audit.
+// Provider is a varchar so future MS Graph (outlook/office365) lands
+// without a schema change — the lib/calendar/types CalendarProvider
+// union is the runtime gatekeeper. Tokens are AES-256-GCM encrypted via
+// lib/crypto.ts envelopes (v1: prefix).
+export const calendarConnections = pgTable(
+  "calendar_connections",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    provider: varchar("provider", { length: 20 }).notNull(),
+    status: varchar("status", { length: 20 }).notNull().default("active"),
+    refreshTokenEncrypted: text("refresh_token_encrypted").notNull(),
+    accessTokenEncrypted: text("access_token_encrypted"),
+    accessTokenExpiresAt: timestamp("access_token_expires_at", { withTimezone: true }),
+    calendarId: varchar("calendar_id", { length: 255 }).notNull().default("primary"),
+    scopes: jsonb("scopes").notNull().default([]),
+    accountEmail: varchar("account_email", { length: 255 }),
+    lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
+    lastError: text("last_error"),
+    lastErrorAt: timestamp("last_error_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    tenantIdx: index("calendar_connections_tenant_idx").on(t.tenantId),
+    statusIdx: index("calendar_connections_status_idx").on(t.status),
+  })
+);
+
+export const calendarSyncLogs = pgTable(
+  "calendar_sync_logs",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    connectionId: uuid("connection_id").references(() => calendarConnections.id, {
+      onDelete: "set null",
+    }),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+    bookingId: uuid("booking_id"),
+    provider: varchar("provider", { length: 20 }).notNull(),
+    kind: varchar("kind", { length: 20 }).notNull(),
+    status: varchar("status", { length: 20 }).notNull(),
+    errorClass: varchar("error_class", { length: 20 }),
+    errorMessage: text("error_message"),
+    externalEventId: varchar("external_event_id", { length: 255 }),
+    latencyMs: integer("latency_ms"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    tenantIdx: index("calendar_sync_logs_tenant_idx").on(t.tenantId, t.createdAt),
+    connectionIdx: index("calendar_sync_logs_connection_idx").on(t.connectionId, t.createdAt),
+    bookingIdx: index("calendar_sync_logs_booking_idx").on(t.bookingId),
   })
 );
 

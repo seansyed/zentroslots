@@ -5,6 +5,7 @@ import { db } from "@/db/client";
 import { bookings, services, tenants, users } from "@/db/schema";
 import { errorResponse, HttpError } from "@/lib/auth";
 import { isFeatureEnabled } from "@/lib/features";
+import { onBookingCancelled } from "@/lib/calendar/sync";
 import { verifyBookingToken } from "@/lib/tokens";
 import { renderCancellation, sendEmail, type BookingForEmail } from "@/lib/email";
 import { gateSchedulingEmail, logSuppressed } from "@/lib/communications/preferences";
@@ -48,6 +49,20 @@ export async function POST(
         )
       )
       .returning();
+
+    // External calendar sync — delete the event from staff's calendar.
+    // Best-effort; no-op without an active connection. 404 from
+    // provider treated as success (idempotent).
+    try {
+      const staffUser = await db.query.users.findFirst({
+        where: eq(users.id, updated.staffUserId),
+      });
+      if (staffUser) {
+        await onBookingCancelled({ booking: updated, staff: staffUser });
+      }
+    } catch (gErr) {
+      console.error("Public calendar sync cancel failed (booking kept):", gErr);
+    }
 
     // Best-effort email — never fails the request. The cancellation
     // itself already landed above; the gate just decides whether the

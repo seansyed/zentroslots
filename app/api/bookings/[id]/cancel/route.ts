@@ -5,6 +5,7 @@ import { db } from "@/db/client";
 import { bookings, services, tenants, users } from "@/db/schema";
 import { errorResponse, isManagerial, requireUser, HttpError } from "@/lib/auth";
 import { isFeatureEnabled } from "@/lib/features";
+import { onBookingCancelled } from "@/lib/calendar/sync";
 import { renderCancellation, sendEmail, type BookingForEmail } from "@/lib/email";
 import { gateSchedulingEmail, logSuppressed } from "@/lib/communications/preferences";
 import { audit } from "@/lib/audit";
@@ -44,6 +45,21 @@ export async function POST(
       .set({ status: "cancelled", updatedAt: new Date() })
       .where(and(eq(bookings.id, id), eq(bookings.tenantId, caller.tenantId)))
       .returning();
+
+    // External calendar sync — delete the event on the staff's
+    // calendar. Best-effort: orchestrator is no-op for staff without
+    // an active connection or for bookings without an external event
+    // id. 404 from the provider is treated as success (idempotent).
+    try {
+      const staffUser = await db.query.users.findFirst({
+        where: eq(users.id, updated.staffUserId),
+      });
+      if (staffUser) {
+        await onBookingCancelled({ booking: updated, staff: staffUser });
+      }
+    } catch (gErr) {
+      console.error("Calendar sync cancel failed (booking kept):", gErr);
+    }
 
     // Best-effort cancellation email — never fails the request. The
     // booking is already cancelled in the DB above; the gate only

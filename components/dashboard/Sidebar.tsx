@@ -96,6 +96,7 @@ function buildNav(variant: SidebarVariant, role: Role): Group[] {
   const time: Item[] = [
     { label: "Working hours", href: "/dashboard/availability",            icon: I.clock },
     { label: "Overrides",     href: "/dashboard/availability/overrides",  icon: I.flag },
+    { label: "Calendar sync", href: "/dashboard/settings/calendar",       icon: I.link },
   ];
 
   const insightAndSettings: Item[] = [

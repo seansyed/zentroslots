@@ -5,6 +5,7 @@ import { db } from "@/db/client";
 import { bookings, services, tenants, users } from "@/db/schema";
 import { errorResponse, isManagerial, requireUser, HttpError } from "@/lib/auth";
 import { isFeatureEnabled } from "@/lib/features";
+import { onBookingRescheduled } from "@/lib/calendar/sync";
 import { bookingRescheduleSchema } from "@/lib/validation";
 import { getAvailableSlots } from "@/lib/availability";
 import { renderReschedule, sendEmail, type BookingForEmail } from "@/lib/email";
@@ -101,6 +102,16 @@ export async function POST(
     }
 
     if (!updated) throw new HttpError(500, "Reschedule failed");
+
+    // External calendar sync — patch the existing event with the new
+    // start/end. Best-effort: a failed sync never fails the request,
+    // and the orchestrator no-ops if there's no active connection or
+    // no external event id on the booking.
+    try {
+      await onBookingRescheduled({ booking: updated, staff, serviceName: service.name });
+    } catch (gErr) {
+      console.error("Calendar sync reschedule failed (booking kept):", gErr);
+    }
 
     // Best-effort email — never fails the request. The reschedule
     // itself already committed above.
