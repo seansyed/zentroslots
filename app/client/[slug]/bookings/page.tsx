@@ -4,6 +4,7 @@ import { and, desc, eq } from "drizzle-orm";
 import { db } from "@/db/client";
 import { bookings, services, users } from "@/db/schema";
 import ClientPortalShell from "@/components/client/ClientPortalShell";
+import { loadTenantFeatures } from "@/lib/features";
 import { signBookingToken } from "@/lib/tokens";
 import { requireClientPortalContext } from "../_lib/guard";
 
@@ -40,13 +41,24 @@ export default async function ClientBookingsPage(props: {
   const upcoming = rows.filter((r) => r.startAt.getTime() >= now && r.status !== "cancelled");
   const past = rows.filter((r) => !(r.startAt.getTime() >= now && r.status !== "cancelled"));
 
+  // Tenant feature gate. We only mint cancel/reschedule tokens when the
+  // workspace has the feature enabled — `undefined` tokens cause the
+  // BookingCard to hide the buttons. The public token-gated routes
+  // also independently 403 if the feature is off after a token was
+  // issued, so this is defense in depth rather than the sole barrier.
+  const features = await loadTenantFeatures(tenant.id);
+
   // Mint cancel/reschedule tokens for upcoming rows so the buttons hit
   // the existing token-gated public endpoints.
   const upcomingWithTokens = await Promise.all(
     upcoming.map(async (b) => ({
       ...b,
-      cancelToken: await signBookingToken({ bookingId: b.id, tenantId: tenant.id, kind: "cancel" }),
-      rescheduleToken: await signBookingToken({ bookingId: b.id, tenantId: tenant.id, kind: "reschedule" }),
+      cancelToken: features.cancellations
+        ? await signBookingToken({ bookingId: b.id, tenantId: tenant.id, kind: "cancel" })
+        : undefined,
+      rescheduleToken: features.rescheduling
+        ? await signBookingToken({ bookingId: b.id, tenantId: tenant.id, kind: "reschedule" })
+        : undefined,
     }))
   );
 

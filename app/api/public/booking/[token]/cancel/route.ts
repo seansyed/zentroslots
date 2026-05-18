@@ -4,6 +4,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@/db/client";
 import { bookings, services, tenants, users } from "@/db/schema";
 import { errorResponse, HttpError } from "@/lib/auth";
+import { isFeatureEnabled } from "@/lib/features";
 import { verifyBookingToken } from "@/lib/tokens";
 import { renderCancellation, sendEmail, type BookingForEmail } from "@/lib/email";
 import { gateSchedulingEmail, logSuppressed } from "@/lib/communications/preferences";
@@ -17,6 +18,12 @@ export async function POST(
     const payload = await verifyBookingToken(token);
     if (!payload || payload.kind !== "cancel") {
       throw new HttpError(401, "Invalid or expired link");
+    }
+
+    // Tenant feature gate. Token may be valid, but the workspace may
+    // have disabled customer-initiated cancellations since issuing it.
+    if (!(await isFeatureEnabled(payload.tenantId, "cancellations"))) {
+      throw new HttpError(403, "Cancellations are no longer available for this booking");
     }
 
     const booking = await db.query.bookings.findFirst({

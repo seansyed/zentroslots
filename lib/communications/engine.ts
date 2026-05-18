@@ -48,6 +48,7 @@ import {
   resolveAndRenderTemplate,
   type TemplateType,
 } from "@/lib/communications/templates";
+import { loadTenantFeatures } from "@/lib/features";
 import type { SchedulingEmailKind } from "@/lib/communications/email-rules";
 import type { TemplateContext } from "@/lib/communications/variables";
 import { formatInTimeZone } from "date-fns-tz";
@@ -106,6 +107,27 @@ export async function triggerAutomation(args: TriggerArgs): Promise<TriggerResul
     });
     if (already) {
       return { status: "skipped", logId: already.id, reason: "already_sent" };
+    }
+
+    // ── (1b) Tenant feature gate. Reminders are the only scheduling
+    // event currently behind a feature toggle — the admin can disable
+    // them at Settings → Feature Controls. Disabling silently skips
+    // both the 24h and 1h reminders; confirmations / cancels /
+    // reschedules are unaffected (they're separate toggles enforced
+    // elsewhere — cancel/reschedule are gated at the API layer, not
+    // here, because the gate decides whether the ACTION runs at all).
+    if (
+      args.eventType === "appointment.reminder_24h" ||
+      args.eventType === "appointment.reminder_1h"
+    ) {
+      const features = await loadTenantFeatures(args.tenantId);
+      if (!features.reminders) {
+        return await writeLog({
+          ...skeleton(args, channel),
+          status: "skipped",
+          skippedReason: "feature_disabled",
+        });
+      }
     }
 
     // ── (2) Load booking + ancillaries.

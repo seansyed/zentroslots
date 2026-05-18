@@ -6,6 +6,7 @@ import { bookings, customers, intakeForms, serviceStaff, services, tenants, user
 import { sql, asc } from "drizzle-orm";
 import { validateResponses, type IntakeField } from "@/lib/intake";
 import { errorResponse, getSession, HttpError, isManagerial } from "@/lib/auth";
+import { loadTenantFeatures } from "@/lib/features";
 import { assertResourcesShareTenant } from "@/lib/tenant";
 import { createBookingSchema } from "@/lib/validation";
 import { getAvailableSlots } from "@/lib/availability";
@@ -158,9 +159,18 @@ export async function POST(req: NextRequest) {
 
     const endAt = new Date(startAt.getTime() + service.durationMinutes * 60_000);
 
+    // ─── Tenant feature flags ──────────────────────────────────────────
+    // Pulled once and reused below for intake + Google Meet gates so
+    // we don't hit the cache twice in the hot path.
+    const features = await loadTenantFeatures(tenantId);
+
     // ─── Intake form validation (if service has one attached) ──────────
+    // When intakeForms is OFF at the tenant level, skip validation
+    // entirely — the customer never saw the form on the public page
+    // (gated symmetrically in the public booking GET), and the
+    // service-level attachment becomes a no-op.
     let normalisedResponses: Record<string, unknown> | null = null;
-    if (service.intakeFormId) {
+    if (service.intakeFormId && features.intakeForms) {
       const form = await db.query.intakeForms.findFirst({
         where: and(eq(intakeForms.id, service.intakeFormId), eq(intakeForms.tenantId, tenantId)),
       });
@@ -201,10 +211,11 @@ export async function POST(req: NextRequest) {
     }
 
     // Video provider: only create a Google Calendar event when the
-    // service is configured for Google Meet. Other providers (Zoom/Teams)
-    // are wired in a future phase — keeping their booking flows clean
-    // (no Meet link) until OAuth is configured.
-    if (service.videoProvider === "google_meet") {
+    // service is configured for Google Meet AND the tenant hasn't
+    // disabled the googleMeet feature toggle. Other providers
+    // (Zoom/Teams) are wired in a future phase — keeping their
+    // booking flows clean (no Meet link) until OAuth is configured.
+    if (service.videoProvider === "google_meet" && features.googleMeet) {
       try {
         const ev = await createCalendarEventForStaff({
           staff,

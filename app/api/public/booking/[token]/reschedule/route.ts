@@ -4,6 +4,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@/db/client";
 import { bookings, services, tenants, users } from "@/db/schema";
 import { errorResponse, HttpError } from "@/lib/auth";
+import { isFeatureEnabled } from "@/lib/features";
 import { signBookingToken, verifyBookingToken } from "@/lib/tokens";
 import { publicRescheduleSchema } from "@/lib/validation";
 import { getAvailableSlots } from "@/lib/availability";
@@ -19,6 +20,14 @@ export async function POST(
     const payload = await verifyBookingToken(token);
     if (!payload || payload.kind !== "reschedule") {
       throw new HttpError(401, "Invalid or expired link");
+    }
+
+    // Tenant feature gate. Even though the token is valid, the
+    // workspace may have disabled customer-initiated rescheduling
+    // after the link was issued — refuse here before any state
+    // changes.
+    if (!(await isFeatureEnabled(payload.tenantId, "rescheduling"))) {
+      throw new HttpError(403, "Rescheduling is no longer available for this booking");
     }
 
     const body = publicRescheduleSchema.parse(await req.json());

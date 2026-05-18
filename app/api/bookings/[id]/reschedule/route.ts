@@ -4,6 +4,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@/db/client";
 import { bookings, services, tenants, users } from "@/db/schema";
 import { errorResponse, isManagerial, requireUser, HttpError } from "@/lib/auth";
+import { isFeatureEnabled } from "@/lib/features";
 import { bookingRescheduleSchema } from "@/lib/validation";
 import { getAvailableSlots } from "@/lib/availability";
 import { renderReschedule, sendEmail, type BookingForEmail } from "@/lib/email";
@@ -20,6 +21,13 @@ export async function POST(
     const caller = await requireUser();
     const { id } = await context.params;
     const body = bookingRescheduleSchema.parse(await req.json());
+
+    // Tenant feature gate. When admins turn rescheduling off, the
+    // route refuses regardless of role — the UI also hides its button
+    // (see TaskCreate task #9) but the API is the security boundary.
+    if (!(await isFeatureEnabled(caller.tenantId, "rescheduling"))) {
+      throw new HttpError(403, "Rescheduling is disabled for this workspace");
+    }
 
     const booking = await db.query.bookings.findFirst({
       where: and(eq(bookings.id, id), eq(bookings.tenantId, caller.tenantId)),

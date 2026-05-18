@@ -642,6 +642,29 @@ export const communicationLogs = pgTable(
   })
 );
 
+// ─── Tenant feature toggles ─────────────────────────────────────────────
+// One row per tenant; absence = all defaults (everything on). Flags is a
+// jsonb blob: which keys are valid and what their defaults are is owned
+// by lib/features.ts (the migration-free path for adding toggles).
+//
+// Only the toggles whose runtime backend exists are honored at the
+// gate sites — see lib/features.ts for the closed FeatureFlag union.
+export const tenantFeatureSettings = pgTable(
+  "tenant_feature_settings",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    flags: jsonb("flags").notNull().default({}),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    tenantUnique: uniqueIndex("tenant_feature_settings_tenant_unique").on(t.tenantId),
+  })
+);
+
 // ─── Tenant SMS provider connections ────────────────────────────────────
 // One active provider per tenant. Secrets are AES-256-GCM encrypted —
 // never store or return plaintext. See lib/crypto.ts for envelope shape.

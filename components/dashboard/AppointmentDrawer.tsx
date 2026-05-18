@@ -26,12 +26,16 @@ export default function AppointmentDrawer({
   onClose,
   onChanged,
   canManage,
+  canCancel = true,
 }: {
   booking: DrawerBooking | null;
   timezone: string;
   onClose: () => void;
   onChanged?: (next: DrawerBooking) => void;
   canManage: boolean;
+  /** Tenant feature toggle (cancellations). When false the Cancel
+   *  action is hidden; the API would 403 the request anyway. */
+  canCancel?: boolean;
 }) {
   const [busy, setBusy] = React.useState(false);
 
@@ -146,9 +150,11 @@ export default function AppointmentDrawer({
                     <Button variant="secondary" size="sm" disabled={busy} onClick={() => setStatus("no_show")}>
                       No-show
                     </Button>
-                    <Button variant="danger" size="sm" disabled={busy} onClick={cancel}>
-                      Cancel
-                    </Button>
+                    {canCancel && (
+                      <Button variant="danger" size="sm" disabled={busy} onClick={cancel}>
+                        Cancel
+                      </Button>
+                    )}
                   </>
                 )}
                 {booking.status === "cancelled" && (

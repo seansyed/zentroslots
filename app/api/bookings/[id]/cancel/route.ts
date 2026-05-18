@@ -4,6 +4,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@/db/client";
 import { bookings, services, tenants, users } from "@/db/schema";
 import { errorResponse, isManagerial, requireUser, HttpError } from "@/lib/auth";
+import { isFeatureEnabled } from "@/lib/features";
 import { renderCancellation, sendEmail, type BookingForEmail } from "@/lib/email";
 import { gateSchedulingEmail, logSuppressed } from "@/lib/communications/preferences";
 import { audit } from "@/lib/audit";
@@ -17,6 +18,12 @@ export async function POST(
   try {
     const caller = await requireUser();
     const { id } = await context.params;
+
+    // Tenant feature gate. Same boundary as rescheduling: refuse at
+    // the API regardless of role. UI hides the button alongside this.
+    if (!(await isFeatureEnabled(caller.tenantId, "cancellations"))) {
+      throw new HttpError(403, "Cancellations are disabled for this workspace");
+    }
 
     const booking = await db.query.bookings.findFirst({
       where: and(eq(bookings.id, id), eq(bookings.tenantId, caller.tenantId)),

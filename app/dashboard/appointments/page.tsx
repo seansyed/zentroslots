@@ -4,6 +4,7 @@ import { and, desc, eq, gte, lt } from "drizzle-orm";
 import { db } from "@/db/client";
 import { bookings, services, tenants, users } from "@/db/schema";
 import { getSession, isManagerial } from "@/lib/auth";
+import { loadTenantFeatures } from "@/lib/features";
 import Shell from "@/components/dashboard/Shell";
 import AppointmentsTable from "@/components/dashboard/AppointmentsTable";
 
@@ -62,6 +63,12 @@ export default async function AppointmentsPage(props: {
   const hasMore = rows.length > PAGE_SIZE;
   const page = hasMore ? rows.slice(0, PAGE_SIZE) : rows;
   const nextCursor = hasMore ? page[page.length - 1].startAt.toISOString() : null;
+
+  // Resolve tenant feature flags once and pass relevant ones into the
+  // client table so the drawer can hide buttons whose actions are
+  // disabled at the API layer. The API stays the security boundary —
+  // this just keeps the UI honest.
+  const features = await loadTenantFeatures(user.tenantId);
 
   return (
     <Shell
@@ -129,6 +136,7 @@ export default async function AppointmentsPage(props: {
         }))}
         timezone={user.timezone}
         canManage={user.role === "admin" || user.role === "staff" || user.role === "manager"}
+        canCancel={features.cancellations}
         currentStatus={status}
         nextCursor={nextCursor}
       />

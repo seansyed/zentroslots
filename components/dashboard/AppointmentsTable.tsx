@@ -37,12 +37,17 @@ export default function AppointmentsTable({
   rows: initialRows,
   timezone,
   canManage,
+  canCancel,
   currentStatus,
   nextCursor,
 }: {
   rows: Row[];
   timezone: string;
   canManage: boolean;
+  /** Tenant feature toggle. When false, the drawer hides the Cancel
+   *  button (and the API would 403 anyway). Defaults true at the
+   *  prop site for callers that haven't been updated yet. */
+  canCancel?: boolean;
   currentStatus: string;
   nextCursor: string | null;
 }) {
@@ -199,6 +204,7 @@ export default function AppointmentsTable({
         booking={drawer}
         timezone={timezone}
         canManage={canManage}
+        canCancel={canCancel !== false}
         onClose={() => setDrawer(null)}
         onChanged={(next) => {
           setDrawer(next);
