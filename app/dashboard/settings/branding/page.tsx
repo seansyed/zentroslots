@@ -37,6 +37,7 @@ export default async function BrandingPage() {
 
       <BrandingForm
         disabled={!allowed}
+        tenantSlug={tenant.slug}
         initial={{
           name: tenant.name,
           logoUrl: tenant.logoUrl ?? "",
