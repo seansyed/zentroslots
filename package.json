@@ -11,7 +11,7 @@
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
-    "test": "tsx --test tests/**/*.test.ts",
+    "test": "tsx --import ./tests/setup.ts --test tests/**/*.test.ts",
     "reminders:send": "tsx scripts/send-reminders.ts"
   },
   "dependencies": {

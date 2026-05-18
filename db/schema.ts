@@ -563,6 +563,85 @@ export const auditLogsRelations = relations(auditLogs, ({ one }) => ({
   actor: one(users, { fields: [auditLogs.actorUserId], references: [users.id] }),
 }));
 
+// ─── Communication engine ──────────────────────────────────────────────
+// Tenant-customizable templates + automation rules + delivery logs.
+// Backward-compat: missing template rows fall back to system code defaults
+// (see lib/communications/templates.ts) so existing tenants behave
+// identically until they explicitly customize.
+
+export const communicationTemplates = pgTable(
+  "communication_templates",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    serviceId: uuid("service_id"),
+    templateType: varchar("template_type", { length: 60 }).notNull(),
+    channel: varchar("channel", { length: 20 }).notNull().default("email"),
+    subject: varchar("subject", { length: 500 }),
+    htmlContent: text("html_content"),
+    textContent: text("text_content"),
+    enabled: boolean("enabled").notNull().default(true),
+    systemDefault: boolean("system_default").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    tenantIdx: index("comm_templates_tenant_idx").on(t.tenantId),
+  })
+);
+
+export const automationRules = pgTable(
+  "automation_rules",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    serviceId: uuid("service_id"),
+    triggerEvent: varchar("trigger_event", { length: 60 }).notNull(),
+    delayMinutes: integer("delay_minutes").notNull().default(0),
+    channel: varchar("channel", { length: 20 }).notNull().default("email"),
+    templateId: uuid("template_id"),
+    enabled: boolean("enabled").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    tenantIdx: index("automation_rules_tenant_idx").on(t.tenantId),
+    triggerIdx: index("automation_rules_trigger_idx").on(t.tenantId, t.triggerEvent),
+  })
+);
+
+export const communicationLogs = pgTable(
+  "communication_logs",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    bookingId: uuid("booking_id"),
+    customerId: uuid("customer_id"),
+    templateId: uuid("template_id"),
+    channel: varchar("channel", { length: 20 }).notNull(),
+    eventType: varchar("event_type", { length: 60 }).notNull(),
+    status: varchar("status", { length: 20 }).notNull(),
+    provider: varchar("provider", { length: 40 }),
+    providerMessageId: varchar("provider_message_id", { length: 255 }),
+    failureReason: text("failure_reason"),
+    skippedReason: varchar("skipped_reason", { length: 60 }),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    tenantIdx: index("comm_logs_tenant_idx").on(t.tenantId),
+    bookingIdx: index("comm_logs_booking_idx").on(t.bookingId),
+    eventIdx: index("comm_logs_event_idx").on(t.tenantId, t.eventType),
+    statusIdx: index("comm_logs_status_idx").on(t.status),
+  })
+);
+
 // ─── Tenant SMS provider connections ────────────────────────────────────
 // One active provider per tenant. Secrets are AES-256-GCM encrypted —
 // never store or return plaintext. See lib/crypto.ts for envelope shape.

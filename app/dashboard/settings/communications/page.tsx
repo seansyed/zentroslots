@@ -46,8 +46,30 @@ export default async function CommunicationsSettingsPage() {
     >
       <h1 className="text-heading font-semibold text-ink">Communications</h1>
       <p className="mt-1 max-w-2xl text-sm text-ink-muted">
-        Connect your own SMS provider so reminders, confirmations, and broadcasts
-        go out under your brand and on your account. Credentials are encrypted at rest;
+        Email templates, SMS provider, and delivery logs for every booking
+        notification your customers receive.
+      </p>
+
+      <div className="mt-5 grid gap-3 sm:grid-cols-2">
+        <a
+          href="/dashboard/settings/communications/templates"
+          className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-slate-300 hover:shadow"
+        >
+          <div className="text-sm font-semibold text-ink">Email templates</div>
+          <div className="mt-1 text-xs text-ink-muted">Customize confirmations, reminders, cancellations.</div>
+        </a>
+        <a
+          href="/dashboard/settings/communications/logs"
+          className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-slate-300 hover:shadow"
+        >
+          <div className="text-sm font-semibold text-ink">Delivery logs</div>
+          <div className="mt-1 text-xs text-ink-muted">See every send, skip, and failure with structured reasons.</div>
+        </a>
+      </div>
+
+      <h2 className="mt-8 text-sm font-medium text-ink">SMS provider</h2>
+      <p className="mt-1 max-w-2xl text-xs text-ink-muted">
+        Connect your own Twilio / Telnyx account. Credentials are encrypted at rest;
         only the last few characters of the auth token are ever shown back to you.
       </p>
 

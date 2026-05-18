@@ -3,28 +3,27 @@
  * send-reminders.ts
  *
  * Scans confirmed bookings whose start_at falls into the 24h or 1h
- * window and sends one reminder email each, marking the booking so
+ * window and fires a reminder automation each, marking the booking so
  * it doesn't fire again.
  *
  * Run every 10–15 minutes via a host-level scheduler:
  *   - Windows: Task Scheduler → "npm run reminders:send" in scheduling-saas
  *   - Linux:   cron entry  *​/15 * * * *  (cd /app && npm run reminders:send)
  *
- * No queue, no daemon. Idempotent — re-running won't double-send.
+ * No queue, no daemon. Idempotent — re-running won't double-send (the
+ * automation engine itself enforces DB-level idempotency, and the
+ * booking's reminder_*_sent_at flag short-circuits the SELECT below).
  */
 
 import "dotenv/config";
 import { and, eq, gte, isNull, lt } from "drizzle-orm";
 
 import { db } from "../db/client";
-import { bookings, services, tenants, users } from "../db/schema";
-import { signBookingToken } from "../lib/tokens";
-import { renderReminder, sendEmail, type BookingForEmail } from "../lib/email";
+import { bookings } from "../db/schema";
 import {
-  gateSchedulingEmail,
-  logSuppressed,
-} from "../lib/communications/preferences";
-import type { SchedulingEmailKind } from "../lib/communications/email-rules";
+  triggerAutomation,
+  type AutomationEvent,
+} from "../lib/communications/engine";
 
 const WINDOW_MIN = 30;
 
@@ -43,12 +42,7 @@ async function processWindow(
       id: bookings.id,
       tenantId: bookings.tenantId,
       startAt: bookings.startAt,
-      endAt: bookings.endAt,
-      clientName: bookings.clientName,
       clientEmail: bookings.clientEmail,
-      meetLink: bookings.meetLink,
-      serviceId: bookings.serviceId,
-      staffUserId: bookings.staffUserId,
     })
     .from(bookings)
     .where(
@@ -64,71 +58,32 @@ async function processWindow(
   if (due.length === 0) return;
   console.log(`[reminders:${label}] processing ${due.length} booking(s)`);
 
-  // Translate the cron's window-hour into the canonical kind once.
-  const kind: SchedulingEmailKind =
-    windowHours === 24 ? "appointment_reminder_24h" : "appointment_reminder_1h";
+  const eventType: AutomationEvent =
+    windowHours === 24 ? "appointment.reminder_24h" : "appointment.reminder_1h";
 
   for (const b of due) {
     try {
-      // Single source of truth for prefs (tenant-scoped customer lookup
-      // happens inside the gate). Customers without a customer record
-      // get DEFAULT_PREFS — identical behavior to the prior inline path.
-      const gate = await gateSchedulingEmail({
+      // The engine handles: idempotency, customer pref gate, template
+      // resolution (service → tenant → system), variable rendering, send,
+      // and structured logging into communication_logs.
+      const result = await triggerAutomation({
         tenantId: b.tenantId,
-        email: b.clientEmail,
-        kind,
+        bookingId: b.id,
+        eventType,
       });
-      if (!gate.allowed) {
-        // Mark the flag so the cron doesn't keep looking at this row.
-        await db
-          .update(bookings)
-          .set({ [flag]: new Date() })
-          .where(eq(bookings.id, b.id));
-        logSuppressed({
-          kind,
-          reason: gate.reason,
-          tenantId: b.tenantId,
-          email: b.clientEmail,
-          bookingId: b.id,
-        });
-        continue;
-      }
 
-      const [svc, staff, tenant] = await Promise.all([
-        db.query.services.findFirst({ where: eq(services.id, b.serviceId) }),
-        db.query.users.findFirst({ where: eq(users.id, b.staffUserId) }),
-        db.query.tenants.findFirst({ where: eq(tenants.id, b.tenantId) }),
-      ]);
-      if (!svc || !staff || !tenant) continue;
+      // Whatever the engine decided (sent / skipped / failed), we mark
+      // the booking's flag so cron stops looking at this row. Skipped =
+      // customer opted out; we don't keep retrying that. Failed = log is
+      // already in communication_logs for admin review; retrying via
+      // cron isn't the right recovery vector (admins can manually
+      // re-fire later from the delivery log UI in a future session).
+      await db
+        .update(bookings)
+        .set({ [flag]: new Date() })
+        .where(eq(bookings.id, b.id));
 
-      const [cancelToken, rescheduleToken] = await Promise.all([
-        signBookingToken({ bookingId: b.id, tenantId: b.tenantId, kind: "cancel" }),
-        signBookingToken({ bookingId: b.id, tenantId: b.tenantId, kind: "reschedule" }),
-      ]);
-      const payload: BookingForEmail = {
-        id: b.id,
-        serviceName: svc.name,
-        staffName: staff.name,
-        staffEmail: staff.email,
-        startAt: b.startAt,
-        endAt: b.endAt,
-        clientName: b.clientName,
-        clientEmail: b.clientEmail,
-        clientTimezone: staff.timezone,
-        meetLink: b.meetLink,
-        tenantName: tenant.name,
-        cancelToken,
-        rescheduleToken,
-      };
-      const tpl = renderReminder(payload, label);
-
-      const result = await sendEmail({ to: b.clientEmail, ...tpl });
-      if (result.ok) {
-        await db
-          .update(bookings)
-          .set({ [flag]: new Date() })
-          .where(eq(bookings.id, b.id));
-      } else {
+      if (result.status === "failed") {
         console.error(`[reminders] send failed for ${b.id}:`, result.reason);
       }
     } catch (err) {
