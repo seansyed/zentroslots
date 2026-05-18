@@ -10,8 +10,11 @@ export const dynamic = "force-dynamic";
 
 export default async function ClientLoginPage(props: {
   params: Promise<{ slug: string }>;
+  searchParams: Promise<{ invalid?: string }>;
 }) {
   const { slug } = await props.params;
+  const sp = await props.searchParams;
+  const linkExpired = sp.invalid === "1";
 
   const tenant = await db.query.tenants.findFirst({ where: eq(tenants.slug, slug) });
   if (!tenant || !tenant.active) {
@@ -55,6 +58,11 @@ export default async function ClientLoginPage(props: {
       </header>
 
       <main className="mx-auto max-w-md px-6 py-10">
+        {linkExpired && (
+          <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+            That sign-in link is expired or invalid. Enter your email below and we&rsquo;ll send a fresh one.
+          </div>
+        )}
         <LoginForm slug={slug} accentColor={tenant.primaryColor} />
         {!tenant.hidePoweredBy && (
           <footer className="mt-10 border-t border-slate-200 pt-4 text-center text-[11px] text-slate-400">

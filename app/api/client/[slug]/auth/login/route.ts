@@ -68,7 +68,9 @@ export async function POST(
         tenantId: tenant.id,
       });
       const appBase = (process.env.APP_BASE_URL ?? "http://localhost:3001").replace(/\/+$/, "");
-      const link = `${appBase}/client/${encodeURIComponent(tenant.slug)}/auth/verify?token=${encodeURIComponent(token)}`;
+      // Verify lives under /api/ because Next.js 15 only allows cookie
+      // writes from Route Handlers, not page components.
+      const link = `${appBase}/api/client/${encodeURIComponent(tenant.slug)}/auth/verify?token=${encodeURIComponent(token)}`;
 
       const subject = `Sign in to ${tenant.name}`;
       const html = `
