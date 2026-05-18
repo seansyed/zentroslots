@@ -9,11 +9,26 @@ type Props = {
   staffId: string;
   staffName: string;
   durationMinutes: number;
+  /** Tenant brand color. Threaded down so selected states + CTA match the
+   *  rest of the public page. Falls back to a sensible default. */
+  accentColor?: string;
+  tenantName?: string;
 };
 
 type Step = "pick-time" | "confirm" | "done";
 
-export default function BookingFlow({ serviceId, staffId, staffName, durationMinutes }: Props) {
+const DEFAULT_ACCENT = "#2563eb";
+
+export default function BookingFlow({
+  serviceId,
+  staffId,
+  staffName,
+  durationMinutes,
+  accentColor,
+  tenantName,
+}: Props) {
+  const accent = accentColor || DEFAULT_ACCENT;
+
   const tz = useMemo(
     () => Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
     []
@@ -31,6 +46,10 @@ export default function BookingFlow({ serviceId, staffId, staffName, durationMin
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmedMeetLink, setConfirmedMeetLink] = useState<string | null>(null);
+
+  // Date strip — next 14 days starting from today (visitor's TZ). Cheap
+  // to compute; re-derived only when tz changes (~never).
+  const dateStrip = useMemo(() => buildDateStrip(tz, 14), [tz]);
 
   useEffect(() => {
     let cancelled = false;
@@ -52,9 +71,7 @@ export default function BookingFlow({ serviceId, staffId, staffName, durationMin
       .catch(() => !cancelled && setSlots([]))
       .finally(() => !cancelled && setLoadingSlots(false));
 
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [serviceId, staffId, date, tz]);
 
   async function submit() {
@@ -86,173 +103,439 @@ export default function BookingFlow({ serviceId, staffId, staffName, durationMin
     }
   }
 
+  // ─── DONE ─────────────────────────────────────────────────────────────
   if (step === "done") {
     const start = selectedSlot ? new Date(selectedSlot) : null;
     const end = start ? new Date(start.getTime() + durationMinutes * 60_000) : null;
     const fmtIcs = (d: Date) => d.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
+    const title = `Meeting with ${staffName}${tenantName ? ` (${tenantName})` : ""}`;
+    const description = confirmedMeetLink ? `Join: ${confirmedMeetLink}` : "";
     const gcalUrl =
       start && end
-        ? `https://www.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(
-            `Meeting with ${staffName}`
-          )}&dates=${fmtIcs(start)}/${fmtIcs(end)}&details=${encodeURIComponent(
-            confirmedMeetLink ? `Join: ${confirmedMeetLink}` : ""
-          )}`
+        ? `https://www.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(title)}&dates=${fmtIcs(start)}/${fmtIcs(end)}&details=${encodeURIComponent(description)}`
+        : "";
+    // Outlook web — works for outlook.com / live.com personal accounts.
+    const outlookUrl =
+      start && end
+        ? `https://outlook.live.com/calendar/0/deeplink/compose?path=/calendar/action/compose&rru=addevent&startdt=${start.toISOString()}&enddt=${end.toISOString()}&subject=${encodeURIComponent(title)}&body=${encodeURIComponent(description)}`
         : "";
 
     return (
-      <div className="mt-8 rounded-lg border bg-white p-8 text-center shadow-sm animate-in fade-in slide-in-from-bottom-4 duration-500">
-        <div
-          className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-green-100"
-          aria-hidden
-        >
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" className="h-6 w-6 text-green-600">
-            <path d="M5 13l4 4L19 7" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </div>
-        <div className="text-lg font-semibold">You&rsquo;re booked</div>
-        <div className="mt-2 text-sm text-slate-600">
-          {selectedSlot && formatInTimeZone(selectedSlot, tz, "EEEE, MMM d 'at' h:mm a")}
-        </div>
-        <div className="mt-1 text-xs text-slate-500">with {staffName} • {tz}</div>
+      <section
+        className="mt-8 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm animate-in fade-in slide-in-from-bottom-4 duration-500"
+        aria-live="polite"
+      >
+        {/* Accent banner */}
+        <div className="h-1.5 w-full" style={{ backgroundColor: accent }} aria-hidden />
 
-        <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
-          {confirmedMeetLink && (
-            <a
-              href={confirmedMeetLink}
-              target="_blank"
-              rel="noreferrer"
-              className="rounded-md bg-brand-accent px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
-            >
-              Open Google Meet
-            </a>
-          )}
-          {gcalUrl && (
-            <a
-              href={gcalUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="rounded-md border bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-            >
-              Add to Google Calendar
-            </a>
-          )}
-        </div>
+        <div className="px-6 py-8 text-center sm:px-10 sm:py-10">
+          {/* Animated success check */}
+          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-green-100 ring-4 ring-green-50" aria-hidden>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" className="h-7 w-7 text-green-600 animate-in zoom-in duration-300">
+              <path d="M5 13l4 4L19 7" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </div>
 
-        <div className="mt-6 inline-flex items-center gap-1.5 text-[11px] text-slate-500">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-3.5 w-3.5" aria-hidden>
-            <path d="M4 12l4 4L20 6" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-          A confirmation with an <code>.ics</code> invite is on its way to {clientEmail}.
+          <h2 className="mt-5 text-xl font-semibold tracking-tight text-slate-900">
+            You&rsquo;re booked
+          </h2>
+          <p className="mt-1 text-sm text-slate-600">A confirmation is on its way to {clientEmail}.</p>
+
+          {/* Appointment summary card */}
+          {start && (
+            <div className="mx-auto mt-6 max-w-sm rounded-xl border border-slate-200 bg-slate-50 p-4 text-left text-sm">
+              <div className="flex items-start gap-3">
+                <div
+                  className="flex h-10 w-10 shrink-0 flex-col items-center justify-center rounded-lg text-white"
+                  style={{ backgroundColor: accent }}
+                >
+                  <span className="text-[10px] font-semibold uppercase tracking-wider opacity-80">
+                    {formatInTimeZone(start, tz, "MMM")}
+                  </span>
+                  <span className="text-base font-semibold leading-none">
+                    {formatInTimeZone(start, tz, "d")}
+                  </span>
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="font-medium text-slate-900">
+                    {formatInTimeZone(start, tz, "EEEE, h:mm a")}
+                  </div>
+                  <div className="mt-0.5 text-xs text-slate-600">
+                    {durationMinutes} min with {staffName}
+                  </div>
+                  <div className="mt-0.5 text-xs text-slate-500">{tz}</div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* CTAs */}
+          <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
+            {confirmedMeetLink && (
+              <a
+                href={confirmedMeetLink}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:opacity-90"
+                style={{ backgroundColor: accent }}
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4" aria-hidden>
+                  <path d="M23 7l-7 5 7 5V7zM14 5H3a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2z" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                Open Google Meet
+              </a>
+            )}
+            {gcalUrl && (
+              <a
+                href={gcalUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50"
+              >
+                Google Calendar
+              </a>
+            )}
+            {outlookUrl && (
+              <a
+                href={outlookUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50"
+              >
+                Outlook
+              </a>
+            )}
+          </div>
+
+          <p className="mt-6 text-[11px] text-slate-500">
+            You&rsquo;ll receive reminder emails before your appointment. Need to change it? Use the link in your confirmation email.
+          </p>
         </div>
-      </div>
+      </section>
     );
   }
 
+  // ─── PICK TIME + CONFIRM ──────────────────────────────────────────────
+  const selectedDateLabel = formatInTimeZone(
+    new Date(date + "T12:00:00"),
+    tz,
+    "EEEE, MMMM d"
+  );
+
   return (
-    <div className="mt-8 grid gap-6 sm:grid-cols-[1fr_1fr]">
-      {/* Date column */}
-      <div className="rounded-lg border bg-white p-5 shadow-sm">
-        <label className="block text-sm font-medium text-slate-700">
-          Pick a date
-        </label>
-        <input
-          type="date"
-          className="mt-2 w-full rounded-md border px-3 py-2 text-sm"
-          value={date}
-          min={todayInTz(tz)}
-          onChange={(e) => setDate(e.target.value)}
-        />
-        <div className="mt-3 text-xs text-slate-500">Your timezone: {tz}</div>
+    <section className="mt-8">
+      {/* Date strip + native picker */}
+      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex items-baseline justify-between gap-3">
+          <label className="text-sm font-medium text-slate-900">Pick a date</label>
+          <span className="text-[11px] text-slate-500">{tz}</span>
+        </div>
+
+        {/* Horizontal date pills — mobile-first, scrolls on overflow */}
+        <div
+          className="-mx-1 mt-3 flex gap-1.5 overflow-x-auto px-1 pb-1"
+          role="radiogroup"
+          aria-label="Select date"
+        >
+          {dateStrip.map((d) => {
+            const isSelected = d.iso === date;
+            return (
+              <button
+                key={d.iso}
+                role="radio"
+                aria-checked={isSelected}
+                onClick={() => setDate(d.iso)}
+                className={
+                  "flex shrink-0 flex-col items-center justify-center rounded-xl border px-3 py-2 text-center transition focus:outline-none focus:ring-2 focus:ring-offset-1 " +
+                  (isSelected
+                    ? "border-transparent text-white shadow-md"
+                    : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:shadow-sm")
+                }
+                style={
+                  isSelected
+                    ? ({
+                        backgroundColor: accent,
+                        /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
+                        "--tw-ring-color": accent,
+                      } as React.CSSProperties)
+                    : ({
+                        /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
+                        "--tw-ring-color": accent,
+                      } as React.CSSProperties)
+                }
+              >
+                <span className={"text-[10px] font-semibold uppercase tracking-wider " + (isSelected ? "opacity-80" : "text-slate-400")}>
+                  {d.wd}
+                </span>
+                <span className="mt-0.5 text-base font-semibold leading-none tabular-nums">{d.dd}</span>
+                <span className={"mt-0.5 text-[10px] " + (isSelected ? "opacity-70" : "text-slate-400")}>{d.mo}</span>
+              </button>
+            );
+          })}
+
+          {/* "More dates" — opens the native picker via a hidden input */}
+          <label
+            className="flex shrink-0 cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed border-slate-300 bg-white px-3 py-2 text-center text-slate-500 transition hover:border-slate-400 hover:text-slate-700"
+            title="Pick another date"
+          >
+            <span className="text-[10px] font-semibold uppercase tracking-wider">More</span>
+            <span className="mt-0.5 text-base leading-none">📅</span>
+            <input
+              type="date"
+              value={date}
+              min={todayInTz(tz)}
+              onChange={(e) => setDate(e.target.value)}
+              className="sr-only"
+            />
+          </label>
+        </div>
       </div>
 
-      {/* Slots / confirm column */}
-      <div className="rounded-lg border bg-white p-5 shadow-sm">
-        {step === "pick-time" && (
-          <>
-            <div className="text-sm font-medium text-slate-700">
-              Available times ({durationMinutes} min)
+      {/* Slot grid */}
+      {step === "pick-time" && (
+        <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex items-baseline justify-between gap-3">
+            <div>
+              <div className="text-sm font-medium text-slate-900">{selectedDateLabel}</div>
+              <div className="text-xs text-slate-500">{durationMinutes} min appointments</div>
             </div>
-
-            {loadingSlots ? (
-              <div className="mt-4 grid grid-cols-2 gap-2" aria-label="Loading available times">
-                {Array.from({ length: 8 }).map((_, i) => (
-                  <Skeleton key={i} className="h-9" />
-                ))}
-              </div>
-            ) : slots.length === 0 ? (
-              <div className="mt-4 rounded-md border border-dashed bg-slate-50 p-4 text-center text-sm text-slate-500">
-                No times available on this day. Try another date.
-              </div>
-            ) : (
-              <div className="mt-4 grid max-h-72 grid-cols-2 gap-2 overflow-y-auto pr-1">
-                {slots.map((iso) => (
-                  <button
-                    key={iso}
-                    onClick={() => {
-                      setSelectedSlot(iso);
-                      setStep("confirm");
-                    }}
-                    className="rounded-md border px-3 py-2 text-sm hover:border-brand-accent hover:bg-blue-50"
-                  >
-                    {formatInTimeZone(iso, tz, "h:mm a")}
-                  </button>
-                ))}
-              </div>
+            {!loadingSlots && slots.length > 0 && (
+              <span className="text-xs text-slate-500">
+                <span className="tabular-nums font-medium text-slate-900">{slots.length}</span> open
+              </span>
             )}
-          </>
-        )}
+          </div>
 
-        {step === "confirm" && selectedSlot && (
-          <>
-            <button
-              onClick={() => setStep("pick-time")}
-              className="text-xs text-slate-500 hover:text-slate-700"
-            >
-              ← Change time
-            </button>
-
-            <div className="mt-2 text-sm font-medium text-slate-700">
-              Confirm your booking
+          {loadingSlots ? (
+            <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3" aria-label="Loading available times">
+              {Array.from({ length: 9 }).map((_, i) => (
+                <Skeleton key={i} className="h-10 rounded-lg" />
+              ))}
             </div>
-            <div className="mt-1 text-xs text-slate-500">
-              {formatInTimeZone(selectedSlot, tz, "EEEE, MMM d 'at' h:mm a")} ({tz})
+          ) : slots.length === 0 ? (
+            <div className="mt-5 rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center text-sm text-slate-500">
+              No times available on this day.
+              <div className="mt-1 text-xs text-slate-400">Try another date above.</div>
             </div>
+          ) : (
+            <SlotsGrouped
+              slots={slots}
+              tz={tz}
+              accent={accent}
+              onPick={(iso) => {
+                setSelectedSlot(iso);
+                setStep("confirm");
+              }}
+            />
+          )}
+        </div>
+      )}
 
-            <div className="mt-4 space-y-3">
-              <input
-                placeholder="Your name"
-                value={clientName}
-                onChange={(e) => setClientName(e.target.value)}
-                className="w-full rounded-md border px-3 py-2 text-sm"
-              />
-              <input
-                type="email"
-                placeholder="Email address"
-                value={clientEmail}
-                onChange={(e) => setClientEmail(e.target.value)}
-                className="w-full rounded-md border px-3 py-2 text-sm"
-              />
+      {/* Confirm */}
+      {step === "confirm" && selectedSlot && (
+        <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+          <button
+            onClick={() => setStep("pick-time")}
+            className="inline-flex items-center gap-1 text-xs text-slate-500 transition hover:text-slate-900"
+          >
+            ← Change time
+          </button>
+
+          <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm">
+            <div className="flex items-start gap-3">
+              <div
+                className="flex h-10 w-10 shrink-0 flex-col items-center justify-center rounded-lg text-white"
+                style={{ backgroundColor: accent }}
+                aria-hidden
+              >
+                <span className="text-[10px] font-semibold uppercase tracking-wider opacity-80">
+                  {formatInTimeZone(selectedSlot, tz, "MMM")}
+                </span>
+                <span className="text-base font-semibold leading-none">
+                  {formatInTimeZone(selectedSlot, tz, "d")}
+                </span>
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="font-medium text-slate-900">
+                  {formatInTimeZone(selectedSlot, tz, "EEEE, h:mm a")}
+                </div>
+                <div className="mt-0.5 text-xs text-slate-500">
+                  {durationMinutes} min with {staffName} · {tz}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <h3 className="mt-5 text-sm font-medium text-slate-900">Your details</h3>
+
+          <div className="mt-3 space-y-3">
+            <FloatingInput
+              id="bk-name"
+              label="Full name"
+              value={clientName}
+              onChange={setClientName}
+              required
+              autoComplete="name"
+              accent={accent}
+            />
+            <FloatingInput
+              id="bk-email"
+              label="Email"
+              type="email"
+              value={clientEmail}
+              onChange={setClientEmail}
+              required
+              autoComplete="email"
+              inputMode="email"
+              accent={accent}
+            />
+            <div className="relative">
               <textarea
-                placeholder="Notes (optional)"
+                id="bk-notes"
+                placeholder=" "
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
                 rows={3}
-                className="w-full rounded-md border px-3 py-2 text-sm"
+                className="peer w-full rounded-lg border border-slate-300 bg-white px-3 pb-2 pt-5 text-sm text-slate-900 outline-none transition focus:border-slate-400 focus:ring-2"
+                style={{
+                  /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
+                  "--tw-ring-color": accent,
+                } as React.CSSProperties}
               />
+              <label
+                htmlFor="bk-notes"
+                className="pointer-events-none absolute left-3 top-1.5 text-[10px] font-medium uppercase tracking-wider text-slate-500"
+              >
+                Notes (optional)
+              </label>
             </div>
+          </div>
 
-            {error && <div className="mt-3 text-sm text-red-600">{error}</div>}
+          {error && (
+            <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+              {error}
+            </div>
+          )}
 
-            <button
-              onClick={submit}
-              disabled={submitting || !clientName || !clientEmail}
-              className="mt-4 w-full rounded-md bg-brand-accent px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-            >
-              {submitting ? "Booking…" : "Confirm booking"}
-            </button>
-          </>
-        )}
-      </div>
+          <button
+            onClick={submit}
+            disabled={submitting || !clientName || !clientEmail}
+            className="mt-5 inline-flex w-full items-center justify-center rounded-lg px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+            style={{ backgroundColor: accent }}
+          >
+            {submitting ? "Booking…" : "Confirm booking"}
+          </button>
+          <p className="mt-2 text-center text-[11px] text-slate-500">
+            By confirming you&rsquo;ll receive an email with your meeting details and reminders.
+          </p>
+        </div>
+      )}
+    </section>
+  );
+}
+
+// ─── Helpers ────────────────────────────────────────────────────────────
+
+function SlotsGrouped({
+  slots,
+  tz,
+  accent,
+  onPick,
+}: {
+  slots: string[];
+  tz: string;
+  accent: string;
+  onPick: (iso: string) => void;
+}) {
+  // Group slots into Morning / Afternoon / Evening using the visitor's tz
+  // hour. Keeps grouping cheap (no extra lib).
+  const groups: { label: string; key: "morning" | "afternoon" | "evening"; slots: string[] }[] = [
+    { label: "Morning", key: "morning", slots: [] },
+    { label: "Afternoon", key: "afternoon", slots: [] },
+    { label: "Evening", key: "evening", slots: [] },
+  ];
+  for (const iso of slots) {
+    const hour = Number(formatInTimeZone(iso, tz, "H"));
+    if (hour < 12) groups[0].slots.push(iso);
+    else if (hour < 17) groups[1].slots.push(iso);
+    else groups[2].slots.push(iso);
+  }
+
+  return (
+    <div className="mt-4 space-y-4">
+      {groups.map((g) => {
+        if (g.slots.length === 0) return null;
+        return (
+          <div key={g.key}>
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+              {g.label}
+            </div>
+            <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
+              {g.slots.map((iso) => (
+                <button
+                  key={iso}
+                  onClick={() => onPick(iso)}
+                  className="group rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:-translate-y-0.5 hover:border-transparent hover:bg-slate-900 hover:text-white hover:shadow focus:outline-none focus:ring-2"
+                  style={{
+                    /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
+                    "--tw-ring-color": accent,
+                  } as React.CSSProperties}
+                >
+                  <span className="tabular-nums">{formatInTimeZone(iso, tz, "h:mm a")}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function FloatingInput({
+  id,
+  label,
+  value,
+  onChange,
+  type = "text",
+  required = false,
+  autoComplete,
+  inputMode,
+  accent,
+}: {
+  id: string;
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  type?: string;
+  required?: boolean;
+  autoComplete?: string;
+  inputMode?: React.HTMLAttributes<HTMLInputElement>["inputMode"];
+  accent: string;
+}) {
+  return (
+    <div className="relative">
+      <input
+        id={id}
+        type={type}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        required={required}
+        autoComplete={autoComplete}
+        inputMode={inputMode}
+        placeholder=" "
+        className="peer w-full rounded-lg border border-slate-300 bg-white px-3 pb-2 pt-5 text-sm text-slate-900 outline-none transition focus:border-slate-400 focus:ring-2"
+        style={{
+          /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
+          "--tw-ring-color": accent,
+        } as React.CSSProperties}
+      />
+      <label
+        htmlFor={id}
+        className="pointer-events-none absolute left-3 top-1.5 text-[10px] font-medium uppercase tracking-wider text-slate-500"
+      >
+        {label}
+      </label>
     </div>
   );
 }
@@ -265,4 +548,26 @@ function todayInTz(timezone: string): string {
     day: "2-digit",
   });
   return fmt.format(new Date());
+}
+
+function buildDateStrip(timezone: string, days: number): { iso: string; wd: string; dd: string; mo: string }[] {
+  const out: { iso: string; wd: string; dd: string; mo: string }[] = [];
+  const isoFmt = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit",
+  });
+  const wdFmt = new Intl.DateTimeFormat("en-US", { timeZone: timezone, weekday: "short" });
+  const ddFmt = new Intl.DateTimeFormat("en-US", { timeZone: timezone, day: "numeric" });
+  const moFmt = new Intl.DateTimeFormat("en-US", { timeZone: timezone, month: "short" });
+  const now = new Date();
+  for (let i = 0; i < days; i++) {
+    const d = new Date(now);
+    d.setDate(d.getDate() + i);
+    out.push({
+      iso: isoFmt.format(d),
+      wd: wdFmt.format(d),
+      dd: ddFmt.format(d),
+      mo: moFmt.format(d),
+    });
+  }
+  return out;
 }

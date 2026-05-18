@@ -81,6 +81,8 @@ export default async function EmbedPage(props: {
             staffId={staff.userId}
             staffName={staff.name}
             durationMinutes={service.durationMinutes}
+            accentColor={tenant.primaryColor}
+            tenantName={tenant.name}
           />
           {!tenant.hidePoweredBy && (
             <div className="mt-6 border-t border-border pt-3 text-center text-[10px] text-ink-subtle">
