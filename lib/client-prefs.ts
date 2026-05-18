@@ -49,13 +49,16 @@ export function normalizePrefs(raw: unknown): ClientCommPrefs {
 
 /**
  * Returns true if the email-reminder for a given window should be sent.
- * Honors the master `emailEnabled` switch + the per-window toggle.
+ *
+ * @deprecated Prefer `decideSchedulingEmail()` / `isReminderAllowed()`
+ *   from `lib/communications/email-rules`. Kept as a thin delegator so
+ *   any pre-existing caller keeps working — but the canonical decision
+ *   now lives in one place.
  */
 export function shouldSendEmailReminder(
   prefs: ClientCommPrefs,
   windowHours: 24 | 1
 ): boolean {
   if (!prefs.emailEnabled) return false;
-  if (windowHours === 24) return prefs.reminder24hEnabled;
-  return prefs.reminder1hEnabled;
+  return windowHours === 24 ? prefs.reminder24hEnabled : prefs.reminder1hEnabled;
 }

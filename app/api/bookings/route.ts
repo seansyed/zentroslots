@@ -12,6 +12,7 @@ import { getAvailableSlots } from "@/lib/availability";
 import { createCalendarEventForStaff } from "@/lib/google";
 import { signBookingToken } from "@/lib/tokens";
 import { renderConfirmation, sendEmail, type BookingForEmail } from "@/lib/email";
+import { gateSchedulingEmail, logSuppressed } from "@/lib/communications/preferences";
 import { assertCanCreateBooking } from "@/lib/quotas";
 import { audit, ipFromHeaders } from "@/lib/audit";
 import { rateLimit } from "@/lib/rate-limit";
@@ -232,49 +233,67 @@ export async function POST(req: NextRequest) {
 
     // Best-effort confirmation email with cancel/reschedule tokens + .ics.
     // Wrapped in try/catch so a failing mailer NEVER blocks the booking.
+    // The booking-quota / customer-upsert / google-calendar / audit
+    // logic below this block runs unconditionally — the gate only short-
+    // circuits the email itself, never the booking.
     try {
-      const tenant = await db.query.tenants.findFirst({
-        where: eq(tenants.id, tenantId),
+      const gate = await gateSchedulingEmail({
+        tenantId,
+        email: row.clientEmail,
+        kind: "appointment_confirmation",
       });
-      const [cancelToken, rescheduleToken] = await Promise.all([
-        signBookingToken({ bookingId: row.id, tenantId, kind: "cancel" }),
-        signBookingToken({ bookingId: row.id, tenantId, kind: "reschedule" }),
-      ]);
-      const ep: BookingForEmail = {
-        id: row.id,
-        serviceName: service.name,
-        staffName: staff.name,
-        staffEmail: staff.email,
-        startAt: row.startAt,
-        endAt: row.endAt,
-        clientName: row.clientName,
-        clientEmail: row.clientEmail,
-        clientTimezone: staff.timezone,
-        meetLink: row.meetLink,
-        tenantName: tenant?.name ?? "",
-        cancelToken,
-        rescheduleToken,
-      };
-      const tpl = renderConfirmation(ep);
-      const ics = buildIcs({
-        uid: `${row.id}@scheduling-saas`,
-        start: row.startAt,
-        end: row.endAt,
-        summary: `${service.name} with ${staff.name}`,
-        description: body.notes ?? "",
-        location: row.meetLink ?? undefined,
-        organizerEmail: staff.email,
-        organizerName: staff.name,
-        attendeeEmail: row.clientEmail,
-        attendeeName: row.clientName,
-        method: "REQUEST",
-      });
-      await sendEmail({
-        to: row.clientEmail,
-        ...tpl,
-        attachments: [{ filename: "invite.ics", content: ics, contentType: "text/calendar; charset=utf-8; method=REQUEST" }],
-        audit: { tenantId, kind: "confirmation", bookingId: row.id },
-      });
+      if (!gate.allowed) {
+        logSuppressed({
+          kind: "appointment_confirmation",
+          reason: gate.reason,
+          tenantId,
+          email: row.clientEmail,
+          bookingId: row.id,
+        });
+      } else {
+        const tenant = await db.query.tenants.findFirst({
+          where: eq(tenants.id, tenantId),
+        });
+        const [cancelToken, rescheduleToken] = await Promise.all([
+          signBookingToken({ bookingId: row.id, tenantId, kind: "cancel" }),
+          signBookingToken({ bookingId: row.id, tenantId, kind: "reschedule" }),
+        ]);
+        const ep: BookingForEmail = {
+          id: row.id,
+          serviceName: service.name,
+          staffName: staff.name,
+          staffEmail: staff.email,
+          startAt: row.startAt,
+          endAt: row.endAt,
+          clientName: row.clientName,
+          clientEmail: row.clientEmail,
+          clientTimezone: staff.timezone,
+          meetLink: row.meetLink,
+          tenantName: tenant?.name ?? "",
+          cancelToken,
+          rescheduleToken,
+        };
+        const tpl = renderConfirmation(ep);
+        const ics = buildIcs({
+          uid: `${row.id}@scheduling-saas`,
+          start: row.startAt,
+          end: row.endAt,
+          summary: `${service.name} with ${staff.name}`,
+          description: body.notes ?? "",
+          location: row.meetLink ?? undefined,
+          organizerEmail: staff.email,
+          organizerName: staff.name,
+          attendeeEmail: row.clientEmail,
+          attendeeName: row.clientName,
+          method: "REQUEST",
+        });
+        await sendEmail({
+          to: row.clientEmail,
+          ...tpl,
+          attachments: [{ filename: "invite.ics", content: ics, contentType: "text/calendar; charset=utf-8; method=REQUEST" }],
+          audit: { tenantId, kind: "confirmation", bookingId: row.id },
+        });
+      }
     } catch (eErr) {
       console.error("Confirmation email failed (booking kept):", eErr);
     }

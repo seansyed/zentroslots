@@ -7,6 +7,7 @@ import { errorResponse, isManagerial, requireUser, HttpError } from "@/lib/auth"
 import { bookingRescheduleSchema } from "@/lib/validation";
 import { getAvailableSlots } from "@/lib/availability";
 import { renderReschedule, sendEmail, type BookingForEmail } from "@/lib/email";
+import { gateSchedulingEmail, logSuppressed } from "@/lib/communications/preferences";
 import { signBookingToken } from "@/lib/tokens";
 import { audit } from "@/lib/audit";
 import { notify } from "@/lib/notify";
@@ -93,32 +94,48 @@ export async function POST(
 
     if (!updated) throw new HttpError(500, "Reschedule failed");
 
-    // Best-effort email.
+    // Best-effort email — never fails the request. The reschedule
+    // itself already committed above.
     try {
-      const tenant = await db.query.tenants.findFirst({
-        where: eq(tenants.id, updated.tenantId),
+      const gate = await gateSchedulingEmail({
+        tenantId: updated.tenantId,
+        email: updated.clientEmail,
+        kind: "appointment_rescheduled",
       });
-      const [cancelToken, rescheduleToken] = await Promise.all([
-        signBookingToken({ bookingId: updated.id, tenantId: updated.tenantId, kind: "cancel" }),
-        signBookingToken({ bookingId: updated.id, tenantId: updated.tenantId, kind: "reschedule" }),
-      ]);
-      const payload: BookingForEmail = {
-        id: updated.id,
-        serviceName: service.name,
-        staffName: staff.name,
-        staffEmail: staff.email,
-        startAt: updated.startAt,
-        endAt: updated.endAt,
-        clientName: updated.clientName,
-        clientEmail: updated.clientEmail,
-        clientTimezone: staff.timezone,
-        meetLink: updated.meetLink,
-        tenantName: tenant?.name ?? "",
-        cancelToken,
-        rescheduleToken,
-      };
-      const tpl = renderReschedule(payload);
-      await sendEmail({ to: updated.clientEmail, ...tpl });
+      if (!gate.allowed) {
+        logSuppressed({
+          kind: "appointment_rescheduled",
+          reason: gate.reason,
+          tenantId: updated.tenantId,
+          email: updated.clientEmail,
+          bookingId: updated.id,
+        });
+      } else {
+        const tenant = await db.query.tenants.findFirst({
+          where: eq(tenants.id, updated.tenantId),
+        });
+        const [cancelToken, rescheduleToken] = await Promise.all([
+          signBookingToken({ bookingId: updated.id, tenantId: updated.tenantId, kind: "cancel" }),
+          signBookingToken({ bookingId: updated.id, tenantId: updated.tenantId, kind: "reschedule" }),
+        ]);
+        const payload: BookingForEmail = {
+          id: updated.id,
+          serviceName: service.name,
+          staffName: staff.name,
+          staffEmail: staff.email,
+          startAt: updated.startAt,
+          endAt: updated.endAt,
+          clientName: updated.clientName,
+          clientEmail: updated.clientEmail,
+          clientTimezone: staff.timezone,
+          meetLink: updated.meetLink,
+          tenantName: tenant?.name ?? "",
+          cancelToken,
+          rescheduleToken,
+        };
+        const tpl = renderReschedule(payload);
+        await sendEmail({ to: updated.clientEmail, ...tpl });
+      }
     } catch (e) {
       console.error("Reschedule email failed:", e);
     }

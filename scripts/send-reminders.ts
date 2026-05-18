@@ -14,13 +14,17 @@
  */
 
 import "dotenv/config";
-import { and, eq, gte, isNull, lt, sql } from "drizzle-orm";
+import { and, eq, gte, isNull, lt } from "drizzle-orm";
 
 import { db } from "../db/client";
-import { bookings, customers, services, tenants, users } from "../db/schema";
+import { bookings, services, tenants, users } from "../db/schema";
 import { signBookingToken } from "../lib/tokens";
 import { renderReminder, sendEmail, type BookingForEmail } from "../lib/email";
-import { normalizePrefs, shouldSendEmailReminder } from "../lib/client-prefs";
+import {
+  gateSchedulingEmail,
+  logSuppressed,
+} from "../lib/communications/preferences";
+import type { SchedulingEmailKind } from "../lib/communications/email-rules";
 
 const WINDOW_MIN = 30;
 
@@ -60,37 +64,42 @@ async function processWindow(
   if (due.length === 0) return;
   console.log(`[reminders:${label}] processing ${due.length} booking(s)`);
 
+  // Translate the cron's window-hour into the canonical kind once.
+  const kind: SchedulingEmailKind =
+    windowHours === 24 ? "appointment_reminder_24h" : "appointment_reminder_1h";
+
   for (const b of due) {
     try {
-      const [svc, staff, tenant, customer] = await Promise.all([
-        db.query.services.findFirst({ where: eq(services.id, b.serviceId) }),
-        db.query.users.findFirst({ where: eq(users.id, b.staffUserId) }),
-        db.query.tenants.findFirst({ where: eq(tenants.id, b.tenantId) }),
-        // Tenant-scoped, case-insensitive email match. May be null if
-        // the booking was created before a customer record existed.
-        db.query.customers.findFirst({
-          where: and(
-            eq(customers.tenantId, b.tenantId),
-            sql`lower(${customers.email}) = lower(${b.clientEmail})`
-          ),
-        }),
-      ]);
-      if (!svc || !staff || !tenant) continue;
-
-      // Honor per-customer preferences. Customers who haven't visited
-      // their portal have no record yet → DEFAULT_PREFS (everything on)
-      // applies via normalizePrefs(undefined).
-      const prefs = normalizePrefs(customer?.commPrefs);
-      if (!shouldSendEmailReminder(prefs, windowHours)) {
-        // Mark the flag so the cron doesn't keep looking at this row;
-        // the customer opted out of this reminder, that's a final no.
+      // Single source of truth for prefs (tenant-scoped customer lookup
+      // happens inside the gate). Customers without a customer record
+      // get DEFAULT_PREFS — identical behavior to the prior inline path.
+      const gate = await gateSchedulingEmail({
+        tenantId: b.tenantId,
+        email: b.clientEmail,
+        kind,
+      });
+      if (!gate.allowed) {
+        // Mark the flag so the cron doesn't keep looking at this row.
         await db
           .update(bookings)
           .set({ [flag]: new Date() })
           .where(eq(bookings.id, b.id));
-        console.log(`[reminders:${label}] skipped ${b.id} — disabled by customer prefs`);
+        logSuppressed({
+          kind,
+          reason: gate.reason,
+          tenantId: b.tenantId,
+          email: b.clientEmail,
+          bookingId: b.id,
+        });
         continue;
       }
+
+      const [svc, staff, tenant] = await Promise.all([
+        db.query.services.findFirst({ where: eq(services.id, b.serviceId) }),
+        db.query.users.findFirst({ where: eq(users.id, b.staffUserId) }),
+        db.query.tenants.findFirst({ where: eq(tenants.id, b.tenantId) }),
+      ]);
+      if (!svc || !staff || !tenant) continue;
 
       const [cancelToken, rescheduleToken] = await Promise.all([
         signBookingToken({ bookingId: b.id, tenantId: b.tenantId, kind: "cancel" }),
