@@ -27,7 +27,10 @@ type ServiceRow = {
   description: string | null;
   durationMinutes: number;
   price: number;
-  departmentId: string | null;
+  // Departments aren't a direct service column. A service is "in" a
+  // department if at least one of its assigned staff belongs to that
+  // department. We carry the full set here for filtering.
+  departmentIds: Set<string>;
   staff: { id: string; name: string }[];
 };
 
@@ -52,9 +55,9 @@ export default async function PublicProfilePage(props: {
       description: services.description,
       durationMinutes: services.durationMinutes,
       price: services.price,
-      departmentId: services.departmentId,
       staffId: users.id,
       staffName: users.name,
+      staffDepartmentId: users.departmentId,
     })
     .from(services)
     .innerJoin(serviceStaff, and(
@@ -73,10 +76,11 @@ export default async function PublicProfilePage(props: {
       description: r.description,
       durationMinutes: r.durationMinutes,
       price: r.price,
-      departmentId: r.departmentId,
+      departmentIds: new Set<string>(),
       staff: [],
     };
     cur.staff.push({ id: r.staffId, name: r.staffName });
+    if (r.staffDepartmentId) cur.departmentIds.add(r.staffDepartmentId);
     byService.set(r.serviceId, cur);
   }
   const allServices = Array.from(byService.values());
@@ -90,15 +94,20 @@ export default async function PublicProfilePage(props: {
     .where(eq(departments.tenantId, tenant.id))
     .orderBy(asc(departments.name));
 
+  // A service can sit in multiple departments (one per assigned staff
+  // member's home dept). `unassigned` is the bucket for services whose
+  // staff are not in any department.
   const servicesByDept = new Map<string, ServiceRow[]>();
   const unassigned: ServiceRow[] = [];
   for (const svc of allServices) {
-    if (svc.departmentId) {
-      const arr = servicesByDept.get(svc.departmentId) ?? [];
-      arr.push(svc);
-      servicesByDept.set(svc.departmentId, arr);
-    } else {
+    if (svc.departmentIds.size === 0) {
       unassigned.push(svc);
+      continue;
+    }
+    for (const deptId of svc.departmentIds) {
+      const arr = servicesByDept.get(deptId) ?? [];
+      arr.push(svc);
+      servicesByDept.set(deptId, arr);
     }
   }
   const departmentsWithServices = allDepartments.filter((d) => (servicesByDept.get(d.id) ?? []).length > 0);
