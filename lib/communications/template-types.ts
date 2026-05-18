@@ -22,7 +22,8 @@ export type TemplateType =
   | "appointment_completed"
   | "appointment_no_show"
   | "review_request"
-  | "followup";
+  | "followup"
+  | "waitlist_slot_available";
 
 export const TEMPLATE_TYPES: readonly TemplateType[] = [
   "booking_confirmation",
@@ -34,6 +35,7 @@ export const TEMPLATE_TYPES: readonly TemplateType[] = [
   "appointment_no_show",
   "review_request",
   "followup",
+  "waitlist_slot_available",
 ];
 
 export type ResolvedTemplate = {
@@ -81,6 +83,9 @@ export function systemFallbackFor(
       break;
     case "followup":
       out = renderFollowup(payload);
+      break;
+    case "waitlist_slot_available":
+      out = renderWaitlistSlotAvailable(payload);
       break;
   }
   return { ...out, source: "system" };
@@ -139,6 +144,24 @@ function renderReviewRequest(p: BookingForEmail): { subject: string; html: strin
     text:
       `Hi ${p.clientName},\n\nWould you mind leaving a quick review for ${p.tenantName}? ` +
       `It really helps. Review link: {{review_url}}\n`,
+  };
+}
+
+function renderWaitlistSlotAvailable(p: BookingForEmail): { subject: string; html: string; text: string } {
+  return {
+    subject: `A spot just opened — ${p.tenantName}`,
+    html: simpleEmail({
+      heading: "A spot just opened",
+      body:
+        `Hi ${p.clientName}, good news — a ${p.serviceName} slot just opened at ` +
+        `${p.tenantName}. You're first in line. Claim it before {{claim_expires_at}} ` +
+        `or the slot moves to the next customer in the queue.`,
+      ctaLabel: "Claim this slot",
+      ctaUrl: "{{claim_url}}",
+    }),
+    text:
+      `Hi ${p.clientName},\n\nA ${p.serviceName} slot just opened at ${p.tenantName}. ` +
+      `You're first in line. Claim before {{claim_expires_at}}.\n\n{{claim_url}}\n`,
   };
 }
 

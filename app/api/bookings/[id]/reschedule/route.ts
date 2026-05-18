@@ -6,6 +6,8 @@ import { bookings, services, tenants, users } from "@/db/schema";
 import { errorResponse, isManagerial, requireUser, HttpError } from "@/lib/auth";
 import { isFeatureEnabled } from "@/lib/features";
 import { onBookingRescheduled } from "@/lib/calendar/sync";
+import { releaseSlot } from "@/lib/waitlists/releaseSlot";
+import { notifySlotAvailable } from "@/lib/waitlists/notifications";
 import { bookingRescheduleSchema } from "@/lib/validation";
 import { getAvailableSlots } from "@/lib/availability";
 import { renderReschedule, sendEmail, type BookingForEmail } from "@/lib/email";
@@ -111,6 +113,32 @@ export async function POST(
       await onBookingRescheduled({ booking: updated, staff, serviceName: service.name });
     } catch (gErr) {
       console.error("Calendar sync reschedule failed (booking kept):", gErr);
+    }
+
+    // Waitlist slot-release for the OLD slot (which just opened up).
+    // Rule #13: never affects the reschedule. We use the pre-update
+    // `booking` row that we loaded above.
+    try {
+      const release = await releaseSlot({
+        tenantId: caller.tenantId,
+        serviceId: booking.serviceId,
+        staffUserId: booking.staffUserId,
+        slotStartAt: booking.startAt,
+        slotEndAt: booking.endAt,
+        originatingBookingId: booking.id,
+      });
+      if (release.ok) {
+        await notifySlotAvailable({
+          tenantId: caller.tenantId,
+          bookingId: booking.id,
+          customerEmail: release.customerEmail,
+          claimUrl: release.claimUrl,
+          expiresAt: release.expiresAt,
+          staffTimezone: staff.timezone,
+        });
+      }
+    } catch (wlErr) {
+      console.error("Waitlist release after reschedule failed:", wlErr);
     }
 
     // Best-effort email — never fails the request. The reschedule

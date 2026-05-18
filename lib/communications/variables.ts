@@ -31,6 +31,9 @@ export const SUPPORTED_VARIABLES = [
   // Added with the review-request + follow-up automations:
   "review_url",
   "review_platform",
+  // Added with the waitlist + slot-release automations:
+  "claim_url",
+  "claim_expires_at",
 ] as const;
 
 export type TemplateVariable = (typeof SUPPORTED_VARIABLES)[number];

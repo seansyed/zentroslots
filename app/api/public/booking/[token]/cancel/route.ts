@@ -6,6 +6,8 @@ import { bookings, services, tenants, users } from "@/db/schema";
 import { errorResponse, HttpError } from "@/lib/auth";
 import { isFeatureEnabled } from "@/lib/features";
 import { onBookingCancelled } from "@/lib/calendar/sync";
+import { releaseSlot } from "@/lib/waitlists/releaseSlot";
+import { notifySlotAvailable } from "@/lib/waitlists/notifications";
 import { verifyBookingToken } from "@/lib/tokens";
 import { renderCancellation, sendEmail, type BookingForEmail } from "@/lib/email";
 import { gateSchedulingEmail, logSuppressed } from "@/lib/communications/preferences";
@@ -62,6 +64,33 @@ export async function POST(
       }
     } catch (gErr) {
       console.error("Public calendar sync cancel failed (booking kept):", gErr);
+    }
+
+    // Waitlist slot-release — best effort. Rule #13: never affects cancel.
+    try {
+      const release = await releaseSlot({
+        tenantId: updated.tenantId,
+        serviceId: updated.serviceId,
+        staffUserId: updated.staffUserId,
+        slotStartAt: updated.startAt,
+        slotEndAt: updated.endAt,
+        originatingBookingId: updated.id,
+      });
+      if (release.ok) {
+        const staffUser = await db.query.users.findFirst({
+          where: eq(users.id, updated.staffUserId),
+        });
+        await notifySlotAvailable({
+          tenantId: updated.tenantId,
+          bookingId: updated.id,
+          customerEmail: release.customerEmail,
+          claimUrl: release.claimUrl,
+          expiresAt: release.expiresAt,
+          staffTimezone: staffUser?.timezone ?? "UTC",
+        });
+      }
+    } catch (wlErr) {
+      console.error("Public waitlist release failed (cancel kept):", wlErr);
     }
 
     // Best-effort email — never fails the request. The cancellation

@@ -735,6 +735,75 @@ export const calendarSyncLogs = pgTable(
   })
 );
 
+// ─── Waitlists + waitlist_notifications ─────────────────────────────────
+// One waitlist row per (tenant, service, customer email) at a time —
+// the active-customer unique index gates re-joins. Status transitions:
+// waiting → notified → claimed | expired | cancelled.
+//
+// waitlist_notifications: every promotion attempt + reservation hold.
+// The partial unique index on (waitlist_id) WHERE status='sent' makes
+// it impossible to have two outstanding offers for the same customer.
+//
+// Tenants who never accept a waitlist join see byte-identical booking
+// behavior — the trigger orchestrators in cancel/reschedule wrap
+// every call in try/catch and no-op when no candidates match.
+export const waitlists = pgTable(
+  "waitlists",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    serviceId: uuid("service_id")
+      .notNull()
+      .references(() => services.id, { onDelete: "cascade" }),
+    locationId: uuid("location_id"),
+    customerEmail: varchar("customer_email", { length: 255 }).notNull(),
+    customerName: varchar("customer_name", { length: 120 }).notNull(),
+    customerPhone: varchar("customer_phone", { length: 40 }),
+    preferredDate: varchar("preferred_date", { length: 10 }),
+    preferredTimeRange: varchar("preferred_time_range", { length: 16 }).notNull().default("any"),
+    status: varchar("status", { length: 20 }).notNull().default("waiting"),
+    priority: integer("priority").notNull().default(0),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    claimedAt: timestamp("claimed_at", { withTimezone: true }),
+    claimedBookingId: uuid("claimed_booking_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    tenantIdx: index("waitlists_tenant_idx").on(t.tenantId),
+    serviceIdx: index("waitlists_service_idx").on(t.serviceId),
+    statusIdx: index("waitlists_status_idx").on(t.status),
+  })
+);
+
+export const waitlistNotifications = pgTable(
+  "waitlist_notifications",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    waitlistId: uuid("waitlist_id")
+      .notNull()
+      .references(() => waitlists.id, { onDelete: "cascade" }),
+    bookingId: uuid("booking_id"),
+    notificationType: varchar("notification_type", { length: 30 }).notNull(),
+    status: varchar("status", { length: 20 }).notNull().default("sent"),
+    staffUserId: uuid("staff_user_id"),
+    slotStartAt: timestamp("slot_start_at", { withTimezone: true }),
+    slotEndAt: timestamp("slot_end_at", { withTimezone: true }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    respondedAt: timestamp("responded_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    tenantIdx: index("waitlist_notifications_tenant_idx").on(t.tenantId, t.createdAt),
+    waitlistIdx: index("waitlist_notifications_waitlist_idx").on(t.waitlistId),
+  })
+);
+
 // ─── Review-request rules + follow-up automations + pending queue ──────
 // review_request_rules: per-(tenant, service) configuration for the
 // post-completion review-request automation. Without a row, no review

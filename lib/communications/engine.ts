@@ -69,7 +69,8 @@ export type AutomationEvent =
   | "appointment.completed"
   | "appointment.no_show"
   | "appointment.review_request"
-  | "appointment.followup";
+  | "appointment.followup"
+  | "appointment.waitlist_slot_available";
 
 export type TriggerArgs = {
   tenantId: string;
@@ -339,6 +340,7 @@ function eventToTemplateType(e: AutomationEvent): TemplateType {
     case "appointment.no_show":        return "appointment_no_show";
     case "appointment.review_request": return "review_request";
     case "appointment.followup":       return "followup";
+    case "appointment.waitlist_slot_available": return "waitlist_slot_available";
   }
 }
 
@@ -353,6 +355,7 @@ function eventToSchedulingEmailKind(e: AutomationEvent): SchedulingEmailKind {
     case "appointment.no_show":        return "appointment_no_show";
     case "appointment.review_request": return "appointment_review_request";
     case "appointment.followup":       return "appointment_followup";
+    case "appointment.waitlist_slot_available": return "appointment_waitlist_slot_available";
   }
 }
 

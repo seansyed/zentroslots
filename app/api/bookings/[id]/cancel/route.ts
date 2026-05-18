@@ -6,6 +6,8 @@ import { bookings, services, tenants, users } from "@/db/schema";
 import { errorResponse, isManagerial, requireUser, HttpError } from "@/lib/auth";
 import { isFeatureEnabled } from "@/lib/features";
 import { onBookingCancelled } from "@/lib/calendar/sync";
+import { releaseSlot } from "@/lib/waitlists/releaseSlot";
+import { notifySlotAvailable } from "@/lib/waitlists/notifications";
 import { renderCancellation, sendEmail, type BookingForEmail } from "@/lib/email";
 import { gateSchedulingEmail, logSuppressed } from "@/lib/communications/preferences";
 import { audit } from "@/lib/audit";
@@ -59,6 +61,34 @@ export async function POST(
       }
     } catch (gErr) {
       console.error("Calendar sync cancel failed (booking kept):", gErr);
+    }
+
+    // Waitlist slot-release — best effort. No active candidates → no-op.
+    // Rule #13: failures here NEVER affect the cancel result.
+    try {
+      const release = await releaseSlot({
+        tenantId: caller.tenantId,
+        serviceId: updated.serviceId,
+        staffUserId: updated.staffUserId,
+        slotStartAt: updated.startAt,
+        slotEndAt: updated.endAt,
+        originatingBookingId: updated.id,
+      });
+      if (release.ok) {
+        const staffUser = await db.query.users.findFirst({
+          where: eq(users.id, updated.staffUserId),
+        });
+        await notifySlotAvailable({
+          tenantId: caller.tenantId,
+          bookingId: updated.id,
+          customerEmail: release.customerEmail,
+          claimUrl: release.claimUrl,
+          expiresAt: release.expiresAt,
+          staffTimezone: staffUser?.timezone ?? "UTC",
+        });
+      }
+    } catch (wlErr) {
+      console.error("Waitlist release failed (cancel kept):", wlErr);
     }
 
     // Best-effort cancellation email — never fails the request. The

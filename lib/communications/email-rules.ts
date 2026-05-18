@@ -33,7 +33,8 @@ export type SchedulingEmailKind =
   | "appointment_completed"
   | "appointment_no_show"
   | "appointment_review_request"
-  | "appointment_followup";
+  | "appointment_followup"
+  | "appointment_waitlist_slot_available";
 
 export type GateDecision =
   | { allowed: true; reason?: never }

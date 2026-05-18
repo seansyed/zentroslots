@@ -13,7 +13,8 @@
     "db:studio": "drizzle-kit studio",
     "test": "tsx --import ./tests/setup.ts --test tests/**/*.test.ts",
     "reminders:send": "tsx scripts/send-reminders.ts",
-    "automations:run": "tsx scripts/run-automations.ts"
+    "automations:run": "tsx scripts/run-automations.ts",
+    "waitlists:expire": "tsx scripts/expire-waitlist-reservations.ts"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

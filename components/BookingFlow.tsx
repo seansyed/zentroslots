@@ -375,9 +375,16 @@ export default function BookingFlow({
               ))}
             </div>
           ) : slots.length === 0 ? (
-            <div className="mt-5 rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center text-sm text-slate-500">
-              No times available on this day.
-              <div className="mt-1 text-xs text-slate-400">Try another date above.</div>
+            <div className="mt-5 space-y-3">
+              <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center text-sm text-slate-500">
+                No times available on this day.
+                <div className="mt-1 text-xs text-slate-400">Try another date above — or join the waitlist below.</div>
+              </div>
+              <WaitlistJoinTile
+                serviceId={serviceId}
+                preferredDate={date}
+                accent={accent}
+              />
             </div>
           ) : (
             <SlotsGrouped
@@ -633,3 +640,127 @@ function buildDateStrip(timezone: string, days: number): { iso: string; wd: stri
   }
   return out;
 }
+
+// ─── Waitlist join tile ────────────────────────────────────────────────
+// Shown in the empty state when no slots are available on the chosen
+// date. Lazy expand — initial render is a single button so we don't
+// nudge customers who just want to try another date.
+function WaitlistJoinTile({
+  serviceId,
+  preferredDate,
+  accent,
+}: {
+  serviceId: string;
+  preferredDate: string;
+  accent: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [range, setRange] = useState<"morning" | "afternoon" | "evening" | "any">("any");
+  const [submitting, setSubmitting] = useState(false);
+  const [done, setDone] = useState<null | { position: number; already: boolean }>(null);
+
+  async function submit() {
+    if (!name || !email.includes("@")) return;
+    setSubmitting(true);
+    try {
+      const res = await fetch("/api/public/waitlist/join", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          serviceId,
+          customerName: name,
+          customerEmail: email,
+          preferredDate,
+          preferredTimeRange: range,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error ?? "Could not join waitlist");
+      setDone({ position: data.queuePosition, already: Boolean(data.alreadyOnWaitlist) });
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Could not join waitlist", "error");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  if (done) {
+    return (
+      <div className="rounded-xl border border-green-200 bg-green-50 p-4 text-center text-sm">
+        <div className="font-medium text-green-900">
+          {done.already ? "You're already on the waitlist." : "Added to the waitlist!"}
+        </div>
+        <div className="mt-1 text-xs text-green-800">
+          You're position {done.position} in the queue. We'll email you when a spot opens.
+        </div>
+      </div>
+    );
+  }
+
+  if (!open) {
+    return (
+      <button
+        onClick={() => setOpen(true)}
+        className="block w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-center text-sm font-medium text-slate-700 transition hover:border-slate-400 hover:bg-slate-50"
+      >
+        Join the waitlist for this date
+      </button>
+    );
+  }
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="text-sm font-semibold text-slate-900">Join the waitlist</div>
+      <p className="mt-1 text-xs text-slate-500">
+        We'll email you if a spot opens for {preferredDate}.
+      </p>
+      <div className="mt-3 grid gap-2">
+        <input
+          type="text"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Your name"
+          className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+        />
+        <input
+          type="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          placeholder="you@example.com"
+          className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+        />
+        <select
+          value={range}
+          onChange={(e) => setRange(e.target.value as typeof range)}
+          className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
+        >
+          <option value="any">Any time</option>
+          <option value="morning">Morning</option>
+          <option value="afternoon">Afternoon</option>
+          <option value="evening">Evening</option>
+        </select>
+      </div>
+      <div className="mt-3 flex justify-end gap-2">
+        <button
+          type="button"
+          onClick={() => setOpen(false)}
+          className="text-xs text-slate-500 hover:text-slate-700"
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={submit}
+          disabled={submitting || !name || !email.includes("@")}
+          className="rounded-md px-4 py-2 text-sm font-medium text-white shadow-sm transition disabled:opacity-50"
+          style={{ backgroundColor: accent }}
+        >
+          {submitting ? "Joining…" : "Join waitlist"}
+        </button>
+      </div>
+    </div>
+  );
+}
+

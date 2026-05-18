@@ -6,6 +6,8 @@ import { bookings, services, tenants, users } from "@/db/schema";
 import { errorResponse, HttpError } from "@/lib/auth";
 import { isFeatureEnabled } from "@/lib/features";
 import { onBookingRescheduled } from "@/lib/calendar/sync";
+import { releaseSlot } from "@/lib/waitlists/releaseSlot";
+import { notifySlotAvailable } from "@/lib/waitlists/notifications";
 import { signBookingToken, verifyBookingToken } from "@/lib/tokens";
 import { publicRescheduleSchema } from "@/lib/validation";
 import { getAvailableSlots } from "@/lib/availability";
@@ -115,6 +117,30 @@ export async function POST(
       await onBookingRescheduled({ booking: updated, staff, serviceName: service.name });
     } catch (gErr) {
       console.error("Public calendar sync reschedule failed (booking kept):", gErr);
+    }
+
+    // Waitlist slot-release for the OLD slot. Best-effort; rule #13.
+    try {
+      const release = await releaseSlot({
+        tenantId: booking.tenantId,
+        serviceId: booking.serviceId,
+        staffUserId: booking.staffUserId,
+        slotStartAt: booking.startAt,
+        slotEndAt: booking.endAt,
+        originatingBookingId: booking.id,
+      });
+      if (release.ok) {
+        await notifySlotAvailable({
+          tenantId: booking.tenantId,
+          bookingId: booking.id,
+          customerEmail: release.customerEmail,
+          claimUrl: release.claimUrl,
+          expiresAt: release.expiresAt,
+          staffTimezone: staff.timezone,
+        });
+      }
+    } catch (wlErr) {
+      console.error("Public waitlist release after reschedule failed:", wlErr);
     }
 
     // Best-effort email with fresh tokens for the new booking time.
