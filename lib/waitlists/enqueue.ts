@@ -12,7 +12,7 @@
  * customers and time-range mismatches mean actual notification order
  * may differ.
  */
-import { and, asc, count, eq, lte, sql } from "drizzle-orm";
+import { and, asc, count, eq, gt, lt, or, sql } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import { services, waitlists } from "@/db/schema";
@@ -127,6 +127,8 @@ async function estimatePosition(
   });
   if (!self) return 1;
 
+  // Use typed Drizzle predicates — postgres-js can't bind Date into a
+  // raw sql template (same constraint hit by the automations cron).
   const ahead = await db
     .select({ value: count() })
     .from(waitlists)
@@ -135,13 +137,18 @@ async function estimatePosition(
         eq(waitlists.tenantId, tenantId),
         eq(waitlists.serviceId, serviceId),
         eq(waitlists.status, "waiting"),
-        sql`(${waitlists.priority} > ${self.priority}
-             OR (${waitlists.priority} = ${self.priority} AND ${waitlists.createdAt} < ${self.createdAt}))`
+        or(
+          gt(waitlists.priority, self.priority),
+          and(
+            eq(waitlists.priority, self.priority),
+            lt(waitlists.createdAt, self.createdAt)
+          )
+        )
       )
     );
   return (ahead[0]?.value ?? 0) + 1;
 }
 
-// `asc` / `lte` reserved for future ordered-fetch helpers.
+// `asc` reserved for future ordered-fetch helpers.
 void asc;
-void lte;
+void sql;
