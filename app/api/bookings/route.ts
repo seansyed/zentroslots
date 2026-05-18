@@ -12,6 +12,8 @@ import { createBookingSchema } from "@/lib/validation";
 import { getAvailableSlots } from "@/lib/availability";
 import { onBookingCreated } from "@/lib/calendar/sync";
 import { triggerAutomation } from "@/lib/communications/engine";
+import { assignStaff } from "@/lib/routing/assignStaff";
+import { recordAssignment } from "@/lib/routing/recordAssignment";
 import { assertCanCreateBooking } from "@/lib/quotas";
 import { audit, ipFromHeaders } from "@/lib/audit";
 import { rateLimit } from "@/lib/rate-limit";
@@ -117,12 +119,42 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // ─── Round-robin assignment ─────────────────────────────────────────
+    // ─── Auto assignment ────────────────────────────────────────────────
+    // staffUserId === "auto" → the customer didn't pick a staff member.
+    // We first ask the routing engine (round_robin / least_busy /
+    // priority / weighted). If no rule exists, or the rule says
+    // "manual", we fall through to the LEGACY pickRoundRobinStaff path
+    // — byte-identical behavior for tenants who haven't configured
+    // routing (rule #13). The engine never throws; any internal error
+    // becomes ok:false with a reason and triggers the legacy path.
     let staffUserId: string = body.staffUserId;
+    let routingReason: string | null = null;
+    let routingMode: string | null = null;
     if (staffUserId === "auto") {
-      const picked = await pickRoundRobinStaff(service.tenantId, service.id);
-      if (!picked) throw new HttpError(404, "No staff available to deliver this service");
-      staffUserId = picked;
+      // Compute the end time tentatively for eligibility — service
+      // duration is known. The booking insert below recomputes from
+      // the same source.
+      const tentativeEnd = new Date(startAt.getTime() + service.durationMinutes * 60_000);
+      const assigned = await assignStaff({
+        tenantId: service.tenantId,
+        serviceId: service.id,
+        startAt,
+        endAt: tentativeEnd,
+      });
+      if (assigned.ok) {
+        staffUserId = assigned.staffId;
+        routingMode = assigned.mode;
+        routingReason = assigned.reason;
+      } else {
+        // Engine declined — typically because no rule is configured.
+        // Fall through to the legacy round-robin path. Same SQL,
+        // same selection logic that's been in production all along.
+        const picked = await pickRoundRobinStaff(service.tenantId, service.id);
+        if (!picked) throw new HttpError(404, "No staff available to deliver this service");
+        staffUserId = picked;
+        routingMode = "legacy_round_robin";
+        routingReason = assigned.reason;
+      }
     }
 
     const staff = await db.query.users.findFirst({ where: eq(users.id, staffUserId) });
@@ -276,6 +308,16 @@ export async function POST(req: NextRequest) {
       console.error("Customer upsert failed (booking kept):", cErr);
     }
 
+    // Routing stats — fire and forget. Only relevant when the engine
+    // actually picked (auto + non-legacy paths). Never blocks anything.
+    if (body.staffUserId === "auto" && routingMode && routingMode !== "legacy_round_robin") {
+      try {
+        await recordAssignment({ tenantId, staffId: staff.id });
+      } catch (rErr) {
+        console.error("Routing recordAssignment failed (booking kept):", rErr);
+      }
+    }
+
     // Best-effort in-app notification for the assigned staff. Never throws.
     notify({
       tenantId,
@@ -301,7 +343,15 @@ export async function POST(req: NextRequest) {
       entityType: "booking",
       entityId: row.id,
       actorLabel: `${row.clientName} <${row.clientEmail}>`,
-      metadata: { serviceId: service.id, staffId: staff.id, startAt: row.startAt.toISOString() },
+      metadata: {
+        serviceId: service.id,
+        staffId: staff.id,
+        startAt: row.startAt.toISOString(),
+        // Routing transparency: which mode picked, and the engine's
+        // reason. Surfaces in the Settings → Routing audit view.
+        routingMode: routingMode ?? "direct",
+        routingReason: routingReason,
+      },
       ipAddress: ip === "anon" ? null : ip,
     });
 

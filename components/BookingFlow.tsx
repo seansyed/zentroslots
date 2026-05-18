@@ -13,6 +13,13 @@ type Props = {
    *  rest of the public page. Falls back to a sensible default. */
   accentColor?: string;
   tenantName?: string;
+  /** When true, the POST sends staffUserId="auto" so the routing engine
+   *  picks the actual staff at insert time. Slots still come from the
+   *  preselected staff (additive — slots endpoint untouched per rule #1).
+   *  The customer's request may be reassigned to an equally-eligible
+   *  staff member; the per-staff slot view limits the surface area of
+   *  that mismatch. */
+  autoRouted?: boolean;
 };
 
 type Step = "pick-time" | "confirm" | "done";
@@ -26,6 +33,7 @@ export default function BookingFlow({
   durationMinutes,
   accentColor,
   tenantName,
+  autoRouted = false,
 }: Props) {
   const accent = accentColor || DEFAULT_ACCENT;
 
@@ -84,7 +92,10 @@ export default function BookingFlow({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           serviceId,
-          staffUserId: staffId,
+          // autoRouted=true → POST receives "auto" and the routing
+          // engine assigns the real staff member at insert time.
+          // autoRouted=false → original behavior (specific staff).
+          staffUserId: autoRouted ? "auto" : staffId,
           startAt: selectedSlot,
           clientName,
           clientEmail,

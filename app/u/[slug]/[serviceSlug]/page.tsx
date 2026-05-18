@@ -1,9 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull, or } from "drizzle-orm";
 
 import { db } from "@/db/client";
-import { serviceStaff, services, tenants, users } from "@/db/schema";
+import { serviceStaff, services, staffAssignmentRules, tenants, users } from "@/db/schema";
 import BookingFlow from "@/components/BookingFlow";
 
 export default async function PublicServicePage(props: {
@@ -37,6 +37,32 @@ export default async function PublicServicePage(props: {
   const staff = sp.staff
     ? assignments.find((a) => a.userId === sp.staff) ?? assignments[0]
     : assignments[0];
+
+  // Routing intent — when a non-manual rule applies to this service or
+  // the tenant default is non-manual, the booking is routed at insert
+  // time by lib/routing/assignStaff. We surface that to the customer
+  // here as "Next available specialist" instead of pinning a name.
+  // The slots view continues to read from the preselected staff's
+  // availability (additive — no change to lib/availability.ts).
+  const routingRules = await db
+    .select()
+    .from(staffAssignmentRules)
+    .where(
+      and(
+        eq(staffAssignmentRules.tenantId, tenant.id),
+        or(
+          eq(staffAssignmentRules.serviceId, service.id),
+          and(isNull(staffAssignmentRules.serviceId), isNull(staffAssignmentRules.locationId))
+        )
+      )
+    );
+  const winningRule =
+    routingRules.find((r) => r.serviceId === service.id) ??
+    routingRules.find((r) => r.serviceId === null && r.locationId === null) ??
+    null;
+  const isAutoRouted = Boolean(
+    winningRule && winningRule.enabled && winningRule.mode !== "manual" && !sp.staff
+  );
 
   const accent = tenant.primaryColor;
   const showPoweredBy = !tenant.hidePoweredBy;
@@ -90,7 +116,13 @@ export default async function PublicServicePage(props: {
                 <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
                 <circle cx="9" cy="7" r="4" />
               </svg>
-              with <span className="font-medium text-slate-900">{staff.name}</span>
+              {isAutoRouted ? (
+                <span className="font-medium text-slate-900">Next available specialist</span>
+              ) : (
+                <>
+                  with <span className="font-medium text-slate-900">{staff.name}</span>
+                </>
+              )}
             </span>
           </div>
         </div>
@@ -104,6 +136,7 @@ export default async function PublicServicePage(props: {
           durationMinutes={service.durationMinutes}
           accentColor={accent}
           tenantName={tenant.name}
+          autoRouted={isAutoRouted}
         />
 
         {showPoweredBy && (

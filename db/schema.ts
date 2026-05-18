@@ -735,6 +735,65 @@ export const calendarSyncLogs = pgTable(
   })
 );
 
+// ─── Staff routing rules + assignment stats ─────────────────────────────
+// One rule per scope: service-specific > location-specific > tenant default.
+// Mode is varchar so adding a mode is a one-line addition to the
+// lib/routing types union (no migration). priorityOrder is jsonb array of
+// staff ids; weightedDistribution is jsonb object {staffId: percent}.
+// Tenants without any rule fall through to the legacy pickRoundRobinStaff
+// path in /api/bookings POST — preserves byte-identical behavior.
+export const staffAssignmentRules = pgTable(
+  "staff_assignment_rules",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    serviceId: uuid("service_id").references(() => services.id, { onDelete: "cascade" }),
+    // Schema-ready for location-pinned pools; enforcement deferred
+    // until staff_location pivot exists. NULL = scope ignores location.
+    locationId: uuid("location_id"),
+    mode: varchar("mode", { length: 20 }).notNull().default("manual"),
+    enabled: boolean("enabled").notNull().default(true),
+    priorityOrder: jsonb("priority_order").notNull().default([]),
+    weightedDistribution: jsonb("weighted_distribution").notNull().default({}),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    tenantIdx: index("staff_assignment_rules_tenant_idx").on(t.tenantId),
+    serviceIdx: index("staff_assignment_rules_service_idx").on(t.serviceId),
+    locationIdx: index("staff_assignment_rules_location_idx").on(t.locationId),
+  })
+);
+
+// Rolling assignment counts. day/week windows reset lazily on next
+// write (no cron required) — recorder compares the window anchor to
+// the current day-of-year / iso-week and zeros if rolled over.
+export const staffAssignmentStats = pgTable(
+  "staff_assignment_stats",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    staffId: uuid("staff_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    totalAssignments: integer("total_assignments").notNull().default(0),
+    lastAssignedAt: timestamp("last_assigned_at", { withTimezone: true }),
+    assignmentsToday: integer("assignments_today").notNull().default(0),
+    assignmentsThisWeek: integer("assignments_this_week").notNull().default(0),
+    dayWindowStart: timestamp("day_window_start", { withTimezone: true }),
+    weekWindowStart: timestamp("week_window_start", { withTimezone: true }),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    staffUnique: uniqueIndex("staff_assignment_stats_staff_unique").on(t.tenantId, t.staffId),
+    tenantIdx: index("staff_assignment_stats_tenant_idx").on(t.tenantId),
+  })
+);
+
 // ─── Tenant SMS provider connections ────────────────────────────────────
 // One active provider per tenant. Secrets are AES-256-GCM encrypted —
 // never store or return plaintext. See lib/crypto.ts for envelope shape.
