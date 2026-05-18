@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, asc, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "@/db/client";
@@ -86,18 +86,21 @@ export async function PUT(req: NextRequest) {
       ...Object.keys(body.weightedDistribution),
     ]);
     if (referencedStaff.size > 0) {
+      const referencedArr = Array.from(referencedStaff);
       const rows = await db
         .select({ id: users.id })
         .from(users)
         .where(
           and(
             eq(users.tenantId, admin.tenantId),
-            sql`${users.id} = ANY(${Array.from(referencedStaff)})`
+            inArray(users.id, referencedArr)
           )
         );
       const valid = new Set(rows.map((r) => r.id));
       for (const id of referencedStaff) {
-        if (!valid.has(id)) throw new HttpError(400, "Unknown staff id in routing config");
+        if (!valid.has(id)) {
+          throw new HttpError(400, "Unknown staff id in routing config");
+        }
       }
     }
 
