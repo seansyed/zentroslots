@@ -3,66 +3,167 @@ import { and, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "@/db/client";
-import { communicationTemplates } from "@/db/schema";
+import { communicationTemplates, services } from "@/db/schema";
 import { errorResponse, HttpError, requireRole } from "@/lib/auth";
 import { TEMPLATE_TYPES, templateStarterFor, type TemplateType } from "@/lib/communications/templates";
 import { audit, ipFromHeaders } from "@/lib/audit";
 
-// GET  /api/tenant/communications/templates
-//   Returns one entry per supported template type. Each entry is either
-//   the tenant's saved row (if any) or the system-default starter.
+// GET    /api/tenant/communications/templates[?serviceId=...]
+// PUT    /api/tenant/communications/templates
+// DELETE /api/tenant/communications/templates?type=...&[serviceId=...]
 //
-// PUT  /api/tenant/communications/templates
-//   Upserts a tenant-wide template (serviceId IS NULL). Body is the
-//   editor's full state for one type — we deliberately keep the API
-//   tight + one-type-at-a-time so an admin's accidental clobber never
-//   wipes more than one template.
+// Two scopes share the same shape:
+//   - Business-wide (serviceId omitted / null) — existing behavior
+//   - Service-specific (serviceId provided)    — service-level overrides
 //
-// Service-level overrides are NOT exposed via this endpoint yet — the
-// schema supports them but the admin UI is tenant-level only in this
-// release. Adding service-level CRUD is a focused follow-up.
+// In service scope, the GET response includes the inheritance source:
+// service / tenant / system. The PUT body's optional serviceId controls
+// where the row lands. Service ownership is validated against the
+// caller's tenant on every write/delete; cross-tenant ids are rejected.
 
 const upsertSchema = z.object({
   templateType: z.enum(TEMPLATE_TYPES as unknown as [string, ...string[]]),
+  // Optional. When present, upsert is service-scoped; when absent or
+  // null, business-wide (matches pre-existing behavior).
+  serviceId: z.string().uuid().nullable().optional(),
   subject: z.string().max(500).nullable(),
   htmlContent: z.string().max(50_000).nullable(),
   textContent: z.string().max(20_000).nullable(),
   enabled: z.boolean(),
 });
 
-export async function GET() {
+async function assertServiceInTenant(serviceId: string, tenantId: string): Promise<void> {
+  const svc = await db.query.services.findFirst({
+    where: and(eq(services.id, serviceId), eq(services.tenantId, tenantId)),
+  });
+  if (!svc) throw new HttpError(404, "Service not found in workspace");
+}
+
+export async function GET(req: NextRequest) {
   try {
     const admin = await requireRole(["admin", "manager"]);
+    const serviceIdParam = req.nextUrl.searchParams.get("serviceId");
 
-    const rows = await db
-      .select()
-      .from(communicationTemplates)
-      .where(
-        and(
-          eq(communicationTemplates.tenantId, admin.tenantId),
-          isNull(communicationTemplates.serviceId)
-        )
+    // ── Business-wide scope (legacy, unchanged shape) ───────────────
+    if (!serviceIdParam) {
+      const rows = await db
+        .select()
+        .from(communicationTemplates)
+        .where(
+          and(
+            eq(communicationTemplates.tenantId, admin.tenantId),
+            isNull(communicationTemplates.serviceId)
+          )
+        );
+
+      const byType = new Map(rows.map((r) => [r.templateType, r]));
+
+      return NextResponse.json(
+        TEMPLATE_TYPES.map((type) => {
+          const row = byType.get(type);
+          if (row) {
+            return {
+              templateType: type,
+              scope: "business" as const,
+              source: "tenant" as const,
+              isCustomized: true,
+              subject: row.subject ?? "",
+              htmlContent: row.htmlContent ?? "",
+              textContent: row.textContent ?? "",
+              enabled: row.enabled,
+              updatedAt: row.updatedAt,
+            };
+          }
+          const starter = templateStarterFor(type);
+          return {
+            templateType: type,
+            scope: "business" as const,
+            source: "system" as const,
+            isCustomized: false,
+            subject: starter.subject,
+            htmlContent: starter.html,
+            textContent: starter.text,
+            enabled: true,
+            updatedAt: null,
+          };
+        })
       );
+    }
 
-    const byType = new Map(rows.map((r) => [r.templateType, r]));
+    // ── Service-scoped: load both service rows and the tenant defaults,
+    // and present an inheritance-aware view for each type. ────────────
+    await assertServiceInTenant(serviceIdParam, admin.tenantId);
+
+    const [serviceRows, tenantRows] = await Promise.all([
+      db
+        .select()
+        .from(communicationTemplates)
+        .where(
+          and(
+            eq(communicationTemplates.tenantId, admin.tenantId),
+            eq(communicationTemplates.serviceId, serviceIdParam)
+          )
+        ),
+      db
+        .select()
+        .from(communicationTemplates)
+        .where(
+          and(
+            eq(communicationTemplates.tenantId, admin.tenantId),
+            isNull(communicationTemplates.serviceId)
+          )
+        ),
+    ]);
+
+    const byService = new Map(serviceRows.map((r) => [r.templateType, r]));
+    const byTenant = new Map(tenantRows.map((r) => [r.templateType, r]));
 
     return NextResponse.json(
       TEMPLATE_TYPES.map((type) => {
-        const row = byType.get(type);
-        if (row) {
+        const svcRow = byService.get(type);
+        const tenantRow = byTenant.get(type);
+        // The resolver requires `enabled=true` on the service row to
+        // honor it; disabled rows fall through to tenant/system. The
+        // editor must reflect that — same source semantics.
+        if (svcRow && svcRow.enabled) {
           return {
             templateType: type,
+            scope: "service" as const,
+            source: "service" as const,
             isCustomized: true,
-            subject: row.subject ?? "",
-            htmlContent: row.htmlContent ?? "",
-            textContent: row.textContent ?? "",
-            enabled: row.enabled,
-            updatedAt: row.updatedAt,
+            subject: svcRow.subject ?? "",
+            htmlContent: svcRow.htmlContent ?? "",
+            textContent: svcRow.textContent ?? "",
+            enabled: svcRow.enabled,
+            updatedAt: svcRow.updatedAt,
+            // When inherited would be: which tenant row this would fall
+            // back to. Useful for the "view inherited" affordance.
+            inheritedSubject: tenantRow?.subject ?? null,
+            inheritedHtml: tenantRow?.htmlContent ?? null,
+            inheritedText: tenantRow?.textContent ?? null,
           };
         }
+
+        // Inherited path — show the tenant row (or system fallback).
+        if (tenantRow) {
+          return {
+            templateType: type,
+            scope: "service" as const,
+            source: "tenant" as const,
+            isCustomized: false,
+            subject: tenantRow.subject ?? "",
+            htmlContent: tenantRow.htmlContent ?? "",
+            textContent: tenantRow.textContent ?? "",
+            enabled: tenantRow.enabled,
+            updatedAt: tenantRow.updatedAt,
+          };
+        }
+
         const starter = templateStarterFor(type);
         return {
           templateType: type,
+          scope: "service" as const,
+          source: "system" as const,
           isCustomized: false,
           subject: starter.subject,
           htmlContent: starter.html,
@@ -82,11 +183,21 @@ export async function PUT(req: NextRequest) {
     const admin = await requireRole(["admin", "manager"]);
     const body = upsertSchema.parse(await req.json());
     const templateType = body.templateType as TemplateType;
+    const serviceId = body.serviceId ?? null;
 
+    if (serviceId) {
+      await assertServiceInTenant(serviceId, admin.tenantId);
+    }
+
+    // Tenant-wide vs service-scoped have separate unique constraints in
+    // the DB (partial indexes on serviceId IS NULL vs IS NOT NULL). The
+    // findFirst here uses the same predicate so we hit the matching row.
     const existing = await db.query.communicationTemplates.findFirst({
       where: and(
         eq(communicationTemplates.tenantId, admin.tenantId),
-        isNull(communicationTemplates.serviceId),
+        serviceId
+          ? eq(communicationTemplates.serviceId, serviceId)
+          : isNull(communicationTemplates.serviceId),
         eq(communicationTemplates.templateType, templateType),
         eq(communicationTemplates.channel, "email")
       ),
@@ -110,7 +221,7 @@ export async function PUT(req: NextRequest) {
         .insert(communicationTemplates)
         .values({
           tenantId: admin.tenantId,
-          serviceId: null,
+          serviceId,
           templateType,
           channel: "email",
           subject: body.subject,
@@ -123,12 +234,12 @@ export async function PUT(req: NextRequest) {
 
     audit({
       tenantId: admin.tenantId,
-      action: "comm_template.update",
+      action: serviceId ? "comm_template.service_update" : "comm_template.update",
       actorUserId: admin.id,
       actorLabel: admin.email,
       entityType: "communication_template",
       entityId: row.id,
-      metadata: { templateType, enabled: row.enabled },
+      metadata: { templateType, serviceId, enabled: row.enabled },
       ipAddress: ipFromHeaders(req.headers),
     });
 
@@ -138,22 +249,31 @@ export async function PUT(req: NextRequest) {
   }
 }
 
-// DELETE /api/tenant/communications/templates?type=X
-//   Restore defaults — drops the tenant-wide override row for that
-//   type. Subsequent sends will fall through to the system default.
+// DELETE /api/tenant/communications/templates?type=X[&serviceId=Y]
+//   - Without serviceId → restore business-wide default (drops tenant
+//     row; falls back to system).
+//   - With serviceId    → restore inherited (drops service-level row;
+//     falls back to tenant row, then system).
 export async function DELETE(req: NextRequest) {
   try {
     const admin = await requireRole(["admin", "manager"]);
     const type = req.nextUrl.searchParams.get("type");
+    const serviceIdParam = req.nextUrl.searchParams.get("serviceId");
     if (!type || !(TEMPLATE_TYPES as readonly string[]).includes(type)) {
       throw new HttpError(400, "Unknown template type");
     }
+    if (serviceIdParam) {
+      await assertServiceInTenant(serviceIdParam, admin.tenantId);
+    }
+
     const deleted = await db
       .delete(communicationTemplates)
       .where(
         and(
           eq(communicationTemplates.tenantId, admin.tenantId),
-          isNull(communicationTemplates.serviceId),
+          serviceIdParam
+            ? eq(communicationTemplates.serviceId, serviceIdParam)
+            : isNull(communicationTemplates.serviceId),
           eq(communicationTemplates.templateType, type),
           eq(communicationTemplates.channel, "email")
         )
@@ -163,12 +283,12 @@ export async function DELETE(req: NextRequest) {
     if (deleted.length > 0) {
       audit({
         tenantId: admin.tenantId,
-        action: "comm_template.restore_default",
+        action: serviceIdParam ? "comm_template.service_restore" : "comm_template.restore_default",
         actorUserId: admin.id,
         actorLabel: admin.email,
         entityType: "communication_template",
         entityId: deleted[0].id,
-        metadata: { templateType: type },
+        metadata: { templateType: type, serviceId: serviceIdParam },
         ipAddress: ipFromHeaders(req.headers),
       });
     }

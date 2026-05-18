@@ -46,8 +46,15 @@ const SUPPORTED_VARIABLES = [
   "business_email", "notes",
 ] as const;
 
+type TemplateSource = "service" | "tenant" | "system";
+
 type Row = {
   templateType: TemplateType;
+  // 'business' when scope picker is on Business default; 'service' when
+  // viewing a specific service. Echoed from the API.
+  scope?: "business" | "service";
+  // Where the rendered content actually came from in the hierarchy.
+  source?: TemplateSource;
   isCustomized: boolean;
   subject: string;
   htmlContent: string;
@@ -56,59 +63,172 @@ type Row = {
   updatedAt: string | null;
 };
 
+type ServiceOption = {
+  id: string;
+  name: string;
+  slug: string;
+  overrideCount: number;
+};
+
 export default function TemplatesClient({ currentUserEmail }: { currentUserEmail: string }) {
   const [rows, setRows] = React.useState<Row[] | null>(null);
+  const [services, setServices] = React.useState<ServiceOption[]>([]);
+  // null = "Business default" scope. Otherwise the active service id.
+  const [scopeServiceId, setScopeServiceId] = React.useState<string | null>(null);
   const [openType, setOpenType] = React.useState<TemplateType | null>(null);
 
-  const refresh = React.useCallback(async () => {
-    setRows(null);
+  const refreshServices = React.useCallback(async () => {
     try {
-      const res = await fetch("/api/tenant/communications/templates", { cache: "no-store" });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = (await res.json()) as Row[];
-      setRows(data);
-    } catch (e) {
-      toast(e instanceof Error ? e.message : "Failed to load", "error");
-      setRows([]);
-    }
+      const res = await fetch("/api/tenant/communications/services", { cache: "no-store" });
+      if (!res.ok) return;
+      const data = (await res.json()) as ServiceOption[];
+      setServices(data);
+    } catch { /* no-op — scope picker just won't show services */ }
   }, []);
 
-  React.useEffect(() => { refresh(); }, [refresh]);
+  const refreshTemplates = React.useCallback(
+    async (serviceId: string | null) => {
+      setRows(null);
+      try {
+        const url = serviceId
+          ? `/api/tenant/communications/templates?serviceId=${encodeURIComponent(serviceId)}`
+          : "/api/tenant/communications/templates";
+        const res = await fetch(url, { cache: "no-store" });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = (await res.json()) as Row[];
+        setRows(data);
+      } catch (e) {
+        toast(e instanceof Error ? e.message : "Failed to load", "error");
+        setRows([]);
+      }
+    },
+    []
+  );
+
+  React.useEffect(() => { refreshServices(); }, [refreshServices]);
+  React.useEffect(() => { refreshTemplates(scopeServiceId); }, [refreshTemplates, scopeServiceId]);
 
   const open = openType ? rows?.find((r) => r.templateType === openType) ?? null : null;
+  const activeService = services.find((s) => s.id === scopeServiceId) ?? null;
 
   return (
     <div className="mt-6">
-      {rows === null ? (
-        <div className="grid gap-3 sm:grid-cols-2">
-          {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-24 rounded-xl" />)}
-        </div>
-      ) : (
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {rows.map((r) => (
-            <TemplateCard
-              key={r.templateType}
-              row={r}
-              onOpen={() => setOpenType(r.templateType)}
-            />
-          ))}
+      {/* Scope picker — Business default vs per-service */}
+      <ScopePicker
+        services={services}
+        activeServiceId={scopeServiceId}
+        onChange={setScopeServiceId}
+      />
+
+      {scopeServiceId && activeService && (
+        <div className="mt-3 rounded-lg border border-violet-200 bg-violet-50 p-3 text-xs text-violet-900">
+          Editing templates for <b>{activeService.name}</b>. Service-level overrides take
+          precedence over business defaults; everything else inherits from your business templates.
         </div>
       )}
+
+      <div className="mt-4">
+        {rows === null ? (
+          <div className="grid gap-3 sm:grid-cols-2">
+            {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-28 rounded-xl" />)}
+          </div>
+        ) : (
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {rows.map((r) => (
+              <TemplateCard
+                key={r.templateType}
+                row={r}
+                onOpen={() => setOpenType(r.templateType)}
+              />
+            ))}
+          </div>
+        )}
+      </div>
 
       {open && (
         <TemplateEditor
           initial={open}
+          serviceId={scopeServiceId}
+          serviceName={activeService?.name ?? null}
           currentUserEmail={currentUserEmail}
           onClose={() => setOpenType(null)}
-          onSaved={() => { setOpenType(null); refresh(); }}
+          onSaved={() => {
+            setOpenType(null);
+            refreshTemplates(scopeServiceId);
+            refreshServices();
+          }}
         />
       )}
     </div>
   );
 }
 
+function ScopePicker({
+  services,
+  activeServiceId,
+  onChange,
+}: {
+  services: ServiceOption[];
+  activeServiceId: string | null;
+  onChange: (id: string | null) => void;
+}) {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+      <div className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">
+        Editing scope
+      </div>
+      <div className="flex flex-wrap items-center gap-2 text-sm">
+        <button
+          onClick={() => onChange(null)}
+          className={
+            "rounded-md border px-3 py-1.5 transition " +
+            (activeServiceId === null
+              ? "border-slate-900 bg-slate-900 text-white"
+              : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50")
+          }
+        >
+          Business default
+        </button>
+        <span className="mx-1 text-slate-300">|</span>
+        <label className="text-xs text-ink-muted">Per service:</label>
+        <select
+          value={activeServiceId ?? ""}
+          onChange={(e) => onChange(e.target.value || null)}
+          className="min-w-[200px] rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm"
+        >
+          <option value="">— pick a service —</option>
+          {services.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.name}{s.overrideCount > 0 ? ` (${s.overrideCount} override${s.overrideCount === 1 ? "" : "s"})` : ""}
+            </option>
+          ))}
+        </select>
+        {services.length === 0 && (
+          <span className="text-[11px] text-ink-subtle">
+            (no active services yet — create one to enable per-service overrides)
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function TemplateCard({ row, onOpen }: { row: Row; onOpen: () => void }) {
   const meta = TEMPLATE_LABELS[row.templateType];
+  // Source labels — only meaningful in service scope. In business scope
+  // the "tenant" source effectively means "custom"; "system" means "default".
+  const isServiceScope = row.scope === "service";
+  const sourceLabel =
+    isServiceScope
+      ? row.source === "service"
+        ? { tone: "violet" as const, text: "Service override" }
+        : row.source === "tenant"
+          ? { tone: "blue" as const, text: "Inherited from business" }
+          : { tone: "neutral" as const, text: "Inherited from system default" }
+      : row.isCustomized
+        ? { tone: "violet" as const, text: "Custom" }
+        : { tone: "neutral" as const, text: "System default" };
+
   return (
     <Card>
       <div className="flex items-start justify-between gap-2">
@@ -118,14 +238,14 @@ function TemplateCard({ row, onOpen }: { row: Row; onOpen: () => void }) {
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1">
           {!row.enabled && <Badge tone="red">disabled</Badge>}
-          {row.isCustomized
-            ? <Badge tone="violet">custom</Badge>
-            : <Badge tone="neutral">default</Badge>}
+          <Badge tone={sourceLabel.tone}>{sourceLabel.text}</Badge>
         </div>
       </div>
       <div className="mt-3 truncate text-xs text-ink-subtle">{row.subject || "—"}</div>
       <div className="mt-4 flex items-center gap-2">
-        <Button size="sm" onClick={onOpen}>Edit</Button>
+        <Button size="sm" onClick={onOpen}>
+          {isServiceScope && row.source !== "service" ? "Override" : "Edit"}
+        </Button>
         {row.updatedAt && (
           <span className="text-[11px] text-ink-subtle">
             updated {row.updatedAt.slice(0, 10)}
@@ -138,11 +258,17 @@ function TemplateCard({ row, onOpen }: { row: Row; onOpen: () => void }) {
 
 function TemplateEditor({
   initial,
+  serviceId,
+  serviceName,
   onClose,
   onSaved,
   currentUserEmail,
 }: {
   initial: Row;
+  /** Active scope. null = business default, non-null = service override. */
+  serviceId: string | null;
+  /** Human name of the active service (for confirm dialogs + heading). */
+  serviceName: string | null;
   onClose: () => void;
   onSaved: () => void;
   currentUserEmail: string;
@@ -198,6 +324,9 @@ function TemplateEditor({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           templateType: initial.templateType,
+          // serviceId echoed back: present = service-scoped override,
+          // null/omitted = business-wide. API enforces tenant ownership.
+          serviceId,
           subject: draft.subject || null,
           htmlContent: draft.htmlContent || null,
           textContent: draft.textContent || null,
@@ -206,7 +335,7 @@ function TemplateEditor({
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error ?? "Save failed");
-      toast("Template saved", "success");
+      toast(serviceId ? "Service override saved" : "Template saved", "success");
       onSaved();
     } catch (e) {
       toast(e instanceof Error ? e.message : "Save failed", "error");
@@ -216,13 +345,18 @@ function TemplateEditor({
   }
 
   async function restoreDefaults() {
-    if (!confirm(`Restore "${meta.title}" to the system default? Your customizations will be discarded.`)) return;
+    const confirmMsg = serviceId
+      ? `Restore "${meta.title}" for ${serviceName ?? "this service"} to inherit from your business default? The service override will be deleted.`
+      : `Restore "${meta.title}" to the system default? Your customizations will be discarded.`;
+    if (!confirm(confirmMsg)) return;
     try {
-      const res = await fetch(`/api/tenant/communications/templates?type=${initial.templateType}`, {
+      const params = new URLSearchParams({ type: initial.templateType });
+      if (serviceId) params.set("serviceId", serviceId);
+      const res = await fetch(`/api/tenant/communications/templates?${params.toString()}`, {
         method: "DELETE",
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      toast("Restored default", "success");
+      toast(serviceId ? "Reverted to inherited" : "Restored default", "success");
       onSaved();
     } catch (e) {
       toast(e instanceof Error ? e.message : "Restore failed", "error");
@@ -294,10 +428,19 @@ function TemplateEditor({
         <header className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
           <div>
             <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">
-              Email template
+              {serviceId ? (
+                <>Service template · <span className="text-ink">{serviceName ?? "Service"}</span></>
+              ) : (
+                <>Email template · Business default</>
+              )}
             </div>
             <h2 className="text-base font-semibold text-ink">{meta.title}</h2>
             <p className="mt-0.5 text-xs text-ink-muted">{meta.subtitle}</p>
+            {serviceId && initial.source !== "service" && (
+              <p className="mt-1 text-[11px] text-blue-700">
+                Currently inheriting from {initial.source === "tenant" ? "business default" : "system default"}.
+              </p>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <div className="flex overflow-hidden rounded-md border border-slate-300">
@@ -453,17 +596,36 @@ function TemplateEditor({
 
         {/* Footer */}
         <footer className="flex items-center justify-between gap-2 border-t border-slate-200 bg-white px-5 py-3">
-          <button
-            onClick={restoreDefaults}
-            disabled={!initial.isCustomized}
-            className="text-xs text-ink-muted hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {initial.isCustomized ? "↺ Restore default" : "Using system default"}
-          </button>
+          {serviceId ? (
+            initial.source === "service" ? (
+              <button
+                onClick={restoreDefaults}
+                className="text-xs text-ink-muted hover:text-ink"
+              >
+                ↺ Restore inherited (delete service override)
+              </button>
+            ) : (
+              <span className="text-xs text-ink-subtle">
+                Currently inherited — saving will create a service-specific override
+              </span>
+            )
+          ) : (
+            <button
+              onClick={restoreDefaults}
+              disabled={!initial.isCustomized}
+              className="text-xs text-ink-muted hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {initial.isCustomized ? "↺ Restore default" : "Using system default"}
+            </button>
+          )}
           <div className="flex items-center gap-2">
             <Button variant="secondary" onClick={onClose}>Cancel</Button>
             <Button onClick={save} disabled={saving}>
-              {saving ? "Saving…" : "Save changes"}
+              {saving
+                ? "Saving…"
+                : serviceId && initial.source !== "service"
+                  ? "Create override"
+                  : "Save changes"}
             </Button>
           </div>
         </footer>
