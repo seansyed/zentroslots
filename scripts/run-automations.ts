@@ -23,7 +23,7 @@
  */
 
 import "dotenv/config";
-import { and, eq, lte, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, lte, sql } from "drizzle-orm";
 
 import { db } from "../db/client";
 import {
@@ -50,9 +50,32 @@ const MAX_ATTEMPTS = 3;
 async function run() {
   const now = new Date();
 
-  // Claim up to BATCH_SIZE pending rows that are due. The UPDATE …
-  // RETURNING pattern is atomic per-row in PostgreSQL — flipping to
-  // 'processing' commits before the worker reads the row back.
+  // Step 1: pick due rows via Drizzle primitives (typed binding handles
+  // Date correctly). We don't need FOR UPDATE SKIP LOCKED — only one
+  // worker runs in production today. Idempotency at the comm_logs
+  // unique index protects against accidental double-runs anyway.
+  const dueRows = await db
+    .select({ id: pendingAutomations.id })
+    .from(pendingAutomations)
+    .where(
+      and(
+        eq(pendingAutomations.status, "pending"),
+        lte(pendingAutomations.dueAt, now),
+        sql`${pendingAutomations.attempts} < ${MAX_ATTEMPTS}`
+      )
+    )
+    .orderBy(asc(pendingAutomations.dueAt))
+    .limit(BATCH_SIZE);
+
+  if (dueRows.length === 0) {
+    console.log(`[automations] no due rows at ${now.toISOString()}`);
+    return;
+  }
+
+  const dueIds = dueRows.map((r) => r.id);
+
+  // Step 2: flip to 'processing' in one UPDATE … RETURNING. Atomic
+  // per-row, so any concurrent run sees the rows already taken.
   const claimed = await db
     .update(pendingAutomations)
     .set({
@@ -62,15 +85,10 @@ async function run() {
       updatedAt: now,
     })
     .where(
-      sql`id IN (
-        SELECT id FROM ${pendingAutomations}
-        WHERE status = 'pending'
-          AND due_at <= ${now}
-          AND attempts < ${MAX_ATTEMPTS}
-        ORDER BY due_at ASC
-        LIMIT ${BATCH_SIZE}
-        FOR UPDATE SKIP LOCKED
-      )`
+      and(
+        inArray(pendingAutomations.id, dueIds),
+        eq(pendingAutomations.status, "pending")
+      )
     )
     .returning();
 
@@ -246,7 +264,3 @@ run()
     console.error("[automations] worker crashed:", e);
     process.exit(1);
   });
-
-// `lte` is reserved for a future "find scheduled non-due rows" debug
-// flag; keep the import alive without bloating bundle elsewhere.
-void lte;
