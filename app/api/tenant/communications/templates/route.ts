@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "@/db/client";
@@ -44,22 +44,44 @@ export async function GET(req: NextRequest) {
     const admin = await requireRole(["admin", "manager"]);
     const serviceIdParam = req.nextUrl.searchParams.get("serviceId");
 
-    // ── Business-wide scope (legacy, unchanged shape) ───────────────
+    // ── Business-wide scope (additive: now includes a count of how
+    //   many services override each template type, so the list UI can
+    //   show "Used by N services"). Backward-compatible: the existing
+    //   shape is preserved and the new field is additive. ──────────
     if (!serviceIdParam) {
-      const rows = await db
-        .select()
-        .from(communicationTemplates)
-        .where(
-          and(
-            eq(communicationTemplates.tenantId, admin.tenantId),
-            isNull(communicationTemplates.serviceId)
+      const [rows, overrideCounts] = await Promise.all([
+        db
+          .select()
+          .from(communicationTemplates)
+          .where(
+            and(
+              eq(communicationTemplates.tenantId, admin.tenantId),
+              isNull(communicationTemplates.serviceId)
+            )
+          ),
+        db
+          .select({
+            templateType: communicationTemplates.templateType,
+            count: sql<number>`count(*)::int`,
+          })
+          .from(communicationTemplates)
+          .where(
+            and(
+              eq(communicationTemplates.tenantId, admin.tenantId),
+              eq(communicationTemplates.channel, "email"),
+              // service_id IS NOT NULL — only overrides count.
+              sql`${communicationTemplates.serviceId} IS NOT NULL`
+            )
           )
-        );
+          .groupBy(communicationTemplates.templateType),
+      ]);
 
       const byType = new Map(rows.map((r) => [r.templateType, r]));
+      const overrideByType = new Map(overrideCounts.map((r) => [r.templateType, r.count]));
 
       return NextResponse.json(
         TEMPLATE_TYPES.map((type) => {
+          const overridingServices = overrideByType.get(type) ?? 0;
           const row = byType.get(type);
           if (row) {
             return {
@@ -72,6 +94,7 @@ export async function GET(req: NextRequest) {
               textContent: row.textContent ?? "",
               enabled: row.enabled,
               updatedAt: row.updatedAt,
+              overridingServiceCount: overridingServices,
             };
           }
           const starter = templateStarterFor(type);
@@ -85,6 +108,7 @@ export async function GET(req: NextRequest) {
             textContent: starter.text,
             enabled: true,
             updatedAt: null,
+            overridingServiceCount: overridingServices,
           };
         })
       );

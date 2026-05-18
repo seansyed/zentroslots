@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { Badge, Button, Card, Skeleton, toast } from "@/components/ui/primitives";
+import { hasWarnings, lintHtmlTemplate, type LintFinding } from "@/lib/communications/html-lint";
 
 type TemplateType =
   | "booking_confirmation"
@@ -61,6 +62,9 @@ type Row = {
   textContent: string;
   enabled: boolean;
   updatedAt: string | null;
+  /** How many services have an override for THIS template type. Only
+   *  returned in business scope. Drives the "Used by N services" badge. */
+  overridingServiceCount?: number;
 };
 
 type ServiceOption = {
@@ -76,6 +80,7 @@ export default function TemplatesClient({ currentUserEmail }: { currentUserEmail
   // null = "Business default" scope. Otherwise the active service id.
   const [scopeServiceId, setScopeServiceId] = React.useState<string | null>(null);
   const [openType, setOpenType] = React.useState<TemplateType | null>(null);
+  const [search, setSearch] = React.useState("");
 
   const refreshServices = React.useCallback(async () => {
     try {
@@ -111,6 +116,46 @@ export default function TemplatesClient({ currentUserEmail }: { currentUserEmail
   const open = openType ? rows?.find((r) => r.templateType === openType) ?? null : null;
   const activeService = services.find((s) => s.id === scopeServiceId) ?? null;
 
+  // Quick restore — calls DELETE without opening the editor. Used from
+  // the card "↺ Restore" action. Skipped for non-customized rows (the
+  // button is hidden there anyway).
+  const quickRestore = React.useCallback(
+    async (type: TemplateType) => {
+      const params = new URLSearchParams({ type });
+      if (scopeServiceId) params.set("serviceId", scopeServiceId);
+      const target = TEMPLATE_LABELS[type].title;
+      const msg = scopeServiceId
+        ? `Revert "${target}" to inherit from business default?`
+        : `Revert "${target}" to the system default? Your customizations will be lost.`;
+      if (!confirm(msg)) return;
+      try {
+        const res = await fetch(`/api/tenant/communications/templates?${params.toString()}`, {
+          method: "DELETE",
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        toast("Reverted", "success");
+        refreshTemplates(scopeServiceId);
+        refreshServices();
+      } catch (e) {
+        toast(e instanceof Error ? e.message : "Restore failed", "error");
+      }
+    },
+    [scopeServiceId, refreshServices, refreshTemplates]
+  );
+
+  // Filter cards by title/subject substring. Cheap; runs on every
+  // keystroke. Returns the unfiltered list when the search is empty.
+  const filteredRows = React.useMemo(() => {
+    if (!rows) return rows;
+    const q = search.trim().toLowerCase();
+    if (!q) return rows;
+    return rows.filter((r) => {
+      const title = TEMPLATE_LABELS[r.templateType].title.toLowerCase();
+      const subject = (r.subject ?? "").toLowerCase();
+      return title.includes(q) || subject.includes(q);
+    });
+  }, [rows, search]);
+
   return (
     <div className="mt-6">
       {/* Scope picker — Business default vs per-service */}
@@ -127,18 +172,46 @@ export default function TemplatesClient({ currentUserEmail }: { currentUserEmail
         </div>
       )}
 
+      {/* Search box — client-side filter over the 5 template types. */}
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        <input
+          type="search"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search templates by name or subject…"
+          aria-label="Search templates"
+          className="w-full max-w-md rounded-md border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
+        />
+        {search && rows && filteredRows && filteredRows.length !== rows.length && (
+          <span className="text-xs text-ink-subtle">
+            {filteredRows.length} of {rows.length} match
+          </span>
+        )}
+      </div>
+
       <div className="mt-4">
         {rows === null ? (
           <div className="grid gap-3 sm:grid-cols-2">
             {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-28 rounded-xl" />)}
           </div>
+        ) : filteredRows && filteredRows.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center text-sm text-ink-muted">
+            No templates match &ldquo;{search}&rdquo;.
+          </div>
         ) : (
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-            {rows.map((r) => (
+            {filteredRows!.map((r) => (
               <TemplateCard
                 key={r.templateType}
                 row={r}
                 onOpen={() => setOpenType(r.templateType)}
+                onQuickRestore={
+                  // Only meaningful when this row IS customized; the
+                  // card hides the button otherwise.
+                  (scopeServiceId && r.source === "service") || (!scopeServiceId && r.isCustomized)
+                    ? () => quickRestore(r.templateType)
+                    : undefined
+                }
               />
             ))}
           </div>
@@ -213,7 +286,18 @@ function ScopePicker({
   );
 }
 
-function TemplateCard({ row, onOpen }: { row: Row; onOpen: () => void }) {
+function TemplateCard({
+  row,
+  onOpen,
+  onQuickRestore,
+}: {
+  row: Row;
+  onOpen: () => void;
+  /** Present only when this row is restorable in the current scope.
+   *  Triggers the DELETE without opening the editor (saves a click for
+   *  the "I just want to reset to default" path). */
+  onQuickRestore?: () => void;
+}) {
   const meta = TEMPLATE_LABELS[row.templateType];
   // Source labels — only meaningful in service scope. In business scope
   // the "tenant" source effectively means "custom"; "system" means "default".
@@ -229,6 +313,8 @@ function TemplateCard({ row, onOpen }: { row: Row; onOpen: () => void }) {
         ? { tone: "violet" as const, text: "Custom" }
         : { tone: "neutral" as const, text: "System default" };
 
+  const overridingCount = row.overridingServiceCount ?? 0;
+
   return (
     <Card>
       <div className="flex items-start justify-between gap-2">
@@ -239,15 +325,30 @@ function TemplateCard({ row, onOpen }: { row: Row; onOpen: () => void }) {
         <div className="flex shrink-0 flex-col items-end gap-1">
           {!row.enabled && <Badge tone="red">disabled</Badge>}
           <Badge tone={sourceLabel.tone}>{sourceLabel.text}</Badge>
+          {/* Business scope only — how many services override this. */}
+          {!isServiceScope && overridingCount > 0 && (
+            <Badge tone="blue">
+              Used by {overridingCount} service{overridingCount === 1 ? "" : "s"}
+            </Badge>
+          )}
         </div>
       </div>
       <div className="mt-3 truncate text-xs text-ink-subtle">{row.subject || "—"}</div>
-      <div className="mt-4 flex items-center gap-2">
+      <div className="mt-4 flex flex-wrap items-center gap-2">
         <Button size="sm" onClick={onOpen}>
           {isServiceScope && row.source !== "service" ? "Override" : "Edit"}
         </Button>
+        {onQuickRestore && (
+          <button
+            onClick={onQuickRestore}
+            className="text-[11px] text-ink-muted underline-offset-2 hover:text-ink hover:underline"
+            title={isServiceScope ? "Revert to inherited" : "Restore system default"}
+          >
+            ↺ Restore
+          </button>
+        )}
         {row.updatedAt && (
-          <span className="text-[11px] text-ink-subtle">
+          <span className="ml-auto text-[11px] text-ink-subtle">
             updated {row.updatedAt.slice(0, 10)}
           </span>
         )}
@@ -274,18 +375,63 @@ function TemplateEditor({
   currentUserEmail: string;
 }) {
   const meta = TEMPLATE_LABELS[initial.templateType];
-  const [draft, setDraft] = React.useState({
-    subject: initial.subject,
-    htmlContent: initial.htmlContent,
-    textContent: initial.textContent,
-    enabled: initial.enabled,
-  });
+  const initialDraft = React.useMemo(
+    () => ({
+      subject: initial.subject,
+      htmlContent: initial.htmlContent,
+      textContent: initial.textContent,
+      enabled: initial.enabled,
+    }),
+    [initial]
+  );
+  const [draft, setDraft] = React.useState(initialDraft);
   const [view, setView] = React.useState<"edit" | "preview">("edit");
+  const [previewViewport, setPreviewViewport] = React.useState<"desktop" | "mobile">("desktop");
   const [saving, setSaving] = React.useState(false);
   const [testTo, setTestTo] = React.useState(currentUserEmail);
   const [testing, setTesting] = React.useState(false);
   const [previewHtml, setPreviewHtml] = React.useState("");
   const [previewSubject, setPreviewSubject] = React.useState("");
+
+  // Dirty state — drives the unsaved-changes warning. Compares draft
+  // to the snapshot taken at editor open; flips to clean again after
+  // a successful save (via onSaved).
+  const dirty = React.useMemo(
+    () =>
+      draft.subject !== initialDraft.subject ||
+      draft.htmlContent !== initialDraft.htmlContent ||
+      draft.textContent !== initialDraft.textContent ||
+      draft.enabled !== initialDraft.enabled,
+    [draft, initialDraft]
+  );
+
+  // Browser-level guard: tab close / refresh while dirty.
+  React.useEffect(() => {
+    if (!dirty) return;
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      // Modern browsers ignore the returnValue string but require it set.
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [dirty]);
+
+  // HTML lint findings — recomputed on every keystroke. Cheap (regex
+  // over a small body); no debounce needed.
+  const lintFindings: LintFinding[] = React.useMemo(
+    () => lintHtmlTemplate(draft.htmlContent),
+    [draft.htmlContent]
+  );
+  const hasLintWarnings = hasWarnings(lintFindings);
+
+  // Wrap onClose with the dirty-state confirmation prompt.
+  const confirmClose = React.useCallback(() => {
+    if (dirty) {
+      if (!confirm("Discard unsaved changes to this template?")) return;
+    }
+    onClose();
+  }, [dirty, onClose]);
 
   // Live preview — re-render with sample context whenever switching to
   // preview view, debounced cheaply by tab switch.
@@ -317,6 +463,12 @@ function TemplateEditor({
   }, [view, draft.subject, draft.htmlContent, draft.textContent]);
 
   async function save() {
+    // Optimistic-rollback contract: snapshot the draft BEFORE the
+    // network call, and restore it on failure. The visible state never
+    // diverges from what the server believes — even if the user kept
+    // typing during the in-flight request, we abort by overwriting
+    // back to the last-known-bad snapshot (consistent with toast).
+    const snapshot = draft;
     setSaving(true);
     try {
       const res = await fetch("/api/tenant/communications/templates", {
@@ -327,10 +479,10 @@ function TemplateEditor({
           // serviceId echoed back: present = service-scoped override,
           // null/omitted = business-wide. API enforces tenant ownership.
           serviceId,
-          subject: draft.subject || null,
-          htmlContent: draft.htmlContent || null,
-          textContent: draft.textContent || null,
-          enabled: draft.enabled,
+          subject: snapshot.subject || null,
+          htmlContent: snapshot.htmlContent || null,
+          textContent: snapshot.textContent || null,
+          enabled: snapshot.enabled,
         }),
       });
       const data = await res.json();
@@ -338,6 +490,9 @@ function TemplateEditor({
       toast(serviceId ? "Service override saved" : "Template saved", "success");
       onSaved();
     } catch (e) {
+      // Roll back to the snapshot so dirty-state recalculates correctly
+      // and the user sees exactly what wasn't saved.
+      setDraft(snapshot);
       toast(e instanceof Error ? e.message : "Save failed", "error");
     } finally {
       setSaving(false);
@@ -421,7 +576,7 @@ function TemplateEditor({
       aria-modal="true"
       aria-label="Edit template"
       className="fixed inset-0 z-50 flex items-stretch justify-end bg-black/40"
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      onClick={(e) => { if (e.target === e.currentTarget) confirmClose(); }}
     >
       <div className="flex h-full w-full max-w-4xl flex-col bg-white shadow-xl">
         {/* Header */}
@@ -460,7 +615,7 @@ function TemplateEditor({
               ))}
             </div>
             <button
-              onClick={onClose}
+              onClick={confirmClose}
               aria-label="Close"
               className="inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-muted hover:bg-surface-inset"
             >
@@ -508,6 +663,28 @@ function TemplateEditor({
                     rows={16}
                     className={INPUT + " font-mono text-xs"}
                   />
+                  {/* Non-blocking lint panel — flags HTML patterns that
+                      email clients strip. Save still proceeds; this is
+                      informational. */}
+                  {lintFindings.length > 0 && (
+                    <div
+                      className={
+                        "mt-2 rounded-md border p-2.5 text-[11px] " +
+                        (hasLintWarnings
+                          ? "border-amber-200 bg-amber-50 text-amber-900"
+                          : "border-slate-200 bg-slate-50 text-ink-muted")
+                      }
+                    >
+                      <div className="mb-1 font-semibold">
+                        {hasLintWarnings ? "HTML may not render in some email clients" : "Notes"}
+                      </div>
+                      <ul className="ml-4 list-disc space-y-1">
+                        {lintFindings.map((f, i) => (
+                          <li key={`${f.code}-${i}`}>{f.message}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
                 </Field>
 
                 <Field label="Plain-text fallback" hint="Shown by email clients that don't render HTML.">
@@ -529,16 +706,40 @@ function TemplateEditor({
                   </div>
                   <div className="mt-1 font-medium text-ink">{previewSubject}</div>
                 </div>
+                {/* Viewport toggle — same preview HTML, narrower iframe
+                    container for the mobile view. Email clients vary
+                    so this is approximate, but catches the most common
+                    "looks fine on desktop, broken on phone" issues. */}
+                <div className="flex items-center gap-1.5 text-xs">
+                  <span className="text-ink-subtle">Viewport:</span>
+                  {(["desktop", "mobile"] as const).map((v) => (
+                    <button
+                      key={v}
+                      onClick={() => setPreviewViewport(v)}
+                      className={
+                        "rounded-md border px-2 py-1 capitalize " +
+                        (v === previewViewport
+                          ? "border-slate-900 bg-slate-900 text-white"
+                          : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50")
+                      }
+                    >
+                      {v === "desktop" ? "🖥 Desktop" : "📱 Mobile"}
+                    </button>
+                  ))}
+                </div>
                 <div className="rounded-lg border border-slate-200 bg-white shadow-sm">
                   <div className="border-b border-slate-200 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">
                     HTML preview · sample data
                   </div>
-                  <iframe
-                    title="Template preview"
-                    srcDoc={previewHtml}
-                    className="block h-[480px] w-full"
-                    sandbox=""
-                  />
+                  <div className="flex justify-center bg-slate-100 p-3">
+                    <iframe
+                      title="Template preview"
+                      srcDoc={previewHtml}
+                      className="block h-[480px] border border-slate-200 bg-white shadow-sm"
+                      style={{ width: previewViewport === "mobile" ? "360px" : "100%", maxWidth: "100%" }}
+                      sandbox=""
+                    />
+                  </div>
                 </div>
               </div>
             )}
@@ -564,6 +765,29 @@ function TemplateEditor({
                   </button>
                 ))}
               </div>
+
+              <div className="my-5 h-px bg-slate-200" />
+
+              {/* Copy-from picker. Pulls other tenant templates (business
+                  + service-scoped) so the admin can clone an existing
+                  one into this draft. Selection only mutates local
+                  state — admin still has to click Save. */}
+              <DuplicateFromPicker
+                templateType={initial.templateType}
+                serviceId={serviceId}
+                onPicked={(values) => {
+                  // Copy into draft. Empty fields don't overwrite the
+                  // current draft, so picking "subject only" templates
+                  // doesn't wipe HTML body.
+                  setDraft((cur) => ({
+                    ...cur,
+                    subject: values.subject || cur.subject,
+                    htmlContent: values.htmlContent || cur.htmlContent,
+                    textContent: values.textContent || cur.textContent,
+                  }));
+                  toast("Copied into draft — review and save", "info");
+                }}
+              />
 
               <div className="my-5 h-px bg-slate-200" />
 
@@ -619,8 +843,13 @@ function TemplateEditor({
             </button>
           )}
           <div className="flex items-center gap-2">
-            <Button variant="secondary" onClick={onClose}>Cancel</Button>
-            <Button onClick={save} disabled={saving}>
+            {dirty && !saving && (
+              <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-800">
+                Unsaved changes
+              </span>
+            )}
+            <Button variant="secondary" onClick={confirmClose}>Cancel</Button>
+            <Button onClick={save} disabled={saving || !dirty}>
               {saving
                 ? "Saving…"
                 : serviceId && initial.source !== "service"
@@ -630,6 +859,154 @@ function TemplateEditor({
           </div>
         </footer>
       </div>
+    </div>
+  );
+}
+
+/**
+ * "Copy from..." picker shown in the editor sidebar. Lists every other
+ * row available to this tenant for the SAME template type — business
+ * default + any other service overrides — so admins can clone one
+ * template's content as a starting point. Cross-tenant impossible:
+ * the underlying templates GET only ever returns the caller's tenant.
+ *
+ * Does NOT save — copies content into the editor's draft so the admin
+ * can review and click Save. This preserves the unsaved-changes flow
+ * and the optimistic-rollback contract.
+ */
+function DuplicateFromPicker({
+  templateType,
+  serviceId,
+  onPicked,
+}: {
+  templateType: TemplateType;
+  /** Current editor scope (null = business). Excludes the active row
+   *  from the candidate list — duplicating from yourself is a no-op. */
+  serviceId: string | null;
+  onPicked: (values: { subject: string; htmlContent: string; textContent: string }) => void;
+}) {
+  type Candidate = {
+    label: string;
+    serviceId: string | null;
+    /** Resolved values from the candidate's GET response. */
+    subject: string;
+    htmlContent: string;
+    textContent: string;
+  };
+  const [candidates, setCandidates] = React.useState<Candidate[] | null>(null);
+  const [selectedKey, setSelectedKey] = React.useState<string>("");
+  const [loading, setLoading] = React.useState(false);
+
+  // Lazy load on first expand — saves a network call for admins who
+  // never use this feature.
+  const load = React.useCallback(async () => {
+    if (candidates !== null) return; // cached
+    setLoading(true);
+    try {
+      // Step 1: business-default row for this type (always available).
+      const businessRes = await fetch("/api/tenant/communications/templates", {
+        cache: "no-store",
+      });
+      const businessRows = (await businessRes.json()) as Row[];
+      const businessRow = businessRows.find((r) => r.templateType === templateType);
+
+      // Step 2: per-service rows for this type — only services that
+      // ACTUALLY override (overrideCount > 0). Avoids N pointless
+      // requests for services that all inherit.
+      const servicesRes = await fetch("/api/tenant/communications/services", {
+        cache: "no-store",
+      });
+      const allServices = (await servicesRes.json()) as ServiceOption[];
+      const candidateServices = allServices.filter((s) => s.overrideCount > 0);
+
+      const serviceRows = await Promise.all(
+        candidateServices.map(async (s) => {
+          try {
+            const res = await fetch(
+              `/api/tenant/communications/templates?serviceId=${encodeURIComponent(s.id)}`,
+              { cache: "no-store" }
+            );
+            if (!res.ok) return null;
+            const rows = (await res.json()) as Row[];
+            const row = rows.find((r) => r.templateType === templateType);
+            // Only include services where THIS template type is actually
+            // overridden (otherwise the API returns the inherited
+            // tenant/system row — already covered by businessRow).
+            if (!row || row.source !== "service") return null;
+            return { service: s, row };
+          } catch {
+            return null;
+          }
+        })
+      );
+
+      const list: Candidate[] = [];
+      // Include business default unless we're currently editing it.
+      if (businessRow && serviceId !== null) {
+        list.push({
+          label: "Business default",
+          serviceId: null,
+          subject: businessRow.subject,
+          htmlContent: businessRow.htmlContent,
+          textContent: businessRow.textContent,
+        });
+      }
+      for (const r of serviceRows) {
+        if (!r) continue;
+        // Skip the row we're currently editing.
+        if (r.service.id === serviceId) continue;
+        list.push({
+          label: `Service · ${r.service.name}`,
+          serviceId: r.service.id,
+          subject: r.row.subject,
+          htmlContent: r.row.htmlContent,
+          textContent: r.row.textContent,
+        });
+      }
+      setCandidates(list);
+    } catch {
+      setCandidates([]); // failed — show empty list rather than spin forever
+    } finally {
+      setLoading(false);
+    }
+  }, [candidates, serviceId, templateType]);
+
+  return (
+    <div>
+      <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">
+        Copy from another template
+      </div>
+      <p className="mt-1 text-[11px] text-ink-muted">
+        Use an existing template&apos;s body as the starting point. Saves manual copy-paste.
+      </p>
+      <select
+        onClick={load}
+        value={selectedKey}
+        onChange={(e) => {
+          setSelectedKey(e.target.value);
+          if (!candidates) return;
+          const c = candidates[Number(e.target.value)];
+          if (c) onPicked({ subject: c.subject, htmlContent: c.htmlContent, textContent: c.textContent });
+          // Reset selection so picking the same one again re-applies.
+          setSelectedKey("");
+        }}
+        className={INPUT + " mt-2 text-xs"}
+      >
+        <option value="">
+          {loading
+            ? "Loading…"
+            : candidates === null
+              ? "— click to load —"
+              : candidates.length === 0
+                ? "(no other templates of this type)"
+                : "— pick a source —"}
+        </option>
+        {(candidates ?? []).map((c, i) => (
+          <option key={`${c.serviceId ?? "biz"}-${i}`} value={i}>
+            {c.label}
+          </option>
+        ))}
+      </select>
     </div>
   );
 }
