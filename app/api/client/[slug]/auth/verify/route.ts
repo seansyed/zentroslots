@@ -28,20 +28,27 @@ export async function GET(
     const { slug } = await context.params;
     const token = (req.nextUrl.searchParams.get("token") ?? "").trim();
 
-    const failLoginUrl = new URL(`/client/${encodeURIComponent(slug)}/login`, req.nextUrl.origin);
-    failLoginUrl.searchParams.set("invalid", "1");
+    // We use relative Location headers so the redirect target follows
+    // the browser's current host. `NextResponse.redirect()` would force
+    // us to construct an absolute URL, which behind a reverse proxy
+    // resolves to the upstream localhost. Per RFC 7231 the Location
+    // header can be a relative reference.
+    const failLogin = `/client/${encodeURIComponent(slug)}/login?invalid=1`;
+    const home = `/client/${encodeURIComponent(slug)}`;
+    const redirectTo = (path: string) =>
+      new NextResponse(null, { status: 307, headers: { Location: path } });
 
     const tenant = await db.query.tenants.findFirst({ where: eq(tenants.slug, slug) });
     if (!tenant || !tenant.active) {
-      return NextResponse.redirect(failLoginUrl);
+      return redirectTo(failLogin);
     }
     if (!token) {
-      return NextResponse.redirect(failLoginUrl);
+      return redirectTo(failLogin);
     }
 
     const payload = await verifyClientMagicLink(token);
     if (!payload || payload.tenantId !== tenant.id) {
-      return NextResponse.redirect(failLoginUrl);
+      return redirectTo(failLogin);
     }
 
     const customer = await db.query.customers.findFirst({
@@ -51,7 +58,7 @@ export async function GET(
       ),
     });
     if (!customer) {
-      return NextResponse.redirect(failLoginUrl);
+      return redirectTo(failLogin);
     }
 
     const sessionToken = await signClientSession({
@@ -69,8 +76,7 @@ export async function GET(
       metadata: { email: customer.email },
     });
 
-    const dest = new URL(`/client/${encodeURIComponent(slug)}`, req.nextUrl.origin);
-    return NextResponse.redirect(dest);
+    return redirectTo(home);
   } catch (err) {
     return errorResponse(err);
   }
