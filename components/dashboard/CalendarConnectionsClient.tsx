@@ -148,7 +148,11 @@ export default function CalendarConnectionsClient({
 
   return (
     <div className="mt-6 space-y-8">
-      {/* CONNECT TILES — providers section */}
+      {/* CONNECT TILES — providers section.
+          Google only. Outlook + Office 365 are NOT shown — per the
+          enterprise spec, no placeholder tiles for providers that
+          aren't actually integrated. They land here the moment the
+          MS Graph adapter ships (single line in the grid below). */}
       <section>
         <h2 className="text-sm font-semibold text-ink">Add a calendar</h2>
         <p className="mt-1 text-xs text-ink-muted">
@@ -162,22 +166,6 @@ export default function CalendarConnectionsClient({
             href="/api/calendar/google/connect"
             description="Two-way sync with Google Calendar + Meet auto-links."
             enabled
-          />
-          <ProviderTile
-            name="Outlook"
-            logo="O"
-            color="#0078D4"
-            href="#"
-            description="Microsoft Graph integration is in development. Not yet available."
-            enabled={false}
-          />
-          <ProviderTile
-            name="Office 365"
-            logo="365"
-            color="#D24726"
-            href="#"
-            description="Microsoft Graph integration is in development. Not yet available."
-            enabled={false}
           />
         </div>
       </section>
