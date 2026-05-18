@@ -12,6 +12,7 @@ import { createBookingSchema } from "@/lib/validation";
 import { getAvailableSlots } from "@/lib/availability";
 import { onBookingCreated } from "@/lib/calendar/sync";
 import { triggerAutomation } from "@/lib/communications/engine";
+import { validateBookingRules } from "@/lib/booking-rules/validateBookingRules";
 import { assignStaff } from "@/lib/routing/assignStaff";
 import { recordAssignment } from "@/lib/routing/recordAssignment";
 import { assertCanCreateBooking } from "@/lib/quotas";
@@ -117,6 +118,28 @@ export async function POST(req: NextRequest) {
       if (startAt > latest) {
         throw new HttpError(409, `This service can only be booked up to ${service.maxAdvanceDays} days ahead.`);
       }
+    }
+
+    // ─── Booking rules (additive, evaluated BEFORE insert) ──────────────
+    // The legacy services.minNoticeMinutes / services.maxAdvanceDays
+    // checks above keep firing for byte-identical pre-feature behavior
+    // (rule #11). The new engine layers on top — most-restrictive wins.
+    // When a booking_rules row exists, its caps / cooldown / blackouts /
+    // business hours are enforced too. Caller-friendly 409 with the
+    // engine's message.
+    const tentativeEnd = new Date(startAt.getTime() + service.durationMinutes * 60_000);
+    const ruleResult = await validateBookingRules({
+      tenantId: service.tenantId,
+      serviceId: service.id,
+      // locationId not always set on the request today — schema-ready
+      // for when location-pinned rules apply.
+      locationId: null,
+      clientEmail: body.clientEmail,
+      startAt,
+      endAt: tentativeEnd,
+    });
+    if (!ruleResult.ok) {
+      throw new HttpError(409, ruleResult.error.message);
     }
 
     // ─── Auto assignment ────────────────────────────────────────────────

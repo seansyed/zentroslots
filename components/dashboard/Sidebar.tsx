@@ -113,6 +113,7 @@ function buildNav(variant: SidebarVariant, role: Role): Group[] {
           { label: "Communications", href: "/dashboard/settings/communications", icon: I.bell },
           { label: "Feature controls", href: "/dashboard/settings/features", icon: I.flag },
           { label: "Staff routing", href: "/dashboard/settings/routing", icon: I.bar },
+          { label: "Booking rules", href: "/dashboard/settings/booking-rules", icon: I.clock },
         ]
       : []),
   ];

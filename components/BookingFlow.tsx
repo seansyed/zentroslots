@@ -59,6 +59,51 @@ export default function BookingFlow({
   // to compute; re-derived only when tz changes (~never).
   const dateStrip = useMemo(() => buildDateStrip(tz, 14), [tz]);
 
+  // Public rules surface — fetched once. We use it to disable dates in
+  // the strip that fall on blackouts or outside earliest/latest
+  // bookable. Failure to fetch is non-fatal — strip falls back to
+  // "every date enabled" (the booking POST will still enforce on
+  // submit). Tenants without a rule get all-null fields → no dates
+  // disabled, byte-identical pre-feature behavior.
+  const [rules, setRules] = useState<{
+    blackoutDates: string[];
+    earliestBookable: string | null;
+    latestBookable: string | null;
+  }>({ blackoutDates: [], earliestBookable: null, latestBookable: null });
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/public/services/${encodeURIComponent(serviceId)}/rules`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (cancelled || !data) return;
+        setRules({
+          blackoutDates: Array.isArray(data.blackoutDates) ? data.blackoutDates : [],
+          earliestBookable: data.earliestBookable ?? null,
+          latestBookable: data.latestBookable ?? null,
+        });
+      })
+      .catch(() => {
+        /* leave defaults */
+      });
+    return () => { cancelled = true; };
+  }, [serviceId]);
+
+  // Per-date disable predicate. A date is disabled if it's in the
+  // blackout list OR (entire day) before earliestBookable OR after
+  // latestBookable. The booking POST still re-validates on submit.
+  const isDateDisabled = (isoDate: string): boolean => {
+    if (rules.blackoutDates.includes(isoDate)) return true;
+    if (rules.earliestBookable) {
+      const earliestDate = new Date(rules.earliestBookable).toISOString().slice(0, 10);
+      if (isoDate < earliestDate) return true;
+    }
+    if (rules.latestBookable) {
+      const latestDate = new Date(rules.latestBookable).toISOString().slice(0, 10);
+      if (isoDate > latestDate) return true;
+    }
+    return false;
+  };
+
   useEffect(() => {
     let cancelled = false;
     setLoadingSlots(true);
@@ -250,20 +295,26 @@ export default function BookingFlow({
         >
           {dateStrip.map((d) => {
             const isSelected = d.iso === date;
+            const disabled = isDateDisabled(d.iso);
             return (
               <button
                 key={d.iso}
                 role="radio"
                 aria-checked={isSelected}
-                onClick={() => setDate(d.iso)}
+                aria-disabled={disabled}
+                disabled={disabled}
+                onClick={() => !disabled && setDate(d.iso)}
+                title={disabled ? "Not available for booking" : undefined}
                 className={
                   "flex shrink-0 flex-col items-center justify-center rounded-xl border px-3 py-2 text-center transition focus:outline-none focus:ring-2 focus:ring-offset-1 " +
-                  (isSelected
-                    ? "border-transparent text-white shadow-md"
-                    : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:shadow-sm")
+                  (disabled
+                    ? "border-slate-200 bg-slate-50 text-slate-300 line-through cursor-not-allowed"
+                    : isSelected
+                      ? "border-transparent text-white shadow-md"
+                      : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:shadow-sm")
                 }
                 style={
-                  isSelected
+                  !disabled && isSelected
                     ? ({
                         backgroundColor: accent,
                         /* eslint-disable-next-line @typescript-eslint/no-explicit-any */

@@ -735,6 +735,44 @@ export const calendarSyncLogs = pgTable(
   })
 );
 
+// ─── Booking rules (notice / advance / caps / cooldown / blackouts) ────
+// One rule per scope bucket: service > location > tenant default.
+// Tenants without a row continue to use the legacy fields on `services`
+// (minNoticeMinutes, maxAdvanceDays) — byte-identical pre-feature
+// behavior. When a rule exists, its notice/advance override the legacy
+// fields. Other rule fields (caps, cooldown, blackouts, business hours)
+// are new — no legacy equivalent.
+export const bookingRules = pgTable(
+  "booking_rules",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    serviceId: uuid("service_id").references(() => services.id, { onDelete: "cascade" }),
+    locationId: uuid("location_id"),
+    enabled: boolean("enabled").notNull().default(true),
+    minNoticeMinutes: integer("min_notice_minutes"),
+    maxAdvanceDays: integer("max_advance_days"),
+    maxBookingsPerDay: integer("max_bookings_per_day"),
+    maxBookingsPerCustomerPerDay: integer("max_bookings_per_customer_per_day"),
+    maxConcurrentBookings: integer("max_concurrent_bookings"),
+    cooldownMinutes: integer("cooldown_minutes"),
+    /** jsonb string[] of "YYYY-MM-DD" dates (tenant TZ). */
+    blackoutDates: jsonb("blackout_dates").notNull().default([]),
+    requireBusinessHours: boolean("require_business_hours").notNull().default(false),
+    /** {0..6: {start: "HH:MM", end: "HH:MM"}} or {} */
+    businessHours: jsonb("business_hours").notNull().default({}),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    tenantIdx: index("booking_rules_tenant_idx").on(t.tenantId),
+    serviceIdx: index("booking_rules_service_idx").on(t.serviceId),
+    locationIdx: index("booking_rules_location_idx").on(t.locationId),
+  })
+);
+
 // ─── Staff routing rules + assignment stats ─────────────────────────────
 // One rule per scope: service-specific > location-specific > tenant default.
 // Mode is varchar so adding a mode is a one-line addition to the
