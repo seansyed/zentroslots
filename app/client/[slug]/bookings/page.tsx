@@ -24,7 +24,9 @@ export default async function ClientBookingsPage(props: {
       meetLink: bookings.meetLink,
       notes: bookings.notes,
       serviceName: services.name,
+      serviceSlug: services.slug,
       durationMinutes: services.durationMinutes,
+      staffUserId: users.id,
       staffName: users.name,
     })
     .from(bookings)
@@ -81,6 +83,7 @@ export default async function ClientBookingsPage(props: {
                   endAt: b.endAt.toISOString(),
                 }}
                 accent={tenant.primaryColor}
+                tenantSlug={tenant.slug}
               />
             ))}
           </ul>
@@ -104,6 +107,7 @@ export default async function ClientBookingsPage(props: {
                   rescheduleToken: undefined,
                 }}
                 accent={tenant.primaryColor}
+                tenantSlug={tenant.slug}
                 past
               />
             ))}
@@ -131,6 +135,7 @@ function EmptyCard({ children }: { children: React.ReactNode }) {
 function BookingCard({
   booking,
   accent,
+  tenantSlug,
   past = false,
 }: {
   booking: {
@@ -141,12 +146,15 @@ function BookingCard({
     meetLink: string | null;
     notes: string | null;
     serviceName: string;
+    serviceSlug: string;
     durationMinutes: number;
+    staffUserId: string;
     staffName: string;
     cancelToken?: string;
     rescheduleToken?: string;
   };
   accent: string;
+  tenantSlug: string;
   past?: boolean;
 }) {
   const start = new Date(booking.startAt);
@@ -207,6 +215,17 @@ function BookingCard({
                   Cancel
                 </Link>
               )}
+            </div>
+          )}
+          {past && booking.status !== "cancelled" && (
+            <div className="mt-3">
+              <Link
+                href={`/u/${encodeURIComponent(tenantSlug)}/${encodeURIComponent(booking.serviceSlug)}?staff=${encodeURIComponent(booking.staffUserId)}`}
+                className="inline-flex items-center justify-center rounded-md px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:opacity-90"
+                style={{ backgroundColor: accent }}
+              >
+                ↻ Book again
+              </Link>
             </div>
           )}
         </div>

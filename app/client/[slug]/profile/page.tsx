@@ -1,5 +1,7 @@
 import ClientPortalShell from "@/components/client/ClientPortalShell";
 import ProfileForm from "./ProfileForm";
+import CommPrefsCard from "./CommPrefsCard";
+import { normalizePrefs } from "@/lib/client-prefs";
 import { requireClientPortalContext } from "../_lib/guard";
 
 export const dynamic = "force-dynamic";
@@ -9,6 +11,8 @@ export default async function ClientProfilePage(props: {
 }) {
   const { slug } = await props.params;
   const { tenant, customer } = await requireClientPortalContext(slug);
+
+  const prefs = normalizePrefs(customer.commPrefs);
 
   return (
     <ClientPortalShell
@@ -33,17 +37,13 @@ export default async function ClientProfilePage(props: {
         }}
       />
 
-      <section className="mt-5 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-5 text-sm">
-        <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-          Communication preferences
-        </div>
-        <p className="mt-1.5 text-xs text-slate-500">
-          Per-channel opt-out and reminder-frequency controls are coming in a later release.
-        </p>
-        <div className="mt-2 text-[11px] text-slate-400">
-          Member since {customer.createdAt.toISOString().slice(0, 10)}
-        </div>
-      </section>
+      <div className="mt-5">
+        <CommPrefsCard slug={tenant.slug} accent={tenant.primaryColor} initial={prefs} />
+      </div>
+
+      <div className="mt-3 text-[11px] text-slate-400">
+        Member since {customer.createdAt.toISOString().slice(0, 10)}
+      </div>
     </ClientPortalShell>
   );
 }

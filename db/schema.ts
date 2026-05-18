@@ -377,6 +377,9 @@ export const customers = pgTable(
     phone: varchar("phone", { length: 40 }),
     notes: text("notes"),
     tags: jsonb("tags").notNull().default([]),
+    // Per-customer communication preferences. Shape is defined in
+    // lib/client-prefs.ts so missing keys fall back to sensible defaults.
+    commPrefs: jsonb("comm_prefs").notNull().default({}),
     status: varchar("status", { length: 40 }).notNull().default("active"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
