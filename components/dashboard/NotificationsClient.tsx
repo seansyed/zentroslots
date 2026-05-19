@@ -332,12 +332,12 @@ function IntelChip({
   return (
     <div
       className={cn(
-        "relative inline-flex items-center gap-2 overflow-hidden rounded-xl border border-border/70 bg-surface/70 px-2.5 py-1.5 shadow-soft backdrop-blur-md transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:border-border-strong hover:bg-surface/85 hover:shadow-md",
+        "relative inline-flex items-center gap-2 overflow-hidden rounded-xl border border-border/70 bg-surface/70 px-2.5 py-1.5 shadow-[0_1px_2px_rgba(15,23,42,0.04),inset_0_-1px_0_rgba(15,23,42,0.03)] backdrop-blur-md transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:border-border-strong hover:bg-surface/85 hover:shadow-md",
         emphasis && "ring-1 ring-brand-accent/15",
       )}
     >
       {/* Inner top-edge highlight */}
-      <span aria-hidden className="pointer-events-none absolute inset-x-1 top-0 h-px bg-gradient-to-r from-transparent via-white/55 to-transparent" />
+      <span aria-hidden className="pointer-events-none absolute inset-x-1 top-0 h-px bg-gradient-to-r from-transparent via-white/65 to-transparent" />
       {/* Live pulse dot */}
       <span aria-hidden className="relative inline-flex h-2 w-2 shrink-0 items-center justify-center">
         {pulse && (
@@ -371,6 +371,12 @@ function AIOperationalStrip({ summary }: { summary: string }) {
         <span
           aria-hidden
           className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/60 to-transparent"
+        />
+        {/* Diagonal light sweep — passes across the strip every 15s
+            with a long rest. Pure ambient — never grabs attention. */}
+        <span
+          aria-hidden
+          className="zm-light-sweep pointer-events-none absolute inset-y-0 -left-1/4 w-1/3 bg-gradient-to-r from-transparent via-white/35 to-transparent"
         />
 
         <div className="relative flex items-center gap-3 px-4 py-3 sm:px-5">
@@ -693,7 +699,18 @@ function NotificationCard({
 
 function PremiumEmptyState() {
   return (
-    <PremiumCard interactive={false} className="relative overflow-hidden bg-gradient-to-br from-brand-subtle/30 via-surface to-surface">
+    <PremiumCard interactive={false} className="relative overflow-hidden bg-gradient-to-br from-brand-subtle/35 via-surface to-brand-subtle/20">
+      {/* Top-edge ambient light — a soft horizontal wash that anchors
+          the top of the card without showing a hard line. */}
+      <span
+        aria-hidden
+        className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-white/40 to-transparent"
+      />
+      {/* Top inner-highlight hairline */}
+      <span
+        aria-hidden
+        className="pointer-events-none absolute inset-x-6 top-0 h-px bg-gradient-to-r from-transparent via-white/55 to-transparent"
+      />
       {/* Two large ambient corner glows */}
       <div
         aria-hidden
@@ -714,22 +731,25 @@ function PremiumEmptyState() {
       />
 
       <div className="relative flex flex-col items-center justify-center px-4 py-12 text-center">
-        {/* Floating bell with layered translucent orbit rings */}
+        {/* Floating bell with layered orbit rings — each ring has
+            its own pulse timing for organic, non-synchronized motion.
+            Thickness varies inward (thinnest outside, slightly thicker
+            close to the icon) for natural depth perception. */}
         <div className="relative mb-5 inline-flex h-28 w-28 items-center justify-center">
-          {/* Outer orbit ring — slowest pulse */}
+          {/* Outer orbit ring — softest, longest cycle, faint blur */}
           <span
             aria-hidden
-            className="absolute h-28 w-28 rounded-full border border-brand-accent/10"
+            className="zm-ring-pulse-3 absolute h-28 w-28 rounded-full border border-brand-accent/8 blur-[1px]"
           />
-          {/* Middle orbit ring — brighter */}
+          {/* Middle orbit ring — medium opacity, medium cycle */}
           <span
             aria-hidden
-            className="absolute h-[88px] w-[88px] rounded-full border border-brand-accent/20"
+            className="zm-ring-pulse-2 absolute h-[88px] w-[88px] rounded-full border border-brand-accent/18"
           />
-          {/* Innermost orbit ring — closest to icon */}
+          {/* Innermost orbit ring — brightest, thicker, shortest cycle */}
           <span
             aria-hidden
-            className="absolute h-[72px] w-[72px] rounded-full border border-brand-accent/30"
+            className="zm-ring-pulse-1 absolute h-[72px] w-[72px] rounded-full border-2 border-brand-accent/30"
           />
           {/* Diffuse glow behind icon */}
           <span
@@ -765,35 +785,43 @@ function PremiumEmptyState() {
           Monitoring bookings, customers, reminders, and automation.
         </div>
 
-        {/* Ghost preview activity — communicates "the system IS working,
-            it's just quiet right now". Ultra low opacity, no interaction,
-            stylized to look like real notifications behind a frosted
-            pane. */}
-        <div className="mt-8 w-full max-w-md space-y-1.5" aria-hidden>
-          <GhostNotifRow
-            icon={Calendar}
-            iconBg="bg-brand-subtle"
-            iconText="text-brand-accent"
-            title="Sarah booked Strategy Session"
-            meta="Booking · 2h ago"
-            opacity="opacity-55"
-          />
-          <GhostNotifRow
-            icon={Sparkles}
-            iconBg="bg-brand-subtle"
-            iconText="text-brand-accent"
-            title="AI optimized tomorrow's availability"
-            meta="AI Insight · earlier"
-            opacity="opacity-45"
-          />
-          <GhostNotifRow
-            icon={CheckCheck}
-            iconBg="bg-emerald-50"
-            iconText="text-emerald-700"
-            title="Reminder delivered successfully"
-            meta="System · earlier"
-            opacity="opacity-35"
-          />
+        {/* Ghost preview activity — staggered horizontal offsets +
+            width variance simulate ambient operational activity
+            instead of mechanical centered alignment. */}
+        <div className="mt-8 w-full max-w-md space-y-2" aria-hidden>
+          {/* Row 1 — full width, brightest */}
+          <div className="mx-auto" style={{ width: "100%" }}>
+            <GhostNotifRow
+              icon={Calendar}
+              iconBg="bg-brand-subtle"
+              iconText="text-brand-accent"
+              title="Sarah booked Strategy Session"
+              meta="Booking · 2h ago"
+              opacity="opacity-55"
+            />
+          </div>
+          {/* Row 2 — slightly right-shifted + narrower */}
+          <div className="ml-auto mr-0" style={{ width: "88%" }}>
+            <GhostNotifRow
+              icon={Sparkles}
+              iconBg="bg-brand-subtle"
+              iconText="text-brand-accent"
+              title="AI optimized tomorrow's availability"
+              meta="AI Insight · earlier"
+              opacity="opacity-45"
+            />
+          </div>
+          {/* Row 3 — slightly left-shifted + medium width */}
+          <div className="mr-auto ml-0" style={{ width: "92%" }}>
+            <GhostNotifRow
+              icon={CheckCheck}
+              iconBg="bg-emerald-50"
+              iconText="text-emerald-700"
+              title="Reminder delivered successfully"
+              meta="System · earlier"
+              opacity="opacity-35"
+            />
+          </div>
         </div>
       </div>
     </PremiumCard>

@@ -139,6 +139,29 @@ body {
 }
 .zm-drift-slow-reverse { animation: zm-drift-slow-reverse 18s ease-in-out infinite; }
 
+/* Diagonal light sweep — used by the AI Operational Strip for an
+   ambient "intelligence is alive" surface treatment. A thin diagonal
+   highlight travels across the surface every ~15s with a 4s rest at
+   each end (handled by the keyframe percentage stops). */
+@keyframes zm-light-sweep {
+  0%, 12%   { transform: translateX(-110%) skewX(-20deg); opacity: 0; }
+  18%       { opacity: 0.55; }
+  50%       { transform: translateX(220%)  skewX(-20deg); opacity: 0.55; }
+  60%, 100% { transform: translateX(220%)  skewX(-20deg); opacity: 0; }
+}
+.zm-light-sweep { animation: zm-light-sweep 15s ease-in-out infinite; }
+
+/* Concentric orbit rings — used by the empty-state radar. Each ring
+   carries a different delay + duration so they breathe out of sync,
+   reading as organic rather than mathematical. */
+@keyframes zm-ring-pulse {
+  0%, 100% { opacity: 0.35; transform: scale(1);    }
+  50%      { opacity: 0.85; transform: scale(1.04); }
+}
+.zm-ring-pulse-1 { animation: zm-ring-pulse 4.0s ease-in-out infinite; }
+.zm-ring-pulse-2 { animation: zm-ring-pulse 5.4s ease-in-out infinite 0.7s; }
+.zm-ring-pulse-3 { animation: zm-ring-pulse 6.8s ease-in-out infinite 1.4s; }
+
 /* Animated gradient border — used by the AI summary banner. A
    conic-gradient masked to the border by linear-gradient masks
    sweeps every 10s with a calm easing curve. The masks let us keep
