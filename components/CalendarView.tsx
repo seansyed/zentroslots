@@ -367,7 +367,7 @@ function ViewCrossfade({
         initial={reduced ? { opacity: 1 } : { opacity: 0, y: 4 }}
         animate={{ opacity: 1, y: 0 }}
         exit={reduced ? { opacity: 1 } : { opacity: 0, y: -4 }}
-        transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+        transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
       >
         {children}
       </motion.div>
@@ -446,7 +446,7 @@ function SegmentedViewSwitcher({ view, onView }: { view: View; onView: (v: View)
                 layoutId="calendar-view-indicator"
                 className="absolute inset-0 rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover shadow-[0_4px_12px_rgba(53,157,243,0.35)]"
                 aria-hidden
-                transition={reduced ? { duration: 0 } : { type: "spring", stiffness: 350, damping: 30 }}
+                transition={reduced ? { duration: 0 } : { duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
               />
             )}
             <span className="relative">{VIEW_LABEL[v]}</span>
@@ -865,15 +865,16 @@ function MiniCalendar({
             >
               <span className="tabular-nums">{format(d, "d")}</span>
               {density > 0 && (
-                <div className={cn(
-                  "absolute bottom-0.5 left-1/2 flex -translate-x-1/2 items-center gap-[2px]",
-                )} aria-hidden>
+                <div
+                  className="absolute bottom-1 left-1/2 flex -translate-x-1/2 items-center gap-[2px]"
+                  aria-hidden
+                >
                   {Array.from({ length: density }).map((_, i) => (
                     <span
                       key={i}
                       className={cn(
-                        "h-[3px] w-[3px] rounded-full",
-                        isAnchor ? "bg-white/80" : "bg-brand-accent",
+                        "h-[2px] w-[4px] rounded-full transition-colors",
+                        isAnchor ? "bg-white/85" : "bg-brand-accent/85",
                       )}
                     />
                   ))}
@@ -1110,17 +1111,28 @@ function DayColumn({
       })}
 
       {/* Focus block overlay — only on today's column when a meaningful
-          window exists. Sits behind events (z-0) but above background. */}
+          window exists. Sits behind events (z-0) but above background.
+          Subtle dot-texture overlay communicates "protected zone"
+          without raising visual noise. */}
       {focusOverlay && (() => {
         const startPx = ((focusOverlay.startMin - DAY_START_HOUR * 60) / 60) * PX_PER_HOUR;
         const heightPx = ((focusOverlay.endMin - focusOverlay.startMin) / 60) * PX_PER_HOUR;
         if (heightPx < 24) return null;
         return (
           <div
-            className="pointer-events-none absolute inset-x-1 z-0 rounded-xl border border-emerald-300/40 bg-gradient-to-b from-emerald-50/70 via-emerald-50/40 to-emerald-50/20 shadow-[inset_0_0_0_1px_rgba(16,185,129,0.08)]"
+            className="pointer-events-none absolute inset-x-1 z-0 overflow-hidden rounded-xl border border-emerald-300/40 bg-gradient-to-b from-emerald-50/70 via-emerald-50/40 to-emerald-50/20 shadow-[inset_0_0_0_1px_rgba(16,185,129,0.08)]"
             style={{ top: startPx, height: heightPx }}
             aria-hidden
           >
+            {/* Quiet dot pattern — "protected time" texture. */}
+            <div
+              className="absolute inset-0"
+              style={{
+                backgroundImage:
+                  "radial-gradient(circle at 1px 1px, rgba(16,185,129,0.10) 1px, transparent 0)",
+                backgroundSize: "14px 14px",
+              }}
+            />
             <div className="absolute left-2 top-2 inline-flex items-center gap-1 rounded-full bg-emerald-500/95 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-white shadow-[0_2px_8px_rgba(16,185,129,0.35)]">
               <Coffee className="h-2.5 w-2.5" strokeWidth={2} />
               Focus · {focusOverlay.minutes}m
@@ -1202,8 +1214,8 @@ function EventBlock({
       draggable={draggable}
       onDragStart={(e) => e.dataTransfer.setData("text/booking-id", booking.id)}
       className={cn(
-        "group/event relative flex flex-col items-start overflow-hidden rounded-xl border bg-surface/90 px-2.5 py-1.5 pl-3 text-left text-[11px] shadow-soft backdrop-blur-sm transition-all duration-200 ease-out",
-        "hover:-translate-y-0.5 hover:scale-[1.012] hover:shadow-lift hover:border-border-strong hover:z-20",
+        "group/event relative flex flex-col items-start overflow-hidden rounded-xl border bg-surface/90 px-2.5 py-1.5 pl-3 text-left text-[11px] shadow-soft backdrop-blur-sm transition-all duration-200 ease-[cubic-bezier(0.16,1,0.3,1)]",
+        "hover:-translate-y-0.5 hover:scale-[1.008] hover:shadow-lift hover:border-border-strong hover:z-20",
         isMuted ? "opacity-60" : "",
         draggable ? "cursor-grab active:cursor-grabbing" : "cursor-pointer",
         "border-border/70",

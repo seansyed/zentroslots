@@ -296,7 +296,7 @@ function RelativeTimeChip({ startAt }: { startAt: string }) {
     return () => clearInterval(t);
   }, [startAt]);
   return (
-    <span className="inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-brand-accent to-brand-hover px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-white shadow-[0_4px_10px_rgba(53,157,243,0.3)]">
+    <span className="zm-pulse-glow inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-brand-accent to-brand-hover px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-white shadow-[0_4px_10px_rgba(53,157,243,0.3)]">
       <span className="h-1 w-1 rounded-full bg-white/90" />
       {label}
     </span>
