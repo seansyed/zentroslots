@@ -181,26 +181,33 @@ export default function NotificationsClient({ initial }: { initial: Notif[] }) {
   }
 
   return (
-    <div className="mt-6 space-y-5">
+    <div className="relative mt-6 space-y-5">
+      {/* ── Ambient background depth — subtle radial wash fields
+            behind the entire notifications container. Sub-conscious
+            depth without competing with content. ──────────────────── */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute -left-32 top-32 -z-10 h-80 w-80 rounded-full bg-brand-accent/[0.06] blur-3xl"
+      />
+      <div
+        aria-hidden
+        className="pointer-events-none absolute -right-32 top-96 -z-10 h-72 w-72 rounded-full bg-brand-accent/[0.05] blur-3xl"
+      />
+
       {/* ── Hero ──────────────────────────────────────────────── */}
       <FadeIn>
         <Hero unreadCount={unreadCount} totalCount={rows.length} todayCount={todayCount} />
       </FadeIn>
 
-      {/* ── AI summary banner (only when there's signal) ──────── */}
-      {summary && (
-        <FadeIn delay={1}>
-          {/* zm-border-sweep wraps the InsightCard with an animated
-              gradient hairline border that sweeps every 10s. Inner
-              surface stays fully opaque so text contrast is intact. */}
-          <div className="zm-border-sweep relative overflow-hidden rounded-2xl">
-            <InsightCard title="Operational signal">{summary}</InsightCard>
-          </div>
-        </FadeIn>
-      )}
+      {/* ── AI Operational Strip — always rendered. The intelligence
+            affordance never disappears so the page always reads as
+            actively monitored. ────────────────────────────────────── */}
+      <FadeIn delay={1}>
+        <AIOperationalStrip summary={summary} />
+      </FadeIn>
 
       {/* ── Filter bar + actions ──────────────────────────────── */}
-      <FadeIn delay={summary ? 2 : 1}>
+      <FadeIn delay={2}>
         <FilterBar
           filter={filter}
           onChange={setFilter}
@@ -212,13 +219,13 @@ export default function NotificationsClient({ initial }: { initial: Notif[] }) {
 
       {/* ── Body ──────────────────────────────────────────────── */}
       {filtered.length === 0 ? (
-        <FadeIn delay={summary ? 3 : 2}>
+        <FadeIn delay={3}>
           {rows.length === 0 ? <PremiumEmptyState /> : <FilteredEmptyState filter={filter} />}
         </FadeIn>
       ) : (
         <div className="space-y-5">
           {grouped.map((g, idx) => (
-            <FadeIn key={g.bucket} delay={(summary ? 3 : 2) + idx}>
+            <FadeIn key={g.bucket} delay={3 + idx}>
               <NotifGroup bucket={g.bucket} notifs={g.notifs} onMarkRead={markOne} />
             </FadeIn>
           ))}
@@ -343,6 +350,59 @@ function IntelChip({
         <div className="mt-0.5 text-[12px] font-semibold tabular-nums text-ink">
           {value}
           {suffix && <span className="ml-1 text-[10px] font-medium text-ink-muted">{suffix}</span>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── AI Operational Strip ──────────────────────────────────────────
+
+function AIOperationalStrip({ summary }: { summary: string }) {
+  return (
+    <div className="zm-border-sweep relative overflow-hidden rounded-2xl">
+      <div className="relative overflow-hidden rounded-2xl border border-brand-accent/15 bg-gradient-to-r from-brand-subtle/45 via-surface to-surface shadow-soft">
+        {/* Soft internal glow */}
+        <div
+          aria-hidden
+          className="pointer-events-none absolute -right-16 -top-16 h-40 w-40 rounded-full bg-brand-accent/12 blur-3xl"
+        />
+        {/* Inner top-edge highlight */}
+        <span
+          aria-hidden
+          className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/60 to-transparent"
+        />
+
+        <div className="relative flex items-center gap-3 px-4 py-3 sm:px-5">
+          {/* AI sync indicator — Sparkles in a brand-gradient pill
+              with a live emerald sync dot in the corner. The
+              container itself carries zm-pulse-glow so the dot has
+              a slow breathing halo. */}
+          <div className="zm-pulse-glow relative inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-brand-accent to-brand-hover text-white shadow-[0_4px_12px_rgba(53,157,243,0.35)]">
+            <Sparkles className="h-4 w-4" strokeWidth={2} />
+            <span aria-hidden className="absolute -right-0.5 -top-0.5 inline-flex h-2.5 w-2.5 items-center justify-center">
+              <span className="absolute inset-0 animate-ping rounded-full bg-emerald-400/55" />
+              <span className="relative h-2 w-2 rounded-full bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.55)] ring-2 ring-surface" />
+            </span>
+          </div>
+
+          <div className="min-w-0 flex-1">
+            <div className="text-[10px] font-semibold uppercase tracking-[0.10em] text-brand-accent">
+              AI Operational Signal
+            </div>
+            <div className="mt-0.5 text-[13px] leading-relaxed text-ink">
+              {summary}
+            </div>
+          </div>
+
+          {/* Tiny right-side live presence */}
+          <div className="hidden shrink-0 items-center gap-1.5 rounded-full border border-border bg-surface/70 px-2 py-0.5 text-[10px] font-medium text-ink-muted backdrop-blur-sm sm:inline-flex">
+            <span aria-hidden className="relative inline-flex h-1.5 w-1.5">
+              <span className="absolute inset-0 animate-ping rounded-full bg-emerald-400/55" />
+              <span className="relative h-1.5 w-1.5 rounded-full bg-emerald-500" />
+            </span>
+            Live
+          </div>
         </div>
       </div>
     </div>
@@ -654,12 +714,29 @@ function PremiumEmptyState() {
       />
 
       <div className="relative flex flex-col items-center justify-center px-4 py-12 text-center">
-        {/* Floating bell */}
-        <div className="relative mb-5">
+        {/* Floating bell with layered translucent orbit rings */}
+        <div className="relative mb-5 inline-flex h-28 w-28 items-center justify-center">
+          {/* Outer orbit ring — slowest pulse */}
           <span
             aria-hidden
-            className="absolute inset-0 -m-3 rounded-full bg-brand-accent/15 blur-2xl"
+            className="absolute h-28 w-28 rounded-full border border-brand-accent/10"
           />
+          {/* Middle orbit ring — brighter */}
+          <span
+            aria-hidden
+            className="absolute h-[88px] w-[88px] rounded-full border border-brand-accent/20"
+          />
+          {/* Innermost orbit ring — closest to icon */}
+          <span
+            aria-hidden
+            className="absolute h-[72px] w-[72px] rounded-full border border-brand-accent/30"
+          />
+          {/* Diffuse glow behind icon */}
+          <span
+            aria-hidden
+            className="absolute h-20 w-20 rounded-full bg-brand-accent/15 blur-2xl"
+          />
+          {/* Bell icon container */}
           <div className="zm-pulse-glow relative inline-flex h-16 w-16 items-center justify-center rounded-2xl border border-brand-accent/15 bg-gradient-to-br from-brand-subtle to-surface text-brand-accent shadow-soft">
             <Bell className="h-7 w-7" strokeWidth={1.75} />
             {/* Tiny live system pulse */}
@@ -699,7 +776,7 @@ function PremiumEmptyState() {
             iconText="text-brand-accent"
             title="Sarah booked Strategy Session"
             meta="Booking · 2h ago"
-            opacity="opacity-40"
+            opacity="opacity-55"
           />
           <GhostNotifRow
             icon={Sparkles}
@@ -707,7 +784,7 @@ function PremiumEmptyState() {
             iconText="text-brand-accent"
             title="AI optimized tomorrow's availability"
             meta="AI Insight · earlier"
-            opacity="opacity-30"
+            opacity="opacity-45"
           />
           <GhostNotifRow
             icon={CheckCheck}
@@ -715,7 +792,7 @@ function PremiumEmptyState() {
             iconText="text-emerald-700"
             title="Reminder delivered successfully"
             meta="System · earlier"
-            opacity="opacity-25"
+            opacity="opacity-35"
           />
         </div>
       </div>
@@ -848,8 +925,13 @@ function formatRelative(ts: string): string {
   return new Date(ts).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
-function deriveSummary(rows: Notif[]): string | null {
-  if (rows.length === 0) return null;
+/**
+ * Operational signal text. Always returns a string — when there's no
+ * actionable signal, falls back to a calm "systems running normally"
+ * variant so the AI strip remains a permanent intelligence affordance
+ * instead of disappearing whenever the inbox quiets down.
+ */
+function deriveSummary(rows: Notif[]): string {
   const unread = rows.filter((n) => !n.readAt).length;
   const critical = rows.filter(isCritical).length;
   const todayKey = dayKey(new Date());
@@ -859,7 +941,6 @@ function deriveSummary(rows: Notif[]): string | null {
   if (critical > 0) {
     return `${critical} critical ${critical === 1 ? "alert" : "alerts"} need attention. Resolve these first to keep operations clean.`;
   }
-  if (unread === 0) return null; // No insight beats a noisy one when there's nothing to do.
   if (bookingToday >= 2) {
     return `${bookingToday} booking updates today. Your customer activity is healthy.`;
   }
@@ -869,5 +950,10 @@ function deriveSummary(rows: Notif[]): string | null {
   if (unread > 0) {
     return `${unread} unread ${unread === 1 ? "notification" : "notifications"}. Nothing urgent flagged.`;
   }
-  return null;
+  // Calm fallbacks — rotate by row volume so even an empty inbox
+  // reads as monitored rather than dead.
+  if (rows.length === 0) {
+    return "Automation systems running normally. No urgent operational risks detected.";
+  }
+  return "All operational signals resolved. Workspace is calm.";
 }
