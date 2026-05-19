@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { sql } from "drizzle-orm";
 import { db } from "@/db/client";
 import { log } from "@/lib/logger";
+import { verifySmtpTransport, getEmailProviderInfo } from "@/lib/email";
 
 export const dynamic = "force-dynamic";
 
@@ -208,6 +209,47 @@ export async function GET() {
       };
     } catch (e) {
       checks.recommendation_generation_runtime = {
+        ok: false,
+        ms: Date.now() - start,
+        detail: (e as Error).message,
+      };
+    }
+  }
+
+  // SMTP transport — verifies the centralized email transport is
+  // reachable + auth works. Cached for 60s inside verifySmtpTransport
+  // so the LB probe doesn't open a TLS handshake every check.
+  // SOFT-FAIL — an SES outage must NOT take the booking engine down.
+  // The detail field surfaces provider/category so ops dashboards can
+  // alert distinctly from a hard DB failure.
+  {
+    const start = Date.now();
+    try {
+      const info = getEmailProviderInfo();
+      const v = await verifySmtpTransport({ timeoutMs: 3_000 });
+      const detail = v.ok
+        ? `provider=${info.provider}; ${v.detail ?? ""}`
+        : `provider=${info.provider}; category=${v.category ?? "unknown"}; ${v.detail ?? ""}`;
+      checks.smtp_transport = {
+        ok: true, // soft check — never toggles allOk
+        ms: Date.now() - start,
+        detail: detail.slice(0, 300),
+      };
+      // If the underlying verify failed, also tee a single structured
+      // log line so an alert pipeline can fire on it.
+      if (!v.ok) {
+        console.error(
+          JSON.stringify({
+            evt: "smtp_health_fail",
+            provider: info.provider,
+            category: v.category,
+            detail: v.detail,
+            ts: new Date().toISOString(),
+          })
+        );
+      }
+    } catch (e) {
+      checks.smtp_transport = {
         ok: false,
         ms: Date.now() - start,
         detail: (e as Error).message,
