@@ -32,7 +32,7 @@ import {
 } from "lucide-react";
 
 import AppointmentDrawer, { type DrawerBooking } from "@/components/dashboard/AppointmentDrawer";
-import { STATUS_BADGE, STATUS_LABEL, type Status } from "@/lib/status-colors";
+import { STATUS_BADGE, STATUS_DOT, STATUS_LABEL, type Status } from "@/lib/status-colors";
 import { Avatar, toast } from "@/components/ui/primitives";
 import { cn } from "@/lib/cn";
 import SegmentedControl from "@/components/ui/SegmentedControl";
@@ -296,7 +296,7 @@ function DateSection({
             className={cn(
               "rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider",
               relativeLabel === "Today"
-                ? "bg-brand-accent text-white"
+                ? "zm-pulse-glow bg-gradient-to-r from-brand-accent to-brand-hover text-white shadow-[0_3px_10px_rgba(53,157,243,0.32)]"
                 : "bg-surface-inset text-ink-subtle"
             )}
           >
@@ -403,6 +403,25 @@ function AppointmentCard({
           : "border-border",
       )}
     >
+      {/* Soft tactile hover halo — brand-tinted ring + glow that fades
+          in on hover. Same language as the calendar event card so the
+          two surfaces feel like one product. */}
+      <span
+        aria-hidden
+        className="pointer-events-none absolute -inset-px rounded-2xl opacity-0 transition-opacity duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] group-hover:opacity-100"
+        style={{
+          boxShadow:
+            "0 0 0 1px rgba(53,157,243,0.18), 0 10px 28px rgba(53,157,243,0.10)",
+        }}
+      />
+      {/* Subtle inner top highlight — 1px white hairline that lifts the
+          card off the canvas at rest. Disabled on muted rows. */}
+      {!isMuted && (
+        <span
+          aria-hidden
+          className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/60 to-transparent"
+        />
+      )}
       {/* Accent rail on the left for confirmed/upcoming */}
       <div
         aria-hidden
@@ -503,10 +522,11 @@ function AppointmentCard({
 
             <span
               className={cn(
-                "inline-flex shrink-0 items-center rounded-full border px-2 py-0.5 text-[10px] font-medium",
+                "inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] font-medium",
                 STATUS_BADGE[row.status]
               )}
             >
+              <span className={cn("inline-flex h-1.5 w-1.5 rounded-full", STATUS_DOT[row.status])} aria-hidden />
               {STATUS_LABEL[row.status]}
             </span>
           </div>
