@@ -856,7 +856,7 @@ function MiniCalendar({
                 isAnchor
                   ? "bg-gradient-to-br from-brand-accent to-brand-hover text-white shadow-[0_4px_10px_rgba(53,157,243,0.35)] hover:ring-0"
                   : isToday
-                    ? "bg-brand-subtle/70 font-semibold text-brand-accent ring-1 ring-brand-accent/20"
+                    ? "bg-brand-subtle/70 font-semibold text-brand-accent ring-1 ring-brand-accent/20 zm-pulse-glow"
                     : inMonth
                       ? "text-ink hover:bg-surface-inset"
                       : "text-ink-subtle hover:bg-surface-inset/60",
