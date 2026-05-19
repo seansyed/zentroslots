@@ -58,7 +58,7 @@ export async function recordExportAudit(args: ExportAuditArgs): Promise<void> {
       category: "security.export.executed",
       actorUserId: args.userId ?? null,
       entityType: "export",
-      entityId: args.exportType,
+      // entityId is a UUID column — exportType lives in metadata.
       ipAddress: args.ipAddress ?? null,
       metadata: {
         export_type: args.exportType,

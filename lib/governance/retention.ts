@@ -24,7 +24,7 @@
  * NEVER throws. Always returns a summary.
  */
 
-import { and, eq, lt, sql } from "drizzle-orm";
+import { and, count, eq, lt } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import {
@@ -94,10 +94,12 @@ export async function runTenantRetention(args: {
         return r.length;
       },
       count: async (cutoff) => {
-        const rows = (await db.execute(
-          sql`SELECT count(*)::int AS n FROM audit_logs
-              WHERE tenant_id = ${args.tenantId} AND created_at < ${cutoff}`
-        )) as unknown as Array<{ n: number | string | null }>;
+        // Use Drizzle's typed predicates — postgres-js can't bind a
+        // Date inside a raw sql template (documented workaround).
+        const rows = await db
+          .select({ n: count() })
+          .from(auditLogs)
+          .where(and(eq(auditLogs.tenantId, args.tenantId), lt(auditLogs.createdAt, cutoff)));
         return Number(rows[0]?.n ?? 0);
       },
     },
@@ -117,10 +119,10 @@ export async function runTenantRetention(args: {
         return r.length;
       },
       count: async (cutoff) => {
-        const rows = (await db.execute(
-          sql`SELECT count(*)::int AS n FROM session_audit_events
-              WHERE tenant_id = ${args.tenantId} AND created_at < ${cutoff}`
-        )) as unknown as Array<{ n: number | string | null }>;
+        const rows = await db
+          .select({ n: count() })
+          .from(sessionAuditEvents)
+          .where(and(eq(sessionAuditEvents.tenantId, args.tenantId), lt(sessionAuditEvents.createdAt, cutoff)));
         return Number(rows[0]?.n ?? 0);
       },
     },
@@ -140,10 +142,10 @@ export async function runTenantRetention(args: {
         return r.length;
       },
       count: async (cutoff) => {
-        const rows = (await db.execute(
-          sql`SELECT count(*)::int AS n FROM password_reset_tokens
-              WHERE tenant_id = ${args.tenantId} AND created_at < ${cutoff}`
-        )) as unknown as Array<{ n: number | string | null }>;
+        const rows = await db
+          .select({ n: count() })
+          .from(passwordResetTokens)
+          .where(and(eq(passwordResetTokens.tenantId, args.tenantId), lt(passwordResetTokens.createdAt, cutoff)));
         return Number(rows[0]?.n ?? 0);
       },
     },
@@ -166,10 +168,11 @@ export async function runTenantRetention(args: {
       },
       count: async (cutoff) => {
         const cutoffStr = cutoff.toISOString().slice(0, 10);
-        const rows = (await db.execute(
-          sql`SELECT count(*)::int AS n FROM analytics_daily_snapshots
-              WHERE tenant_id = ${args.tenantId} AND snapshot_date < ${cutoffStr}`
-        )) as unknown as Array<{ n: number | string | null }>;
+        // snapshotDate is a DATE — string binding is fine here.
+        const rows = await db
+          .select({ n: count() })
+          .from(analyticsDailySnapshots)
+          .where(and(eq(analyticsDailySnapshots.tenantId, args.tenantId), lt(analyticsDailySnapshots.snapshotDate, cutoffStr)));
         return Number(rows[0]?.n ?? 0);
       },
     },
@@ -189,10 +192,10 @@ export async function runTenantRetention(args: {
         return r.length;
       },
       count: async (cutoff) => {
-        const rows = (await db.execute(
-          sql`SELECT count(*)::int AS n FROM export_audit_events
-              WHERE tenant_id = ${args.tenantId} AND exported_at < ${cutoff}`
-        )) as unknown as Array<{ n: number | string | null }>;
+        const rows = await db
+          .select({ n: count() })
+          .from(exportAuditEvents)
+          .where(and(eq(exportAuditEvents.tenantId, args.tenantId), lt(exportAuditEvents.exportedAt, cutoff)));
         return Number(rows[0]?.n ?? 0);
       },
     },
@@ -247,7 +250,7 @@ export async function runTenantRetention(args: {
           actorUserId: args.actorUserId ?? null,
           actorLabel: args.actorUserId ? undefined : "system/cron",
           entityType: "retention",
-          entityId: t.target,
+          // entityId is a UUID column — keep the resource name in metadata only.
           metadata: {
             target: t.target,
             configured_days: t.configuredDays,
@@ -276,7 +279,7 @@ export async function runTenantRetention(args: {
           actorUserId: args.actorUserId ?? null,
           actorLabel: args.actorUserId ? undefined : "system/cron",
           entityType: "retention",
-          entityId: t.target,
+          // entityId is a UUID column — keep the resource name in metadata only.
           metadata: {
             target: t.target,
             failed: true,

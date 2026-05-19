@@ -129,7 +129,8 @@ export async function PATCH(req: NextRequest) {
         actorUserId: user.id,
         actorLabel: user.name,
         entityType: "policy",
-        entityId: f,
+        // entityId is a UUID column — DO NOT pass the string field
+        // name here. The field name lives in metadata.field.
         ipAddress: ip,
         metadata: { field: f, previous: prev, next },
       });
