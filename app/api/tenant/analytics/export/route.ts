@@ -58,7 +58,23 @@ export async function GET(req: NextRequest) {
       "successful_payments",
       "failed_payments",
       "avg_booking_value_cents",
+      // Forecasting + intelligence (populated on rows where the
+      // aggregation worker computed trailing-window intelligence —
+      // typically the latest day per tenant).
+      "projected_bookings_30d",
+      "projected_revenue_30d_cents",
+      "staffing_pressure_level",
+      "trend_direction",
+      "forecast_confidence",
     ];
+
+    type ForecastingExtras = {
+      projectedBookingsNext30Days: number;
+      projectedRevenueNext30Days: number;
+      staffingPressureLevel: string;
+      trendDirection: string;
+      confidenceScore: number;
+    };
 
     type RevenueExtras = {
       grossRevenueCents: number;
@@ -73,9 +89,10 @@ export async function GET(req: NextRequest) {
     for (const r of rows) {
       const extras =
         r.extras && typeof r.extras === "object" && !Array.isArray(r.extras)
-          ? (r.extras as { revenue?: RevenueExtras })
+          ? (r.extras as { revenue?: RevenueExtras; forecasting?: ForecastingExtras })
           : null;
       const rev = extras?.revenue;
+      const fc = extras?.forecasting;
       lines.push(
         [
           r.snapshotDate,
@@ -97,6 +114,11 @@ export async function GET(req: NextRequest) {
           rev?.successfulPayments ?? "",
           rev?.failedPayments ?? "",
           rev?.avgBookingValueCents ?? "",
+          fc?.projectedBookingsNext30Days ?? "",
+          fc?.projectedRevenueNext30Days ?? "",
+          fc?.staffingPressureLevel ?? "",
+          fc?.trendDirection ?? "",
+          fc?.confidenceScore ?? "",
         ].join(",")
       );
     }

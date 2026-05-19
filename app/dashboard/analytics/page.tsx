@@ -220,6 +220,19 @@ export default async function AnalyticsPage() {
     .slice(0, 8);
   const dollars = (cents: number) => `$${(cents / 100).toFixed(2)}`;
 
+  // ─── Forecasting + staffing intelligence + recommendations ────────
+  // The aggregation worker writes these to the most-recent snapshot's
+  // extras using a trailing 30-day window. We read off the LAST
+  // snapshot (chronological end of `aggregates`). Absent → the
+  // corresponding section is hidden gracefully.
+  const latestExtras = aggregates.length > 0 ? aggregates[aggregates.length - 1].extras : {};
+  const forecast = latestExtras.forecasting ?? null;
+  const staffingInsightsExtra = latestExtras.staffingInsights ?? null;
+  const riskSignals = latestExtras.riskSignals ?? null;
+  const recommendations = latestExtras.recommendations ?? null;
+  // Hide forecasts when confidence is too low — avoids false-precision noise.
+  const showForecast = forecast !== null && forecast.confidenceScore >= 0.4;
+
   return (
     <Shell {...shellProps}>
       <h1 className="text-heading font-semibold text-ink">Analytics</h1>
@@ -404,6 +417,95 @@ export default async function AnalyticsPage() {
               </div>
             </>
           )}
+        </>
+      )}
+
+      {/* FORECASTING — only when confidence sufficient. */}
+      {showForecast && forecast && (
+        <>
+          <h2 className="mt-10 text-lg font-medium">Forecasting</h2>
+          <p className="mt-1 text-xs text-ink-muted">
+            Based on the last {forecast.basedOnDays} days. Confidence{" "}
+            <span className="font-semibold text-ink">{Math.round(forecast.confidenceScore * 100)}%</span>{" · "}
+            trend{" "}
+            <span className="font-semibold text-ink">{forecast.trendDirection}</span>{" · "}
+            pressure{" "}
+            <span className="font-semibold text-ink">{forecast.staffingPressureLevel}</span>.
+          </p>
+          <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <Stat label="Projected bookings (30d)" value={String(forecast.projectedBookingsNext30Days)} />
+            <Stat label="Projected revenue (30d)" value={dollars(forecast.projectedRevenueNext30Days)} />
+            <Stat label="Busy days" value={forecast.expectedBusyWeekdays.join(", ") || "—"} muted />
+            <Stat label="Peak hours" value={forecast.expectedPeakHours.length > 0 ? forecast.expectedPeakHours.map((h) => `${h}h`).join(", ") : "—"} muted />
+          </div>
+        </>
+      )}
+
+      {/* STAFFING INTELLIGENCE — emit only when there are signals. */}
+      {staffingInsightsExtra && (
+        <>
+          <h2 className="mt-10 text-lg font-medium">Staffing intelligence</h2>
+          <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <Stat label="Overloaded staff" value={String(staffingInsightsExtra.overloadStaff)} muted />
+            <Stat label="Underutilized" value={String(staffingInsightsExtra.underutilizedStaff)} muted />
+            <Stat label="Uneven assignment" value={staffingInsightsExtra.unevenAssignment ? "Yes" : "No"} muted />
+            <Stat label="Booking surge" value={staffingInsightsExtra.bookingSurge ? "Yes" : "No"} muted />
+          </div>
+          {staffingInsightsExtra.messages.length > 0 && (
+            <ul className="mt-3 space-y-2">
+              {staffingInsightsExtra.messages.map((m, i) => (
+                <li
+                  key={`${m.code}-${i}`}
+                  className={
+                    "rounded-lg border p-3 text-sm " +
+                    (m.severity === "warning"
+                      ? "border-amber-200 bg-amber-50 text-amber-900"
+                      : m.severity === "positive"
+                        ? "border-green-200 bg-green-50 text-green-900"
+                        : "border-slate-200 bg-slate-50 text-slate-700")
+                  }
+                >
+                  {m.message}
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
+      )}
+
+      {/* RISK MONITORING — only when scoring has populated. */}
+      {riskSignals && riskSignals.totalScored > 0 && (
+        <>
+          <h2 className="mt-10 text-lg font-medium">Risk monitoring</h2>
+          <p className="mt-1 text-xs text-ink-muted">
+            Upcoming bookings scored by lead time, prior history, and engagement.
+          </p>
+          <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <Stat label="High-risk" value={String(riskSignals.highCount)} muted />
+            <Stat label="Medium-risk" value={String(riskSignals.mediumCount)} muted />
+            <Stat label="Low-risk" value={String(riskSignals.lowCount)} muted />
+            <Stat label="Scored" value={String(riskSignals.totalScored)} muted />
+          </div>
+        </>
+      )}
+
+      {/* OPERATIONAL RECOMMENDATIONS — cited, never AI-generated. */}
+      {recommendations && recommendations.length > 0 && (
+        <>
+          <h2 className="mt-10 text-lg font-medium">Recommendations</h2>
+          <ul className="mt-3 space-y-2">
+            {recommendations.map((r) => (
+              <li
+                key={r.code}
+                className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm"
+              >
+                <div className="text-sm font-medium text-ink">{r.message}</div>
+                <div className="mt-1 text-xs text-ink-subtle">
+                  <span className="font-semibold text-ink-muted">Why:</span> {r.evidence}
+                </div>
+              </li>
+            ))}
+          </ul>
         </>
       )}
 

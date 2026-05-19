@@ -77,6 +77,37 @@ export type SnapshotExtras = {
     revenueCents: number;
     bookings: number;
   }>;
+  /** Trailing-window forecasting result (recomputed nightly). Absent
+   *  on tenants with insufficient history (< 7 days of snapshots). */
+  forecasting?: {
+    projectedBookingsNext30Days: number;
+    projectedRevenueNext30Days: number;
+    expectedBusyWeekdays: string[];
+    expectedPeakHours: number[];
+    staffingPressureLevel: "low" | "medium" | "high";
+    trendDirection: "up" | "down" | "flat";
+    confidenceScore: number;
+    basedOnDays: number;
+  };
+  /** Staffing intelligence signals + insight message list. */
+  staffingInsights?: {
+    overloadStaff: number;
+    underutilizedStaff: number;
+    unevenAssignment: boolean;
+    bookingSurge: boolean;
+    highCancelWeekdays: number[];
+    messages: Array<{ code: string; severity: "warning" | "info" | "positive"; message: string }>;
+  };
+  /** No-show risk roll-up (counts only — per-appointment scoring
+   *  happens at read time when a future endpoint surfaces it). */
+  riskSignals?: {
+    highCount: number;
+    mediumCount: number;
+    lowCount: number;
+    totalScored: number;
+  };
+  /** Operational recommendations — deterministic, cited. */
+  recommendations?: Array<{ code: string; message: string; evidence: string }>;
 };
 
 /** Empty default — used when a tenant had no activity on a given day. */

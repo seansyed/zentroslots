@@ -98,6 +98,36 @@ export async function GET() {
     }
   }
 
+  // Forecasting freshness — counts snapshots written in the last 48h
+  // that have a forecasting payload in extras (proxy for "the
+  // trailing-window intelligence ran successfully"). Soft-fail — a
+  // tenant with insufficient history legitimately has no forecasting.
+  {
+    const start = Date.now();
+    try {
+      const rows = (await db.execute(
+        sql`SELECT MAX(created_at) AS last_at FROM analytics_daily_snapshots
+            WHERE extras ? 'forecasting'
+              AND created_at > NOW() - INTERVAL '48 hours'`
+      )) as unknown as Array<{ last_at: string | Date | null }>;
+      const lastAtRaw = rows[0]?.last_at;
+      const lastAt = lastAtRaw ? new Date(lastAtRaw) : null;
+      checks.forecasting_freshness = {
+        ok: lastAt !== null,
+        ms: Date.now() - start,
+        detail: lastAt
+          ? `last_at=${lastAt.toISOString()}`
+          : "no_forecasting_in_48h",
+      };
+    } catch (e) {
+      checks.forecasting_freshness = {
+        ok: false,
+        ms: Date.now() - start,
+        detail: (e as Error).message,
+      };
+    }
+  }
+
   return NextResponse.json(
     {
       ok: allOk,

@@ -9,7 +9,7 @@
  * the next (tenant, day). Rule #13 — analytics failures NEVER affect
  * the booking lifecycle (we don't touch bookings/users/etc here).
  */
-import { and, eq, sql } from "drizzle-orm";
+import { and, asc, eq, gte, lt, sql } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import { analyticsDailySnapshots } from "@/db/schema";
@@ -19,6 +19,9 @@ import { aggregateBookingMetrics } from "./bookingMetrics";
 import { aggregateRevenueMetrics } from "./revenueMetrics";
 import { aggregateRoutingMetrics } from "./routingMetrics";
 import { aggregateWaitlistMetrics } from "./waitlistMetrics";
+import { computeForecast } from "./forecasting";
+import { buildStaffingInsights } from "./staffingInsights";
+import { buildRecommendations } from "./recommendations";
 import type { DailyAggregate, SnapshotExtras } from "./types";
 
 export type AggregateInput = {
@@ -80,6 +83,93 @@ export async function aggregateDailyAnalytics(input: AggregateInput): Promise<Ag
           }
         : {}),
     };
+
+    // ── Trailing-window intelligence (forecasting + staffing + recs)
+    // Computed from the LAST 30 SNAPSHOTS (inclusive of today's just-
+    // built aggregate). Pure functions, defensive — each wrapped so
+    // a single failure doesn't block the snapshot write.
+    try {
+      const trailingStart = new Date(input.dayStart.getTime() - 29 * ONE_DAY_MS);
+      const trailingStartStr = trailingStart.toISOString().slice(0, 10);
+      const trailingRows = await db
+        .select()
+        .from(analyticsDailySnapshots)
+        .where(
+          and(
+            eq(analyticsDailySnapshots.tenantId, input.tenantId),
+            gte(analyticsDailySnapshots.snapshotDate, trailingStartStr),
+            lt(analyticsDailySnapshots.snapshotDate, snapshotDate)
+          )
+        )
+        .orderBy(asc(analyticsDailySnapshots.snapshotDate));
+
+      const trailing: DailyAggregate[] = trailingRows.map((r) => ({
+        tenantId: r.tenantId,
+        snapshotDate: r.snapshotDate,
+        totalBookings: r.totalBookings,
+        completedBookings: r.completedBookings,
+        cancelledBookings: r.cancelledBookings,
+        noShowBookings: r.noShowBookings,
+        recurringBookings: r.recurringBookings,
+        waitlistJoins: r.waitlistJoins,
+        waitlistConversions: r.waitlistConversions,
+        reviewRequestsSent: r.reviewRequestsSent,
+        reviewsCompleted: r.reviewsCompleted,
+        reminderEmailsSent: r.reminderEmailsSent,
+        reminderEmailsSuppressed: r.reminderEmailsSuppressed,
+        followupsSent: r.followupsSent,
+        averageBookingLeadHours: r.averageBookingLeadHours,
+        extras: (r.extras as SnapshotExtras) ?? {},
+      }));
+
+      // Synthesize a placeholder for today so the window includes the
+      // freshly-computed metrics. We build a minimal DailyAggregate
+      // matching the in-flight values.
+      const todayProvisional: DailyAggregate = {
+        tenantId: input.tenantId,
+        snapshotDate,
+        totalBookings: bookingCounts.total,
+        completedBookings: bookingCounts.completed,
+        cancelledBookings: bookingCounts.cancelled,
+        noShowBookings: bookingCounts.noShow,
+        recurringBookings: bookingCounts.recurring,
+        waitlistJoins: waitlist.joins,
+        waitlistConversions: waitlist.conversions,
+        reviewRequestsSent: automation.reviewRequestsSent,
+        reviewsCompleted: 0,
+        reminderEmailsSent: automation.reminderEmailsSent,
+        reminderEmailsSuppressed: automation.reminderEmailsSuppressed,
+        followupsSent: automation.followupsSent,
+        averageBookingLeadHours: bookingCounts.averageBookingLeadHours,
+        extras,
+      };
+      const window = [...trailing, todayProvisional];
+
+      const forecast = computeForecast(window);
+      const { insights, signals } = buildStaffingInsights(window);
+      const recommendations = buildRecommendations({
+        snapshots: window,
+        forecast,
+        staffingSignals: signals,
+      });
+
+      if (forecast) extras.forecasting = forecast;
+      if (insights.length > 0 || signals.overloadStaff > 0 || signals.underutilizedStaff > 0) {
+        extras.staffingInsights = {
+          overloadStaff: signals.overloadStaff,
+          underutilizedStaff: signals.underutilizedStaff,
+          unevenAssignment: signals.unevenAssignment,
+          bookingSurge: signals.bookingSurge,
+          highCancelWeekdays: signals.highCancelWeekdays,
+          messages: insights.map((i) => ({ code: i.code, severity: i.severity, message: i.message })),
+        };
+      }
+      if (recommendations.length > 0) extras.recommendations = recommendations;
+    } catch (e) {
+      console.error("[analytics] trailing-window intelligence failed:", e);
+      // Rule #13: never breaks the snapshot write. Day-level counts
+      // are still captured below.
+    }
 
     const aggregate: DailyAggregate = {
       tenantId: input.tenantId,
