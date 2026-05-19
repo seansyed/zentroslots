@@ -5,8 +5,12 @@ import { db } from "@/db/client";
 import { bookings, services, tenants, users } from "@/db/schema";
 import { getSession, isManagerial } from "@/lib/auth";
 import { loadTenantFeatures } from "@/lib/features";
+import { effectivePermissions } from "@/lib/security/permissions";
 import Shell from "@/components/dashboard/Shell";
-import AppointmentsTable from "@/components/dashboard/AppointmentsTable";
+import AppointmentsAgenda from "@/components/dashboard/AppointmentsAgenda";
+import AppointmentsSidePanel from "@/components/dashboard/AppointmentsSidePanel";
+import { FadeIn } from "@/components/ui/Motion";
+import { Download, CalendarRange } from "lucide-react";
 
 const PAGE_SIZE = 30;
 
@@ -64,82 +68,77 @@ export default async function AppointmentsPage(props: {
   const page = hasMore ? rows.slice(0, PAGE_SIZE) : rows;
   const nextCursor = hasMore ? page[page.length - 1].startAt.toISOString() : null;
 
-  // Resolve tenant feature flags once and pass relevant ones into the
-  // client table so the drawer can hide buttons whose actions are
-  // disabled at the API layer. The API stays the security boundary —
-  // this just keeps the UI honest.
   const features = await loadTenantFeatures(user.tenantId);
+  const permissions = effectivePermissions(user);
+
+  const serializedRows = page.map((r) => ({
+    ...r,
+    startAt: r.startAt.toISOString(),
+    endAt: r.endAt.toISOString(),
+    status: r.status,
+  }));
 
   return (
     <Shell
-      user={{ name: user.name, email: user.email, role: user.role }}
+      user={{ name: user.name, email: user.email, role: user.role, permissions }}
       tenant={tenant ? { name: tenant.name, slug: tenant.slug, plan: tenant.currentPlan, logoUrl: tenant.logoUrl } : undefined}
       title="Appointments"
       crumbs={[{ label: "Dashboard", href: "/dashboard" }, { label: "Appointments" }]}
     >
-      <div className="flex flex-wrap items-baseline justify-between gap-3">
-        <div>
-          <h1 className="text-heading font-semibold text-ink">Appointments</h1>
-          <p className="mt-1 text-sm text-ink-muted">Manage every booking across your workspace.</p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <a
-            href={`/api/bookings/export${status ? `?status=${status}` : ""}`}
-            download
-            className="rounded-md border border-border bg-surface px-3 py-1.5 text-sm text-ink hover:bg-surface-inset"
-          >
-            ↓ Export CSV
-          </a>
-          <a
-            href="/dashboard/calendar"
-            className="rounded-md border border-border bg-surface px-3 py-1.5 text-sm text-ink hover:bg-surface-inset"
-          >
-            Open calendar
-          </a>
-        </div>
-      </div>
-
-      <div className="mt-4 flex flex-wrap gap-1.5 text-sm">
-        {[
-          { slug: "",          label: "All" },
-          { slug: "confirmed", label: "Confirmed" },
-          { slug: "pending",   label: "Pending" },
-          { slug: "cancelled", label: "Cancelled" },
-          { slug: "completed", label: "Completed" },
-          { slug: "no_show",   label: "No-show" },
-        ].map((chip) => {
-          const isActive = (status || "") === chip.slug;
-          const href = chip.slug ? `/dashboard/appointments?status=${chip.slug}` : "/dashboard/appointments";
-          return (
+      <FadeIn delay={0}>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h1 className="text-[26px] font-semibold tracking-tight text-ink sm:text-[28px]">
+              Appointments
+            </h1>
+            <p className="mt-1 text-[13px] text-ink-muted">
+              Every booking across your workspace, in a calm scheduling timeline.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
             <a
-              key={chip.slug || "all"}
-              href={href}
-              className={
-                "rounded-md border px-3 py-1.5 " +
-                (isActive
-                  ? "border-brand-accent bg-brand-accent text-white"
-                  : "border-border bg-surface text-ink-muted hover:bg-surface-inset")
-              }
+              href="/dashboard/calendar"
+              className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-border bg-surface px-3 text-[12px] font-medium text-ink-muted shadow-soft transition-all hover:-translate-y-0.5 hover:bg-surface-inset hover:text-ink hover:shadow"
             >
-              {chip.label}
+              <CalendarRange className="h-3.5 w-3.5" strokeWidth={1.75} />
+              Open calendar
             </a>
-          );
-        })}
-      </div>
+            <a
+              href={`/api/bookings/export${status ? `?status=${status}` : ""}`}
+              download
+              className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-border bg-surface px-3 text-[12px] font-medium text-ink-muted shadow-soft transition-all hover:-translate-y-0.5 hover:bg-surface-inset hover:text-ink hover:shadow"
+            >
+              <Download className="h-3.5 w-3.5" strokeWidth={1.75} />
+              Export CSV
+            </a>
+          </div>
+        </div>
+      </FadeIn>
 
-      <AppointmentsTable
-        rows={page.map((r) => ({
-          ...r,
-          startAt: r.startAt.toISOString(),
-          endAt: r.endAt.toISOString(),
-          status: r.status as "pending" | "confirmed" | "cancelled" | "completed" | "no_show",
-        }))}
-        timezone={user.timezone}
-        canManage={user.role === "admin" || user.role === "staff" || user.role === "manager"}
-        canCancel={features.cancellations}
-        currentStatus={status}
-        nextCursor={nextCursor}
-      />
+      <FadeIn delay={1} className="mt-6">
+        <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
+          <AppointmentsAgenda
+            rows={serializedRows}
+            timezone={user.timezone}
+            canManage={user.role === "admin" || user.role === "staff" || user.role === "manager"}
+            canCancel={features.cancellations}
+            currentStatus={status}
+            nextCursor={nextCursor}
+          />
+          <AppointmentsSidePanel
+            rows={serializedRows.map((r) => ({
+              id: r.id,
+              startAt: r.startAt,
+              endAt: r.endAt,
+              status: r.status,
+              clientName: r.clientName,
+              serviceName: r.serviceName,
+              meetLink: r.meetLink,
+            }))}
+            timezone={user.timezone}
+          />
+        </div>
+      </FadeIn>
     </Shell>
   );
 }

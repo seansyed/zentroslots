@@ -27,6 +27,7 @@ import {
   ShieldCheck,
   ChevronsLeft,
   ChevronsRight,
+  ChevronRight,
   LogOut,
   Activity,
   CreditCard,
@@ -46,7 +47,6 @@ export type SidebarUser = {
   name: string;
   email: string;
   role: Role;
-  /** Optional granular permission map — keeps Sidebar back-compat. */
   permissions?: Partial<Record<
     | "canViewExecutiveAnalytics"
     | "canManageAutomation"
@@ -66,7 +66,16 @@ export type SidebarTenant = {
 
 type LucideIcon = React.ComponentType<{ className?: string; strokeWidth?: number }>;
 type Item = { label: string; href: string; icon: LucideIcon; soon?: boolean };
-type Group = { label?: string; items: Item[] };
+type Group = {
+  /** Stable id used as the localStorage key for collapsed state. */
+  id: string;
+  label?: string;
+  items: Item[];
+  /** When true, the group can be expanded/collapsed by the user. */
+  collapsible?: boolean;
+  /** Initial collapsed state if the user hasn't interacted. */
+  collapsedByDefault?: boolean;
+};
 
 function buildNav(
   variant: SidebarVariant,
@@ -85,6 +94,7 @@ function buildNav(
   if (variant === "super") {
     return [
       {
+        id: "super-platform",
         label: "Platform",
         items: [
           { label: "Overview",      href: "/admin",                 icon: LayoutDashboard },
@@ -96,6 +106,7 @@ function buildNav(
         ],
       },
       {
+        id: "super-ops",
         label: "Operations",
         items: [
           { label: "Audit logs",    href: "/admin#audit",           icon: ListChecks },
@@ -105,29 +116,7 @@ function buildNav(
     ];
   }
 
-  // tenant variant
-  const operations: Item[] = [
-    { label: "Dashboard",     href: "/dashboard",                icon: LayoutDashboard },
-    { label: "Calendar",      href: "/dashboard/calendar",       icon: Calendar },
-    { label: "Appointments",  href: "/dashboard/appointments",   icon: ListChecks },
-    { label: "Tasks",         href: "/dashboard/tasks",          icon: Flag },
-    { label: "Notifications", href: "/dashboard/notifications",  icon: Bell },
-  ];
-
-  const records: Item[] = [
-    { label: "Customers",   href: "/dashboard/customers",   icon: UserRound },
-    { label: "Staff",       href: "/dashboard/staff",       icon: Users },
-    { label: "Services",    href: "/dashboard/services",    icon: Box },
-    { label: "Locations",   href: "/dashboard/locations",   icon: MapPin },
-    { label: "Departments", href: "/dashboard/departments", icon: Briefcase },
-  ];
-
-  const time: Item[] = [
-    { label: "Working hours", href: "/dashboard/availability",            icon: Clock },
-    { label: "Overrides",     href: "/dashboard/availability/overrides",  icon: Flag },
-    { label: "Calendar sync", href: "/dashboard/settings/calendar",       icon: CalendarSync },
-  ];
-
+  // tenant variant — Phase 3 restructure into 5 progressive-disclosure groups.
   const roleDefaults = {
     canViewExecutiveAnalytics: role === "admin" || role === "manager",
     canManageAutomation:       role === "admin" || role === "manager",
@@ -135,34 +124,63 @@ function buildNav(
     canViewAuditLogs:          role === "admin" || role === "manager",
   };
 
-  const insightAndSettings: Item[] = [
-    { label: "Analytics",    href: "/dashboard/analytics",           icon: BarChart3 },
+  const operate: Item[] = [
+    { label: "Dashboard",     href: "/dashboard",                icon: LayoutDashboard },
+    { label: "Calendar",      href: "/dashboard/calendar",       icon: Calendar },
+    { label: "Appointments",  href: "/dashboard/appointments",   icon: ListChecks },
+    { label: "Tasks",         href: "/dashboard/tasks",          icon: Flag },
+    { label: "Notifications", href: "/dashboard/notifications",  icon: Bell },
+  ];
+
+  const crm: Item[] = [
+    { label: "Customers",   href: "/dashboard/customers",   icon: UserRound },
+    { label: "Staff",       href: "/dashboard/staff",       icon: Users },
+    ...(role === "admin"
+      ? [{ label: "Departments", href: "/dashboard/departments", icon: Briefcase }]
+      : []),
+  ];
+
+  const booking: Item[] = [
+    { label: "Services",      href: "/dashboard/services",                icon: Box },
+    ...(role === "admin"
+      ? [{ label: "Locations", href: "/dashboard/locations", icon: MapPin }]
+      : []),
+    { label: "Working hours", href: "/dashboard/availability",            icon: Clock },
+    { label: "Overrides",     href: "/dashboard/availability/overrides",  icon: Flag },
+    { label: "Calendar sync", href: "/dashboard/settings/calendar",       icon: CalendarSync },
+  ];
+
+  const workspace: Item[] = [
+    { label: "Analytics", href: "/dashboard/analytics", icon: BarChart3 },
     ...(flagOrRoleDefault("canViewExecutiveAnalytics", roleDefaults.canViewExecutiveAnalytics)
       ? [{ label: "Executive", href: "/dashboard/analytics/executive", icon: Sparkles }]
       : []),
-    { label: "Reports",      href: "/dashboard/reports",             icon: Receipt },
+    { label: "Reports", href: "/dashboard/reports", icon: Receipt },
     ...(role === "admin"
       ? [
-          { label: "Email log",    href: "/dashboard/emails",               icon: Mail },
-          { label: "Embed widget", href: "/dashboard/settings/embed",       icon: Box },
-          { label: "Custom domain",href: "/dashboard/settings/domain",      icon: Plug },
-          { label: "Billing",      href: "/dashboard/billing",              icon: Receipt },
-          { label: "Branding",     href: "/dashboard/settings/branding",    icon: Palette },
-          { label: "Integrations", href: "/dashboard/settings/integrations", icon: Plug },
+          { label: "Email log",      href: "/dashboard/emails",                  icon: Mail },
           { label: "Communications", href: "/dashboard/settings/communications", icon: Mail },
-          { label: "Feature controls", href: "/dashboard/settings/features", icon: Settings2 },
-          { label: "Staff routing", href: "/dashboard/settings/routing", icon: GitBranch },
-          { label: "Booking rules", href: "/dashboard/settings/booking-rules", icon: Clock },
+          { label: "Billing",        href: "/dashboard/billing",                 icon: Receipt },
+          { label: "Branding",       href: "/dashboard/settings/branding",       icon: Palette },
+          { label: "Integrations",   href: "/dashboard/settings/integrations",   icon: Plug },
+          { label: "Custom domain",  href: "/dashboard/settings/domain",         icon: Plug },
+          { label: "Embed widget",   href: "/dashboard/settings/embed",          icon: Box },
+        ]
+      : []),
+  ];
+
+  const advanced: Item[] = [
+    ...(role === "admin"
+      ? [
+          { label: "Feature controls",       href: "/dashboard/settings/features",        icon: Settings2 },
+          { label: "Staff routing",          href: "/dashboard/settings/routing",         icon: GitBranch },
+          { label: "Booking rules",          href: "/dashboard/settings/booking-rules",   icon: Clock },
+          { label: "Waitlists",              href: "/dashboard/settings/waitlists",       icon: Users },
+          { label: "Recurring bookings",     href: "/dashboard/settings/recurring",       icon: Repeat },
         ]
       : []),
     ...(flagOrRoleDefault("canManageAutomation", roleDefaults.canManageAutomation)
       ? [{ label: "Follow-up automations", href: "/dashboard/settings/automations", icon: Sparkles }]
-      : []),
-    ...(role === "admin"
-      ? [
-          { label: "Waitlists", href: "/dashboard/settings/waitlists", icon: Users },
-          { label: "Recurring bookings", href: "/dashboard/settings/recurring", icon: Repeat },
-        ]
       : []),
     { label: "Security", href: "/dashboard/settings/security", icon: Shield },
     ...(flagOrRoleDefault("canManageSecurity", role === "admin")
@@ -170,12 +188,21 @@ function buildNav(
       : []),
   ];
 
-  return [
-    { label: "Operate", items: operations },
-    { label: "Records", items: records },
-    { label: "Time",    items: time },
-    { label: "Workspace", items: insightAndSettings },
+  const groups: Group[] = [
+    { id: "operate",   label: "Operate",   items: operate },
+    { id: "crm",       label: "CRM",       items: crm },
+    { id: "booking",   label: "Booking",   items: booking },
+    { id: "workspace", label: "Workspace", items: workspace },
+    {
+      id: "advanced",
+      label: "Advanced",
+      items: advanced,
+      collapsible: true,
+      collapsedByDefault: true,
+    },
   ];
+
+  return groups.filter((g) => g.items.length > 0);
 }
 
 function isActive(href: string, pathname: string): boolean {
@@ -186,7 +213,7 @@ function isActive(href: string, pathname: string): boolean {
   return pathname === href || pathname.startsWith(href + "/");
 }
 
-// ─── Collapsed-state context (read by Shell to set the desktop aside width) ───
+// ─── Collapsed (sidebar-wide) state ─────────────────────────────────
 const STORAGE_KEY = "zm:sidebar:collapsed";
 
 export function useSidebarCollapsed(): [boolean, (next: boolean) => void] {
@@ -208,6 +235,33 @@ export function useSidebarCollapsed(): [boolean, (next: boolean) => void] {
     }
   }, []);
   return [collapsed, set];
+}
+
+// ─── Per-group collapsed state ───────────────────────────────────────
+function useGroupCollapsed(groupId: string, defaultCollapsed: boolean) {
+  const key = `zm:sidebar:group:${groupId}`;
+  const [collapsed, setCollapsed] = React.useState<boolean>(defaultCollapsed);
+  React.useEffect(() => {
+    try {
+      const stored = localStorage.getItem(key);
+      if (stored === "1") setCollapsed(true);
+      else if (stored === "0") setCollapsed(false);
+    } catch {
+      /* ignore */
+    }
+  }, [key]);
+  const toggle = React.useCallback(() => {
+    setCollapsed((c) => {
+      const next = !c;
+      try {
+        localStorage.setItem(key, next ? "1" : "0");
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  }, [key]);
+  return [collapsed, toggle] as const;
 }
 
 export default function Sidebar({
@@ -268,65 +322,13 @@ export default function Sidebar({
 
       {/* Nav */}
       <nav className={cn("flex-1 overflow-y-auto", collapsed ? "px-2 py-4" : "px-3 py-5")} aria-label="Primary">
-        {groups.map((g, gi) => (
-          <div key={gi} className={cn("mb-6", collapsed && "mb-4")}>
-            {g.label && !collapsed && (
-              <div className="mb-2 px-2.5 text-[10px] font-semibold uppercase tracking-[0.10em] text-ink-subtle">
-                {g.label}
-              </div>
-            )}
-            {g.label && collapsed && (
-              <div className="mb-2 h-px bg-border/70" />
-            )}
-            <ul className="space-y-[3px]">
-              {g.items.map((it) => {
-                const active = isActive(it.href, pathname);
-                const Icon = it.icon;
-                return (
-                  <li key={it.href + it.label}>
-                    <Link
-                      href={it.href}
-                      aria-current={active ? "page" : undefined}
-                      title={collapsed ? it.label : undefined}
-                      className={cn(
-                        "group relative flex items-center rounded-lg text-[13px] font-medium transition-all duration-150 ease-out",
-                        collapsed
-                          ? "h-9 w-full justify-center"
-                          : "gap-2.5 px-2.5 py-[7px]",
-                        active
-                          ? "bg-gradient-to-r from-brand-subtle to-brand-subtle/40 text-brand-accent"
-                          : "text-ink-muted hover:bg-surface-inset/70 hover:text-ink"
-                      )}
-                    >
-                      {active && !collapsed && (
-                        <span
-                          aria-hidden
-                          className="absolute -left-3 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r-full bg-brand-accent shadow-[0_0_8px_var(--color-accent-ring)]"
-                        />
-                      )}
-                      <Icon
-                        className={cn(
-                          "h-[18px] w-[18px] shrink-0 transition-colors",
-                          active ? "text-brand-accent" : "text-ink-subtle group-hover:text-ink"
-                        )}
-                        strokeWidth={1.75}
-                      />
-                      {!collapsed && (
-                        <>
-                          <span className="flex-1 truncate">{it.label}</span>
-                          {it.soon && (
-                            <span className="rounded bg-surface-inset px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-ink-subtle">
-                              Soon
-                            </span>
-                          )}
-                        </>
-                      )}
-                    </Link>
-                  </li>
-                );
-              })}
-            </ul>
-          </div>
+        {groups.map((g) => (
+          <NavGroup
+            key={g.id}
+            group={g}
+            collapsed={collapsed}
+            pathname={pathname}
+          />
         ))}
       </nav>
 
@@ -376,6 +378,108 @@ export default function Sidebar({
           </button>
         )}
       </div>
+    </div>
+  );
+}
+
+// ─── NavGroup ──────────────────────────────────────────────────────
+
+function NavGroup({
+  group,
+  collapsed,
+  pathname,
+}: {
+  group: Group;
+  collapsed: boolean;
+  pathname: string;
+}) {
+  const isCollapsible = group.collapsible === true && !collapsed;
+  const [groupCollapsed, toggleGroup] = useGroupCollapsed(
+    group.id,
+    group.collapsedByDefault === true
+  );
+
+  // Auto-expand a collapsed group when an item inside it is active.
+  const hasActiveChild = group.items.some((it) => isActive(it.href, pathname));
+  const shouldShowItems = !isCollapsible || !groupCollapsed || hasActiveChild;
+
+  return (
+    <div className={cn("mb-6", collapsed && "mb-4")}>
+      {group.label && !collapsed && (
+        isCollapsible ? (
+          <button
+            type="button"
+            onClick={toggleGroup}
+            className="mb-2 flex w-full items-center justify-between rounded px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.10em] text-ink-subtle transition-colors hover:text-ink"
+            aria-expanded={!groupCollapsed || hasActiveChild}
+          >
+            <span>{group.label}</span>
+            <ChevronRight
+              className={cn(
+                "h-3 w-3 transition-transform duration-200",
+                (!groupCollapsed || hasActiveChild) && "rotate-90"
+              )}
+              strokeWidth={2.25}
+            />
+          </button>
+        ) : (
+          <div className="mb-2 px-2.5 text-[10px] font-semibold uppercase tracking-[0.10em] text-ink-subtle">
+            {group.label}
+          </div>
+        )
+      )}
+      {group.label && collapsed && <div className="mb-2 h-px bg-border/70" />}
+
+      {shouldShowItems && (
+        <ul className="space-y-[3px]">
+          {group.items.map((it) => {
+            const active = isActive(it.href, pathname);
+            const Icon = it.icon;
+            return (
+              <li key={it.href + it.label}>
+                <Link
+                  href={it.href}
+                  aria-current={active ? "page" : undefined}
+                  title={collapsed ? it.label : undefined}
+                  className={cn(
+                    "group relative flex items-center rounded-lg text-[13px] font-medium transition-all duration-150 ease-out",
+                    collapsed
+                      ? "h-9 w-full justify-center"
+                      : "gap-2.5 px-2.5 py-[7px]",
+                    active
+                      ? "bg-gradient-to-r from-brand-subtle to-brand-subtle/40 text-brand-accent"
+                      : "text-ink-muted hover:bg-surface-inset/70 hover:text-ink"
+                  )}
+                >
+                  {active && !collapsed && (
+                    <span
+                      aria-hidden
+                      className="absolute -left-3 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r-full bg-brand-accent shadow-[0_0_8px_var(--color-accent-ring)]"
+                    />
+                  )}
+                  <Icon
+                    className={cn(
+                      "h-[18px] w-[18px] shrink-0 transition-colors",
+                      active ? "text-brand-accent" : "text-ink-subtle group-hover:text-ink"
+                    )}
+                    strokeWidth={1.75}
+                  />
+                  {!collapsed && (
+                    <>
+                      <span className="flex-1 truncate">{it.label}</span>
+                      {it.soon && (
+                        <span className="rounded bg-surface-inset px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-ink-subtle">
+                          Soon
+                        </span>
+                      )}
+                    </>
+                  )}
+                </Link>
+              </li>
+            );
+          })}
+        </ul>
+      )}
     </div>
   );
 }
