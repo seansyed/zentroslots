@@ -22,6 +22,7 @@ import { aggregateWaitlistMetrics } from "./waitlistMetrics";
 import { computeForecast } from "./forecasting";
 import { buildStaffingInsights } from "./staffingInsights";
 import { buildRecommendations } from "./recommendations";
+import { buildOptimizationRecommendations } from "./optimizationEngine";
 import type { DailyAggregate, SnapshotExtras } from "./types";
 
 export type AggregateInput = {
@@ -165,6 +166,30 @@ export async function aggregateDailyAnalytics(input: AggregateInput): Promise<Ag
         };
       }
       if (recommendations.length > 0) extras.recommendations = recommendations;
+
+      // ── Optimization engine — richer recommendation shape (6 categories,
+      // priority bands, projected impact). Composes the already-computed
+      // forecast + staffing + legacy recs so we don't pay double-compute.
+      // Wrapped separately so a bug here cannot suppress the simpler
+      // legacy `recommendations` write above.
+      try {
+        const optStart = Date.now();
+        const optimizationRecs = buildOptimizationRecommendations({
+          snapshots: window,
+          forecast,
+          staffing: { insights, signals },
+          legacyRecommendations: recommendations,
+          // customerIntelligence is intentionally omitted here — it would
+          // require a tenant-scoped DB read inside this pure block. The
+          // scheduledReports composer adds it at report-build time.
+        });
+        extras.optimizationGenerationMs = Date.now() - optStart;
+        if (optimizationRecs.length > 0) {
+          extras.optimizationRecommendations = optimizationRecs;
+        }
+      } catch (e) {
+        console.error("[analytics] optimization engine failed:", e);
+      }
     } catch (e) {
       console.error("[analytics] trailing-window intelligence failed:", e);
       // Rule #13: never breaks the snapshot write. Day-level counts

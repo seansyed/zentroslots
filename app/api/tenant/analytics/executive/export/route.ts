@@ -13,6 +13,7 @@ import {
   aggregateCustomerIntelligence,
   loadRepeatCustomerForComparison,
 } from "@/lib/analytics/customerIntelligence";
+import { buildOptimizationRecommendations } from "@/lib/analytics/optimizationEngine";
 import type { DailyAggregate, SnapshotExtras } from "@/lib/analytics/types";
 
 // GET /api/tenant/analytics/executive/export?range=60
@@ -119,6 +120,39 @@ export async function GET(req: NextRequest) {
     lines.push(`customer_intelligence,bookings_by_existing,${custIntel.bookingsByExistingCustomers}`);
     lines.push(`customer_intelligence,bookings_by_new,${custIntel.bookingsByNewCustomers}`);
 
+    // Optimization recommendations — composed from the same window the
+    // dashboard panel uses, so the export matches what an admin sees.
+    let optRecs: Awaited<ReturnType<typeof buildOptimizationRecommendations>> = [];
+    try {
+      optRecs = buildOptimizationRecommendations({
+        snapshots,
+        customerIntelligence:
+          custIntel.bookingsByExistingCustomers + custIntel.bookingsByNewCustomers > 0
+            ? custIntel
+            : null,
+      });
+    } catch {
+      optRecs = [];
+    }
+    if (optRecs.length > 0) {
+      lines.push("");
+      lines.push("section,category,severity,code,title,confidence,monthly_impact_cents,explanation");
+      for (const r of optRecs) {
+        lines.push(
+          [
+            "optimization",
+            r.category,
+            r.severity,
+            r.code,
+            csvEscape(r.title),
+            r.confidence,
+            r.projectedImpact.monthlyImpactCents,
+            csvEscape(r.explanation),
+          ].join(",")
+        );
+      }
+    }
+
     const body = lines.join("\n") + "\n";
     return new Response(body, {
       status: 200,
@@ -130,4 +164,10 @@ export async function GET(req: NextRequest) {
   } catch (err) {
     return errorResponse(err);
   }
+}
+
+/** Minimal CSV-safe wrapper — wraps in quotes when commas/quotes/newlines appear. */
+function csvEscape(value: string): string {
+  if (!/[",\n]/.test(value)) return value;
+  return `"${value.replace(/"/g, '""')}"`;
 }

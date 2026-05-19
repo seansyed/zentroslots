@@ -156,6 +156,65 @@ export async function GET() {
     }
   }
 
+  // Optimization-engine freshness — counts snapshots in the last 48h
+  // that have an optimizationRecommendations payload. Soft-fail —
+  // tenants with insufficient history (< 7 snapshots) legitimately
+  // have no optimization output. detail surfaces last write time.
+  {
+    const start = Date.now();
+    try {
+      const rows = (await db.execute(
+        sql`SELECT MAX(created_at) AS last_at FROM analytics_daily_snapshots
+            WHERE extras ? 'optimizationRecommendations'
+              AND created_at > NOW() - INTERVAL '48 hours'`
+      )) as unknown as Array<{ last_at: string | Date | null }>;
+      const lastAtRaw = rows[0]?.last_at;
+      const lastAt = lastAtRaw ? new Date(lastAtRaw) : null;
+      checks.optimization_freshness = {
+        ok: true, // soft check — never toggles allOk
+        ms: Date.now() - start,
+        detail: lastAt
+          ? `last_at=${lastAt.toISOString()}`
+          : "no_optimization_in_48h",
+      };
+    } catch (e) {
+      checks.optimization_freshness = {
+        ok: false,
+        ms: Date.now() - start,
+        detail: (e as Error).message,
+      };
+    }
+  }
+
+  // Recommendation-generation runtime — avg of
+  // extras->>'optimizationGenerationMs' across snapshots written in
+  // the last 48h. Useful for catching engine regressions. Soft-fail.
+  {
+    const start = Date.now();
+    try {
+      const rows = (await db.execute(
+        sql`SELECT AVG((extras->>'optimizationGenerationMs')::int)::int AS avg_ms,
+                   COUNT(*)::int AS n
+            FROM analytics_daily_snapshots
+            WHERE extras ? 'optimizationGenerationMs'
+              AND created_at > NOW() - INTERVAL '48 hours'`
+      )) as unknown as Array<{ avg_ms: number | null; n: number | string | null }>;
+      const avgMs = rows[0]?.avg_ms ?? null;
+      const n = Number(rows[0]?.n ?? 0);
+      checks.recommendation_generation_runtime = {
+        ok: true, // soft check
+        ms: Date.now() - start,
+        detail: n > 0 ? `avg_ms=${avgMs}; n=${n}` : "no_runs_in_48h",
+      };
+    } catch (e) {
+      checks.recommendation_generation_runtime = {
+        ok: false,
+        ms: Date.now() - start,
+        detail: (e as Error).message,
+      };
+    }
+  }
+
   // Stale tenant detection — tenants whose most recent
   // analytics_daily_snapshots row is > 36h old. Likely indicates the
   // cron skipped them. Soft-fail; detail surfaces the count.

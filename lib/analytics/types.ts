@@ -108,6 +108,40 @@ export type SnapshotExtras = {
   };
   /** Operational recommendations — deterministic, cited. */
   recommendations?: Array<{ code: string; message: string; evidence: string }>;
+  /** Intelligent optimization recommendations (richer shape than the
+   *  legacy `recommendations` key). Each entry covers one of 6 categories:
+   *  staffing | scheduling | reminders | revenue | waitlist |
+   *  customer_retention. Severity is one of low|medium|high|critical.
+   *  Absent when the trailing window has fewer than 7 snapshots. */
+  optimizationRecommendations?: Array<{
+    code: string;
+    category:
+      | "staffing"
+      | "scheduling"
+      | "reminders"
+      | "revenue"
+      | "waitlist"
+      | "customer_retention";
+    severity: "low" | "medium" | "high" | "critical";
+    title: string;
+    explanation: string;
+    supportingMetrics: Array<{ label: string; value: string }>;
+    confidence: number;
+    projectedImpact: {
+      description: string;
+      monthlyImpactCents: number;
+    };
+    priorityFactors: {
+      financialImpact: number;
+      operationalPressure: number;
+      frequency: number;
+      confidence: number;
+    };
+  }>;
+  /** Trailing-window compute latency for the optimization engine
+   *  (ms). Used by the optimization_freshness health check. Absent
+   *  when the engine didn't run. */
+  optimizationGenerationMs?: number;
 };
 
 /** Empty default — used when a tenant had no activity on a given day. */

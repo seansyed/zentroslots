@@ -8,6 +8,7 @@
  * surprises.
  */
 import { buildExecutiveSummary, type ExecutiveSummary } from "./executiveMetrics";
+import { buildOptimizationRecommendations } from "./optimizationEngine";
 import type { DailyAggregate, SnapshotExtras } from "./types";
 
 export type ReportPeriodType = "daily" | "weekly" | "monthly";
@@ -37,6 +38,10 @@ export type ScheduledReportBody = {
   /** Executive comparison (this-period vs prior-period). Null when
    *  insufficient history. */
   executive: ExecutiveSummary | null;
+  /** Intelligent optimization recommendations recomputed at report time
+   *  with customerIntelligence context. Falls back to the latest
+   *  snapshot's cached set if recomputation yields nothing. */
+  optimizationRecommendations: SnapshotExtras["optimizationRecommendations"] | null;
 };
 
 export function composeScheduledReportBody(args: {
@@ -88,6 +93,33 @@ export function composeScheduledReportBody(args: {
 
   const executive = buildExecutiveSummary(args.windowWithPriorPeriod, args.repeatCustomerData);
 
+  // Recompute optimization recommendations at report time so the
+  // customer-intelligence-aware retention category fires. If the
+  // computation produces nothing (sparse window, etc.) fall back to
+  // whatever the latest snapshot cached.
+  let optimizationRecommendations: SnapshotExtras["optimizationRecommendations"] | null = null;
+  try {
+    const customerIntel = args.repeatCustomerData && args.repeatCustomerData.currentTotal > 0
+      ? {
+          repeatCustomerRate: Math.round(
+            (args.repeatCustomerData.currentRepeat / Math.max(args.repeatCustomerData.currentTotal, 1)) * 100
+          ),
+          retentionRate: 0, // not directly exposed via repeatCustomerData
+          newCustomersThisPeriod: args.repeatCustomerData.currentTotal - args.repeatCustomerData.currentRepeat,
+          bookingsByExistingCustomers: args.repeatCustomerData.currentRepeat,
+          bookingsByNewCustomers: args.repeatCustomerData.currentTotal - args.repeatCustomerData.currentRepeat,
+        }
+      : null;
+    const recs = buildOptimizationRecommendations({
+      snapshots: args.windowWithPriorPeriod,
+      customerIntelligence: customerIntel,
+    });
+    optimizationRecommendations =
+      recs.length > 0 ? recs : latest?.extras.optimizationRecommendations ?? null;
+  } catch {
+    optimizationRecommendations = latest?.extras.optimizationRecommendations ?? null;
+  }
+
   return {
     periodType: args.periodType,
     periodStart: args.periodStart,
@@ -98,6 +130,7 @@ export function composeScheduledReportBody(args: {
     staffingInsights: latest?.extras.staffingInsights ?? null,
     recommendations: latest?.extras.recommendations ?? null,
     executive,
+    optimizationRecommendations,
   };
 }
 
