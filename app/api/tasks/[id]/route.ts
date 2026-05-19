@@ -10,6 +10,7 @@ const patchSchema = z.object({
   title: z.string().min(1).max(200).optional(),
   description: z.string().max(5000).nullable().optional(),
   status: z.enum(["open", "done"]).optional(),
+  priority: z.enum(["urgent", "high", "medium", "low"]).nullable().optional(),
   dueAt: z.string().datetime().nullable().optional(),
   assignedUserId: z.string().uuid().nullable().optional(),
 });

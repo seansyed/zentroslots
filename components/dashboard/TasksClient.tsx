@@ -73,6 +73,10 @@ type Task = {
   title: string;
   description: string | null;
   status: "open" | "done";
+  /** Explicit priority chosen by the user. Null falls back to the
+   *  temporal derivation in derivePriority(). New tasks always set
+   *  this; legacy rows from before migration 0031 may be null. */
+  priority: "urgent" | "high" | "medium" | "low" | null;
   dueAt: string | null;
   assignedUserId: string | null;
   assignedName: string | null;
@@ -226,6 +230,28 @@ export default function TasksClient({
     }
   }
 
+  // Set priority: PATCH /api/tasks/[id] with { priority }.
+  async function setTaskPriority(t: Task, priority: Priority) {
+    if (t.priority === priority) return;
+    if (t.isDemo) {
+      toast("Preview · Sample task priority can't be changed.", "info");
+      return;
+    }
+    setRows((cur) => cur?.map((x) => (x.id === t.id ? { ...x, priority } : x)) ?? null);
+    try {
+      const r = await fetch(`/api/tasks/${t.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ priority }),
+      });
+      if (!r.ok) throw new Error("Failed");
+      toast(`Priority set to ${priority}`, "success");
+    } catch {
+      toast("Failed to update priority", "error");
+      reload();
+    }
+  }
+
   // Snooze: shift dueAt forward by `days` (preserving the original
   // local clock hour). PATCH /api/tasks/[id] already accepts dueAt.
   async function snoozeTask(t: Task, days: number) {
@@ -340,6 +366,7 @@ export default function TasksClient({
         onToggle={toggleStatus}
         onRemove={removeTask}
         onSnooze={snoozeTask}
+        onSetPriority={setTaskPriority}
       />
     </div>
   );
@@ -790,6 +817,65 @@ function ToolbarLink({
   );
 }
 
+function PrioritySelector({
+  value,
+  onChange,
+  size = "md",
+  layoutGroupId,
+}: {
+  /** Currently selected priority — null means "no explicit priority" */
+  value: Priority | null;
+  onChange: (next: Priority) => void;
+  size?: "sm" | "md";
+  /** Distinct layoutId per place this selector renders so Framer
+   *  doesn't try to animate the indicator across drawers. */
+  layoutGroupId: string;
+}) {
+  const reduced = useReducedMotion();
+  const options: Array<{ value: Priority; label: string; dot: string }> = [
+    { value: "urgent", label: "Urgent", dot: "bg-red-500" },
+    { value: "high",   label: "High",   dot: "bg-amber-500" },
+    { value: "medium", label: "Medium", dot: "bg-brand-accent" },
+    { value: "low",    label: "Low",    dot: "bg-slate-400" },
+  ];
+  return (
+    <div
+      className={cn(
+        "relative inline-flex rounded-lg border border-border bg-surface-subtle p-0.5 shadow-soft",
+        size === "sm" ? "" : "",
+      )}
+    >
+      {options.map((opt) => {
+        const active = value === opt.value;
+        return (
+          <button
+            key={opt.value}
+            type="button"
+            onClick={() => onChange(opt.value)}
+            aria-pressed={active}
+            className={cn(
+              "relative z-10 inline-flex items-center gap-1 rounded-md font-medium transition-colors duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)]",
+              size === "sm" ? "h-6 px-2 text-[10px]" : "h-7 px-2.5 text-[11px]",
+              active ? "text-white" : "text-ink-muted hover:text-ink",
+            )}
+          >
+            {active && (
+              <motion.span
+                layoutId={`priority-indicator-${layoutGroupId}`}
+                className="absolute inset-0 rounded-md bg-gradient-to-br from-brand-accent to-brand-hover shadow-[0_4px_12px_rgba(53,157,243,0.35),inset_0_1px_0_rgba(255,255,255,0.25)]"
+                aria-hidden
+                transition={reduced ? { duration: 0 } : { duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+              />
+            )}
+            <span aria-hidden className={cn("relative inline-block h-1.5 w-1.5 rounded-full", active ? "bg-white/85" : opt.dot)} />
+            <span className="relative">{opt.label}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function PriorityChip({ priority, isDone }: { priority: Priority; isDone: boolean }) {
   if (isDone) return null;
   if (priority === "low") return null; // restrained — only show ≥ medium
@@ -1054,6 +1140,7 @@ function NewTaskDrawer({
   const [dueAt, setDueAt] = React.useState("");
   const [assignedUserId, setAssignedUserId] = React.useState(defaultAssigneeId);
   const [relatedCustomerId, setRelatedCustomerId] = React.useState<string>("");
+  const [priority, setPriority] = React.useState<Priority>("medium");
   const [busy, setBusy] = React.useState(false);
   const reduced = useReducedMotion();
 
@@ -1062,6 +1149,7 @@ function NewTaskDrawer({
       setTitle(""); setDescription(""); setDueAt("");
       setAssignedUserId(defaultAssigneeId);
       setRelatedCustomerId("");
+      setPriority("medium");
     }
   }, [open, defaultAssigneeId]);
 
@@ -1083,6 +1171,7 @@ function NewTaskDrawer({
         body: JSON.stringify({
           title,
           description: description || null,
+          priority,
           dueAt: dueAt ? new Date(dueAt + "T00:00:00").toISOString() : null,
           assignedUserId: assignedUserId || null,
           relatedCustomerId: relatedCustomerId || null,
@@ -1173,6 +1262,15 @@ function NewTaskDrawer({
                   className={cn(INPUT_CLS, "resize-none")}
                 />
               </Field>
+              <Field label="Priority">
+                <div className="flex">
+                  <PrioritySelector
+                    layoutGroupId="new-task"
+                    value={priority}
+                    onChange={setPriority}
+                  />
+                </div>
+              </Field>
               <div className="grid grid-cols-2 gap-3">
                 <Field label="Due date">
                   <input
@@ -1255,12 +1353,14 @@ function TaskDetailDrawer({
   onToggle,
   onRemove,
   onSnooze,
+  onSetPriority,
 }: {
   task: Task | null;
   onClose: () => void;
   onToggle: (t: Task) => void;
   onRemove: (t: Task) => void;
   onSnooze: (t: Task, days: number) => void;
+  onSetPriority: (t: Task, priority: Priority) => void;
 }) {
   const reduced = useReducedMotion();
 
@@ -1295,7 +1395,7 @@ function TaskDetailDrawer({
             exit={reduced ? { x: 0 } : { x: "100%" }}
             transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
           >
-            <TaskDetailBody task={task} onClose={onClose} onToggle={onToggle} onRemove={onRemove} onSnooze={onSnooze} />
+            <TaskDetailBody task={task} onClose={onClose} onToggle={onToggle} onRemove={onRemove} onSnooze={onSnooze} onSetPriority={onSetPriority} />
           </motion.aside>
         </>
       )}
@@ -1309,12 +1409,14 @@ function TaskDetailBody({
   onToggle,
   onRemove,
   onSnooze,
+  onSetPriority,
 }: {
   task: Task;
   onClose: () => void;
   onToggle: (t: Task) => void;
   onRemove: (t: Task) => void;
   onSnooze: (t: Task, days: number) => void;
+  onSetPriority: (t: Task, priority: Priority) => void;
 }) {
   const priority = derivePriority(task);
   const isDone = task.status === "done";
@@ -1370,6 +1472,18 @@ function TaskDetailBody({
 
       {/* Body */}
       <div className="flex-1 space-y-4 overflow-y-auto px-5 py-5">
+        {/* Priority — editable inline. Hides on completed tasks since
+            priority no longer drives any rendering for them. */}
+        {!isDone && (
+          <DetailMetaCard icon={Flame} title="Priority">
+            <PrioritySelector
+              layoutGroupId={`drawer-${task.id}`}
+              value={task.priority ?? priority}
+              onChange={(next) => onSetPriority(task, next)}
+            />
+          </DetailMetaCard>
+        )}
+
         {/* Description */}
         {task.description && (
           <DetailMetaCard icon={FileText} title="Notes">
@@ -1627,150 +1741,36 @@ function buildDemoTasks(
     completedDaysAgo?: number;    // only when status === "done"
     customerName: string;
     assignedTo: "me" | 0 | 1 | 2; // "me" → current user, else TEAM idx
+    priority: Priority;
   };
 
   const SPECS: Spec[] = [
     // ── Overdue ─────────────────────────────────────────────────
-    {
-      title: "Call Maria González about Q1 tax planning",
-      description: "She left a voicemail Friday — needs the updated rate table before her board meeting.",
-      daysFromNow: -2,
-      status: "open",
-      customerName: "Maria González",
-      assignedTo: "me",
-    },
-    {
-      title: "Send reminder email · David Park",
-      description: "Documents for next week's consultation are still pending.",
-      daysFromNow: -1,
-      hour: 14,
-      status: "open",
-      customerName: "David Park",
-      assignedTo: 0,
-    },
+    { title: "Call Maria González about Q1 tax planning", description: "She left a voicemail Friday — needs the updated rate table before her board meeting.", daysFromNow: -2, status: "open", customerName: "Maria González", assignedTo: "me", priority: "urgent" },
+    { title: "Send reminder email · David Park", description: "Documents for next week's consultation are still pending.", daysFromNow: -1, hour: 14, status: "open", customerName: "David Park", assignedTo: 0, priority: "high" },
 
     // ── Today ───────────────────────────────────────────────────
-    {
-      title: "Confirm consultation with Emily Roberts",
-      description: "Verify Zoom link and send the intake packet.",
-      daysFromNow: 0,
-      hour: 11,
-      status: "open",
-      customerName: "Emily Roberts",
-      assignedTo: "me",
-    },
-    {
-      title: "Review intake form · Marcus Johnson",
-      daysFromNow: 0,
-      hour: 13,
-      status: "open",
-      customerName: "Marcus Johnson",
-      assignedTo: 1,
-    },
-    {
-      title: "Follow up after no-show — Priya Sharma",
-      description: "Offer to reschedule. Apply the no-show fee policy.",
-      daysFromNow: 0,
-      hour: 16,
-      status: "open",
-      customerName: "Priya Sharma",
-      assignedTo: "me",
-    },
+    { title: "Confirm consultation with Emily Roberts", description: "Verify Zoom link and send the intake packet.", daysFromNow: 0, hour: 11, status: "open", customerName: "Emily Roberts", assignedTo: "me", priority: "high" },
+    { title: "Review intake form · Marcus Johnson", daysFromNow: 0, hour: 13, status: "open", customerName: "Marcus Johnson", assignedTo: 1, priority: "medium" },
+    { title: "Follow up after no-show — Priya Sharma", description: "Offer to reschedule. Apply the no-show fee policy.", daysFromNow: 0, hour: 16, status: "open", customerName: "Priya Sharma", assignedTo: "me", priority: "urgent" },
 
     // ── Tomorrow ────────────────────────────────────────────────
-    {
-      title: "Prepare onboarding packet · Daniel Kim",
-      description: "Include the welcome PDF, brand templates, and the calendar invite.",
-      daysFromNow: 1,
-      hour: 10,
-      status: "open",
-      customerName: "Daniel Kim",
-      assignedTo: 0,
-    },
-    {
-      title: "Verify payment from Ana Silva",
-      daysFromNow: 1,
-      hour: 12,
-      status: "open",
-      customerName: "Ana Silva",
-      assignedTo: "me",
-    },
+    { title: "Prepare onboarding packet · Daniel Kim", description: "Include the welcome PDF, brand templates, and the calendar invite.", daysFromNow: 1, hour: 10, status: "open", customerName: "Daniel Kim", assignedTo: 0, priority: "medium" },
+    { title: "Verify payment from Ana Silva", daysFromNow: 1, hour: 12, status: "open", customerName: "Ana Silva", assignedTo: "me", priority: "high" },
 
     // ── This week ───────────────────────────────────────────────
-    {
-      title: "Call overdue invoice — Tom Henderson",
-      description: "Net-30 hit yesterday. Soft call first, then a formal email.",
-      daysFromNow: 3,
-      hour: 10,
-      status: "open",
-      customerName: "Tom Henderson",
-      assignedTo: 2,
-    },
-    {
-      title: "Schedule Q2 strategy review · Lisa Wong",
-      daysFromNow: 4,
-      hour: 14,
-      status: "open",
-      customerName: "Lisa Wong",
-      assignedTo: 1,
-    },
-    {
-      title: "Prep slides for Sam Taylor demo",
-      description: "Highlight the new automation features and the comparison table.",
-      daysFromNow: 5,
-      hour: 9,
-      status: "open",
-      customerName: "Sam Taylor",
-      assignedTo: "me",
-    },
+    { title: "Call overdue invoice — Tom Henderson", description: "Net-30 hit yesterday. Soft call first, then a formal email.", daysFromNow: 3, hour: 10, status: "open", customerName: "Tom Henderson", assignedTo: 2, priority: "medium" },
+    { title: "Schedule Q2 strategy review · Lisa Wong", daysFromNow: 4, hour: 14, status: "open", customerName: "Lisa Wong", assignedTo: 1, priority: "low" },
+    { title: "Prep slides for Sam Taylor demo", description: "Highlight the new automation features and the comparison table.", daysFromNow: 5, hour: 9, status: "open", customerName: "Sam Taylor", assignedTo: "me", priority: "medium" },
 
     // ── Later ───────────────────────────────────────────────────
-    {
-      title: "Send pricing proposal — Olivia Brown",
-      daysFromNow: 9,
-      hour: 11,
-      status: "open",
-      customerName: "Olivia Brown",
-      assignedTo: 0,
-    },
-    {
-      title: "Quarterly check-in · Raj Kumar",
-      daysFromNow: 12,
-      hour: 14,
-      status: "open",
-      customerName: "Raj Kumar",
-      assignedTo: 2,
-    },
+    { title: "Send pricing proposal — Olivia Brown", daysFromNow: 9, hour: 11, status: "open", customerName: "Olivia Brown", assignedTo: 0, priority: "low" },
+    { title: "Quarterly check-in · Raj Kumar", daysFromNow: 12, hour: 14, status: "open", customerName: "Raj Kumar", assignedTo: 2, priority: "low" },
 
     // ── Completed ───────────────────────────────────────────────
-    {
-      title: "Confirmed booking with Noah Reyes",
-      daysFromNow: 0,
-      hour: 8,
-      status: "done",
-      completedDaysAgo: 0,
-      customerName: "Noah Reyes",
-      assignedTo: "me",
-    },
-    {
-      title: "Sent welcome email to Hannah Webb",
-      daysFromNow: -1,
-      hour: 15,
-      status: "done",
-      completedDaysAgo: 1,
-      customerName: "Hannah Webb",
-      assignedTo: 1,
-    },
-    {
-      title: "Reviewed contract with Sofia Romano",
-      description: "Marked up the SOW addendum and sent for counter-signature.",
-      daysFromNow: -3,
-      hour: 13,
-      status: "done",
-      completedDaysAgo: 3,
-      customerName: "Sofia Romano",
-      assignedTo: 0,
-    },
+    { title: "Confirmed booking with Noah Reyes", daysFromNow: 0, hour: 8, status: "done", completedDaysAgo: 0, customerName: "Noah Reyes", assignedTo: "me", priority: "medium" },
+    { title: "Sent welcome email to Hannah Webb", daysFromNow: -1, hour: 15, status: "done", completedDaysAgo: 1, customerName: "Hannah Webb", assignedTo: 1, priority: "medium" },
+    { title: "Reviewed contract with Sofia Romano", description: "Marked up the SOW addendum and sent for counter-signature.", daysFromNow: -3, hour: 13, status: "done", completedDaysAgo: 3, customerName: "Sofia Romano", assignedTo: 0, priority: "high" },
   ];
 
   return SPECS.map((s, idx) => {
@@ -1788,6 +1788,7 @@ function buildDemoTasks(
       title: s.title,
       description: s.description ?? null,
       status: s.status,
+      priority: s.priority,
       dueAt: isoOffset(s.daysFromNow, s.hour ?? 9),
       assignedUserId: assigned.id,
       assignedName: assigned.name,
@@ -1892,6 +1893,9 @@ function groupByBucket(
 }
 
 function derivePriority(t: Task): Priority {
+  // Explicit priority always wins. Legacy / unset rows fall back to
+  // the temporal heuristic so they never lose their rail / chip.
+  if (t.priority) return t.priority;
   if (t.status === "done") return "low";
   if (!t.dueAt) return "low";
   const dueMs = new Date(t.dueAt).getTime();
@@ -1942,6 +1946,11 @@ function computePulse(rows: Task[], myUserId: string): Pulse {
   const openTotal = rows.filter((t) => t.status === "open").length;
   const openOther = Math.max(0, openTotal - dueToday - overdue);
 
+  // Priority-aware counts (uses derivePriority so legacy rows roll up
+  // into the temporal heuristic).
+  const urgentOpen = rows.filter((t) => t.status === "open" && derivePriority(t) === "urgent").length;
+  const highOpen = rows.filter((t) => t.status === "open" && derivePriority(t) === "high").length;
+
   // Completion rate in last 30 days.
   const thirtyAgo = now - 30 * 86_400_000;
   const recentDone = rows.filter(
@@ -1950,19 +1959,26 @@ function computePulse(rows: Task[], myUserId: string): Pulse {
   const recentCreated = rows.filter((t) => new Date(t.createdAt).getTime() >= thirtyAgo).length;
   const completionRatePct = recentCreated > 0 ? Math.round((recentDone / recentCreated) * 100) : 0;
 
-  // Assistant-toned workload insight.
+  // Assistant-toned workload insight — priority-aware. Urgency wins
+  // over temporal heuristics when there are explicit urgent tasks.
   const mineOpen = rows.filter((t) => t.status === "open" && t.assignedUserId === myUserId).length;
   let insight: string;
-  if (overdue > 0) {
+  if (urgentOpen > 0) {
+    insight = `${urgentOpen} urgent task${urgentOpen === 1 ? "" : "s"} require attention. Clearing these first keeps the day on track.`;
+  } else if (overdue > 0) {
     insight = `${overdue} overdue task${overdue === 1 ? "" : "s"} to resolve. Clearing these first protects the rest of the day.`;
+  } else if (highOpen >= 3) {
+    insight = `${highOpen} high-priority tasks queued. Tackle them in a focused block.`;
   } else if (dueToday >= 5) {
     insight = `${dueToday} tasks due today. Consider batching the quick ones together.`;
   } else if (dueToday > 0) {
     insight = `${dueToday} task${dueToday === 1 ? "" : "s"} due today. A focused hour should clear them.`;
+  } else if (highOpen > 0) {
+    insight = "High-priority queue is under control. A calm window for proactive work.";
   } else if (mineOpen === 0 && openTotal === 0) {
     insight = "Your queue is clear. A good window for outreach, planning, or deep work.";
   } else if (openTotal > 0) {
-    insight = "You're clear this afternoon. A calm window to chip into the upcoming queue.";
+    insight = "No urgent operational blockers. A steady afternoon to chip into the upcoming queue.";
   } else {
     insight = "Workload looks balanced. Nothing urgent in front of you.";
   }

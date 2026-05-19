@@ -6,9 +6,12 @@ import { db } from "@/db/client";
 import { customers, tasks, users } from "@/db/schema";
 import { errorResponse, HttpError, requireUser } from "@/lib/auth";
 
+const PRIORITY_VALUES = ["urgent", "high", "medium", "low"] as const;
+
 const createSchema = z.object({
   title: z.string().min(1).max(200),
   description: z.string().max(5000).nullable().optional(),
+  priority: z.enum(PRIORITY_VALUES).nullable().optional(),
   dueAt: z.string().datetime().nullable().optional(),
   assignedUserId: z.string().uuid().nullable().optional(),
   relatedCustomerId: z.string().uuid().nullable().optional(),
@@ -31,6 +34,7 @@ export async function GET(req: NextRequest) {
         title: tasks.title,
         description: tasks.description,
         status: tasks.status,
+        priority: tasks.priority,
         dueAt: tasks.dueAt,
         assignedUserId: tasks.assignedUserId,
         relatedCustomerId: tasks.relatedCustomerId,
@@ -78,6 +82,7 @@ export async function POST(req: NextRequest) {
         tenantId: caller.tenantId,
         title: body.title,
         description: body.description ?? null,
+        priority: body.priority ?? null,
         dueAt: body.dueAt ? new Date(body.dueAt) : null,
         assignedUserId: body.assignedUserId ?? null,
         relatedCustomerId: body.relatedCustomerId ?? null,

@@ -476,6 +476,11 @@ export const tasks = pgTable(
     title: varchar("title", { length: 200 }).notNull(),
     description: text("description"),
     status: varchar("status", { length: 20 }).notNull().default("open"),
+    /** Optional explicit priority ("urgent" | "high" | "medium" | "low").
+     *  When null, the client derives a visual priority from `dueAt` so
+     *  legacy rows still render with sensible rail / chip treatments.
+     *  See migration 0031_task_priority.sql. */
+    priority: varchar("priority", { length: 16 }),
     dueAt: timestamp("due_at", { withTimezone: true }),
     assignedUserId: uuid("assigned_user_id").references(() => users.id, { onDelete: "set null" }),
     relatedCustomerId: uuid("related_customer_id").references(() => customers.id, { onDelete: "set null" }),
