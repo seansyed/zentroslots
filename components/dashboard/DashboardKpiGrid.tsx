@@ -1,10 +1,11 @@
 /**
- * DashboardKpiGrid — premium icon-led KPI cards with trend indicators.
+ * DashboardKpiGrid (Phase 2) — financial-grade KPI tiles.
  *
- * Server component (no client JS). Smooth CSS-only hover transitions.
- * Uses 8 KPIs in a responsive 4-column grid: Today / Upcoming / Revenue
- * / Utilization on row 1, Cancellations / No-show rate / Open tasks /
- * Team on row 2.
+ * Uses the shared MetricCard primitive so every metric tile across the
+ * platform shares one visual language. Adds tiny SVG sparkline
+ * placeholders for the metrics where a trend over time is meaningful;
+ * the sparkline component is intentionally simple (no Recharts) — it's
+ * a presentation accent, not data viz. Real charts ship in Phase 3.
  */
 import {
   CalendarCheck,
@@ -15,26 +16,8 @@ import {
   AlertTriangle,
   ListTodo,
   Users,
-  TrendingUp,
-  TrendingDown,
-  Minus,
-  type LucideIcon,
 } from "lucide-react";
-import { cn } from "@/lib/cn";
-
-type TrendDirection = "up" | "down" | "flat";
-
-type KpiTone = "default" | "positive" | "warning" | "neutral";
-
-type KpiProps = {
-  label: string;
-  value: string;
-  icon: LucideIcon;
-  trend?: { direction: TrendDirection; label: string };
-  tone?: KpiTone;
-  /** When true, the card de-emphasizes itself (lighter background). */
-  muted?: boolean;
-};
+import { MetricCard, type MetricTone } from "@/components/ui/Card";
 
 export default function DashboardKpiGrid(props: {
   todayCount: number;
@@ -49,26 +32,39 @@ export default function DashboardKpiGrid(props: {
   const revenueDisplay = `$${Math.round(props.weekRevenueCents / 100).toLocaleString()}`;
 
   return (
-    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-      <Kpi
+    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <MetricCard
         label="Today's meetings"
-        value={String(props.todayCount)}
+        value={props.todayCount}
         icon={CalendarCheck}
         tone={props.todayCount > 0 ? "positive" : "neutral"}
+        sparkline={
+          <Sparkline
+            data={syntheticSeries(props.todayCount, props.weekCount)}
+            tone={props.todayCount > 0 ? "positive" : "neutral"}
+          />
+        }
       />
-      <Kpi
+      <MetricCard
         label="Upcoming this week"
-        value={String(props.weekCount)}
+        value={props.weekCount}
         icon={CalendarClock}
-        tone="default"
+        tone="brand"
+        sparkline={<Sparkline data={syntheticSeries(props.weekCount, props.weekCount * 1.2)} tone="brand" />}
       />
-      <Kpi
+      <MetricCard
         label="Revenue est (week)"
         value={revenueDisplay}
         icon={DollarSign}
         tone={props.weekRevenueCents > 0 ? "positive" : "neutral"}
+        sparkline={
+          <Sparkline
+            data={syntheticSeries(Math.round(props.weekRevenueCents / 100), Math.round(props.weekRevenueCents / 100) * 1.3)}
+            tone={props.weekRevenueCents > 0 ? "positive" : "neutral"}
+          />
+        }
       />
-      <Kpi
+      <MetricCard
         label="Utilization"
         value={`${props.utilizationPct}%`}
         icon={Gauge}
@@ -76,27 +72,27 @@ export default function DashboardKpiGrid(props: {
         trend={utilizationTrend(props.utilizationPct)}
       />
 
-      <Kpi
+      <MetricCard
         label="Cancellations (30d)"
-        value={String(props.cancellationsCount)}
+        value={props.cancellationsCount}
         icon={CalendarX2}
         tone={props.cancellationsCount > 5 ? "warning" : "neutral"}
       />
-      <Kpi
+      <MetricCard
         label="No-show rate (30d)"
         value={props.noShowRatePct != null ? `${props.noShowRatePct}%` : "—"}
         icon={AlertTriangle}
         tone={noShowTone(props.noShowRatePct)}
       />
-      <Kpi
+      <MetricCard
         label="Open tasks"
-        value={String(props.openTasksCount)}
+        value={props.openTasksCount}
         icon={ListTodo}
         tone="neutral"
       />
-      <Kpi
+      <MetricCard
         label="Team"
-        value={String(props.staffCount)}
+        value={props.staffCount}
         icon={Users}
         tone="neutral"
         muted
@@ -105,78 +101,118 @@ export default function DashboardKpiGrid(props: {
   );
 }
 
-function Kpi(props: KpiProps) {
-  const Icon = props.icon;
-  const Trend = props.trend
-    ? props.trend.direction === "up"
-      ? TrendingUp
-      : props.trend.direction === "down"
-        ? TrendingDown
-        : Minus
-    : null;
+// ─── Sparkline (pure SVG — accent only, not data viz) ───────────────
+
+function Sparkline({
+  data,
+  tone,
+}: {
+  data: number[];
+  tone: MetricTone;
+}) {
+  const w = 90;
+  const h = 26;
+  if (data.length < 2) {
+    // Flat baseline — keeps card height stable in empty states.
+    return (
+      <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} className="overflow-visible">
+        <line
+          x1="0"
+          y1={h - 4}
+          x2={w}
+          y2={h - 4}
+          stroke="currentColor"
+          strokeWidth="1.25"
+          strokeDasharray="3 3"
+          className="text-ink-subtle/40"
+        />
+      </svg>
+    );
+  }
+
+  const max = Math.max(...data);
+  const min = Math.min(...data);
+  const range = Math.max(1, max - min);
+  const stepX = w / (data.length - 1);
+  const points = data
+    .map((v, i) => {
+      const x = i * stepX;
+      const y = h - 4 - ((v - min) / range) * (h - 8);
+      return `${x},${y}`;
+    })
+    .join(" ");
+
+  const stroke =
+    tone === "positive"
+      ? "stroke-emerald-500"
+      : tone === "warning"
+        ? "stroke-amber-500"
+        : tone === "neutral"
+          ? "stroke-ink-subtle"
+          : "stroke-brand-accent";
+
+  const fill =
+    tone === "positive"
+      ? "fill-emerald-500/15"
+      : tone === "warning"
+        ? "fill-amber-500/15"
+        : tone === "neutral"
+          ? "fill-ink-subtle/10"
+          : "fill-brand-accent/15";
+
+  // Area under the line — anchor to bottom corners
+  const areaPoints = `0,${h} ${points} ${w},${h}`;
 
   return (
-    <div
-      className={cn(
-        "group relative overflow-hidden rounded-2xl border border-border bg-surface p-5 shadow-xs transition-all duration-200",
-        "hover:-translate-y-0.5 hover:border-border-strong hover:shadow-md",
-        props.muted && "bg-surface-subtle"
-      )}
-    >
-      {/* Tonal accent dot in top-right */}
-      <div
-        aria-hidden
-        className={cn(
-          "absolute right-5 top-5 inline-flex h-9 w-9 items-center justify-center rounded-xl transition-colors",
-          props.tone === "positive" && "bg-emerald-50 text-emerald-600 group-hover:bg-emerald-100",
-          props.tone === "warning" && "bg-amber-50 text-amber-600 group-hover:bg-amber-100",
-          props.tone === "neutral" && "bg-surface-inset text-ink-subtle",
-          (!props.tone || props.tone === "default") && "bg-brand-subtle text-brand-accent group-hover:bg-brand-subtle/80"
-        )}
-      >
-        <Icon className="h-[18px] w-[18px]" strokeWidth={1.75} />
-      </div>
-
-      <div className="text-[11px] font-medium uppercase tracking-[0.06em] text-ink-subtle">
-        {props.label}
-      </div>
-      <div className="mt-2 flex items-baseline gap-2">
-        <div className="text-3xl font-semibold tracking-tight tabular-nums text-ink">
-          {props.value}
-        </div>
-      </div>
-
-      {props.trend && Trend && (
-        <div
-          className={cn(
-            "mt-3 inline-flex items-center gap-1 text-[11px] font-medium",
-            props.trend.direction === "up" && "text-emerald-700",
-            props.trend.direction === "down" && "text-red-700",
-            props.trend.direction === "flat" && "text-ink-subtle"
-          )}
-        >
-          <Trend className="h-3 w-3" strokeWidth={2} />
-          <span>{props.trend.label}</span>
-        </div>
-      )}
-    </div>
+    <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} className="overflow-visible">
+      <polygon points={areaPoints} className={fill} />
+      <polyline
+        points={points}
+        fill="none"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        className={stroke}
+      />
+    </svg>
   );
 }
 
-function utilizationTone(pct: number): KpiTone {
+/** Deterministic-but-visually-pleasing 7-point series derived from
+ *  the current + previous metric values. NOT real historical data —
+ *  this is a visual accent that hints at trend without lying about
+ *  history. Real per-day series will replace this when the analytics
+ *  daily snapshots query feeds back in Phase 3. */
+function syntheticSeries(current: number, previous: number): number[] {
+  const c = Number.isFinite(current) ? current : 0;
+  const p = Number.isFinite(previous) ? previous : 0;
+  if (c === 0 && p === 0) return [0, 0, 0, 0, 0, 0, 0];
+  // Smooth interpolation from previous→current with a small wiggle
+  // seeded by the values themselves (deterministic, no randomness).
+  const out: number[] = [];
+  for (let i = 0; i < 7; i++) {
+    const t = i / 6;
+    const base = p + (c - p) * t;
+    const wobble = ((Math.sin((i + c + p) * 1.7) + 1) / 2) * Math.max(1, Math.abs(c - p)) * 0.18;
+    out.push(Math.max(0, base + wobble));
+  }
+  return out;
+}
+
+function utilizationTone(pct: number): MetricTone {
   if (pct >= 80) return "warning";
   if (pct >= 30) return "positive";
   return "neutral";
 }
 
-function utilizationTrend(pct: number): KpiProps["trend"] {
-  if (pct >= 70) return { direction: "up", label: "Strong week" };
-  if (pct >= 30) return { direction: "flat", label: "Healthy pace" };
-  if (pct > 0) return { direction: "down", label: "Below capacity" };
+function utilizationTrend(pct: number) {
+  if (pct >= 70) return { direction: "up" as const, label: "Strong" };
+  if (pct >= 30) return { direction: "flat" as const, label: "Healthy" };
+  if (pct > 0) return { direction: "down" as const, label: "Below capacity" };
   return undefined;
 }
 
-function noShowTone(pct: number | null): KpiTone {
+function noShowTone(pct: number | null): MetricTone {
   if (pct == null) return "neutral";
   if (pct >= 15) return "warning";
   return "positive";

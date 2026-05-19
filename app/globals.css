@@ -51,13 +51,69 @@
 html, body { height: 100%; }
 
 body {
-  background: var(--color-surface-subtle);
+  background: var(--color-app-bg, var(--color-surface-subtle));
   color: var(--color-ink);
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   font-feature-settings: "cv11", "ss01", "ss03";
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
+
+/* ─── Depth system (Phase 2 polish) ───────────────────────────────── */
+:root,
+[data-theme="light"] {
+  /* App background: slightly tinted neutral so cards "lift" off it.
+     Cards stay #ffffff; the subtle slate tint behind them adds depth
+     without darkening the canvas. */
+  --color-app-bg:            #f6f8fb;
+  /* Layered shadow tokens for the premium card system. Designed to
+     stack: subtle for resting, lift for hover, glow for branded
+     emphasis (KPI icons, hero AI badge). */
+  --shadow-soft:             0 1px 2px 0 rgb(15 23 42 / 0.03), 0 1px 3px 0 rgb(15 23 42 / 0.04);
+  --shadow-lift:             0 8px 24px -6px rgb(15 23 42 / 0.08), 0 4px 12px -4px rgb(15 23 42 / 0.06);
+  --shadow-glow:             0 0 0 1px var(--color-accent-ring), 0 8px 24px -8px rgba(53, 157, 243, 0.18);
+}
+
+[data-theme="dark"] {
+  --color-app-bg:            #070b15;
+  --shadow-soft:             0 1px 2px 0 rgb(0 0 0 / 0.4), 0 1px 3px 0 rgb(0 0 0 / 0.3);
+  --shadow-lift:             0 8px 24px -6px rgb(0 0 0 / 0.5), 0 4px 12px -4px rgb(0 0 0 / 0.4);
+  --shadow-glow:             0 0 0 1px var(--color-accent-ring), 0 8px 24px -8px rgba(92, 177, 245, 0.28);
+}
+
+/* ─── Motion utilities ────────────────────────────────────────────── */
+@keyframes zm-shimmer {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+.zm-shimmer::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.4) 50%,
+    transparent 100%
+  );
+  animation: zm-shimmer 1.6s infinite linear;
+}
+
+[data-theme="dark"] .zm-shimmer::before {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.06) 50%,
+    transparent 100%
+  );
+}
+
+@keyframes zm-pulse-glow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(53, 157, 243, 0.35); }
+  50%      { box-shadow: 0 0 0 6px rgba(53, 157, 243, 0); }
+}
+.zm-pulse-glow { animation: zm-pulse-glow 2.4s ease-in-out infinite; }
 
 /* Smooth focus rings everywhere */
 :focus-visible {

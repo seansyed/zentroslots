@@ -11,6 +11,8 @@ import TenantAnnouncementBanner from "@/components/dashboard/TenantAnnouncementB
 import DashboardHero from "@/components/dashboard/DashboardHero";
 import DashboardKpiGrid from "@/components/dashboard/DashboardKpiGrid";
 import DashboardSidePanel from "@/components/dashboard/DashboardSidePanel";
+import MiniSchedule from "@/components/dashboard/MiniSchedule";
+import { FadeIn } from "@/components/ui/Motion";
 
 export default async function DashboardPage(props: {
   searchParams: Promise<{ tab?: string }>;
@@ -205,6 +207,31 @@ export default async function DashboardPage(props: {
   const staffCount = Number(staffCountRow?.n ?? 0);
   const bookingCount = Number(bookingCountRow?.n ?? 0);
 
+  // Today's confirmed bookings for the MiniSchedule preview in the hero.
+  // Small, specific query — independent of the active tab filter so the
+  // user always sees today regardless of which tab they last clicked.
+  const todayRows = await db
+    .select({
+      id: bookings.id,
+      startAt: bookings.startAt,
+      endAt: bookings.endAt,
+      clientName: bookings.clientName,
+      serviceName: services.name,
+      meetLink: bookings.meetLink,
+    })
+    .from(bookings)
+    .innerJoin(services, eq(services.id, bookings.serviceId))
+    .where(
+      and(
+        visibility,
+        eq(bookings.status, "confirmed"),
+        gte(bookings.startAt, startOfToday),
+        lt(bookings.startAt, startOfTomorrow)
+      )
+    )
+    .orderBy(bookings.startAt)
+    .limit(6);
+
   // Onboarding checklist (only shown when something is incomplete).
   const hasServices = (await db.select({ n: count() }).from(services).where(eq(services.tenantId, user.tenantId)))[0]?.n ?? 0;
   const hasAvailability = (await db.select({ n: count() }).from(availability).where(eq(availability.userId, user.id)))[0]?.n ?? 0;
@@ -249,19 +276,24 @@ export default async function DashboardPage(props: {
       <OnboardingChecklist items={checklistItems} />
 
       {/* ── HERO ────────────────────────────────────────────────── */}
-      <DashboardHero
-        userName={user.name}
-        userRole={user.role}
-        tenantName={tenant?.name ?? "Workspace"}
-        timezone={user.timezone}
-        todayCount={Number(todayCount?.n ?? 0)}
-        weekCount={Number(weekCount?.n ?? 0)}
-        utilizationPct={utilizationPct}
-        showGoogleConnect={!user.googleRefreshToken && (user.role === "admin" || user.role === "staff")}
-      />
+      <FadeIn delay={0} as="section">
+        <DashboardHero
+          userName={user.name}
+          userRole={user.role}
+          tenantName={tenant?.name ?? "Workspace"}
+          timezone={user.timezone}
+          todayCount={Number(todayCount?.n ?? 0)}
+          weekCount={Number(weekCount?.n ?? 0)}
+          utilizationPct={utilizationPct}
+          showGoogleConnect={!user.googleRefreshToken && (user.role === "admin" || user.role === "staff")}
+          miniSchedule={
+            <MiniSchedule rows={todayRows} timezone={user.timezone} />
+          }
+        />
+      </FadeIn>
 
       {/* ── KPI GRID ────────────────────────────────────────────── */}
-      <div className="mt-8">
+      <FadeIn delay={1} className="mt-8">
         <DashboardKpiGrid
           todayCount={Number(todayCount?.n ?? 0)}
           weekCount={Number(weekCount?.n ?? 0)}
@@ -272,48 +304,54 @@ export default async function DashboardPage(props: {
           cancellationsCount={Number(cancelledCount?.n ?? 0)}
           openTasksCount={pendingTasksCount}
         />
-      </div>
+      </FadeIn>
 
       {/* ── MAIN GRID: timeline + side panel ───────────────────── */}
-      <div className="mt-8 grid gap-6 lg:grid-cols-3">
-        <section className="lg:col-span-2">
-          <div className="rounded-2xl border border-border bg-surface p-6 shadow-xs">
-            <div className="mb-4 flex items-baseline justify-between">
-              <div>
-                <h3 className="text-base font-semibold text-ink">Upcoming appointments</h3>
-                <p className="mt-0.5 text-xs text-ink-muted">Today and the next 7 days</p>
+      <FadeIn delay={2} className="mt-8">
+        <div className="grid gap-6 lg:grid-cols-3">
+          <section className="lg:col-span-2">
+            <div className="rounded-2xl border border-border bg-surface p-5 shadow-soft sm:p-6">
+              <div className="mb-4 flex items-baseline justify-between gap-3">
+                <div>
+                  <h3 className="text-[15px] font-semibold tracking-tight text-ink">
+                    Upcoming appointments
+                  </h3>
+                  <p className="mt-0.5 text-[12px] text-ink-muted">
+                    Today and the next 7 days
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  <TabLink active={tab === "today"} label="Today" href="?tab=today" />
+                  <TabLink active={tab === "upcoming"} label="Upcoming" href="?tab=upcoming" />
+                  <TabLink active={tab === "cancelled"} label="Cancelled" href="?tab=cancelled" />
+                  <TabLink active={tab === "completed"} label="Completed" href="?tab=completed" />
+                </div>
               </div>
-              <div className="flex gap-1">
-                <TabLink active={tab === "today"} label="Today" href="?tab=today" />
-                <TabLink active={tab === "upcoming"} label="Upcoming" href="?tab=upcoming" />
-                <TabLink active={tab === "cancelled"} label="Cancelled" href="?tab=cancelled" />
-                <TabLink active={tab === "completed"} label="Completed" href="?tab=completed" />
-              </div>
+              <DashboardBookings
+                rows={rows.map((r) => ({ ...r, startAt: r.startAt.toISOString(), endAt: r.endAt.toISOString() }))}
+                canManage={user.role === "admin" || user.role === "staff" || user.role === "manager"}
+                userTimezone={user.timezone}
+              />
             </div>
-            <DashboardBookings
-              rows={rows.map((r) => ({ ...r, startAt: r.startAt.toISOString(), endAt: r.endAt.toISOString() }))}
-              canManage={user.role === "admin" || user.role === "staff" || user.role === "manager"}
-              userTimezone={user.timezone}
-            />
-          </div>
-        </section>
+          </section>
 
-        <DashboardSidePanel
-          pendingTasks={pendingTasks.map((t) => ({
-            id: t.id,
-            title: t.title,
-            dueAt: t.dueAt ? t.dueAt.toISOString() : null,
-          }))}
-          topServices={topServices.map((s) => ({
-            id: s.id,
-            name: s.name,
-            bookings: Number(s.n),
-            revenueCents: Number(s.revenue),
-          }))}
-          totalBookings={bookingCount}
-          plan={tenant?.plan ?? "free"}
-        />
-      </div>
+          <DashboardSidePanel
+            pendingTasks={pendingTasks.map((t) => ({
+              id: t.id,
+              title: t.title,
+              dueAt: t.dueAt ? t.dueAt.toISOString() : null,
+            }))}
+            topServices={topServices.map((s) => ({
+              id: s.id,
+              name: s.name,
+              bookings: Number(s.n),
+              revenueCents: Number(s.revenue),
+            }))}
+            totalBookings={bookingCount}
+            plan={tenant?.plan ?? "free"}
+          />
+        </div>
+      </FadeIn>
     </Shell>
   );
 }

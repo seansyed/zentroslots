@@ -30,7 +30,12 @@ export default function Topbar({
   const cmd = useCommandPalette();
 
   return (
-    <header className="sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-border bg-surface/80 px-4 backdrop-blur-xl sm:px-6">
+    <header className="sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-border/70 bg-surface/70 px-4 backdrop-blur-2xl supports-[backdrop-filter]:bg-surface/55 sm:px-6">
+      {/* Subtle bottom shadow that fades in once the user scrolls — pure CSS */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-border to-transparent"
+      />
       {onOpenSidebar && (
         <button
           type="button"
@@ -75,15 +80,19 @@ export default function Topbar({
         )}
       </div>
 
-      {/* Search trigger (CommandPalette) — premium look */}
+      {/* Search trigger (CommandPalette) — Linear/Vercel-style elevated */}
       <button
         type="button"
         onClick={cmd.open}
-        className="hidden h-9 items-center gap-2 rounded-lg border border-border bg-surface-subtle px-3 text-[13px] text-ink-subtle transition-all hover:border-border-strong hover:bg-surface md:inline-flex md:w-64 lg:w-80"
+        className={cn(
+          "hidden h-9 items-center gap-2 rounded-xl border border-border bg-surface-subtle px-3 text-[13px] text-ink-subtle transition-all duration-200 md:inline-flex md:w-64 lg:w-80",
+          "hover:border-brand-accent/30 hover:bg-surface hover:text-ink hover:shadow-soft",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-accent/30 focus-visible:border-brand-accent/40"
+        )}
       >
         <Search className="h-4 w-4" strokeWidth={1.75} />
-        <span className="flex-1 text-left">Search…</span>
-        <kbd className="hidden rounded border border-border bg-surface px-1.5 py-0.5 font-mono text-[10px] text-ink-subtle md:inline">
+        <span className="flex-1 text-left">Search anything…</span>
+        <kbd className="hidden h-5 items-center rounded-md border border-border bg-surface px-1.5 font-mono text-[10px] text-ink-subtle md:inline-flex">
           ⌘K
         </kbd>
       </button>

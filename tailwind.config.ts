@@ -48,6 +48,16 @@ export default {
         md: "0 4px 6px -1px rgb(15 23 42 / 0.08), 0 2px 4px -2px rgb(15 23 42 / 0.06)",
         lg: "0 10px 15px -3px rgb(15 23 42 / 0.08), 0 4px 6px -4px rgb(15 23 42 / 0.06)",
         ring: "0 0 0 4px var(--color-accent-ring)",
+        // Phase 2 depth tokens — CSS-var-backed so dark mode adapts.
+        soft: "var(--shadow-soft)",
+        lift: "var(--shadow-lift)",
+        glow: "var(--shadow-glow)",
+      },
+      backgroundImage: {
+        "app-mesh":
+          "radial-gradient(at 0% 0%, rgba(53,157,243,0.08) 0px, transparent 50%), radial-gradient(at 100% 0%, rgba(120,180,255,0.05) 0px, transparent 50%)",
+        "hero-glow":
+          "radial-gradient(circle at 100% 0%, rgba(53,157,243,0.10) 0px, transparent 60%), linear-gradient(135deg, rgba(53,157,243,0.04) 0%, transparent 50%)",
       },
       fontFamily: {
         sans: [

@@ -267,18 +267,18 @@ export default function Sidebar({
       </div>
 
       {/* Nav */}
-      <nav className={cn("flex-1 overflow-y-auto", collapsed ? "px-2 py-3" : "px-3 py-4")} aria-label="Primary">
+      <nav className={cn("flex-1 overflow-y-auto", collapsed ? "px-2 py-4" : "px-3 py-5")} aria-label="Primary">
         {groups.map((g, gi) => (
-          <div key={gi} className={cn("mb-5", collapsed && "mb-3")}>
+          <div key={gi} className={cn("mb-6", collapsed && "mb-4")}>
             {g.label && !collapsed && (
-              <div className="mb-1.5 px-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-subtle">
+              <div className="mb-2 px-2.5 text-[10px] font-semibold uppercase tracking-[0.10em] text-ink-subtle">
                 {g.label}
               </div>
             )}
             {g.label && collapsed && (
-              <div className="mb-1 h-px bg-border" />
+              <div className="mb-2 h-px bg-border/70" />
             )}
-            <ul className="space-y-0.5">
+            <ul className="space-y-[3px]">
               {g.items.map((it) => {
                 const active = isActive(it.href, pathname);
                 const Icon = it.icon;
@@ -289,19 +289,19 @@ export default function Sidebar({
                       aria-current={active ? "page" : undefined}
                       title={collapsed ? it.label : undefined}
                       className={cn(
-                        "group relative flex items-center rounded-lg text-[13px] font-medium transition-all duration-150",
+                        "group relative flex items-center rounded-lg text-[13px] font-medium transition-all duration-150 ease-out",
                         collapsed
                           ? "h-9 w-full justify-center"
-                          : "gap-2.5 px-2.5 py-2",
+                          : "gap-2.5 px-2.5 py-[7px]",
                         active
-                          ? "bg-brand-subtle text-brand-accent shadow-[inset_0_0_0_1px_var(--color-accent-ring)]"
-                          : "text-ink-muted hover:bg-surface-inset hover:text-ink"
+                          ? "bg-gradient-to-r from-brand-subtle to-brand-subtle/40 text-brand-accent"
+                          : "text-ink-muted hover:bg-surface-inset/70 hover:text-ink"
                       )}
                     >
                       {active && !collapsed && (
                         <span
                           aria-hidden
-                          className="absolute -left-3 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r-full bg-brand-accent"
+                          className="absolute -left-3 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r-full bg-brand-accent shadow-[0_0_8px_var(--color-accent-ring)]"
                         />
                       )}
                       <Icon

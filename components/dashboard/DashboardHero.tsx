@@ -1,19 +1,24 @@
 /**
- * DashboardHero — premium greeting + AI insight + quick actions row.
+ * DashboardHero — premium scheduling workspace centerpiece (Phase 2).
  *
- * Server component. No client JS — all conditional logic resolves at
- * render time. The greeting picks a time-of-day appropriate phrase
- * from the user's timezone.
+ * Server component. Layered glass + soft brand gradient + animated AI
+ * badge + larger pill quick-actions. Mini schedule slot (optional)
+ * lives in the footer of the hero so the user sees today's day in one
+ * glance without scrolling.
+ *
+ * Insight derivation is rules-based (deterministic) — never fake AI.
  */
 import Link from "next/link";
 import {
   CalendarPlus,
   UserPlus,
   Clock4,
-  Sparkles,
   ArrowRight,
   Plug,
+  type LucideIcon,
 } from "lucide-react";
+import { cn } from "@/lib/cn";
+import { InsightCard } from "@/components/ui/Card";
 
 export default function DashboardHero(props: {
   userName: string;
@@ -24,6 +29,8 @@ export default function DashboardHero(props: {
   weekCount: number;
   utilizationPct: number;
   showGoogleConnect: boolean;
+  /** Optional slot — typically MiniSchedule rendered by the page. */
+  miniSchedule?: React.ReactNode;
 }) {
   const greeting = greetingFor(new Date(), props.timezone);
   const todayCopy =
@@ -40,52 +47,77 @@ export default function DashboardHero(props: {
   });
 
   return (
-    <section className="relative overflow-hidden rounded-2xl border border-border bg-surface p-6 shadow-xs sm:p-8">
-      {/* Soft brand glow in the corner */}
+    <section
+      className={cn(
+        "relative overflow-hidden rounded-2xl border border-border bg-surface shadow-soft",
+        "bg-hero-glow"
+      )}
+    >
+      {/* Soft brand glow in the corner — layered on top of bg-hero-glow */}
       <div
         aria-hidden
-        className="pointer-events-none absolute -right-24 -top-24 h-72 w-72 rounded-full bg-gradient-to-br from-brand-subtle to-transparent blur-3xl"
+        className="pointer-events-none absolute -right-32 -top-32 h-80 w-80 rounded-full bg-gradient-to-br from-brand-accent/20 via-brand-accent/8 to-transparent blur-3xl"
+      />
+      {/* Faint grid texture for depth without noise */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 opacity-[0.025]"
+        style={{
+          backgroundImage:
+            "linear-gradient(rgb(15 23 42) 1px, transparent 1px), linear-gradient(90deg, rgb(15 23 42) 1px, transparent 1px)",
+          backgroundSize: "32px 32px",
+        }}
       />
 
-      <div className="relative grid gap-6 lg:grid-cols-[1fr_auto] lg:items-end">
-        <div className="min-w-0">
-          <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-subtle">
-            {props.tenantName}
-          </div>
-          <h2 className="mt-2 text-2xl font-semibold tracking-tight text-ink sm:text-[28px]">
-            {greeting}, {firstName(props.userName)}
-          </h2>
-          <p className="mt-1.5 text-[14px] text-ink-muted">
-            {todayCopy}{" "}
-            <span className="text-ink-subtle">·</span>{" "}
-            <span className="text-ink-muted">{formatDate(new Date(), props.timezone)}</span>
-          </p>
-
-          {aiInsight && (
-            <div className="mt-5 inline-flex max-w-2xl items-start gap-3 rounded-xl border border-brand-accent/20 bg-gradient-to-br from-brand-subtle/60 to-transparent px-4 py-3 text-[13px]">
-              <Sparkles
-                className="mt-0.5 h-4 w-4 shrink-0 text-brand-accent"
-                strokeWidth={1.75}
-              />
-              <div className="min-w-0">
-                <div className="text-[11px] font-semibold uppercase tracking-wider text-brand-accent">
-                  AI Insight
-                </div>
-                <p className="mt-0.5 text-ink">{aiInsight}</p>
-              </div>
+      <div className="relative p-6 sm:p-8">
+        <div className="grid gap-7 lg:grid-cols-[1fr_auto] lg:items-end">
+          {/* Left — greeting + AI insight */}
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.10em] text-ink-subtle">
+              <span className="inline-block h-1.5 w-1.5 rounded-full bg-brand-accent" />
+              {props.tenantName}
             </div>
-          )}
+            <h2 className="mt-3 text-[26px] font-semibold tracking-tight text-ink sm:text-[32px]">
+              {greeting},{" "}
+              <span className="bg-gradient-to-br from-ink to-ink/70 bg-clip-text text-transparent">
+                {firstName(props.userName)}
+              </span>
+            </h2>
+            <p className="mt-1.5 text-[14px] text-ink-muted">
+              {todayCopy}{" "}
+              <span className="text-ink-subtle">·</span>{" "}
+              <span className="text-ink-muted">{formatDate(new Date(), props.timezone)}</span>
+            </p>
+
+            {aiInsight && (
+              <div className="mt-5 max-w-2xl">
+                <InsightCard>{aiInsight}</InsightCard>
+              </div>
+            )}
+          </div>
+
+          {/* Right — quick actions, stacked vertically on lg+ */}
+          <div className="flex flex-wrap gap-2 lg:flex-col lg:items-stretch lg:gap-2">
+            <QuickAction
+              href="/dashboard/calendar"
+              icon={CalendarPlus}
+              label="New booking"
+              primary
+            />
+            <QuickAction href="/dashboard/customers" icon={UserPlus} label="Add customer" />
+            <QuickAction href="/dashboard/availability/overrides" icon={Clock4} label="Block time" />
+            {props.showGoogleConnect && (
+              <QuickAction href="/api/google/connect" icon={Plug} label="Connect Google" />
+            )}
+          </div>
         </div>
 
-        {/* Quick actions */}
-        <div className="flex flex-wrap gap-2 lg:flex-nowrap">
-          <QuickAction href="/dashboard/calendar" icon={CalendarPlus} label="New booking" primary />
-          <QuickAction href="/dashboard/customers" icon={UserPlus} label="Add customer" />
-          <QuickAction href="/dashboard/availability/overrides" icon={Clock4} label="Block time" />
-          {props.showGoogleConnect && (
-            <QuickAction href="/api/google/connect" icon={Plug} label="Connect Google" />
-          )}
-        </div>
+        {/* Mini schedule footer slot — only shown when provided */}
+        {props.miniSchedule && (
+          <div className="relative mt-7 border-t border-border/60 pt-6">
+            {props.miniSchedule}
+          </div>
+        )}
       </div>
     </section>
   );
@@ -98,31 +130,31 @@ function QuickAction({
   primary,
 }: {
   href: string;
-  icon: React.ComponentType<{ className?: string; strokeWidth?: number }>;
+  icon: LucideIcon;
   label: string;
   primary?: boolean;
 }) {
   return (
     <Link
       href={href}
-      className={
-        "group inline-flex h-10 items-center gap-2 rounded-lg px-3.5 text-[13px] font-medium transition-all duration-150 " +
-        (primary
-          ? "bg-brand-accent text-white shadow-sm hover:bg-brand-hover hover:shadow"
-          : "border border-border bg-surface text-ink-muted hover:border-border-strong hover:bg-surface-inset hover:text-ink")
-      }
+      className={cn(
+        "group inline-flex h-11 items-center gap-2.5 rounded-xl px-4 text-[13px] font-medium transition-all duration-200 ease-out",
+        primary
+          ? "bg-brand-accent text-white shadow-soft hover:-translate-y-0.5 hover:bg-brand-hover hover:shadow-glow"
+          : "border border-border bg-surface/70 text-ink-muted backdrop-blur-sm hover:-translate-y-0.5 hover:border-border-strong hover:bg-surface hover:text-ink hover:shadow-soft"
+      )}
     >
       <Icon
-        className={
-          "h-4 w-4 transition-transform group-hover:scale-105 " +
-          (primary ? "text-white" : "text-ink-subtle group-hover:text-ink")
-        }
+        className={cn(
+          "h-4 w-4 transition-transform duration-200 group-hover:scale-110",
+          primary ? "text-white" : "text-ink-subtle group-hover:text-ink"
+        )}
         strokeWidth={1.75}
       />
       <span>{label}</span>
       {primary && (
         <ArrowRight
-          className="h-3.5 w-3.5 text-white/80 transition-transform group-hover:translate-x-0.5"
+          className="h-3.5 w-3.5 text-white/80 transition-transform duration-200 group-hover:translate-x-0.5"
           strokeWidth={2}
         />
       )}
@@ -165,7 +197,6 @@ function formatDate(now: Date, timezone: string): string {
 }
 
 function deriveInsight(args: { today: number; week: number; utilization: number }): string | null {
-  // Deterministic insight derivation — never AI text, always rules.
   if (args.today === 0 && args.week === 0) {
     return "You don't have any bookings this week. Share your booking page to start filling your calendar.";
   }
