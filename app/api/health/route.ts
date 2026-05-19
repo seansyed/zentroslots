@@ -227,9 +227,14 @@ export async function GET() {
     try {
       const info = getEmailProviderInfo();
       const v = await verifySmtpTransport({ timeoutMs: 3_000 });
+      // v.detail already includes "provider=..." for stub/non-SMTP
+      // paths; only prefix when it doesn't to avoid duplication.
+      const vDetail = v.detail ?? "";
       const detail = v.ok
-        ? `provider=${info.provider}; ${v.detail ?? ""}`
-        : `provider=${info.provider}; category=${v.category ?? "unknown"}; ${v.detail ?? ""}`;
+        ? vDetail.startsWith("provider=")
+          ? vDetail
+          : `provider=${info.provider}; ${vDetail}`
+        : `provider=${info.provider}; category=${v.category ?? "unknown"}; ${vDetail}`;
       checks.smtp_transport = {
         ok: true, // soft check — never toggles allOk
         ms: Date.now() - start,
