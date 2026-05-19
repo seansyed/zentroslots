@@ -139,10 +139,13 @@ export default function TasksClient({
   }, []);
   React.useEffect(() => { reload(); }, [reload]);
 
-  // Once the real fetch resolves to an empty array, swap in a demo
-  // schedule. The moment a real task arrives (next reload) the demo
-  // is replaced automatically.
-  const isDemoActive = rows !== null && rows.length === 0 && !demoHidden;
+  // Once the real fetch resolves with no actionable (open) work, swap
+  // in a demo queue so the workspace feels alive. The demo retires the
+  // moment a real OPEN task arrives (next reload). Completed-only
+  // tenants count as operationally empty — the workspace shouldn't
+  // read as abandoned just because there's a record of past work.
+  const openRealCount = rows ? rows.filter((t) => t.status === "open").length : 0;
+  const isDemoActive = rows !== null && openRealCount === 0 && !demoHidden;
   const effectiveRows: Task[] = React.useMemo(
     () => (isDemoActive ? buildDemoTasks(myUserId, allStaff) : (rows ?? [])),
     [isDemoActive, rows, myUserId, allStaff],
