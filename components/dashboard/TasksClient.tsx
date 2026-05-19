@@ -54,6 +54,11 @@ import {
   TrendingUp,
   Users,
   ArrowRight,
+  Clock4,
+  Bell,
+  User,
+  FileText,
+  RotateCcw,
 } from "lucide-react";
 
 import { Avatar, toast } from "@/components/ui/primitives";
@@ -203,6 +208,50 @@ export default function TasksClient({
     }
   }
 
+  // Snooze: shift dueAt forward by `days` (preserving the original
+  // local clock hour). PATCH /api/tasks/[id] already accepts dueAt.
+  async function snoozeTask(t: Task, days: number) {
+    if (t.isDemo) {
+      toast("Preview · Sample tasks can't be snoozed.", "info");
+      return;
+    }
+    const base = t.dueAt ? new Date(t.dueAt) : new Date();
+    const next = new Date(base.getTime() + days * 86_400_000);
+    const nextIso = next.toISOString();
+    setRows((cur) => cur?.map((x) => (x.id === t.id ? { ...x, dueAt: nextIso } : x)) ?? null);
+    try {
+      const r = await fetch(`/api/tasks/${t.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dueAt: nextIso }),
+      });
+      if (!r.ok) throw new Error("Failed");
+      toast(days === 1 ? "Snoozed until tomorrow" : `Snoozed ${days}d`, "success");
+    } catch {
+      toast("Failed to snooze task", "error");
+      reload();
+    }
+  }
+
+  // Open task detail drawer. State holds the full row so the drawer
+  // can show optimistic edits even after the underlying list reloads.
+  const [detailTask, setDetailTask] = React.useState<Task | null>(null);
+  function openTask(t: Task) {
+    if (t.isDemo) {
+      toast("Preview · Sample task. Real tasks open the full detail drawer.", "info");
+      return;
+    }
+    setDetailTask(t);
+  }
+  // Keep the drawer in sync with optimistic row mutations so completing
+  // / snoozing from inside the drawer updates the body live.
+  React.useEffect(() => {
+    if (!detailTask) return;
+    const fresh = rows?.find((x) => x.id === detailTask.id);
+    if (fresh && fresh !== detailTask) setDetailTask(fresh);
+    if (rows && !rows.find((x) => x.id === detailTask.id)) setDetailTask(null);
+  }, [rows, detailTask]);
+
   const counts = React.useMemo(() => computeCounts(effectiveRows, myUserId), [effectiveRows, myUserId]);
   const visible = React.useMemo(() => applyFilter(effectiveRows, filter, myUserId), [effectiveRows, filter, myUserId]);
   const grouped = React.useMemo(() => groupByBucket(visible, filter), [visible, filter]);
@@ -242,6 +291,8 @@ export default function TasksClient({
                   tasks={g.tasks}
                   onToggle={toggleStatus}
                   onRemove={removeTask}
+                  onSnooze={snoozeTask}
+                  onOpen={openTask}
                 />
               </FadeIn>
             ))}
@@ -263,6 +314,14 @@ export default function TasksClient({
         allCustomers={allCustomers}
         defaultAssigneeId={myUserId}
         onCreated={() => { setOpenNew(false); reload(); }}
+      />
+
+      <TaskDetailDrawer
+        task={detailTask}
+        onClose={() => setDetailTask(null)}
+        onToggle={toggleStatus}
+        onRemove={removeTask}
+        onSnooze={snoozeTask}
       />
     </div>
   );
@@ -350,11 +409,15 @@ function TaskGroup({
   tasks,
   onToggle,
   onRemove,
+  onSnooze,
+  onOpen,
 }: {
   bucket: Bucket;
   tasks: Task[];
   onToggle: (t: Task) => void;
   onRemove: (t: Task) => void;
+  onSnooze: (t: Task, days: number) => void;
+  onOpen: (t: Task) => void;
 }) {
   const meta = BUCKET_LABEL[bucket];
   const reduced = useReducedMotion();
@@ -380,7 +443,7 @@ function TaskGroup({
               transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
               style={{ overflow: "hidden" }}
             >
-              <TaskCard task={t} onToggle={onToggle} onRemove={onRemove} />
+              <TaskCard task={t} onToggle={onToggle} onRemove={onRemove} onSnooze={onSnooze} onOpen={onOpen} />
             </motion.li>
           ))}
         </AnimatePresence>
@@ -395,22 +458,61 @@ function TaskCard({
   task,
   onToggle,
   onRemove,
+  onSnooze,
+  onOpen,
 }: {
   task: Task;
   onToggle: (t: Task) => void;
   onRemove: (t: Task) => void;
+  onSnooze: (t: Task, days: number) => void;
+  onOpen: (t: Task) => void;
 }) {
   const priority = derivePriority(task);
   const dueLabel = formatDue(task.dueAt);
   const isDone = task.status === "done";
   const isOverdue = !isDone && task.dueAt && new Date(task.dueAt).getTime() < Date.now();
 
+  // Completion psychology: when the user toggles open → done, we stage
+  // a brief "completing" phase that animates the strike-through and
+  // emerald wash before the AnimatePresence layout collapse fires.
+  // The PATCH still goes through immediately; this is visual sugar.
+  const [completing, setCompleting] = React.useState(false);
+  function handleToggle() {
+    if (!isDone) {
+      setCompleting(true);
+      window.setTimeout(() => setCompleting(false), 350);
+    }
+    onToggle(task);
+  }
+
+  function handleCardClick(e: React.MouseEvent) {
+    // Ignore clicks on the checkbox / nested buttons / links.
+    const target = e.target as HTMLElement;
+    if (target.closest("button, a, input")) return;
+    onOpen(task);
+  }
+  function handleCardKey(e: React.KeyboardEvent) {
+    if (e.key === "Enter" || e.key === " ") {
+      const target = e.target as HTMLElement;
+      if (target.closest("button, a, input")) return;
+      e.preventDefault();
+      onOpen(task);
+    }
+  }
+
   return (
     <div
+      role="button"
+      tabIndex={0}
+      onClick={handleCardClick}
+      onKeyDown={handleCardKey}
+      data-completing={completing ? "true" : undefined}
       className={cn(
-        "group relative overflow-hidden rounded-2xl border bg-surface px-4 py-3.5 shadow-soft transition-all duration-200 ease-[cubic-bezier(0.16,1,0.3,1)]",
+        "group relative cursor-pointer overflow-hidden rounded-2xl border bg-surface px-4 py-3.5 shadow-soft transition-all duration-200 ease-[cubic-bezier(0.16,1,0.3,1)]",
         "hover:-translate-y-0.5 hover:scale-[1.004] hover:border-border-strong hover:shadow-lift",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-accent/40",
         isDone ? "opacity-70 border-border" : "border-border",
+        completing && "border-emerald-300 bg-gradient-to-br from-emerald-50/60 via-surface to-surface",
       )}
     >
       {/* Priority accent rail */}
@@ -444,16 +546,16 @@ function TaskCard({
         {/* Custom completion checkbox */}
         <button
           type="button"
-          onClick={() => onToggle(task)}
+          onClick={handleToggle}
           aria-label={isDone ? "Mark open" : "Mark complete"}
           className={cn(
-            "mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition-all duration-150 ease-[cubic-bezier(0.16,1,0.3,1)]",
-            isDone
-              ? "border-emerald-500 bg-emerald-500 text-white shadow-[0_2px_8px_rgba(16,185,129,0.35)]"
-              : "border-border-strong bg-surface hover:border-brand-accent hover:bg-brand-subtle",
+            "mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition-all duration-200 ease-[cubic-bezier(0.16,1,0.3,1)]",
+            (isDone || completing)
+              ? "border-emerald-500 bg-emerald-500 text-white shadow-[0_2px_10px_rgba(16,185,129,0.45)]"
+              : "border-border-strong bg-surface hover:border-brand-accent hover:bg-brand-subtle hover:scale-110",
           )}
         >
-          {isDone && <CheckCircle2 className="h-3 w-3" strokeWidth={2.5} />}
+          {(isDone || completing) && <CheckCircle2 className="h-3 w-3" strokeWidth={2.5} />}
         </button>
 
         {/* Body */}
@@ -462,8 +564,8 @@ function TaskCard({
             <div className="min-w-0 flex-1">
               <div
                 className={cn(
-                  "truncate text-[14px] font-semibold tracking-tight",
-                  isDone ? "text-ink-muted line-through" : "text-ink",
+                  "truncate text-[14px] font-semibold tracking-tight transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]",
+                  (isDone || completing) ? "text-ink-muted line-through" : "text-ink",
                 )}
               >
                 {task.title}
@@ -514,34 +616,46 @@ function TaskCard({
               </div>
 
               {/* Hover-reveal quick actions */}
-              <div className="pointer-events-none mt-2.5 flex items-center gap-1.5 opacity-0 transition-opacity duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] group-hover:pointer-events-auto group-hover:opacity-100">
-                {task.relatedCustomerId && (
-                  <Link
-                    href={`/dashboard/customers?focus=${task.relatedCustomerId}`}
+              {!isDone && (
+                <div className="pointer-events-none mt-2.5 flex items-center gap-1.5 opacity-0 transition-opacity duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] group-hover:pointer-events-auto group-hover:opacity-100">
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); onSnooze(task, 1); }}
                     className="inline-flex items-center gap-1 rounded-md border border-border bg-surface px-2 py-0.5 text-[10px] font-semibold text-ink-muted shadow-soft transition-colors hover:bg-surface-inset hover:text-ink"
                   >
-                    <ExternalLink className="h-2.5 w-2.5" strokeWidth={1.75} />
-                    Open customer
-                  </Link>
-                )}
-                {task.relatedBookingId && (
-                  <Link
-                    href="/dashboard/appointments"
-                    className="inline-flex items-center gap-1 rounded-md border border-border bg-surface px-2 py-0.5 text-[10px] font-semibold text-ink-muted shadow-soft transition-colors hover:bg-surface-inset hover:text-ink"
+                    <Bell className="h-2.5 w-2.5" strokeWidth={1.75} />
+                    Snooze 1d
+                  </button>
+                  {task.relatedCustomerId && (
+                    <Link
+                      href={`/dashboard/customers?focus=${task.relatedCustomerId}`}
+                      onClick={(e) => e.stopPropagation()}
+                      className="inline-flex items-center gap-1 rounded-md border border-border bg-surface px-2 py-0.5 text-[10px] font-semibold text-ink-muted shadow-soft transition-colors hover:bg-surface-inset hover:text-ink"
+                    >
+                      <ExternalLink className="h-2.5 w-2.5" strokeWidth={1.75} />
+                      Customer
+                    </Link>
+                  )}
+                  {task.relatedBookingId && (
+                    <Link
+                      href="/dashboard/appointments"
+                      onClick={(e) => e.stopPropagation()}
+                      className="inline-flex items-center gap-1 rounded-md border border-border bg-surface px-2 py-0.5 text-[10px] font-semibold text-ink-muted shadow-soft transition-colors hover:bg-surface-inset hover:text-ink"
+                    >
+                      <CalendarIcon className="h-2.5 w-2.5" strokeWidth={1.75} />
+                      Booking
+                    </Link>
+                  )}
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); onRemove(task); }}
+                    className="ml-auto inline-flex items-center gap-1 rounded-md border border-border bg-surface px-2 py-0.5 text-[10px] font-semibold text-ink-subtle shadow-soft transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-700"
                   >
-                    <CalendarIcon className="h-2.5 w-2.5" strokeWidth={1.75} />
-                    Open booking
-                  </Link>
-                )}
-                <button
-                  type="button"
-                  onClick={() => onRemove(task)}
-                  className="ml-auto inline-flex items-center gap-1 rounded-md border border-border bg-surface px-2 py-0.5 text-[10px] font-semibold text-ink-subtle shadow-soft transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-700"
-                >
-                  <Trash2 className="h-2.5 w-2.5" strokeWidth={1.75} />
-                  Delete
-                </button>
-              </div>
+                    <Trash2 className="h-2.5 w-2.5" strokeWidth={1.75} />
+                    Delete
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -553,15 +667,17 @@ function TaskCard({
 function PriorityChip({ priority, isDone }: { priority: Priority; isDone: boolean }) {
   if (isDone) return null;
   if (priority === "low") return null; // restrained — only show ≥ medium
-  const map: Record<Priority, { label: string; cls: string }> = {
-    urgent: { label: "Urgent",  cls: "bg-red-50 text-red-700 ring-1 ring-red-200/60" },
-    high:   { label: "High",    cls: "bg-amber-50 text-amber-800 ring-1 ring-amber-200/60" },
-    medium: { label: "Medium",  cls: "bg-brand-subtle text-brand-accent ring-1 ring-brand-accent/15" },
-    low:    { label: "Low",     cls: "" },
+  const map: Record<Priority, { label: string; cls: string; dot: string }> = {
+    urgent: { label: "Urgent",  cls: "bg-red-50/80 text-red-700 ring-1 ring-red-200/50",          dot: "bg-red-500" },
+    high:   { label: "High",    cls: "bg-amber-50/80 text-amber-800 ring-1 ring-amber-200/50",    dot: "bg-amber-500" },
+    medium: { label: "Medium",  cls: "bg-brand-subtle/70 text-brand-accent ring-1 ring-brand-accent/15", dot: "bg-brand-accent" },
+    low:    { label: "Low",     cls: "",                                                          dot: "" },
   };
+  const m = map[priority];
   return (
-    <span className={cn("inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider", map[priority].cls)}>
-      {map[priority].label}
+    <span className={cn("inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.08em]", m.cls)}>
+      <span className={cn("inline-block h-1 w-1 rounded-full", m.dot)} aria-hidden />
+      {m.label}
     </span>
   );
 }
@@ -975,6 +1091,303 @@ function Field({ label, children, required }: { label: string; children: React.R
       {children}
     </label>
   );
+}
+
+// ─── Task detail drawer ──────────────────────────────────────────
+
+function TaskDetailDrawer({
+  task,
+  onClose,
+  onToggle,
+  onRemove,
+  onSnooze,
+}: {
+  task: Task | null;
+  onClose: () => void;
+  onToggle: (t: Task) => void;
+  onRemove: (t: Task) => void;
+  onSnooze: (t: Task, days: number) => void;
+}) {
+  const reduced = useReducedMotion();
+
+  React.useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape" && task) onClose();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [task, onClose]);
+
+  return (
+    <AnimatePresence>
+      {task && (
+        <>
+          <motion.div
+            className="fixed inset-0 z-40 bg-black/30 backdrop-blur-sm"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+            onClick={onClose}
+            aria-hidden
+          />
+          <motion.aside
+            role="dialog"
+            aria-modal="true"
+            aria-label="Task details"
+            className="fixed bottom-0 right-0 top-0 z-50 flex w-full max-w-md flex-col bg-surface shadow-2xl"
+            initial={reduced ? { x: 0 } : { x: "100%" }}
+            animate={{ x: 0 }}
+            exit={reduced ? { x: 0 } : { x: "100%" }}
+            transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
+          >
+            <TaskDetailBody task={task} onClose={onClose} onToggle={onToggle} onRemove={onRemove} onSnooze={onSnooze} />
+          </motion.aside>
+        </>
+      )}
+    </AnimatePresence>
+  );
+}
+
+function TaskDetailBody({
+  task,
+  onClose,
+  onToggle,
+  onRemove,
+  onSnooze,
+}: {
+  task: Task;
+  onClose: () => void;
+  onToggle: (t: Task) => void;
+  onRemove: (t: Task) => void;
+  onSnooze: (t: Task, days: number) => void;
+}) {
+  const priority = derivePriority(task);
+  const isDone = task.status === "done";
+  const dueLabel = formatDue(task.dueAt);
+  const isOverdue = !isDone && task.dueAt && new Date(task.dueAt).getTime() < Date.now();
+  const relLabel = formatRelative(task.dueAt);
+
+  return (
+    <div className="flex h-full flex-col">
+      {/* Hero */}
+      <div className="relative overflow-hidden border-b border-border/70 bg-gradient-to-br from-brand-subtle/55 via-surface to-surface px-5 pb-5 pt-5">
+        <div
+          aria-hidden
+          className="pointer-events-none absolute -right-16 -top-16 h-40 w-40 rounded-full bg-brand-accent/12 blur-3xl"
+        />
+        <div className="relative flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            {/* Status pill */}
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-ink-muted">
+              <span className={cn("inline-flex h-1.5 w-1.5 rounded-full", isDone ? "bg-emerald-500" : "bg-brand-accent")} />
+              {isDone ? "Completed" : "Open"}
+            </span>
+            <h2 className={cn("mt-2 text-[17px] font-semibold tracking-tight text-ink", isDone && "line-through text-ink-muted")}>
+              {task.title}
+            </h2>
+            {/* Relative time chip */}
+            {relLabel && !isDone && (
+              <div className="mt-2 inline-flex items-center gap-1.5 flex-wrap">
+                <span
+                  className={cn(
+                    "zm-pulse-glow inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-white shadow-[0_4px_10px_rgba(53,157,243,0.3)]",
+                    isOverdue
+                      ? "bg-gradient-to-r from-red-500 to-red-600"
+                      : "bg-gradient-to-r from-brand-accent to-brand-hover",
+                  )}
+                >
+                  <span className="h-1 w-1 rounded-full bg-white/90" />
+                  {relLabel}
+                </span>
+                {priority !== "low" && <PriorityChip priority={priority} isDone={isDone} />}
+              </div>
+            )}
+          </div>
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            className="-mr-1 -mt-1 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-ink-subtle transition-colors hover:bg-surface-inset hover:text-ink"
+          >
+            <X className="h-4 w-4" strokeWidth={2} />
+          </button>
+        </div>
+      </div>
+
+      {/* Body */}
+      <div className="flex-1 space-y-4 overflow-y-auto px-5 py-5">
+        {/* Description */}
+        {task.description && (
+          <DetailMetaCard icon={FileText} title="Notes">
+            <p className="whitespace-pre-line text-[12px] leading-relaxed text-ink">{task.description}</p>
+          </DetailMetaCard>
+        )}
+
+        {/* When */}
+        {task.dueAt && (
+          <DetailMetaCard icon={CalendarIcon} title="Due">
+            <div className="text-[13px] font-semibold text-ink">
+              {new Date(task.dueAt).toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}
+            </div>
+            <div className="mt-0.5 flex items-center gap-1.5 text-[12px] text-ink-muted">
+              <Clock4 className="h-3 w-3" strokeWidth={1.75} />
+              {new Date(task.dueAt).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}
+              {dueLabel && <><span className="text-ink-subtle">·</span><span>{dueLabel}</span></>}
+            </div>
+          </DetailMetaCard>
+        )}
+
+        {/* Assignee */}
+        {task.assignedName && (
+          <DetailMetaCard icon={User} title="Assigned to">
+            <div className="flex items-center gap-3">
+              <div
+                aria-hidden
+                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-brand-accent to-brand-hover text-[12px] font-semibold uppercase tracking-wider text-white shadow-sm"
+              >
+                {(task.assignedName.trim().split(/\s+/).filter(Boolean).slice(0, 2).map((p) => p[0]).join("") || "?").toUpperCase()}
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-[13px] font-semibold text-ink">{task.assignedName}</div>
+              </div>
+            </div>
+          </DetailMetaCard>
+        )}
+
+        {/* Customer */}
+        {task.customerName && (
+          <DetailMetaCard icon={Users} title="Customer">
+            <div className="flex items-center gap-3">
+              <Avatar name={task.customerName} size="sm" className="!h-9 !w-9 !text-[11px]" />
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-[13px] font-semibold text-ink">{task.customerName}</div>
+                {task.relatedCustomerId && (
+                  <Link
+                    href={`/dashboard/customers?focus=${task.relatedCustomerId}`}
+                    className="inline-flex items-center gap-1 text-[11px] text-brand-accent transition-colors hover:text-brand-hover"
+                  >
+                    Open profile
+                    <ArrowRight className="h-2.5 w-2.5" strokeWidth={2.25} />
+                  </Link>
+                )}
+              </div>
+            </div>
+          </DetailMetaCard>
+        )}
+
+        {/* Linked booking */}
+        {task.relatedBookingId && (
+          <DetailMetaCard icon={CalendarIcon} title="Linked appointment">
+            <Link
+              href="/dashboard/appointments"
+              className="inline-flex items-center gap-1.5 text-[12px] font-medium text-brand-accent transition-colors hover:text-brand-hover"
+            >
+              <ExternalLink className="h-3 w-3" strokeWidth={1.75} />
+              View in appointments
+            </Link>
+          </DetailMetaCard>
+        )}
+
+        {/* AI summary placeholder */}
+        <InsightCard title="AI summary">
+          {isDone
+            ? "Task is complete. A short summary of any context will appear here once activity is logged."
+            : "Once you've made progress, a short AI summary of related activity (emails, calls, notes) will appear here."}
+        </InsightCard>
+      </div>
+
+      {/* Action footer */}
+      <div className="border-t border-border/70 bg-surface-subtle/40 px-5 py-3.5">
+        {isDone ? (
+          <button
+            type="button"
+            onClick={() => onToggle(task)}
+            className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-border bg-surface px-3 text-[12px] font-medium text-ink-muted shadow-soft transition-all hover:-translate-y-0.5 hover:bg-surface-inset hover:text-ink hover:shadow-md"
+          >
+            <RotateCcw className="h-3.5 w-3.5" strokeWidth={1.75} />
+            Reopen task
+          </button>
+        ) : (
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap gap-1.5">
+              <button
+                type="button"
+                onClick={() => onToggle(task)}
+                className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover px-3 text-[12px] font-medium text-white shadow-[0_6px_16px_rgba(53,157,243,0.35)] transition-all hover:-translate-y-0.5 hover:shadow-[0_10px_24px_rgba(53,157,243,0.45)]"
+              >
+                <CheckCircle2 className="h-3.5 w-3.5" strokeWidth={2} />
+                Mark complete
+              </button>
+              <button
+                type="button"
+                onClick={() => onSnooze(task, 1)}
+                className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-border bg-surface px-3 text-[12px] font-medium text-ink-muted shadow-soft transition-all hover:-translate-y-0.5 hover:bg-surface-inset hover:text-ink hover:shadow-md"
+              >
+                <Bell className="h-3.5 w-3.5" strokeWidth={1.75} />
+                Snooze 1d
+              </button>
+              <button
+                type="button"
+                onClick={() => onSnooze(task, 7)}
+                className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-border bg-surface px-3 text-[12px] font-medium text-ink-muted shadow-soft transition-all hover:-translate-y-0.5 hover:bg-surface-inset hover:text-ink hover:shadow-md"
+              >
+                Snooze 1w
+              </button>
+            </div>
+            <button
+              type="button"
+              onClick={() => { onRemove(task); onClose(); }}
+              className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-border bg-surface px-3 text-[12px] font-medium text-ink-muted shadow-soft transition-all hover:-translate-y-0.5 hover:border-red-200 hover:bg-red-50 hover:text-red-700 hover:shadow-md"
+            >
+              <Trash2 className="h-3.5 w-3.5" strokeWidth={1.75} />
+              Delete
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function DetailMetaCard({
+  icon: Icon,
+  title,
+  children,
+}: {
+  icon: React.ComponentType<{ className?: string; strokeWidth?: number }>;
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="rounded-xl border border-border/70 bg-surface p-3.5 shadow-soft">
+      <div className="mb-2 flex items-center gap-1.5">
+        <div className="inline-flex h-5 w-5 items-center justify-center rounded-md bg-surface-inset text-ink-subtle">
+          <Icon className="h-3 w-3" strokeWidth={1.75} />
+        </div>
+        <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-subtle">
+          {title}
+        </span>
+      </div>
+      <div>{children}</div>
+    </div>
+  );
+}
+
+function formatRelative(due: string | null): string | null {
+  if (!due) return null;
+  const ms = new Date(due).getTime();
+  const now = Date.now();
+  const diff = ms - now;
+  const abs = Math.abs(diff);
+  const min = Math.round(abs / 60_000);
+  if (min < 1) return "Due now";
+  if (min < 60) return diff >= 0 ? `Due in ${min}m` : `${min}m overdue`;
+  const hr = Math.round(min / 60);
+  if (hr < 24) return diff >= 0 ? `Due in ${hr}h` : `${hr}h overdue`;
+  const days = Math.round(hr / 24);
+  if (days < 7) return diff >= 0 ? `Due in ${days}d` : `${days}d overdue`;
+  const weeks = Math.round(days / 7);
+  return diff >= 0 ? `Due in ${weeks}w` : `${weeks}w overdue`;
 }
 
 // ─── Sample tasks banner + generator ──────────────────────────────
