@@ -324,7 +324,7 @@ function FilterBar({
           Mark all read
         </button>
         <Link
-          href="/dashboard/settings/notifications"
+          href="/dashboard/settings/communications"
           className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-surface text-ink-muted shadow-soft transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:bg-surface-inset hover:text-ink hover:shadow-md"
           aria-label="Notification settings"
           title="Notification settings"
