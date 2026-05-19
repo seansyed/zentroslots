@@ -171,6 +171,11 @@ function buildNav(
     // Manage actions inside the page are further gated by
     // canManageSecurity (server-enforced + UI-gated).
     { label: "Security", href: "/dashboard/settings/security", icon: I.shield },
+    // Governance: only surfaced to users with canManageSecurity.
+    // Server PATCH is gated identically; this is convenience-only.
+    ...(flagOrRoleDefault("canManageSecurity", role === "admin")
+      ? [{ label: "Governance", href: "/dashboard/settings/governance", icon: I.shield }]
+      : []),
   ];
 
   return [

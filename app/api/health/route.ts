@@ -413,6 +413,118 @@ export async function GET() {
     }
   }
 
+  // Governance subsystem freshness — newest security.retention.executed
+  // audit row across all tenants. Soft-fail. Empty detail = pruner has
+  // never run (expected on day-1, before any tenant opts in).
+  {
+    const start = Date.now();
+    try {
+      const rows = (await db.execute(
+        sql`SELECT MAX(created_at) AS last_at FROM audit_logs
+            WHERE action = 'security.retention.executed'`
+      )) as unknown as Array<{ last_at: string | Date | null }>;
+      const lastAtRaw = rows[0]?.last_at;
+      const lastAt = lastAtRaw ? new Date(lastAtRaw) : null;
+      checks.governance_freshness = {
+        ok: true,
+        ms: Date.now() - start,
+        detail: lastAt ? `last_at=${lastAt.toISOString()}` : "no_retention_runs_yet",
+      };
+    } catch (e) {
+      checks.governance_freshness = {
+        ok: false,
+        ms: Date.now() - start,
+        detail: (e as Error).message,
+      };
+    }
+  }
+
+  // Export-audit volume (24h, all tenants) — operators can spot
+  // anomalous extract volume. Soft-fail.
+  {
+    const start = Date.now();
+    try {
+      const rows = (await db.execute(
+        sql`SELECT count(*)::int AS n, COALESCE(SUM(record_count),0)::int AS recs
+            FROM export_audit_events
+            WHERE exported_at > NOW() - INTERVAL '24 hours'`
+      )) as unknown as Array<{ n: number | string | null; recs: number | string | null }>;
+      const n = Number(rows[0]?.n ?? 0);
+      const recs = Number(rows[0]?.recs ?? 0);
+      checks.export_audit_volume_24h = {
+        ok: true,
+        ms: Date.now() - start,
+        detail: `exports=${n}; rows=${recs}`,
+      };
+    } catch (e) {
+      checks.export_audit_volume_24h = {
+        ok: false,
+        ms: Date.now() - start,
+        detail: (e as Error).message,
+      };
+    }
+  }
+
+  // Stale export artifacts — export_audit_events older than the tenant's
+  // export_audit_retention_days that HAVEN'T been pruned. This is a
+  // governance health signal: a large count means the retention cron
+  // isn't keeping up (or has been disabled). Soft-fail; we don't know
+  // each tenant's window precisely without joining; conservative check
+  // uses the hard floor (90d) — anything older than that is unambiguously
+  // stale on tenants that opted in. Reports the raw count.
+  {
+    const start = Date.now();
+    try {
+      const rows = (await db.execute(
+        sql`SELECT count(*)::int AS n FROM export_audit_events
+            WHERE exported_at < NOW() - INTERVAL '365 days'`
+      )) as unknown as Array<{ n: number | string | null }>;
+      const n = Number(rows[0]?.n ?? 0);
+      checks.stale_export_artifacts = {
+        ok: true,
+        ms: Date.now() - start,
+        detail: `older_than_365d=${n}`,
+      };
+    } catch (e) {
+      checks.stale_export_artifacts = {
+        ok: false,
+        ms: Date.now() - start,
+        detail: (e as Error).message,
+      };
+    }
+  }
+
+  // Governance policy errors — tenants whose tenant_governance_settings
+  // row violates a CHECK constraint or contains a value out of the
+  // acceptable range. (CHECK constraints prevent invalid INSERTs; this
+  // check is defensive against drift from manual DB edits.)
+  {
+    const start = Date.now();
+    try {
+      const rows = (await db.execute(
+        sql`SELECT count(*)::int AS n FROM tenant_governance_settings
+            WHERE password_min_length < 8
+               OR password_min_length > 128
+               OR (password_max_age_days <> 0 AND (password_max_age_days < 30 OR password_max_age_days > 365))
+               OR (session_max_age_days <> 0 AND (session_max_age_days < 1 OR session_max_age_days > 30))
+               OR suspicious_login_sensitivity NOT IN ('low','medium','high')`
+      )) as unknown as Array<{ n: number | string | null }>;
+      const bad = Number(rows[0]?.n ?? 0);
+      checks.governance_policy_errors = {
+        ok: bad === 0,
+        ms: Date.now() - start,
+        detail: `bad_rows=${bad}`,
+      };
+      if (bad > 0) allOk = false; // hard-fail — invalid policy is real
+    } catch (e) {
+      checks.governance_policy_errors = {
+        ok: false,
+        ms: Date.now() - start,
+        detail: (e as Error).message,
+      };
+    }
+  }
+
   // Stale tenant detection — tenants whose most recent
   // analytics_daily_snapshots row is > 36h old. Likely indicates the
   // cron skipped them. Soft-fail; detail surfaces the count.

@@ -1363,6 +1363,75 @@ export const revokedSessionJtis = pgTable(
   })
 );
 
+// ─── Governance tables (0029) ───────────────────────────────────────────
+
+export const tenantGovernanceSettings = pgTable(
+  "tenant_governance_settings",
+  {
+    tenantId: uuid("tenant_id")
+      .primaryKey()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+
+    /** Retention windows. NULL = retain forever (no automatic pruning). */
+    auditRetentionDays: integer("audit_retention_days"),
+    sessionEventRetentionDays: integer("session_event_retention_days"),
+    resetTokenRetentionDays: integer("reset_token_retention_days"),
+    analyticsRetentionDays: integer("analytics_retention_days"),
+    exportAuditRetentionDays: integer("export_audit_retention_days"),
+
+    passwordMinLength: integer("password_min_length").notNull().default(10),
+    passwordRequireUppercase: boolean("password_require_uppercase").notNull().default(false),
+    passwordRequireLowercase: boolean("password_require_lowercase").notNull().default(false),
+    passwordRequireDigit: boolean("password_require_digit").notNull().default(false),
+    passwordRequireSymbol: boolean("password_require_symbol").notNull().default(false),
+    passwordMaxAgeDays: integer("password_max_age_days").notNull().default(0),
+
+    sessionMaxAgeDays: integer("session_max_age_days").notNull().default(0),
+    suspiciousLoginSensitivity: varchar("suspicious_login_sensitivity", { length: 10 })
+      .notNull()
+      .default("medium"),
+
+    allowedLoginIps: jsonb("allowed_login_ips"),
+
+    restrictExports: boolean("restrict_exports").notNull().default(false),
+    maxExportRows: integer("max_export_rows"),
+
+    requireAutomationApproval: boolean("require_automation_approval").notNull().default(false),
+
+    updatedByUserId: uuid("updated_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    updatedIdx: index("tgs_updated_idx").on(t.updatedAt),
+  })
+);
+
+export const exportAuditEvents = pgTable(
+  "export_audit_events",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+    exportType: varchar("export_type", { length: 40 }).notNull(),
+    exportedAt: timestamp("exported_at", { withTimezone: true }).notNull().defaultNow(),
+    recordCount: integer("record_count"),
+    fileSizeBytes: integer("file_size_bytes"),
+    filtersUsed: jsonb("filters_used").notNull().default({}),
+    ipAddress: varchar("ip_address", { length: 45 }),
+    userAgent: text("user_agent"),
+  },
+  (t) => ({
+    tenantIdx: index("eae_tenant_idx").on(t.tenantId),
+    userIdx: index("eae_user_idx").on(t.userId),
+    typeIdx: index("eae_type_idx").on(t.exportType),
+    exportedIdx: index("eae_exported_idx").on(t.exportedAt),
+    tenantTimeIdx: index("eae_tenant_time_idx").on(t.tenantId, t.exportedAt),
+  })
+);
+
 // ─── Types ──────────────────────────────────────────────────────────────
 
 export type Tenant = typeof tenants.$inferSelect;
@@ -1411,3 +1480,7 @@ export type SessionAuditEvent = typeof sessionAuditEvents.$inferSelect;
 export type NewSessionAuditEvent = typeof sessionAuditEvents.$inferInsert;
 export type RevokedSessionJti = typeof revokedSessionJtis.$inferSelect;
 export type NewRevokedSessionJti = typeof revokedSessionJtis.$inferInsert;
+export type TenantGovernanceSettings = typeof tenantGovernanceSettings.$inferSelect;
+export type NewTenantGovernanceSettings = typeof tenantGovernanceSettings.$inferInsert;
+export type ExportAuditEvent = typeof exportAuditEvents.$inferSelect;
+export type NewExportAuditEvent = typeof exportAuditEvents.$inferInsert;

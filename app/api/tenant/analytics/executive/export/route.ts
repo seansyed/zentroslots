@@ -1,7 +1,9 @@
 import { NextRequest } from "next/server";
 
 import { errorResponse } from "@/lib/auth";
+import { ipFromHeaders } from "@/lib/audit";
 import { requirePermissionOrRole } from "@/lib/security/permissions";
+import { recordExportAudit } from "@/lib/governance/exportAudit";
 import { db } from "@/db/client";
 import { analyticsDailySnapshots } from "@/db/schema";
 import { and, asc, eq, gte, lte } from "drizzle-orm";
@@ -159,6 +161,19 @@ export async function GET(req: NextRequest) {
     }
 
     const body = lines.join("\n") + "\n";
+
+    // Governance: record the export.
+    await recordExportAudit({
+      tenantId: admin.tenantId,
+      userId: admin.id,
+      exportType: "analytics_executive",
+      recordCount: snapshots.length + locs.length + depts.length + optRecs.length,
+      fileSizeBytes: Buffer.byteLength(body, "utf8"),
+      filtersUsed: { range_days: days },
+      ipAddress: ipFromHeaders(req.headers),
+      userAgent: req.headers.get("user-agent")?.slice(0, 1000) ?? null,
+    });
+
     return new Response(body, {
       status: 200,
       headers: {

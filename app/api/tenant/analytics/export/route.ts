@@ -4,7 +4,9 @@ import { and, asc, eq, gte, lte } from "drizzle-orm";
 import { db } from "@/db/client";
 import { analyticsDailySnapshots } from "@/db/schema";
 import { errorResponse } from "@/lib/auth";
+import { ipFromHeaders } from "@/lib/audit";
 import { requirePermissionOrRole } from "@/lib/security/permissions";
+import { recordExportAudit } from "@/lib/governance/exportAudit";
 
 // GET /api/tenant/analytics/export?range=30
 //
@@ -129,6 +131,20 @@ export async function GET(req: NextRequest) {
     }
 
     const body = lines.join("\n") + "\n";
+
+    // Governance: record the export. Best-effort — never fails the
+    // download. Captures record_count + bytes + filters for compliance.
+    await recordExportAudit({
+      tenantId: admin.tenantId,
+      userId: admin.id,
+      exportType: "analytics",
+      recordCount: rows.length,
+      fileSizeBytes: Buffer.byteLength(body, "utf8"),
+      filtersUsed: { range_days: days, cutoff: cutoffStr, until: todayStr },
+      ipAddress: ipFromHeaders(req.headers),
+      userAgent: req.headers.get("user-agent")?.slice(0, 1000) ?? null,
+    });
+
     return new Response(body, {
       status: 200,
       headers: {

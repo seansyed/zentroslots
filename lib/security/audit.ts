@@ -51,6 +51,17 @@ export const SECURITY_AUDIT_CATEGORIES = [
    *  where authorization is being exercised. Distinct from
    *  security.access.denied which is reserved for role-level denials. */
   "security.permission.denied",
+  // Governance (0029)
+  /** Tenant governance row was created or modified. Metadata: changed
+   *  field names + redacted old/new (booleans + integer windows only;
+   *  never IP allow-lists in audit metadata). */
+  "security.governance.updated",
+  /** Retention engine pruned (or dry-ran) a resource. Metadata: target
+   *  resource, configured + effective days, deleted count, hard-floor flag. */
+  "security.retention.executed",
+  /** Password / session / suspicious-login policy changed. Metadata:
+   *  policy field + old + new value. */
+  "security.policy.changed",
 ] as const;
 
 export type SecurityAuditCategory = (typeof SECURITY_AUDIT_CATEGORIES)[number];
@@ -74,6 +85,9 @@ const SEVERITY_FOR: Record<SecurityAuditCategory, Severity> = {
   "security.access.denied": "warning",
   "security.access.failed_login": "info",
   "security.permission.denied": "info",
+  "security.governance.updated": "warning",
+  "security.retention.executed": "notice",
+  "security.policy.changed": "warning",
 };
 
 export type SecurityAuditEntry = {

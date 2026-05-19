@@ -17,7 +17,8 @@
     "waitlists:expire": "tsx scripts/expire-waitlist-reservations.ts",
     "recurring:materialize": "tsx scripts/materialize-recurring.ts",
     "analytics:aggregate": "tsx scripts/aggregate-daily-analytics.ts",
-    "scheduled-reports:generate": "tsx scripts/generate-scheduled-reports.ts"
+    "scheduled-reports:generate": "tsx scripts/generate-scheduled-reports.ts",
+    "governance:retention": "tsx scripts/run-governance-retention.ts"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

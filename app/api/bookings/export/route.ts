@@ -4,7 +4,9 @@ import { and, desc, eq, gte, lt } from "drizzle-orm";
 import { db } from "@/db/client";
 import { bookings, customers, services, users } from "@/db/schema";
 import { errorResponse, isManagerial, requireUser } from "@/lib/auth";
+import { ipFromHeaders } from "@/lib/audit";
 import { csvResponse, toCsv } from "@/lib/csv";
+import { recordExportAudit } from "@/lib/governance/exportAudit";
 
 export async function GET(req: NextRequest) {
   try {
@@ -69,6 +71,23 @@ export async function GET(req: NextRequest) {
       { key: "notes", header: "notes" },
       { key: "createdAt", header: "created_at" },
     ]);
+    // Governance: record the bookings export. Best-effort.
+    await recordExportAudit({
+      tenantId: caller.tenantId,
+      userId: caller.id,
+      exportType: "bookings",
+      recordCount: rows.length,
+      fileSizeBytes: Buffer.byteLength(csv, "utf8"),
+      filtersUsed: {
+        status: status ?? null,
+        from: startFrom ?? null,
+        to: startTo ?? null,
+        managerial_scope: isManagerial(caller.role),
+      },
+      ipAddress: ipFromHeaders(req.headers),
+      userAgent: req.headers.get("user-agent")?.slice(0, 1000) ?? null,
+    });
+
     return csvResponse(`appointments-${new Date().toISOString().slice(0, 10)}.csv`, csv);
   } catch (err) {
     return errorResponse(err);
