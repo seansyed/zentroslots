@@ -153,6 +153,10 @@ export default function NotificationsClient({ initial }: { initial: Notif[] }) {
   const filtered = React.useMemo(() => applyFilter(rows, filter), [rows, filter]);
   const grouped = React.useMemo(() => groupByBucket(filtered), [filtered]);
   const summary = React.useMemo(() => deriveSummary(rows), [rows]);
+  const todayCount = React.useMemo(() => {
+    const k = dayKey(new Date());
+    return rows.filter((n) => dayKey(new Date(n.createdAt)) === k).length;
+  }, [rows]);
 
   async function markAllRead() {
     if (unreadCount === 0) return;
@@ -180,13 +184,18 @@ export default function NotificationsClient({ initial }: { initial: Notif[] }) {
     <div className="mt-6 space-y-5">
       {/* ── Hero ──────────────────────────────────────────────── */}
       <FadeIn>
-        <Hero unreadCount={unreadCount} totalCount={rows.length} />
+        <Hero unreadCount={unreadCount} totalCount={rows.length} todayCount={todayCount} />
       </FadeIn>
 
       {/* ── AI summary banner (only when there's signal) ──────── */}
       {summary && (
         <FadeIn delay={1}>
-          <InsightCard title="Inbox summary">{summary}</InsightCard>
+          {/* zm-border-sweep wraps the InsightCard with an animated
+              gradient hairline border that sweeps every 10s. Inner
+              surface stays fully opaque so text contrast is intact. */}
+          <div className="zm-border-sweep relative overflow-hidden rounded-2xl">
+            <InsightCard title="Operational signal">{summary}</InsightCard>
+          </div>
         </FadeIn>
       )}
 
@@ -221,18 +230,33 @@ export default function NotificationsClient({ initial }: { initial: Notif[] }) {
 
 // ─── Hero ──────────────────────────────────────────────────────────
 
-function Hero({ unreadCount, totalCount }: { unreadCount: number; totalCount: number }) {
+function Hero({
+  unreadCount,
+  totalCount,
+  todayCount,
+}: {
+  unreadCount: number;
+  totalCount: number;
+  todayCount: number;
+}) {
   return (
     <PremiumCard
       compact
       interactive={false}
       className="relative overflow-hidden bg-gradient-to-br from-brand-subtle/40 via-surface to-surface"
     >
+      {/* Ambient corner glow */}
       <div
         aria-hidden
-        className="pointer-events-none absolute -right-20 -top-20 h-56 w-56 rounded-full bg-brand-accent/10 blur-3xl"
+        className="pointer-events-none absolute -right-24 -top-24 h-64 w-64 rounded-full bg-brand-accent/12 blur-3xl"
       />
-      <div className="relative flex flex-wrap items-start justify-between gap-3">
+      {/* Radial glow behind the intelligence cluster */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute right-6 top-1/2 hidden h-32 w-48 -translate-y-1/2 rounded-full bg-brand-accent/8 blur-3xl md:block"
+      />
+
+      <div className="relative flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0 flex-1">
           <div className="inline-flex items-center gap-1.5 rounded-full bg-brand-accent/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-brand-accent">
             <BellRing className="h-3 w-3" strokeWidth={2} />
@@ -247,14 +271,81 @@ function Hero({ unreadCount, totalCount }: { unreadCount: number; totalCount: nu
               : "Operational alerts, customer activity, and system signals across your workspace."}
           </p>
         </div>
-        {unreadCount > 0 && (
-          <span className="zm-pulse-glow inline-flex items-center gap-1.5 rounded-full bg-gradient-to-r from-brand-accent to-brand-hover px-3 py-1 text-[11px] font-semibold uppercase tracking-wider text-white shadow-[0_4px_12px_rgba(53,157,243,0.35)]">
-            <span className="h-1.5 w-1.5 rounded-full bg-white/90" />
-            {unreadCount} unread
-          </span>
-        )}
+
+        {/* Executive intelligence cluster — 3 glass KPI chips with
+            tiny pulse indicators. Staggered entrance gives the
+            cluster its own micro-cadence. */}
+        <div className="relative flex flex-wrap items-center gap-1.5">
+          <FadeIn delay={1}>
+            <IntelChip
+              label="Unread"
+              value={unreadCount}
+              dotClass={unreadCount > 0 ? "bg-brand-accent" : "bg-ink-subtle/40"}
+              pulse={unreadCount > 0}
+              emphasis={unreadCount > 0}
+            />
+          </FadeIn>
+          <FadeIn delay={2}>
+            <IntelChip
+              label="Systems"
+              value="Active"
+              dotClass="bg-emerald-500"
+              pulse
+            />
+          </FadeIn>
+          <FadeIn delay={3}>
+            <IntelChip
+              label="Today"
+              value={todayCount}
+              dotClass="bg-ink-subtle/40"
+              suffix="events"
+            />
+          </FadeIn>
+        </div>
       </div>
     </PremiumCard>
+  );
+}
+
+function IntelChip({
+  label,
+  value,
+  dotClass,
+  pulse = false,
+  emphasis = false,
+  suffix,
+}: {
+  label: string;
+  value: number | string;
+  dotClass: string;
+  pulse?: boolean;
+  emphasis?: boolean;
+  suffix?: string;
+}) {
+  return (
+    <div
+      className={cn(
+        "relative inline-flex items-center gap-2 overflow-hidden rounded-xl border border-border/70 bg-surface/70 px-2.5 py-1.5 shadow-soft backdrop-blur-md transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:border-border-strong hover:bg-surface/85 hover:shadow-md",
+        emphasis && "ring-1 ring-brand-accent/15",
+      )}
+    >
+      {/* Inner top-edge highlight */}
+      <span aria-hidden className="pointer-events-none absolute inset-x-1 top-0 h-px bg-gradient-to-r from-transparent via-white/55 to-transparent" />
+      {/* Live pulse dot */}
+      <span aria-hidden className="relative inline-flex h-2 w-2 shrink-0 items-center justify-center">
+        {pulse && (
+          <span className={cn("absolute inset-0 animate-ping rounded-full", dotClass, "opacity-50")} />
+        )}
+        <span className={cn("relative h-2 w-2 rounded-full", dotClass)} />
+      </span>
+      <div className="leading-none">
+        <div className="text-[9px] font-semibold uppercase tracking-[0.08em] text-ink-subtle">{label}</div>
+        <div className="mt-0.5 text-[12px] font-semibold tabular-nums text-ink">
+          {value}
+          {suffix && <span className="ml-1 text-[10px] font-medium text-ink-muted">{suffix}</span>}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -285,7 +376,7 @@ function FilterBar({
               onClick={() => onChange(f)}
               aria-pressed={active}
               className={cn(
-                "relative z-10 inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-[12px] font-medium transition-colors duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)]",
+                "relative z-10 inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-[12px] font-medium transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] active:scale-[0.97]",
                 active ? "text-white" : "text-ink-muted hover:text-ink",
               )}
             >
@@ -543,6 +634,7 @@ function NotificationCard({
 function PremiumEmptyState() {
   return (
     <PremiumCard interactive={false} className="relative overflow-hidden bg-gradient-to-br from-brand-subtle/30 via-surface to-surface">
+      {/* Two large ambient corner glows */}
       <div
         aria-hidden
         className="pointer-events-none absolute -right-24 -top-24 h-64 w-64 rounded-full bg-brand-accent/12 blur-3xl"
@@ -551,6 +643,16 @@ function PremiumEmptyState() {
         aria-hidden
         className="pointer-events-none absolute -left-24 bottom-0 h-56 w-56 rounded-full bg-brand-accent/8 blur-3xl"
       />
+      {/* Floating drifting orbs — adds ambient motion without distraction */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute right-12 top-8 h-24 w-24 rounded-full bg-brand-accent/10 blur-2xl zm-drift-slow"
+      />
+      <div
+        aria-hidden
+        className="pointer-events-none absolute left-16 bottom-12 h-20 w-20 rounded-full bg-emerald-400/8 blur-2xl zm-drift-slow-reverse"
+      />
+
       <div className="relative flex flex-col items-center justify-center px-4 py-12 text-center">
         {/* Floating bell */}
         <div className="relative mb-5">
@@ -585,8 +687,67 @@ function PremiumEmptyState() {
           </span>
           Monitoring bookings, customers, reminders, and automation.
         </div>
+
+        {/* Ghost preview activity — communicates "the system IS working,
+            it's just quiet right now". Ultra low opacity, no interaction,
+            stylized to look like real notifications behind a frosted
+            pane. */}
+        <div className="mt-8 w-full max-w-md space-y-1.5" aria-hidden>
+          <GhostNotifRow
+            icon={Calendar}
+            iconBg="bg-brand-subtle"
+            iconText="text-brand-accent"
+            title="Sarah booked Strategy Session"
+            meta="Booking · 2h ago"
+            opacity="opacity-40"
+          />
+          <GhostNotifRow
+            icon={Sparkles}
+            iconBg="bg-brand-subtle"
+            iconText="text-brand-accent"
+            title="AI optimized tomorrow's availability"
+            meta="AI Insight · earlier"
+            opacity="opacity-30"
+          />
+          <GhostNotifRow
+            icon={CheckCheck}
+            iconBg="bg-emerald-50"
+            iconText="text-emerald-700"
+            title="Reminder delivered successfully"
+            meta="System · earlier"
+            opacity="opacity-25"
+          />
+        </div>
       </div>
     </PremiumCard>
+  );
+}
+
+function GhostNotifRow({
+  icon: Icon,
+  iconBg,
+  iconText,
+  title,
+  meta,
+  opacity,
+}: {
+  icon: LucideIcon;
+  iconBg: string;
+  iconText: string;
+  title: string;
+  meta: string;
+  opacity: string;
+}) {
+  return (
+    <div className={cn("flex items-center gap-2.5 rounded-xl border border-border/40 bg-surface/40 px-3 py-2 backdrop-blur-sm", opacity)}>
+      <div className={cn("inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-lg", iconBg, iconText)}>
+        <Icon className="h-3 w-3" strokeWidth={1.75} />
+      </div>
+      <div className="min-w-0 flex-1 text-left">
+        <div className="truncate text-[12px] font-medium text-ink">{title}</div>
+        <div className="mt-0.5 text-[10px] text-ink-subtle">{meta}</div>
+      </div>
+    </div>
   );
 }
 

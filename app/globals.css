@@ -124,6 +124,59 @@ body {
   100% { transform: scale(1);    opacity: 1; }
 }
 
+/* Slow drift for ambient floating orbs (Notifications empty state,
+   any future hero-glow surface). 14-second ease-in-out cycle, ultra
+   subtle — translation stays inside ±12px so it never pulls focus. */
+@keyframes zm-drift-slow {
+  0%, 100% { transform: translate(0px, 0px); }
+  50%      { transform: translate(10px, -8px); }
+}
+.zm-drift-slow { animation: zm-drift-slow 14s ease-in-out infinite; }
+
+@keyframes zm-drift-slow-reverse {
+  0%, 100% { transform: translate(0px, 0px); }
+  50%      { transform: translate(-8px, 6px); }
+}
+.zm-drift-slow-reverse { animation: zm-drift-slow-reverse 18s ease-in-out infinite; }
+
+/* Animated gradient border — used by the AI summary banner. A
+   conic-gradient masked to the border by linear-gradient masks
+   sweeps every 10s with a calm easing curve. The masks let us keep
+   the inner surface fully opaque so text contrast never drops. */
+@keyframes zm-border-sweep {
+  0%   { background-position: 0% 50%; }
+  100% { background-position: 200% 50%; }
+}
+.zm-border-sweep {
+  position: relative;
+  background-clip: padding-box;
+  border: 1px solid transparent;
+}
+.zm-border-sweep::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background:
+    linear-gradient(
+      90deg,
+      rgba(53, 157, 243, 0.0)  0%,
+      rgba(53, 157, 243, 0.0)  35%,
+      rgba(53, 157, 243, 0.45) 50%,
+      rgba(53, 157, 243, 0.0)  65%,
+      rgba(53, 157, 243, 0.0)  100%
+    );
+  background-size: 200% 100%;
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+          mask-composite: exclude;
+  animation: zm-border-sweep 10s linear infinite;
+  pointer-events: none;
+}
+
 /* Smooth focus rings everywhere */
 :focus-visible {
   outline: 2px solid var(--color-accent);
