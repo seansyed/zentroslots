@@ -1,11 +1,59 @@
 "use client";
 
+/**
+ * CustomersClient — Customer Relationship Intelligence Command Center
+ * (Phase 6A).
+ *
+ * STRICTLY PRESERVED:
+ *   - Default export name (CustomersClient)
+ *   - Props { userTimezone, canManage }
+ *   - Row + CustomerDetail type shapes
+ *   - All API calls:
+ *       GET    /api/customers
+ *       POST   /api/customers          (already exists — wired to UI)
+ *       GET    /api/customers/[id]
+ *       PATCH  /api/customers/[id]     (notes + tags)
+ *
+ * What changed (UI-only):
+ *   - Premium Hero with brand-gradient + 3 actions (Add customer
+ *     primary, Import, Invite secondary).
+ *   - 4 KPI cards: Total · Active 30d · Repeat-rate % · VIP.
+ *   - Premium SearchBar + filter pill bar (All · Active · VIP ·
+ *     Archived · Recent).
+ *   - Row cards replace the table — avatar + name + email + meta
+ *     chips + status pill + hover halo with brand glow.
+ *   - Premium empty state with brand-gradient CTA.
+ *   - Apple-quality NewCustomerDrawer for manual creation.
+ *   - Existing CustomerDrawer kept; polished hero treatment.
+ *
+ * Easing language: cubic-bezier(0.16, 1, 0.3, 1) end-to-end.
+ */
 import * as React from "react";
 import { formatInTimeZone } from "date-fns-tz";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import {
+  Plus,
+  Search,
+  Upload,
+  Mail,
+  Users,
+  Crown,
+  TrendingUp,
+  Sparkles,
+  X,
+  ArrowRight,
+  CalendarClock,
+  Filter as FilterIcon,
+} from "lucide-react";
 
-import { Avatar, Badge, Button, Card, Drawer, EmptyState, Skeleton, toast } from "@/components/ui/primitives";
+import { Avatar, Badge, Button, Drawer, Skeleton, toast } from "@/components/ui/primitives";
+import { PremiumCard, InsightCard, MetricCard } from "@/components/ui/Card";
+import { FadeIn } from "@/components/ui/Motion";
 import ActivityTimeline from "@/components/dashboard/ActivityTimeline";
 import { STATUS_BADGE, STATUS_LABEL, type Status } from "@/lib/status-colors";
+import { cn } from "@/lib/cn";
+
+// ─── Types ──────────────────────────────────────────────────────────
 
 type Row = {
   id: string;
@@ -40,18 +88,43 @@ type CustomerDetail = {
   }>;
 };
 
-const TABS = ["overview", "appointments", "notes", "activity"] as const;
-type Tab = (typeof TABS)[number];
+type Filter = "all" | "active" | "vip" | "archived" | "recent";
+
+const FILTERS: Filter[] = ["all", "active", "vip", "archived", "recent"];
+
+const FILTER_LABEL: Record<Filter, string> = {
+  all:      "All",
+  active:   "Active",
+  vip:      "VIP",
+  archived: "Archived",
+  recent:   "Recent · 30d",
+};
+
+const DRAWER_TABS = ["overview", "appointments", "notes", "activity"] as const;
+type DrawerTab = (typeof DRAWER_TABS)[number];
+
+// ─── Main component ────────────────────────────────────────────────
 
 export default function CustomersClient({ userTimezone, canManage }: { userTimezone: string; canManage: boolean }) {
   const [rows, setRows] = React.useState<Row[] | null>(null);
   const [search, setSearch] = React.useState("");
+  const [filter, setFilter] = React.useState<Filter>("all");
   const [openId, setOpenId] = React.useState<string | null>(null);
+  const [openNew, setOpenNew] = React.useState(false);
 
-  React.useEffect(() => {
+  const reload = React.useCallback(() => {
     const url = new URL("/api/customers", window.location.origin);
     if (search) url.searchParams.set("q", search);
+    fetch(url)
+      .then((r) => r.json())
+      .then((data) => setRows(Array.isArray(data) ? data : []))
+      .catch(() => setRows([]));
+  }, [search]);
+
+  React.useEffect(() => {
     let cancelled = false;
+    const url = new URL("/api/customers", window.location.origin);
+    if (search) url.searchParams.set("q", search);
     fetch(url)
       .then((r) => r.json())
       .then((data) => !cancelled && setRows(Array.isArray(data) ? data : []))
@@ -59,110 +132,732 @@ export default function CustomersClient({ userTimezone, canManage }: { userTimez
     return () => { cancelled = true; };
   }, [search]);
 
+  const stats = React.useMemo(() => computeStats(rows ?? []), [rows]);
+  const filtered = React.useMemo(() => applyFilter(rows ?? [], filter), [rows, filter]);
+  const counts = React.useMemo(() => computeCounts(rows ?? []), [rows]);
+
   return (
-    <div className="mt-6 space-y-4">
-      <div className="flex items-center gap-2">
-        <div className="relative max-w-md flex-1">
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search name or email…"
-            className="w-full rounded-md border border-border bg-surface py-2 pl-9 pr-3 text-sm"
+    <div className="relative mt-6 space-y-5">
+      {/* Ambient background depth */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute -left-32 top-32 -z-10 h-80 w-80 rounded-full bg-brand-accent/[0.05] blur-3xl"
+      />
+      <div
+        aria-hidden
+        className="pointer-events-none absolute -right-32 top-96 -z-10 h-72 w-72 rounded-full bg-brand-accent/[0.04] blur-3xl"
+      />
+
+      {/* ── Hero ──────────────────────────────────────────────── */}
+      <FadeIn>
+        <Hero
+          canManage={canManage}
+          onAdd={() => setOpenNew(true)}
+        />
+      </FadeIn>
+
+      {/* ── KPI cluster ──────────────────────────────────────── */}
+      <FadeIn delay={1}>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <MetricCard
+            label="Total customers"
+            value={rows === null ? "—" : String(stats.total)}
+            icon={Users}
+            tone="brand"
           />
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="absolute left-2.5 top-2.5 h-4 w-4 text-ink-subtle" aria-hidden>
-            <circle cx="11" cy="11" r="7" /><path d="M21 21l-4.3-4.3" strokeLinecap="round" />
-          </svg>
+          <MetricCard
+            label="Active · 30d"
+            value={rows === null ? "—" : String(stats.active30)}
+            icon={TrendingUp}
+            tone="positive"
+          />
+          <MetricCard
+            label="Repeat rate"
+            value={rows === null ? "—" : `${stats.repeatRatePct}%`}
+            icon={CalendarClock}
+            tone="brand"
+          />
+          <MetricCard
+            label="VIP"
+            value={rows === null ? "—" : String(stats.vip)}
+            icon={Crown}
+            tone="warning"
+          />
         </div>
-      </div>
+      </FadeIn>
 
-      <div className="overflow-hidden rounded-xl border border-border bg-surface shadow-xs">
-        {rows === null ? (
-          <div className="space-y-2 p-4">
-            {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-12" />)}
-          </div>
-        ) : rows.length === 0 ? (
-          <EmptyState title="No customers yet" body="Customers are created automatically when someone books a service." />
-        ) : (
-          <table className="hidden w-full text-sm sm:table">
-            <thead className="bg-surface-subtle text-left text-xs uppercase text-ink-subtle">
-              <tr>
-                <th className="px-4 py-2.5">Customer</th>
-                <th className="px-4 py-2.5">Bookings</th>
-                <th className="px-4 py-2.5">Cancelled</th>
-                <th className="px-4 py-2.5">Last appointment</th>
-                <th className="px-4 py-2.5">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r) => (
-                <tr
-                  key={r.id}
-                  onClick={() => setOpenId(r.id)}
-                  className="cursor-pointer border-t border-border align-top transition hover:bg-surface-inset/60"
-                >
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-2.5">
-                      <Avatar name={r.name} size="sm" />
-                      <div>
-                        <div className="text-ink">{r.name}</div>
-                        <div className="text-xs text-ink-subtle">{r.email}</div>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-4 py-3 text-ink">{r.totalBookings}</td>
-                  <td className="px-4 py-3 text-ink-muted">{r.cancelled}</td>
-                  <td className="px-4 py-3 text-xs text-ink-muted">
-                    {r.lastAppointmentAt ? formatInTimeZone(r.lastAppointmentAt, userTimezone, "MMM d, yyyy") : "—"}
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex flex-col gap-1.5">
-                      <Badge tone={r.status === "vip" ? "violet" : r.status === "archived" ? "neutral" : "green"} className="capitalize">{r.status}</Badge>
-                      {Array.isArray(r.tags) && r.tags.length > 0 && (
-                        <div className="flex flex-wrap gap-1">
-                          {r.tags.slice(0, 3).map((tag) => (
-                            <span key={tag} className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] text-slate-700">
-                              {tag}
-                            </span>
-                          ))}
-                          {r.tags.length > 3 && (
-                            <span className="text-[10px] text-ink-subtle">+{r.tags.length - 3}</span>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+      {/* ── Optional insight banner ───────────────────────────── */}
+      {rows && rows.length >= 5 && stats.repeatRatePct >= 30 && (
+        <FadeIn delay={2}>
+          <InsightCard title="Relationship intelligence">
+            {`Repeat booking rate is ${stats.repeatRatePct}%. ${stats.active30} customers active in the last 30 days — your retention is healthy.`}
+          </InsightCard>
+        </FadeIn>
+      )}
 
-        {/* Mobile list */}
-        {rows && rows.length > 0 && (
-          <ul className="divide-y divide-border sm:hidden">
-            {rows.map((r) => (
-              <li key={r.id} onClick={() => setOpenId(r.id)} className="flex cursor-pointer items-center gap-3 p-4">
-                <Avatar name={r.name} size="sm" />
-                <div className="min-w-0 flex-1">
-                  <div className="text-sm text-ink">{r.name}</div>
-                  <div className="truncate text-xs text-ink-subtle">{r.email}</div>
-                  <div className="mt-0.5 text-xs text-ink-muted">{r.totalBookings} bookings</div>
-                </div>
-              </li>
+      {/* ── Search + filters ─────────────────────────────────── */}
+      <FadeIn delay={rows && rows.length >= 5 && stats.repeatRatePct >= 30 ? 3 : 2}>
+        <SearchAndFilters
+          search={search}
+          onSearch={setSearch}
+          filter={filter}
+          onFilter={setFilter}
+          counts={counts}
+        />
+      </FadeIn>
+
+      {/* ── Body ──────────────────────────────────────────────── */}
+      {rows === null ? (
+        <LoadingSkeleton />
+      ) : rows.length === 0 ? (
+        <FadeIn delay={3}>
+          <PremiumEmptyState canManage={canManage} onAdd={() => setOpenNew(true)} />
+        </FadeIn>
+      ) : filtered.length === 0 ? (
+        <FadeIn delay={3}>
+          <FilteredEmptyState filter={filter} search={search} />
+        </FadeIn>
+      ) : (
+        <FadeIn delay={3}>
+          <ul className="space-y-2">
+            {filtered.map((r, idx) => (
+              <FadeIn key={r.id} delay={idx} as="div">
+                <CustomerRowCard
+                  row={r}
+                  userTimezone={userTimezone}
+                  onOpen={() => setOpenId(r.id)}
+                />
+              </FadeIn>
             ))}
           </ul>
-        )}
-      </div>
+        </FadeIn>
+      )}
 
+      {/* Existing detail drawer (polished). */}
       <CustomerDrawer
         id={openId}
         onClose={() => setOpenId(null)}
         userTimezone={userTimezone}
         canManage={canManage}
       />
+
+      {/* New manual-create drawer. */}
+      <NewCustomerDrawer
+        open={openNew}
+        onClose={() => setOpenNew(false)}
+        onCreated={() => { setOpenNew(false); reload(); }}
+      />
     </div>
   );
 }
+
+// ─── Hero ──────────────────────────────────────────────────────────
+
+function Hero({ canManage, onAdd }: { canManage: boolean; onAdd: () => void }) {
+  return (
+    <PremiumCard
+      compact
+      interactive={false}
+      className="relative overflow-hidden bg-gradient-to-br from-brand-subtle/40 via-surface to-surface"
+    >
+      <div
+        aria-hidden
+        className="pointer-events-none absolute -right-24 -top-24 h-64 w-64 rounded-full bg-brand-accent/12 blur-3xl"
+      />
+      <div className="relative flex flex-wrap items-start justify-between gap-4">
+        <div className="min-w-0 flex-1">
+          <div className="inline-flex items-center gap-1.5 rounded-full bg-brand-accent/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-brand-accent">
+            <Users className="h-3 w-3" strokeWidth={2} />
+            Customer relationship intelligence
+          </div>
+          <h1 className="mt-2 text-[20px] font-semibold tracking-tight text-ink sm:text-[22px]">
+            Customers
+          </h1>
+          <p className="mt-0.5 text-[12px] text-ink-muted">
+            Every relationship across your workspace — bookings, history, lifetime context.
+          </p>
+        </div>
+
+        {canManage && (
+          <div className="flex flex-wrap items-center gap-1.5">
+            <SecondaryAction icon={Upload} label="Import" disabled title="CSV import — coming soon" />
+            <SecondaryAction icon={Mail} label="Invite" disabled title="Email invite — coming soon" />
+            <button
+              type="button"
+              onClick={onAdd}
+              className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover px-3 text-[12px] font-medium text-white shadow-[0_6px_16px_rgba(53,157,243,0.35)] transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:shadow-[0_10px_24px_rgba(53,157,243,0.45)]"
+            >
+              <Plus className="h-3.5 w-3.5" strokeWidth={2.25} />
+              Add customer
+            </button>
+          </div>
+        )}
+      </div>
+    </PremiumCard>
+  );
+}
+
+function SecondaryAction({
+  icon: Icon,
+  label,
+  disabled,
+  title,
+}: {
+  icon: React.ComponentType<{ className?: string; strokeWidth?: number }>;
+  label: string;
+  disabled?: boolean;
+  title?: string;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      title={title}
+      className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-border bg-surface px-3 text-[12px] font-medium text-ink-muted shadow-soft transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:bg-surface-inset hover:text-ink hover:shadow-md disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:bg-surface"
+    >
+      <Icon className="h-3.5 w-3.5" strokeWidth={1.75} />
+      {label}
+    </button>
+  );
+}
+
+// ─── Search + filters ──────────────────────────────────────────────
+
+function SearchAndFilters({
+  search, onSearch, filter, onFilter, counts,
+}: {
+  search: string;
+  onSearch: (s: string) => void;
+  filter: Filter;
+  onFilter: (f: Filter) => void;
+  counts: Record<Filter, number>;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <div className="relative max-w-md flex-1">
+        <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-ink-subtle" strokeWidth={1.75} aria-hidden />
+        <input
+          value={search}
+          onChange={(e) => onSearch(e.target.value)}
+          placeholder="Search by name or email…"
+          className="w-full rounded-xl border border-border bg-surface py-2 pl-9 pr-3 text-[13px] outline-none transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:border-border-strong focus:border-brand-accent focus:ring-4 focus:ring-brand-accent/15"
+        />
+      </div>
+
+      <div className="relative inline-flex flex-wrap items-center gap-0.5 rounded-xl border border-border bg-surface-subtle p-0.5 shadow-soft">
+        {FILTERS.map((f) => {
+          const active = filter === f;
+          const n = counts[f];
+          return (
+            <button
+              key={f}
+              onClick={() => onFilter(f)}
+              aria-pressed={active}
+              className={cn(
+                "relative z-10 inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-[12px] font-medium transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] active:scale-[0.97]",
+                active ? "text-white" : "text-ink-muted hover:text-ink",
+              )}
+            >
+              {active && (
+                <motion.span
+                  layoutId="customers-filter-indicator"
+                  className="absolute inset-0 rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover shadow-[0_4px_12px_rgba(53,157,243,0.35),inset_0_1px_0_rgba(255,255,255,0.25)]"
+                  aria-hidden
+                  transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
+                />
+              )}
+              <span className="relative">{FILTER_LABEL[f]}</span>
+              {n > 0 && (
+                <span
+                  className={cn(
+                    "relative inline-flex h-4 min-w-[16px] items-center justify-center rounded-full px-1 text-[9px] font-semibold tabular-nums",
+                    active ? "bg-white/25 text-white" : "bg-surface-inset text-ink-subtle",
+                  )}
+                >
+                  {n}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ─── Customer row card ─────────────────────────────────────────────
+
+function CustomerRowCard({
+  row,
+  userTimezone,
+  onOpen,
+}: {
+  row: Row;
+  userTimezone: string;
+  onOpen: () => void;
+}) {
+  const lastSeen = row.lastAppointmentAt
+    ? formatInTimeZone(row.lastAppointmentAt, userTimezone, "MMM d, yyyy")
+    : "Never booked";
+  const isVip = row.status === "vip";
+  const isArchived = row.status === "archived";
+
+  return (
+    <li>
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={onOpen}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onOpen();
+          }
+        }}
+        className={cn(
+          "group relative cursor-pointer overflow-hidden rounded-2xl border bg-surface px-3 py-2.5 shadow-soft transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] sm:px-4 sm:py-3",
+          "hover:-translate-y-0.5 hover:scale-[1.002] hover:border-border-strong hover:shadow-lift",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-accent/40",
+          isArchived ? "opacity-70 border-border" : "border-border",
+        )}
+      >
+        {/* Hover halo */}
+        <span
+          aria-hidden
+          className="pointer-events-none absolute -inset-px rounded-2xl opacity-0 transition-opacity duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] group-hover:opacity-100"
+          style={{
+            boxShadow:
+              "0 0 0 1px rgba(53,157,243,0.18), 0 10px 28px rgba(53,157,243,0.10), 0 24px 52px -8px rgba(53,157,243,0.07)",
+          }}
+        />
+        {/* Top inner highlight */}
+        <span
+          aria-hidden
+          className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/55 to-transparent"
+        />
+        {/* Status-tinted left rail */}
+        <span
+          aria-hidden
+          className={cn(
+            "absolute inset-y-0 left-0 w-1 rounded-l-2xl",
+            isVip ? "bg-amber-400" : isArchived ? "bg-slate-300" : "bg-brand-accent",
+          )}
+        />
+
+        <div className="relative flex items-center gap-3 pl-2">
+          <Avatar name={row.name} size="sm" className="!h-9 !w-9 !text-[11px]" />
+
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-1.5">
+              <div className={cn(
+                "truncate text-[13px] font-semibold tracking-tight",
+                isArchived ? "text-ink-muted" : "text-ink",
+              )}>
+                {row.name}
+              </div>
+              {isVip && (
+                <span className="inline-flex items-center gap-0.5 rounded-full bg-amber-50/80 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-amber-700 ring-1 ring-amber-200/40">
+                  <Crown className="h-2.5 w-2.5" strokeWidth={2} />
+                  VIP
+                </span>
+              )}
+            </div>
+            <div className="mt-0.5 truncate text-[11px] text-ink-subtle">{row.email}</div>
+
+            {/* Meta chips */}
+            <div className="mt-1.5 flex flex-wrap items-center gap-1">
+              <MetaChip>
+                <CalendarClock className="h-2.5 w-2.5" strokeWidth={1.75} />
+                {row.totalBookings} {row.totalBookings === 1 ? "booking" : "bookings"}
+              </MetaChip>
+              {row.completed > 0 && (
+                <MetaChip tone="emerald">
+                  {row.completed} completed
+                </MetaChip>
+              )}
+              <MetaChip tone="subtle">
+                Last · {lastSeen}
+              </MetaChip>
+              {row.tags?.slice(0, 2).map((t) => (
+                <MetaChip key={t} tone="violet">{t}</MetaChip>
+              ))}
+              {row.tags && row.tags.length > 2 && (
+                <span className="text-[9px] font-medium text-ink-subtle">+{row.tags.length - 2}</span>
+              )}
+            </div>
+          </div>
+
+          <div className="hidden items-center gap-2 sm:flex">
+            <ArrowRight className="h-3.5 w-3.5 text-ink-subtle transition-transform group-hover:translate-x-0.5" strokeWidth={2} />
+          </div>
+        </div>
+      </div>
+    </li>
+  );
+}
+
+function MetaChip({
+  children,
+  tone = "neutral",
+}: {
+  children: React.ReactNode;
+  tone?: "neutral" | "subtle" | "emerald" | "violet";
+}) {
+  const cls =
+    tone === "emerald" ? "bg-emerald-50/70 text-emerald-700 ring-1 ring-emerald-200/30"
+    : tone === "violet" ? "bg-violet-50/80 text-violet-700 ring-1 ring-violet-200/30"
+    : tone === "subtle" ? "bg-surface-inset/80 text-ink-subtle"
+    : "bg-surface-inset text-ink-muted";
+  return (
+    <span className={cn("inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium", cls)}>
+      {children}
+    </span>
+  );
+}
+
+// ─── Empty states ──────────────────────────────────────────────────
+
+function PremiumEmptyState({
+  canManage,
+  onAdd,
+}: {
+  canManage: boolean;
+  onAdd: () => void;
+}) {
+  return (
+    <PremiumCard interactive={false} className="relative overflow-hidden bg-gradient-to-br from-brand-subtle/35 via-surface to-brand-subtle/20">
+      <span
+        aria-hidden
+        className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-white/40 to-transparent"
+      />
+      <span
+        aria-hidden
+        className="pointer-events-none absolute inset-x-6 top-0 h-px bg-gradient-to-r from-transparent via-white/55 to-transparent"
+      />
+      <div
+        aria-hidden
+        className="pointer-events-none absolute -right-24 -top-24 h-64 w-64 rounded-full bg-brand-accent/12 blur-3xl"
+      />
+      <div
+        aria-hidden
+        className="pointer-events-none absolute -left-24 bottom-0 h-56 w-56 rounded-full bg-brand-accent/8 blur-3xl"
+      />
+
+      <div className="relative flex flex-col items-center justify-center px-4 py-12 text-center">
+        <div className="zm-pulse-glow mb-4 inline-flex h-14 w-14 items-center justify-center rounded-2xl border border-brand-accent/15 bg-gradient-to-br from-brand-subtle to-surface text-brand-accent shadow-soft">
+          <Users className="h-6 w-6" strokeWidth={1.75} />
+        </div>
+        <div className="text-[10px] font-semibold uppercase tracking-[0.10em] text-brand-accent">
+          Get started
+        </div>
+        <h3 className="mt-1 text-[18px] font-semibold tracking-tight text-ink">
+          Build your customer network
+        </h3>
+        <p className="mt-1 max-w-[440px] text-[12px] leading-relaxed text-ink-muted">
+          Customers are added automatically when someone books — or manually for proactive
+          relationship management before the first appointment.
+        </p>
+        {canManage && (
+          <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+            <button
+              type="button"
+              onClick={onAdd}
+              className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover px-3 text-[12px] font-medium text-white shadow-[0_6px_16px_rgba(53,157,243,0.35)] transition-all hover:-translate-y-0.5 hover:shadow-[0_10px_24px_rgba(53,157,243,0.45)]"
+            >
+              <Plus className="h-3.5 w-3.5" strokeWidth={2.25} />
+              Add customer
+            </button>
+            <button
+              type="button"
+              disabled
+              title="CSV import — coming soon"
+              className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-border bg-surface px-3 text-[12px] font-medium text-ink-muted shadow-soft disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Upload className="h-3.5 w-3.5" strokeWidth={1.75} />
+              Import CSV
+            </button>
+          </div>
+        )}
+      </div>
+    </PremiumCard>
+  );
+}
+
+function FilteredEmptyState({ filter, search }: { filter: Filter; search: string }) {
+  let title = "No customers match";
+  let body = "Try a different filter or clear your search.";
+  if (search) {
+    title = `No matches for "${search}"`;
+    body = "Try a different name or email.";
+  } else if (filter === "vip") {
+    title = "No VIP customers yet";
+    body = "Mark a customer as VIP from their profile to see them here.";
+  } else if (filter === "archived") {
+    title = "Nothing archived";
+    body = "Archived customers will appear here.";
+  } else if (filter === "recent") {
+    title = "No activity in the last 30 days";
+    body = "Customers with recent bookings will surface here.";
+  } else if (filter === "active") {
+    title = "No active customers";
+    body = "Customers with status \"active\" will appear here.";
+  }
+  return (
+    <PremiumCard interactive={false} className="relative overflow-hidden bg-gradient-to-br from-brand-subtle/20 via-surface to-surface">
+      <div className="flex items-start gap-3 px-2 py-4">
+        <div className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-brand-accent/15 bg-gradient-to-br from-brand-subtle to-surface text-brand-accent shadow-soft">
+          <FilterIcon className="h-5 w-5" strokeWidth={1.75} />
+        </div>
+        <div className="min-w-0 flex-1">
+          <h3 className="text-[14px] font-semibold tracking-tight text-ink">{title}</h3>
+          <p className="mt-0.5 text-[12px] leading-relaxed text-ink-muted">{body}</p>
+        </div>
+      </div>
+    </PremiumCard>
+  );
+}
+
+function LoadingSkeleton() {
+  return (
+    <div className="space-y-2">
+      {Array.from({ length: 4 }).map((_, i) => (
+        <div key={i} className="relative h-16 overflow-hidden rounded-2xl border border-border bg-surface-subtle zm-shimmer" />
+      ))}
+    </div>
+  );
+}
+
+// ─── New customer drawer ──────────────────────────────────────────
+
+function NewCustomerDrawer({
+  open, onClose, onCreated,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onCreated: () => void;
+}) {
+  const [name, setName] = React.useState("");
+  const [email, setEmail] = React.useState("");
+  const [phone, setPhone] = React.useState("");
+  const [notes, setNotes] = React.useState("");
+  const [busy, setBusy] = React.useState(false);
+  const reduced = useReducedMotion();
+
+  React.useEffect(() => {
+    if (open) { setName(""); setEmail(""); setPhone(""); setNotes(""); }
+  }, [open]);
+
+  React.useEffect(() => {
+    function onKey(e: KeyboardEvent) { if (e.key === "Escape" && open) onClose(); }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
+
+  async function save() {
+    if (!name.trim()) { toast("Name is required", "error"); return; }
+    if (!email.trim()) { toast("Email is required", "error"); return; }
+    setBusy(true);
+    try {
+      const r = await fetch("/api/customers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: name.trim(),
+          email: email.trim(),
+          phone: phone.trim() || null,
+          notes: notes.trim() || null,
+        }),
+      });
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        throw new Error(d?.error ?? "Failed");
+      }
+      toast("Customer added", "success");
+      onCreated();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed", "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <AnimatePresence>
+      {open && (
+        <>
+          <motion.div
+            className="fixed inset-0 z-40 bg-black/30 backdrop-blur-sm"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+            onClick={onClose}
+            aria-hidden
+          />
+          <motion.aside
+            role="dialog"
+            aria-modal="true"
+            aria-label="Add customer"
+            className="fixed bottom-0 right-0 top-0 z-50 flex w-full max-w-md flex-col bg-surface shadow-2xl"
+            initial={reduced ? { x: 0 } : { x: "100%" }}
+            animate={{ x: 0 }}
+            exit={reduced ? { x: 0 } : { x: "100%" }}
+            transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
+          >
+            <div className="relative overflow-hidden border-b border-border/70 bg-gradient-to-br from-brand-subtle/55 via-surface to-surface px-5 pt-5 pb-4">
+              <div
+                aria-hidden
+                className="pointer-events-none absolute -right-16 -top-16 h-40 w-40 rounded-full bg-brand-accent/12 blur-3xl"
+              />
+              <div className="relative flex items-start justify-between">
+                <div>
+                  <div className="inline-flex items-center gap-1 rounded-full bg-brand-accent/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-brand-accent">
+                    <Sparkles className="h-3 w-3" strokeWidth={2} />
+                    Add customer
+                  </div>
+                  <h2 className="mt-2 text-[17px] font-semibold tracking-tight text-ink">
+                    Add a customer to your workspace
+                  </h2>
+                  <p className="mt-0.5 text-[12px] text-ink-muted">
+                    Create a relationship before the first booking — VIPs, prospects, or returning clients.
+                  </p>
+                </div>
+                <button
+                  onClick={onClose}
+                  aria-label="Close"
+                  className="-mr-1 -mt-1 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-ink-subtle transition-colors hover:bg-surface-inset hover:text-ink"
+                >
+                  <X className="h-4 w-4" strokeWidth={2} />
+                </button>
+              </div>
+            </div>
+
+            <div className="flex-1 space-y-3.5 overflow-y-auto px-5 py-5 text-sm">
+              <DrawerField label="Full name" required>
+                <input
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="Maria González"
+                  className={INPUT_CLS}
+                  autoFocus
+                />
+              </DrawerField>
+              <DrawerField label="Email" required>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="maria@example.com"
+                  className={INPUT_CLS}
+                />
+              </DrawerField>
+              <DrawerField label="Phone (optional)">
+                <input
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  placeholder="+1 (555) 123-4567"
+                  className={INPUT_CLS}
+                />
+              </DrawerField>
+              <DrawerField label="Internal notes (optional)">
+                <textarea
+                  rows={3}
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  placeholder="Anything that helps your team remember the context."
+                  className={cn(INPUT_CLS, "resize-none")}
+                />
+              </DrawerField>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 border-t border-border/70 bg-surface-subtle/40 px-5 py-3.5">
+              <button
+                type="button"
+                onClick={onClose}
+                className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-border bg-surface px-3 text-[12px] font-medium text-ink-muted shadow-soft transition-all hover:-translate-y-0.5 hover:bg-surface-inset hover:text-ink hover:shadow-md"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={save}
+                disabled={busy || !name.trim() || !email.trim()}
+                className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover px-3 text-[12px] font-medium text-white shadow-[0_6px_16px_rgba(53,157,243,0.35)] transition-all hover:-translate-y-0.5 hover:shadow-[0_10px_24px_rgba(53,157,243,0.45)] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {busy ? "Adding…" : (
+                  <>
+                    Add customer
+                    <ArrowRight className="h-3.5 w-3.5" strokeWidth={2.25} />
+                  </>
+                )}
+              </button>
+            </div>
+          </motion.aside>
+        </>
+      )}
+    </AnimatePresence>
+  );
+}
+
+const INPUT_CLS = "w-full rounded-lg border border-border bg-surface px-3 py-2 text-[13px] outline-none transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:border-border-strong focus:border-brand-accent focus:ring-4 focus:ring-brand-accent/15";
+
+function DrawerField({ label, children, required }: { label: string; children: React.ReactNode; required?: boolean }) {
+  return (
+    <label className="block">
+      <span className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-subtle">
+        {label}{required && <span className="text-brand-accent"> *</span>}
+      </span>
+      {children}
+    </label>
+  );
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────
+
+function computeStats(rows: Row[]): {
+  total: number;
+  active30: number;
+  repeatRatePct: number;
+  vip: number;
+} {
+  const now = Date.now();
+  const thirty = 30 * 86_400_000;
+  const total = rows.length;
+  const active30 = rows.filter(
+    (r) => r.lastAppointmentAt && now - new Date(r.lastAppointmentAt).getTime() <= thirty,
+  ).length;
+  const repeat = rows.filter((r) => r.totalBookings >= 2).length;
+  const bookedAtAll = rows.filter((r) => r.totalBookings >= 1).length;
+  const repeatRatePct = bookedAtAll > 0 ? Math.round((repeat / bookedAtAll) * 100) : 0;
+  const vip = rows.filter((r) => r.status === "vip").length;
+  return { total, active30, repeatRatePct, vip };
+}
+
+function applyFilter(rows: Row[], filter: Filter): Row[] {
+  switch (filter) {
+    case "all":      return rows;
+    case "active":   return rows.filter((r) => r.status === "active");
+    case "vip":      return rows.filter((r) => r.status === "vip");
+    case "archived": return rows.filter((r) => r.status === "archived");
+    case "recent": {
+      const cutoff = Date.now() - 30 * 86_400_000;
+      return rows.filter((r) => r.lastAppointmentAt && new Date(r.lastAppointmentAt).getTime() >= cutoff);
+    }
+  }
+}
+
+function computeCounts(rows: Row[]): Record<Filter, number> {
+  const cutoff = Date.now() - 30 * 86_400_000;
+  return {
+    all:      rows.length,
+    active:   rows.filter((r) => r.status === "active").length,
+    vip:      rows.filter((r) => r.status === "vip").length,
+    archived: rows.filter((r) => r.status === "archived").length,
+    recent:   rows.filter((r) => r.lastAppointmentAt && new Date(r.lastAppointmentAt).getTime() >= cutoff).length,
+  };
+}
+
+// ─── Existing customer detail drawer (polished hero) ──────────────
 
 function CustomerDrawer({
   id, onClose, userTimezone, canManage,
@@ -173,7 +868,7 @@ function CustomerDrawer({
   canManage: boolean;
 }) {
   const [data, setData] = React.useState<CustomerDetail | null>(null);
-  const [tab, setTab] = React.useState<Tab>("overview");
+  const [tab, setTab] = React.useState<DrawerTab>("overview");
   const [savingNotes, setSavingNotes] = React.useState(false);
   const [notes, setNotes] = React.useState("");
 
@@ -220,35 +915,54 @@ function CustomerDrawer({
           <Skeleton className="mt-6 h-20 w-full" />
         </div>
       ) : (
-        <div className="flex h-full flex-col">
-          {/* Header */}
-          <div className="flex items-start justify-between gap-3 border-b border-border p-5">
-            <div className="flex items-center gap-3">
-              <Avatar name={data.customer.name} size="lg" />
-              <div>
-                <h2 className="text-lg font-semibold text-ink">{data.customer.name}</h2>
-                <a className="text-sm text-brand-accent hover:underline" href={`mailto:${data.customer.email}`}>
-                  {data.customer.email}
-                </a>
-                {data.customer.phone && <div className="mt-0.5 text-xs text-ink-muted">{data.customer.phone}</div>}
+        <div className="flex h-full flex-col bg-surface">
+          {/* Premium hero */}
+          <div className="relative overflow-hidden border-b border-border/70 bg-gradient-to-br from-brand-subtle/55 via-surface to-surface px-5 pb-5 pt-5">
+            <div
+              aria-hidden
+              className="pointer-events-none absolute -right-16 -top-16 h-40 w-40 rounded-full bg-brand-accent/12 blur-3xl"
+            />
+            <div className="relative flex items-start justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <Avatar name={data.customer.name} size="lg" />
+                <div>
+                  <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-ink-muted">
+                    <span className={cn(
+                      "inline-flex h-1.5 w-1.5 rounded-full",
+                      data.customer.status === "vip" ? "bg-amber-500" :
+                      data.customer.status === "archived" ? "bg-slate-400" : "bg-brand-accent",
+                    )} />
+                    {data.customer.status === "vip" ? "VIP" :
+                     data.customer.status === "archived" ? "Archived" : "Active"}
+                  </span>
+                  <h2 className="mt-1.5 text-[17px] font-semibold tracking-tight text-ink">{data.customer.name}</h2>
+                  <a className="text-[12px] text-brand-accent transition-colors hover:text-brand-hover" href={`mailto:${data.customer.email}`}>
+                    {data.customer.email}
+                  </a>
+                  {data.customer.phone && (
+                    <div className="mt-0.5 text-[11px] text-ink-muted">{data.customer.phone}</div>
+                  )}
+                </div>
               </div>
+              <button
+                onClick={onClose}
+                aria-label="Close"
+                className="-mr-1 -mt-1 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-ink-subtle transition-colors hover:bg-surface-inset hover:text-ink"
+              >
+                <X className="h-4 w-4" strokeWidth={2} />
+              </button>
             </div>
-            <button
-              onClick={onClose}
-              aria-label="Close"
-              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-muted hover:bg-surface-inset hover:text-ink"
-            >×</button>
           </div>
 
           {/* Tabs */}
           <div className="flex gap-1 border-b border-border px-3">
-            {TABS.map((t) => (
+            {DRAWER_TABS.map((t) => (
               <button
                 key={t}
                 onClick={() => setTab(t)}
                 className={
-                  "border-b-2 px-3 py-2 text-sm capitalize transition " +
-                  (t === tab ? "border-brand-accent font-medium text-brand-accent" : "border-transparent text-ink-muted hover:text-ink")
+                  "border-b-2 px-3 py-2 text-[12px] capitalize transition-colors duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] " +
+                  (t === tab ? "border-brand-accent font-semibold text-brand-accent" : "border-transparent text-ink-muted hover:text-ink")
                 }
               >
                 {t}
@@ -267,7 +981,7 @@ function CustomerDrawer({
                   <Stat label="No-shows" value={String(data.history.filter((h) => h.status === "no_show").length)} />
                 </div>
                 <div className="mt-6">
-                  <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">Tags</div>
+                  <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-subtle">Tags</div>
                   <TagEditor
                     customerId={data.customer.id}
                     initial={Array.isArray(data.customer.tags) ? data.customer.tags : []}
@@ -280,14 +994,14 @@ function CustomerDrawer({
             {tab === "appointments" && (
               <ul className="divide-y divide-border">
                 {data.history.length === 0 && (
-                  <li className="py-6 text-center text-sm text-ink-subtle">No appointments yet.</li>
+                  <li className="py-6 text-center text-[12px] text-ink-subtle">No appointments yet.</li>
                 )}
                 {data.history.map((h) => (
                   <li key={h.id} className="flex items-start justify-between gap-3 py-3">
                     <div className="min-w-0">
-                      <div className="text-sm font-medium text-ink">{h.serviceName}</div>
-                      <div className="text-xs text-ink-muted">with {h.staffName}</div>
-                      <div className="mt-1 text-xs text-ink-subtle">
+                      <div className="text-[13px] font-semibold text-ink">{h.serviceName}</div>
+                      <div className="text-[11px] text-ink-muted">with {h.staffName}</div>
+                      <div className="mt-1 text-[11px] text-ink-subtle">
                         {formatInTimeZone(h.startAt, userTimezone, "MMM d, yyyy · h:mm a")}
                       </div>
                     </div>
@@ -305,7 +1019,7 @@ function CustomerDrawer({
                   disabled={!canManage}
                   onChange={(e) => setNotes(e.target.value)}
                   placeholder="Internal notes — visible to your team only."
-                  className="w-full rounded-md border border-border bg-surface p-3 text-sm disabled:bg-surface-inset"
+                  className="w-full rounded-lg border border-border bg-surface p-3 text-[13px] transition-all duration-[180ms] focus:border-brand-accent focus:ring-4 focus:ring-brand-accent/15 disabled:bg-surface-inset"
                 />
                 {canManage && (
                   <div className="mt-3 flex justify-end">
@@ -329,10 +1043,11 @@ function CustomerDrawer({
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
-    <Card>
+    <div className="relative overflow-hidden rounded-xl border border-border bg-surface p-3 shadow-soft">
+      <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/55 to-transparent" />
       <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">{label}</div>
-      <div className="mt-1 text-2xl font-semibold text-ink">{value}</div>
-    </Card>
+      <div className="mt-1 text-[20px] font-semibold tabular-nums text-ink">{value}</div>
+    </div>
   );
 }
 
@@ -359,11 +1074,9 @@ function TagEditor({
       });
       const d = await res.json();
       if (!res.ok) throw new Error(d?.error ?? "Failed");
-      // Trust the server's normalization (lowercase + dedup).
       if (Array.isArray(d.tags)) setTags(d.tags as string[]);
     } catch (e) {
       toast(e instanceof Error ? e.message : "Failed to save tags", "error");
-      // Roll back on failure.
       setTags(initial);
     } finally {
       setSaving(false);
@@ -373,10 +1086,7 @@ function TagEditor({
   function addTag() {
     const t = draft.trim().toLowerCase();
     if (!t) return;
-    if (tags.includes(t)) {
-      setDraft("");
-      return;
-    }
+    if (tags.includes(t)) { setDraft(""); return; }
     const next = [...tags, t];
     setTags(next);
     setDraft("");
@@ -393,12 +1103,12 @@ function TagEditor({
     <div className="mt-2">
       <div className="flex flex-wrap items-center gap-1.5">
         {tags.length === 0 && (
-          <span className="text-xs text-ink-subtle">No tags yet.</span>
+          <span className="text-[11px] text-ink-subtle">No tags yet.</span>
         )}
         {tags.map((t) => (
           <span
             key={t}
-            className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1 text-xs text-slate-700"
+            className="inline-flex items-center gap-1 rounded-full bg-violet-50/80 px-2 py-0.5 text-[10px] font-medium text-violet-700 ring-1 ring-violet-200/40"
           >
             {t}
             {canManage && (
@@ -406,7 +1116,7 @@ function TagEditor({
                 onClick={() => removeTag(t)}
                 aria-label={`Remove tag ${t}`}
                 disabled={saving}
-                className="text-slate-500 hover:text-red-600 disabled:opacity-50"
+                className="text-violet-500 hover:text-red-600 disabled:opacity-50"
               >
                 ×
               </button>
@@ -426,7 +1136,7 @@ function TagEditor({
               }
             }}
             placeholder="Add a tag (e.g. vip, new, repeat)…"
-            className="flex-1 rounded-md border border-border bg-surface px-3 py-1.5 text-sm"
+            className={cn(INPUT_CLS, "flex-1")}
             maxLength={40}
           />
           <Button onClick={addTag} disabled={saving || !draft.trim()}>

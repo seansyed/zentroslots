@@ -21,12 +21,6 @@ export default async function CustomersPage() {
       title="Customers"
       crumbs={[{ label: "Dashboard", href: "/dashboard" }, { label: "Customers" }]}
     >
-      <div className="flex flex-wrap items-baseline justify-between gap-3">
-        <div>
-          <h1 className="text-heading font-semibold text-ink">Customers</h1>
-          <p className="mt-1 text-sm text-ink-muted">Everyone who's booked with you, with full history.</p>
-        </div>
-      </div>
       <CustomersClient userTimezone={user.timezone} canManage={user.role === "admin" || user.role === "staff" || user.role === "manager"} />
     </Shell>
   );
