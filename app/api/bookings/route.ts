@@ -20,6 +20,8 @@ import { audit, ipFromHeaders } from "@/lib/audit";
 import { rateLimit } from "@/lib/rate-limit";
 import { notify } from "@/lib/notify";
 import { postTenantWebhook } from "@/lib/outbound";
+import { getStripe, isStripeConfigured } from "@/lib/stripe";
+import { createPendingPaymentBooking } from "@/lib/billing/paymentLifecycle";
 
 // List bookings — strictly scoped to the caller's tenant.
 // Staff see their own, admins see the whole tenant.
@@ -214,6 +216,16 @@ export async function POST(req: NextRequest) {
 
     const endAt = new Date(startAt.getTime() + service.durationMinutes * 60_000);
 
+    // ─── Paid-booking pre-check (0030) ──────────────────────────────────
+    // If the service has a price AND Stripe is configured, divert to the
+    // pending_payment → checkout flow. Free services continue down the
+    // existing inline path (BYTE-IDENTICAL behavior preserved per
+    // strict rule).
+    const requiresPayment = service.price > 0 && isStripeConfigured();
+    // The actual divert happens AFTER we've validated intake responses
+    // (below) so a bad intake form short-circuits without ever
+    // creating a Stripe session.
+
     // ─── Tenant feature flags ──────────────────────────────────────────
     // Pulled once and reused below for intake + Google Meet gates so
     // we don't hit the cache twice in the hot path.
@@ -241,6 +253,97 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // ─── DIVERT: paid booking → pending_payment + Stripe Checkout ───
+    if (requiresPayment) {
+      const pending = await createPendingPaymentBooking({
+        tenantId,
+        serviceId: service.id,
+        staffUserId: staff.id,
+        clientName: body.clientName,
+        clientEmail: body.clientEmail,
+        startAt,
+        endAt,
+        notes: body.notes,
+        intakeResponses: normalisedResponses,
+        assignmentMode: body.staffUserId === "auto" ? "auto" : "direct",
+      });
+      if (!pending.ok) {
+        if (pending.reason === "slot_held") {
+          throw new HttpError(409, "Another customer is checking out for this slot — try another time");
+        }
+        if (pending.reason === "slot_taken") {
+          throw new HttpError(409, "Slot just taken — pick another");
+        }
+        throw new HttpError(500, "Could not reserve slot");
+      }
+
+      // Create the Stripe checkout session with an idempotency key
+      // derived from the booking id — a double-click can't duplicate.
+      let checkoutUrl: string | null = null;
+      try {
+        const stripe = await getStripe();
+        const appBase = (process.env.APP_BASE_URL ?? "http://localhost:3001").replace(/\/+$/, "");
+        const session = await stripe.checkout.sessions.create(
+          {
+            mode: "payment",
+            line_items: [
+              {
+                price_data: {
+                  currency: "usd",
+                  product_data: {
+                    name: service.name,
+                    description: `${service.durationMinutes} minutes with ${staff.name}`,
+                  },
+                  unit_amount: service.price,
+                },
+                quantity: 1,
+              },
+            ],
+            customer_email: body.clientEmail,
+            success_url: `${appBase}/booking/confirmed?booking=${pending.booking.id}`,
+            cancel_url: `${appBase}/booking/cancelled?booking=${pending.booking.id}`,
+            // Source-of-truth metadata for the webhook handler.
+            metadata: {
+              booking_id: pending.booking.id,
+              tenant_id: tenantId,
+              service_id: service.id,
+              kind: "booking_payment",
+            },
+            // Stripe Checkout sessions expire automatically. Match our
+            // soft-hold so the customer can't pay after the slot was
+            // released by the cleanup cron.
+            expires_at: Math.floor(
+              (pending.booking.paymentHoldExpiresAt?.getTime() ?? Date.now() + 30 * 60_000) / 1000
+            ),
+          },
+          { idempotencyKey: `booking-checkout:${pending.booking.id}` }
+        );
+        checkoutUrl = session.url;
+
+        // Persist the session id back onto the booking so the webhook
+        // can find it.
+        await db
+          .update(bookings)
+          .set({ stripeSessionId: session.id, updatedAt: new Date() })
+          .where(eq(bookings.id, pending.booking.id));
+      } catch (err) {
+        // If Stripe is misconfigured / down, the booking row remains
+        // pending_payment. The cleanup cron will expire it after the
+        // hold window. We surface a 502 so the UI can retry.
+        console.error("[booking] Stripe checkout creation failed:", err);
+        throw new HttpError(502, "Payment provider unavailable — please try again");
+      }
+
+      // Return the pending booking + the checkout URL. NO post-confirmation
+      // hooks fire yet — those run in the webhook after payment settles.
+      return NextResponse.json({
+        ...pending.booking,
+        checkoutUrl,
+        requiresPayment: true,
+      });
+    }
+
+    // ─── FREE booking path (unchanged) ────────────────────────────────
     let row;
     try {
       [row] = await db

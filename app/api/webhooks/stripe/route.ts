@@ -2,9 +2,16 @@ import { NextRequest, NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 
 import { db } from "@/db/client";
-import { tenants } from "@/db/schema";
+import { bookings, tenants } from "@/db/schema";
 import { getStripe, isStripeConfigured } from "@/lib/stripe";
 import { recordBillingEvent } from "@/lib/billing/recordBillingEvent";
+import {
+  autoRefundCharge,
+  confirmPendingPaymentBooking,
+  markBookingPaymentFailed,
+  markBookingRefunded,
+} from "@/lib/billing/paymentLifecycle";
+import { runPostConfirmationHooks } from "@/lib/billing/postBookingHooks";
 
 // Use Node runtime so we can read the raw body for signature verification.
 export const runtime = "nodejs";
@@ -60,6 +67,47 @@ export async function POST(req: NextRequest) {
     switch (event.type) {
       case "checkout.session.completed": {
         const session = event.data.object;
+        // ── Paid-booking branch (0030, additive). Discriminate on
+        //    metadata.kind = 'booking_payment'. SUBSCRIPTION flow
+        //    below stays byte-identical for kind !== 'booking_payment'.
+        const kind = (session.metadata?.kind as string | undefined) ?? null;
+        if (kind === "booking_payment") {
+          const bookingId = (session.metadata?.booking_id as string | undefined) ?? null;
+          const bookingTenantId = (session.metadata?.tenant_id as string | undefined) ?? null;
+          if (bookingId && bookingTenantId) {
+            const paymentIntentId =
+              typeof session.payment_intent === "string" ? session.payment_intent : null;
+            const amountCents = Number(session.amount_total ?? 0);
+            const confirmResult = await confirmPendingPaymentBooking({
+              bookingId,
+              tenantId: bookingTenantId,
+              stripeSessionId: session.id,
+              stripePaymentIntentId: paymentIntentId,
+              amountChargedCents: amountCents,
+            });
+            if (confirmResult.ok) {
+              // Fire the post-confirmation hooks (calendar, email, etc.).
+              await runPostConfirmationHooks({
+                bookingId,
+                tenantId: bookingTenantId,
+              });
+            } else if (confirmResult.reason === "slot_taken" && paymentIntentId) {
+              // EXCLUDE race: a confirmed booking sneaked in during
+              // the payment window. Auto-refund + the lifecycle
+              // helper already marked our booking as payment_failed.
+              await autoRefundCharge({
+                paymentIntentId,
+                reason: "slot_taken_during_payment",
+              });
+            }
+            // Other failure reasons (wrong_state, not_found) are
+            // logged inside the helper; webhook returns 200 either
+            // way so Stripe doesn't retry.
+          }
+          break;
+        }
+
+        // ── SUBSCRIPTION branch (existing, unchanged) ──
         const tenantId = (session.metadata?.tenantId as string | undefined) ?? null;
         const plan = (session.metadata?.plan as string | undefined) ?? null;
         if (tenantId) {
@@ -73,6 +121,64 @@ export async function POST(req: NextRequest) {
               updatedAt: new Date(),
             })
             .where(eq(tenants.id, tenantId));
+        }
+        break;
+      }
+
+      case "payment_intent.payment_failed": {
+        // ── Paid-booking failure (0030, additive). Find the booking
+        //    by stripe_payment_intent_id OR by metadata.booking_id
+        //    that we set on session creation.
+        const pi = event.data.object;
+        const piId = pi.id;
+        const bookingId = (pi.metadata?.booking_id as string | undefined) ?? null;
+        const bookingTenantId = (pi.metadata?.tenant_id as string | undefined) ?? null;
+        let resolvedBookingId: string | null = bookingId;
+        let resolvedTenantId: string | null = bookingTenantId;
+        if (!resolvedBookingId && piId) {
+          // Fallback: look up by stripe_payment_intent_id.
+          const row = await db.query.bookings.findFirst({
+            where: eq(bookings.stripePaymentIntentId, piId),
+          });
+          if (row) {
+            resolvedBookingId = row.id;
+            resolvedTenantId = row.tenantId;
+          }
+        }
+        if (resolvedBookingId && resolvedTenantId) {
+          await markBookingPaymentFailed({
+            bookingId: resolvedBookingId,
+            tenantId: resolvedTenantId,
+            reason: pi.last_payment_error?.message?.slice(0, 200) ?? "payment_failed",
+          });
+        }
+        break;
+      }
+
+      case "charge.refunded": {
+        // ── Full or partial refund sync (0030, additive). Stripe
+        //    charge.refunded fires on EVERY refund including partials.
+        //    We discriminate by amount_refunded vs amount on the charge.
+        const charge = event.data.object;
+        const piId =
+          typeof charge.payment_intent === "string"
+            ? charge.payment_intent
+            : charge.payment_intent?.id ?? null;
+        if (piId) {
+          const row = await db.query.bookings.findFirst({
+            where: eq(bookings.stripePaymentIntentId, piId),
+          });
+          if (row) {
+            const isFullRefund = (charge.amount_refunded ?? 0) >= (charge.amount ?? 0);
+            await markBookingRefunded({
+              bookingId: row.id,
+              tenantId: row.tenantId,
+              refundedAmountCents: charge.amount_refunded ?? 0,
+              isFullRefund,
+              // Most recent refund id when available.
+              refundId: charge.refunds?.data?.[0]?.id ?? undefined,
+            });
+          }
         }
         break;
       }

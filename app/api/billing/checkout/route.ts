@@ -31,16 +31,26 @@ export async function POST(req: NextRequest) {
     const customerId = await ensureStripeCustomer(tenant, admin.email);
     const stripe = await getStripe();
 
-    const session = await stripe.checkout.sessions.create({
-      mode: "subscription",
-      customer: customerId,
-      line_items: [{ price: priceId, quantity: 1 }],
-      subscription_data: body.trialDays ? { trial_period_days: body.trialDays } : undefined,
-      success_url: `${APP_BASE_URL}/dashboard/billing?status=success`,
-      cancel_url: `${APP_BASE_URL}/dashboard/billing?status=cancelled`,
-      allow_promotion_codes: true,
-      metadata: { tenantId: tenant.id, plan: body.plan },
-    });
+    // Idempotency key derived from (tenantId, plan, calendar-hour).
+    // A double-click within the same hour returns the same session
+    // instead of creating a second one. Hour granularity keeps
+    // legitimate retries (e.g. user switches from pro→team) working.
+    const hourBucket = Math.floor(Date.now() / (60 * 60_000));
+    const idempotencyKey = `sub-checkout:${tenant.id}:${body.plan}:${hourBucket}`;
+
+    const session = await stripe.checkout.sessions.create(
+      {
+        mode: "subscription",
+        customer: customerId,
+        line_items: [{ price: priceId, quantity: 1 }],
+        subscription_data: body.trialDays ? { trial_period_days: body.trialDays } : undefined,
+        success_url: `${APP_BASE_URL}/dashboard/billing?status=success`,
+        cancel_url: `${APP_BASE_URL}/dashboard/billing?status=cancelled`,
+        allow_promotion_codes: true,
+        metadata: { tenantId: tenant.id, plan: body.plan },
+      },
+      { idempotencyKey }
+    );
 
     return NextResponse.json({ url: session.url });
   } catch (err) {

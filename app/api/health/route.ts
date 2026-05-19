@@ -525,6 +525,36 @@ export async function GET() {
     }
   }
 
+  // Expired payment holds (0030) — counts bookings stuck in
+  // pending_payment past their hold expiry. The cleanup cron
+  // (holds:expire) should sweep these every 5 minutes. A growing
+  // count means the cron is wedged. Soft-fail.
+  {
+    const start = Date.now();
+    try {
+      const rows = (await db.execute(
+        sql`SELECT count(*)::int AS n,
+                   EXTRACT(EPOCH FROM (NOW() - MIN(payment_hold_expires_at)))::int AS oldest_age_s
+            FROM bookings
+            WHERE status = 'pending_payment'
+              AND payment_hold_expires_at < NOW()`
+      )) as unknown as Array<{ n: number | string | null; oldest_age_s: number | string | null }>;
+      const n = Number(rows[0]?.n ?? 0);
+      const oldestAgeSec = Number(rows[0]?.oldest_age_s ?? 0);
+      checks.expired_payment_holds = {
+        ok: true,
+        ms: Date.now() - start,
+        detail: n > 0 ? `stuck=${n}; oldest_age_s=${oldestAgeSec}` : "none",
+      };
+    } catch (e) {
+      checks.expired_payment_holds = {
+        ok: false,
+        ms: Date.now() - start,
+        detail: (e as Error).message,
+      };
+    }
+  }
+
   // Stale tenant detection — tenants whose most recent
   // analytics_daily_snapshots row is > 36h old. Likely indicates the
   // cron skipped them. Soft-fail; detail surfaces the count.

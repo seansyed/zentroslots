@@ -8,7 +8,16 @@ type Row = {
   id: string;
   startAt: string;
   endAt: string;
-  status: "pending" | "confirmed" | "cancelled" | "completed" | "no_show";
+  // Widened for paid-booking lifecycle (0030) — additive states.
+  status:
+    | "pending"
+    | "confirmed"
+    | "cancelled"
+    | "completed"
+    | "no_show"
+    | "pending_payment"
+    | "payment_failed"
+    | "refunded";
   clientName: string;
   clientEmail: string;
   meetLink: string | null;

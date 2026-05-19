@@ -28,6 +28,10 @@ export const bookingStatusEnum = pgEnum("booking_status", [
   "cancelled",
   "completed",
   "no_show",
+  // Paid-booking lifecycle (0030).
+  "pending_payment",
+  "payment_failed",
+  "refunded",
 ]);
 
 // ─── Tenants ────────────────────────────────────────────────────────────
@@ -250,6 +254,20 @@ export const bookings = pgTable(
     // NULL on one-off bookings (default). Set by the materializer.
     bookingSeriesId: uuid("booking_series_id"),
     bookingOccurrenceId: uuid("booking_occurrence_id"),
+
+    // ── Paid-booking lifecycle (0030, all additive + nullable) ──
+    /** Soft-hold expiry. When status='pending_payment' and this is in
+     *  the past, the cleanup cron transitions the booking to
+     *  'cancelled' (releasing the slot via the existing EXCLUDE
+     *  constraint behavior — confirmed-only). */
+    paymentHoldExpiresAt: timestamp("payment_hold_expires_at", { withTimezone: true }),
+    /** Set when we create the Stripe Checkout session. Used by the
+     *  webhook handler to look the booking up by session id. */
+    stripeSessionId: varchar("stripe_session_id", { length: 255 }),
+    /** Set on payment_intent.succeeded. Used for refund lookup. */
+    stripePaymentIntentId: varchar("stripe_payment_intent_id", { length: 255 }),
+    /** Charged cents at confirmation. Source of truth for refunds. */
+    amountChargedCents: integer("amount_charged_cents"),
 
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
