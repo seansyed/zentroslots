@@ -28,9 +28,6 @@ export default async function NotificationsPage() {
       title="Notifications"
       crumbs={[{ label: "Dashboard", href: "/dashboard" }, { label: "Notifications" }]}
     >
-      <h1 className="text-heading font-semibold text-ink">Notifications</h1>
-      <p className="mt-1 text-sm text-ink-muted">Everything that needs your attention.</p>
-
       <NotificationsClient
         initial={rows.map((r) => ({
           id: r.id,
