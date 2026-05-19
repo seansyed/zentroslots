@@ -128,6 +128,63 @@ export async function GET() {
     }
   }
 
+  // Aggregation latency — avg generation_ms across the 25 most recent
+  // scheduled_reports rows. Useful for detecting cron regression.
+  // Soft-fail. detail carries the avg in ms.
+  {
+    const start = Date.now();
+    try {
+      const rows = (await db.execute(
+        sql`SELECT AVG(generation_ms)::int AS avg_ms, COUNT(*) AS n
+            FROM (SELECT generation_ms FROM scheduled_reports
+                  WHERE generation_ms IS NOT NULL
+                  ORDER BY generated_at DESC LIMIT 25) recent`
+      )) as unknown as Array<{ avg_ms: number | null; n: string | number | null }>;
+      const avgMs = rows[0]?.avg_ms ?? null;
+      const n = Number(rows[0]?.n ?? 0);
+      checks.aggregation_latency = {
+        ok: true,
+        ms: Date.now() - start,
+        detail: n > 0 ? `avg_ms=${avgMs}; n=${n}` : "no_reports_yet",
+      };
+    } catch (e) {
+      checks.aggregation_latency = {
+        ok: false,
+        ms: Date.now() - start,
+        detail: (e as Error).message,
+      };
+    }
+  }
+
+  // Stale tenant detection — tenants whose most recent
+  // analytics_daily_snapshots row is > 36h old. Likely indicates the
+  // cron skipped them. Soft-fail; detail surfaces the count.
+  {
+    const start = Date.now();
+    try {
+      const rows = (await db.execute(
+        sql`SELECT COUNT(*)::int AS n FROM tenants t
+            WHERE NOT EXISTS (
+              SELECT 1 FROM analytics_daily_snapshots s
+              WHERE s.tenant_id = t.id
+                AND s.created_at > NOW() - INTERVAL '36 hours'
+            )`
+      )) as unknown as Array<{ n: number | string | null }>;
+      const staleCount = Number(rows[0]?.n ?? 0);
+      checks.stale_tenants = {
+        ok: staleCount === 0,
+        ms: Date.now() - start,
+        detail: `count=${staleCount}`,
+      };
+    } catch (e) {
+      checks.stale_tenants = {
+        ok: false,
+        ms: Date.now() - start,
+        detail: (e as Error).message,
+      };
+    }
+  }
+
   return NextResponse.json(
     {
       ok: allOk,

@@ -16,7 +16,8 @@
     "automations:run": "tsx scripts/run-automations.ts",
     "waitlists:expire": "tsx scripts/expire-waitlist-reservations.ts",
     "recurring:materialize": "tsx scripts/materialize-recurring.ts",
-    "analytics:aggregate": "tsx scripts/aggregate-daily-analytics.ts"
+    "analytics:aggregate": "tsx scripts/aggregate-daily-analytics.ts",
+    "scheduled-reports:generate": "tsx scripts/generate-scheduled-reports.ts"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

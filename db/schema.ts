@@ -741,6 +741,33 @@ export const calendarSyncLogs = pgTable(
   })
 );
 
+// ─── Scheduled reports ──────────────────────────────────────────────────
+// One row per (tenant, period_type, period_start). Body is a jsonb
+// snapshot of the KPI summary at generation time — admins can scroll
+// back to historical reports without recomputing. Cron UPSERTs by
+// the unique tuple so re-runs overwrite with the latest numbers.
+export const scheduledReports = pgTable(
+  "scheduled_reports",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    periodType: varchar("period_type", { length: 20 }).notNull(),
+    periodStart: date("period_start").notNull(),
+    periodEnd: date("period_end").notNull(),
+    body: jsonb("body").notNull().default({}),
+    generationMs: integer("generation_ms"),
+    generatedAt: timestamp("generated_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    tenantIdx: index("scheduled_reports_tenant_idx").on(t.tenantId),
+    periodIdx: index("scheduled_reports_period_idx").on(t.tenantId, t.periodType, t.periodStart),
+    unique: uniqueIndex("scheduled_reports_unique").on(t.tenantId, t.periodType, t.periodStart),
+  })
+);
+
 // ─── Canonical billing ledger ───────────────────────────────────────────
 // Captures Stripe webhook events (and manual adjustments) as the source
 // of truth for revenue analytics. Strictly additive — tenants without
