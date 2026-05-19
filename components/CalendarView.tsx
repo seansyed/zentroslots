@@ -59,6 +59,7 @@ import {
   Plus,
   ExternalLink,
   Move3D,
+  X,
 } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 
@@ -87,6 +88,12 @@ export type CalendarBooking = {
    *  "Join" quick action on hover. Provided by the calendar page query;
    *  null when the booking has no meeting attached. */
   meetLink?: string | null;
+  /** True when this row was synthesized by buildDemoBookings() to give
+   *  the calendar a populated feel for brand-new tenants. Demo rows are
+   *  visually identical to real ones but never open the drawer or hit
+   *  reschedule endpoints. The page never serializes this flag — it
+   *  only exists in the client when the bookings prop is empty. */
+  isDemo?: boolean;
 };
 
 const VIEWS = ["day", "week", "month", "agenda"] as const;
@@ -112,7 +119,33 @@ export default function CalendarView({
   const [anchor, setAnchor] = React.useState(() => startOfDay(new Date()));
   const [drawerBooking, setDrawerBooking] = React.useState<DrawerBooking | null>(null);
   const [bookingState, setBookingState] = React.useState<CalendarBooking[]>(bookings);
-  React.useEffect(() => setBookingState(bookings), [bookings]);
+
+  // Demo schedule: when the tenant has zero real bookings, populate
+  // the visible window with a realistic showcase schedule so the
+  // calendar feels alive instead of empty. Demo rows are visually
+  // identical but click-locked (no drawer, no API hits). The user can
+  // hide samples; preference persists in localStorage.
+  const [demoHidden, setDemoHidden] = React.useState(false);
+  React.useEffect(() => {
+    if (typeof window !== "undefined" && window.localStorage.getItem("calendar_demo_hidden") === "1") {
+      setDemoHidden(true);
+    }
+  }, []);
+  const isDemoActive = bookings.length === 0 && !demoHidden;
+  React.useEffect(() => {
+    if (isDemoActive) {
+      setBookingState(buildDemoBookings(new Date(), timezone));
+    } else {
+      setBookingState(bookings);
+    }
+  }, [bookings, isDemoActive, timezone]);
+
+  function dismissDemo() {
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem("calendar_demo_hidden", "1");
+    }
+    setDemoHidden(true);
+  }
 
   // ─── Filters ──────────────────────────────────────────────────────────
   const filterDefs: FilterDef[] = React.useMemo(() => {
@@ -175,6 +208,12 @@ export default function CalendarView({
   async function attemptReschedule(bookingId: string, newStartIso: string) {
     const original = bookingState.find((b) => b.id === bookingId);
     if (!original) return;
+    // Demo rows have synthetic IDs the server doesn't know — never POST
+    // them to /api/bookings/[id]/reschedule. Show a calm toast instead.
+    if (original.isDemo) {
+      toast("Preview · Sample appointments can't be rescheduled.", "info");
+      return;
+    }
     const duration = differenceInMinutes(new Date(original.endAt), new Date(original.startAt));
     const newEnd = addMinutes(new Date(newStartIso), duration).toISOString();
     // Optimistic
@@ -200,6 +239,16 @@ export default function CalendarView({
   }
 
   function openBooking(b: CalendarBooking) {
+    // Demo events never open the real drawer — they would route to a
+    // booking ID that doesn't exist on the server, and any cancel /
+    // reschedule action would 404. Show a calm toast instead.
+    if (b.isDemo) {
+      toast(
+        "Preview · Sample appointment. Real bookings open the full detail drawer.",
+        "info",
+      );
+      return;
+    }
     setDrawerBooking({
       id: b.id,
       startAt: b.startAt,
@@ -248,6 +297,7 @@ export default function CalendarView({
       {/* ── Main calendar ───────────────────────────────── */}
       <FadeIn className="min-w-0">
         <PremiumCard compact interactive={false} className="overflow-hidden p-0">
+          {isDemoActive && <SampleScheduleBanner onDismiss={dismissDemo} />}
           <Toolbar
             view={view}
             onView={setView}
@@ -258,7 +308,7 @@ export default function CalendarView({
             timezone={timezone}
           />
 
-          {bookings.length === 0 ? (
+          {bookings.length === 0 && demoHidden ? (
             <CalendarEmptyState />
           ) : isFilteredEmpty ? (
             <FilteredEmptyState onClear={() => setFilters({})} />
@@ -1195,13 +1245,13 @@ function EventBlock({
         </div>
       </div>
 
-      <div className={cn("relative mt-0.5 line-clamp-1 font-medium", isMuted ? "line-through text-ink-muted" : "text-ink")}>
+      <div className={cn("relative mt-0.5 line-clamp-1 text-[12px] font-semibold tracking-tight", isMuted ? "line-through text-ink-muted" : "text-ink")}>
         {booking.serviceName}
       </div>
 
-      <div className="relative mt-0.5 flex items-center gap-1.5 text-[10px] text-ink-muted">
+      <div className="relative mt-1 flex items-center gap-1.5 text-[11px] text-ink-muted">
         <AvatarChip initials={initials} accent={accent} />
-        <span className="line-clamp-1">{booking.clientName}</span>
+        <span className="line-clamp-1 font-medium">{booking.clientName}</span>
       </div>
 
       {/* Hover-expansion: quick actions reveal on hover when the block has
@@ -1640,6 +1690,183 @@ function FilteredEmptyState({ onClear }: { onClear: () => void }) {
       </button>
     </div>
   );
+}
+
+// ─── Sample schedule banner + generator ─────────────────────────
+
+function SampleScheduleBanner({ onDismiss }: { onDismiss: () => void }) {
+  return (
+    <div
+      className="relative flex items-center gap-3 border-b border-brand-accent/15 bg-gradient-to-r from-brand-subtle/60 via-brand-subtle/20 to-transparent px-4 py-2.5 sm:px-5"
+      role="status"
+    >
+      <div className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-brand-accent text-white shadow-sm">
+        <Sparkles className="h-3 w-3" strokeWidth={2} />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="text-[12px] font-semibold tracking-tight text-ink">
+          Sample schedule
+        </div>
+        <div className="text-[11px] text-ink-muted">
+          A preview of how your calendar will look once customers start booking. None of these are real appointments.
+        </div>
+      </div>
+      <button
+        type="button"
+        onClick={onDismiss}
+        className="hidden h-7 items-center gap-1 rounded-lg border border-border bg-surface px-2.5 text-[11px] font-medium text-ink-muted transition-colors hover:bg-surface-inset hover:text-ink sm:inline-flex"
+      >
+        Hide samples
+      </button>
+      <button
+        type="button"
+        onClick={onDismiss}
+        aria-label="Hide samples"
+        className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-ink-subtle transition-colors hover:bg-surface-inset hover:text-ink sm:hidden"
+      >
+        <X className="h-3.5 w-3.5" strokeWidth={2} />
+      </button>
+    </div>
+  );
+}
+
+/**
+ * Synthesize a realistic populated schedule for the current week.
+ *
+ * - Anchored to the start of the user's local week so the demo always
+ *   appears "this week" regardless of when the calendar loads.
+ * - Mix of services, durations (15–120 min), statuses, staff, and
+ *   meeting links.
+ * - One Wednesday overlap shows stacked-density rendering.
+ * - Friday afternoon left empty to demonstrate the focus-window
+ *   overlay derived by SchedulingPulse.
+ * - Saturday/Sunday left mostly clear.
+ *
+ * The function returns rows shaped identically to CalendarBooking with
+ * `isDemo: true` so the UI can opt out of drawer/reschedule actions.
+ */
+function buildDemoBookings(now: Date, timezone: string): CalendarBooking[] {
+  const weekStartDate = startOfWeek(now);
+
+  // Stable pseudo-uuid generator — colors are deterministic via
+  // serviceColor(serviceId), which hashes the id.
+  const sid = (s: string) => s.padStart(36, "0");
+  const SERVICES = {
+    discovery:   { id: sid("svc-discovery"),   name: "Discovery call" },
+    onboarding:  { id: sid("svc-onboarding"),  name: "Onboarding session" },
+    strategy:    { id: sid("svc-strategy"),    name: "Strategy review" },
+    quickSync:   { id: sid("svc-quicksync"),   name: "Quick sync" },
+    consult:     { id: sid("svc-consult"),     name: "Consultation" },
+    standup:     { id: sid("svc-standup"),     name: "Team standup" },
+    workshop:    { id: sid("svc-workshop"),    name: "Deep dive workshop" },
+    coaching:    { id: sid("svc-coaching"),    name: "1:1 coaching" },
+    office:      { id: sid("svc-office"),      name: "Office hours" },
+    followup:    { id: sid("svc-followup"),    name: "Follow-up" },
+    demo:        { id: sid("svc-demo"),        name: "Product demo" },
+    customer:    { id: sid("svc-customer"),    name: "Customer call" },
+    roadmap:     { id: sid("svc-roadmap"),     name: "Roadmap sync" },
+    planning:    { id: sid("svc-planning"),    name: "Strategy planning" },
+    cancelled:   { id: sid("svc-cancelled"),   name: "Coaching session" },
+    review:      { id: sid("svc-review"),      name: "Weekly review" },
+    pricing:     { id: sid("svc-pricing"),     name: "Pricing discussion" },
+    checkin:     { id: sid("svc-checkin"),     name: "Client check-in" },
+  };
+  const STAFF = [
+    { id: sid("staff-sam"),    name: "Sarah Mitchell" },
+    { id: sid("staff-alex"),   name: "Alex Chen" },
+    { id: sid("staff-jordan"), name: "Jordan Patel" },
+  ];
+  const CLIENTS = [
+    { name: "Maria González",  email: "maria@example.com" },
+    { name: "David Park",       email: "david@example.com" },
+    { name: "Emily Roberts",    email: "emily@example.com" },
+    { name: "Marcus Johnson",   email: "marcus@example.com" },
+    { name: "Priya Sharma",     email: "priya@example.com" },
+    { name: "Daniel Kim",       email: "daniel@example.com" },
+    { name: "Ana Silva",        email: "ana@example.com" },
+    { name: "Tom Henderson",    email: "tom@example.com" },
+    { name: "Lisa Wong",        email: "lisa@example.com" },
+    { name: "Sam Taylor",       email: "sam@example.com" },
+    { name: "Olivia Brown",     email: "olivia@example.com" },
+    { name: "Raj Kumar",        email: "raj@example.com" },
+    { name: "Hannah Webb",      email: "hannah@example.com" },
+    { name: "Noah Reyes",       email: "noah@example.com" },
+    { name: "Sofia Romano",     email: "sofia@example.com" },
+    { name: "Liam Walsh",       email: "liam@example.com" },
+  ];
+
+  type DemoSpec = {
+    dayOffset: number; // 0 = Sun, 1 = Mon, ...
+    startHour: number;
+    startMin: number;
+    durationMin: number;
+    service: keyof typeof SERVICES;
+    staff: number;
+    client: number;
+    status: Status;
+    withMeetLink: boolean;
+  };
+
+  const specs: DemoSpec[] = [
+    // Monday
+    { dayOffset: 1, startHour: 9,  startMin: 0,  durationMin: 45,  service: "discovery",  staff: 0, client: 0,  status: "confirmed", withMeetLink: true  },
+    { dayOffset: 1, startHour: 11, startMin: 0,  durationMin: 60,  service: "onboarding", staff: 1, client: 1,  status: "confirmed", withMeetLink: true  },
+    { dayOffset: 1, startHour: 14, startMin: 0,  durationMin: 90,  service: "strategy",   staff: 0, client: 2,  status: "confirmed", withMeetLink: true  },
+    { dayOffset: 1, startHour: 16, startMin: 0,  durationMin: 15,  service: "quickSync",  staff: 2, client: 3,  status: "confirmed", withMeetLink: false },
+
+    // Tuesday
+    { dayOffset: 2, startHour: 10, startMin: 0,  durationMin: 60,  service: "consult",    staff: 1, client: 4,  status: "confirmed", withMeetLink: true  },
+    { dayOffset: 2, startHour: 13, startMin: 0,  durationMin: 30,  service: "standup",    staff: 0, client: 5,  status: "confirmed", withMeetLink: false },
+    { dayOffset: 2, startHour: 15, startMin: 0,  durationMin: 120, service: "workshop",   staff: 2, client: 6,  status: "confirmed", withMeetLink: true  },
+
+    // Wednesday (incl. an overlap demonstrating density)
+    { dayOffset: 3, startHour: 9,  startMin: 30, durationMin: 45,  service: "coaching",   staff: 1, client: 7,  status: "confirmed", withMeetLink: true  },
+    { dayOffset: 3, startHour: 11, startMin: 0,  durationMin: 60,  service: "office",     staff: 0, client: 8,  status: "pending",   withMeetLink: false },
+    { dayOffset: 3, startHour: 13, startMin: 0,  durationMin: 30,  service: "followup",   staff: 2, client: 9,  status: "confirmed", withMeetLink: false },
+    { dayOffset: 3, startHour: 14, startMin: 0,  durationMin: 45,  service: "demo",       staff: 1, client: 10, status: "confirmed", withMeetLink: true  },
+    { dayOffset: 3, startHour: 14, startMin: 15, durationMin: 60,  service: "customer",   staff: 0, client: 11, status: "confirmed", withMeetLink: true  },
+    { dayOffset: 3, startHour: 16, startMin: 30, durationMin: 30,  service: "roadmap",    staff: 2, client: 12, status: "confirmed", withMeetLink: false },
+
+    // Thursday
+    { dayOffset: 4, startHour: 10, startMin: 0,  durationMin: 60,  service: "coaching",   staff: 1, client: 13, status: "confirmed", withMeetLink: true  },
+    { dayOffset: 4, startHour: 13, startMin: 30, durationMin: 60,  service: "planning",   staff: 0, client: 14, status: "confirmed", withMeetLink: false },
+    { dayOffset: 4, startHour: 15, startMin: 0,  durationMin: 60,  service: "cancelled",  staff: 2, client: 15, status: "cancelled", withMeetLink: false },
+
+    // Friday (afternoon left clear so the focus-window overlay engages)
+    { dayOffset: 5, startHour: 9,  startMin: 0,  durationMin: 30,  service: "review",     staff: 0, client: 0,  status: "confirmed", withMeetLink: false },
+    { dayOffset: 5, startHour: 10, startMin: 30, durationMin: 45,  service: "pricing",    staff: 1, client: 1,  status: "confirmed", withMeetLink: true  },
+    { dayOffset: 5, startHour: 13, startMin: 0,  durationMin: 45,  service: "checkin",    staff: 2, client: 2,  status: "completed", withMeetLink: false },
+  ];
+
+  return specs.map((s, idx) => {
+    const date = addDays(weekStartDate, s.dayOffset);
+    const dateKey = format(date, "yyyy-MM-dd");
+    const startLocal = `${dateKey}T${pad(s.startHour)}:${pad(s.startMin)}:00`;
+    const startIso = fromZonedTime(startLocal, timezone).toISOString();
+    const endIso = addMinutes(new Date(startIso), s.durationMin).toISOString();
+    const service = SERVICES[s.service];
+    const staff = STAFF[s.staff];
+    const client = CLIENTS[s.client % CLIENTS.length];
+    return {
+      id: `demo-${idx}-${dateKey}`,
+      startAt: startIso,
+      endAt: endIso,
+      status: s.status,
+      serviceId: service.id,
+      serviceName: service.name,
+      serviceColor: null,
+      staffId: staff.id,
+      staffName: staff.name,
+      clientName: client.name,
+      clientEmail: client.email,
+      meetLink: s.withMeetLink ? "https://meet.google.com/sample-preview" : null,
+      isDemo: true,
+    };
+  });
+}
+
+function pad(n: number): string {
+  return String(n).padStart(2, "0");
 }
 
 // ─── helpers ─────────────────────────────────────────────────────
