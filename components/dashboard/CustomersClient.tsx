@@ -156,8 +156,13 @@ export default function CustomersClient({ userTimezone, canManage }: { userTimez
         />
       </FadeIn>
 
-      {/* ── KPI cluster ──────────────────────────────────────── */}
+      {/* ── CRM Intelligence Strip ──────────────────────────── */}
       <FadeIn delay={1}>
+        <CRMIntelligenceStrip signal={deriveCRMSignal(rows ?? [])} />
+      </FadeIn>
+
+      {/* ── KPI cluster ──────────────────────────────────────── */}
+      <FadeIn delay={2}>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <MetricCard
             label="Total customers"
@@ -186,17 +191,8 @@ export default function CustomersClient({ userTimezone, canManage }: { userTimez
         </div>
       </FadeIn>
 
-      {/* ── Optional insight banner ───────────────────────────── */}
-      {rows && rows.length >= 5 && stats.repeatRatePct >= 30 && (
-        <FadeIn delay={2}>
-          <InsightCard title="Relationship intelligence">
-            {`Repeat booking rate is ${stats.repeatRatePct}%. ${stats.active30} customers active in the last 30 days — your retention is healthy.`}
-          </InsightCard>
-        </FadeIn>
-      )}
-
       {/* ── Search + filters ─────────────────────────────────── */}
-      <FadeIn delay={rows && rows.length >= 5 && stats.repeatRatePct >= 30 ? 3 : 2}>
+      <FadeIn delay={3}>
         <SearchAndFilters
           search={search}
           onSearch={setSearch}
@@ -210,15 +206,15 @@ export default function CustomersClient({ userTimezone, canManage }: { userTimez
       {rows === null ? (
         <LoadingSkeleton />
       ) : rows.length === 0 ? (
-        <FadeIn delay={3}>
+        <FadeIn delay={4}>
           <PremiumEmptyState canManage={canManage} onAdd={() => setOpenNew(true)} />
         </FadeIn>
       ) : filtered.length === 0 ? (
-        <FadeIn delay={3}>
+        <FadeIn delay={4}>
           <FilteredEmptyState filter={filter} search={search} />
         </FadeIn>
       ) : (
-        <FadeIn delay={3}>
+        <FadeIn delay={4}>
           <ul className="space-y-2">
             {filtered.map((r, idx) => (
               <FadeIn key={r.id} delay={idx} as="div">
@@ -321,6 +317,99 @@ function SecondaryAction({
   );
 }
 
+// ─── CRM Intelligence Strip ─────────────────────────────────────────
+
+function CRMIntelligenceStrip({ signal }: { signal: string }) {
+  return (
+    <div className="zm-border-sweep relative overflow-hidden rounded-2xl">
+      <div className="relative overflow-hidden rounded-2xl border border-brand-accent/15 bg-gradient-to-r from-brand-subtle/45 via-surface to-surface shadow-soft">
+        <div
+          aria-hidden
+          className="pointer-events-none absolute -right-16 -top-16 h-40 w-40 rounded-full bg-brand-accent/12 blur-3xl"
+        />
+        <span
+          aria-hidden
+          className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/60 to-transparent"
+        />
+        {/* Diagonal light sweep — 15s ambient pass */}
+        <span
+          aria-hidden
+          className="zm-light-sweep pointer-events-none absolute inset-y-0 -left-1/4 w-1/3 bg-gradient-to-r from-transparent via-white/35 to-transparent"
+        />
+
+        <div className="relative flex items-center gap-3 px-4 py-3 sm:px-5">
+          <div className="zm-pulse-glow relative inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-brand-accent to-brand-hover text-white shadow-[0_4px_12px_rgba(53,157,243,0.35)]">
+            <Sparkles className="h-4 w-4" strokeWidth={2} />
+            <span aria-hidden className="absolute -right-0.5 -top-0.5 inline-flex h-2.5 w-2.5 items-center justify-center">
+              <span className="absolute inset-0 animate-ping rounded-full bg-emerald-400/55" />
+              <span className="relative h-2 w-2 rounded-full bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.55)] ring-2 ring-surface" />
+            </span>
+          </div>
+
+          <div className="min-w-0 flex-1">
+            <div className="text-[10px] font-semibold uppercase tracking-[0.10em] text-brand-accent">
+              Relationship intelligence
+            </div>
+            <div className="mt-0.5 text-[13px] leading-relaxed text-ink">
+              {signal}
+            </div>
+          </div>
+
+          <div className="hidden shrink-0 items-center gap-1.5 rounded-full border border-border bg-surface/70 px-2 py-0.5 text-[10px] font-medium text-ink-muted backdrop-blur-sm sm:inline-flex">
+            <span aria-hidden className="relative inline-flex h-1.5 w-1.5">
+              <span className="absolute inset-0 animate-ping rounded-full bg-emerald-400/55" />
+              <span className="relative h-1.5 w-1.5 rounded-full bg-emerald-500" />
+            </span>
+            Live
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Rule-derived CRM signal. Always returns a calm string so the strip
+ * never disappears — matches the Notifications AI strip behavior.
+ */
+function deriveCRMSignal(rows: Row[]): string {
+  if (rows.length === 0) {
+    return "Build your customer network — operational signals will surface here as your relationships grow.";
+  }
+  const now = Date.now();
+  const thirty = 30 * 86_400_000;
+  const sixty = 60 * 86_400_000;
+  const total = rows.length;
+  const vip = rows.filter((r) => r.status === "vip");
+  const vipDormant = vip.filter(
+    (r) => !r.lastAppointmentAt || now - new Date(r.lastAppointmentAt).getTime() > sixty,
+  ).length;
+  const active30 = rows.filter(
+    (r) => r.lastAppointmentAt && now - new Date(r.lastAppointmentAt).getTime() <= thirty,
+  ).length;
+  const repeat = rows.filter((r) => r.totalBookings >= 2).length;
+  const bookedAtAll = rows.filter((r) => r.totalBookings >= 1).length;
+  const repeatRatePct = bookedAtAll > 0 ? Math.round((repeat / bookedAtAll) * 100) : 0;
+  const neverBooked = rows.filter((r) => r.totalBookings === 0).length;
+
+  if (vipDormant > 0) {
+    return `${vipDormant} VIP ${vipDormant === 1 ? "customer hasn't" : "customers haven't"} booked in 60 days. A good window for proactive outreach.`;
+  }
+  if (repeatRatePct >= 50 && total >= 5) {
+    return `Repeat booking rate is ${repeatRatePct}%. Customer engagement remains healthy.`;
+  }
+  if (active30 / Math.max(1, total) >= 0.4 && total >= 5) {
+    return `${active30} customers active in the last 30 days. Your retention is healthy.`;
+  }
+  if (neverBooked >= 3) {
+    return `${neverBooked} customers haven't booked yet. A calm window for nurture outreach.`;
+  }
+  if (active30 > 0) {
+    return `${active30} ${active30 === 1 ? "customer" : "customers"} active recently. Steady operational rhythm.`;
+  }
+  return "Customer relationships are being tracked. Insights will surface as activity grows.";
+}
+
 // ─── Search + filters ──────────────────────────────────────────────
 
 function SearchAndFilters({
@@ -333,16 +422,23 @@ function SearchAndFilters({
   counts: Record<Filter, number>;
 }) {
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      <div className="relative max-w-md flex-1">
-        <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-ink-subtle" strokeWidth={1.75} aria-hidden />
-        <input
-          value={search}
-          onChange={(e) => onSearch(e.target.value)}
-          placeholder="Search by name or email…"
-          className="w-full rounded-xl border border-border bg-surface py-2 pl-9 pr-3 text-[13px] outline-none transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:border-border-strong focus:border-brand-accent focus:ring-4 focus:ring-brand-accent/15"
-        />
-      </div>
+    <div className="relative overflow-hidden rounded-2xl border border-border bg-surface px-2.5 py-2 shadow-soft">
+      {/* Subtle inner top highlight — one tactile vocabulary across
+          every premium surface */}
+      <span
+        aria-hidden
+        className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/55 to-transparent"
+      />
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative max-w-md flex-1">
+          <Search className="absolute left-2.5 top-2 h-4 w-4 text-ink-subtle" strokeWidth={1.75} aria-hidden />
+          <input
+            value={search}
+            onChange={(e) => onSearch(e.target.value)}
+            placeholder="Search by name or email…"
+            className="w-full rounded-xl border border-border bg-surface-subtle py-1.5 pl-9 pr-3 text-[13px] outline-none transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:border-border-strong focus:border-brand-accent focus:bg-surface focus:ring-4 focus:ring-brand-accent/15"
+          />
+        </div>
 
       <div className="relative inline-flex flex-wrap items-center gap-0.5 rounded-xl border border-border bg-surface-subtle p-0.5 shadow-soft">
         {FILTERS.map((f) => {
@@ -381,6 +477,7 @@ function SearchAndFilters({
           );
         })}
       </div>
+      </div>
     </div>
   );
 }
@@ -401,6 +498,18 @@ function CustomerRowCard({
     : "Never booked";
   const isVip = row.status === "vip";
   const isArchived = row.status === "archived";
+
+  // Rule-derived lifecycle signal — UI scaffolding for future
+  // engagement scoring without any backend dependency.
+  const lifecycleSignal = (() => {
+    if (row.totalBookings === 0) return { label: "New", tone: "brand" as const };
+    if (!row.lastAppointmentAt) return null;
+    const ageMs = Date.now() - new Date(row.lastAppointmentAt).getTime();
+    if (ageMs <= 7 * 86_400_000) return { label: "Recent", tone: "emerald" as const };
+    if (ageMs > 60 * 86_400_000) return { label: "Dormant", tone: "amber" as const };
+    return null;
+  })();
+  const isEngaged = row.completed >= 3;
 
   return (
     <li>
@@ -461,6 +570,12 @@ function CustomerRowCard({
                   VIP
                 </span>
               )}
+              {lifecycleSignal && (
+                <LifecycleChip label={lifecycleSignal.label} tone={lifecycleSignal.tone} />
+              )}
+              {isEngaged && !isArchived && (
+                <LifecycleChip label="Engaged" tone="emerald" />
+              )}
             </div>
             <div className="mt-0.5 truncate text-[11px] text-ink-subtle">{row.email}</div>
 
@@ -493,6 +608,29 @@ function CustomerRowCard({
         </div>
       </div>
     </li>
+  );
+}
+
+function LifecycleChip({
+  label,
+  tone,
+}: {
+  label: string;
+  tone: "brand" | "emerald" | "amber";
+}) {
+  const cls =
+    tone === "brand"   ? "bg-brand-subtle/70 text-brand-accent ring-1 ring-brand-accent/15"
+    : tone === "emerald" ? "bg-emerald-50/80 text-emerald-700 ring-1 ring-emerald-200/40"
+    : "bg-amber-50/80 text-amber-700 ring-1 ring-amber-200/40";
+  const dot =
+    tone === "brand"   ? "bg-brand-accent"
+    : tone === "emerald" ? "bg-emerald-500"
+    : "bg-amber-500";
+  return (
+    <span className={cn("inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.06em]", cls)}>
+      <span aria-hidden className={cn("inline-block h-1 w-1 rounded-full", dot)} />
+      {label}
+    </span>
   );
 }
 
@@ -541,6 +679,21 @@ function PremiumEmptyState({
       <div
         aria-hidden
         className="pointer-events-none absolute -left-24 bottom-0 h-56 w-56 rounded-full bg-brand-accent/8 blur-3xl"
+      />
+      {/* Subtle relationship-network dot grid pattern — implies an
+          intelligent CRM lattice without obvious illustrations. */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 opacity-40"
+        style={{
+          backgroundImage:
+            "radial-gradient(circle at 1px 1px, rgba(53,157,243,0.10) 1px, transparent 0)",
+          backgroundSize: "22px 22px",
+          maskImage:
+            "radial-gradient(ellipse at center, rgba(0,0,0,1) 30%, transparent 75%)",
+          WebkitMaskImage:
+            "radial-gradient(ellipse at center, rgba(0,0,0,1) 30%, transparent 75%)",
+        }}
       />
 
       <div className="relative flex flex-col items-center justify-center px-4 py-12 text-center">
@@ -733,44 +886,57 @@ function NewCustomerDrawer({
             </div>
 
             <div className="flex-1 space-y-3.5 overflow-y-auto px-5 py-5 text-sm">
-              <DrawerField label="Full name" required>
-                <input
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="Maria González"
-                  className={INPUT_CLS}
-                  autoFocus
-                />
-              </DrawerField>
-              <DrawerField label="Email" required>
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="maria@example.com"
-                  className={INPUT_CLS}
-                />
-              </DrawerField>
-              <DrawerField label="Phone (optional)">
-                <input
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                  placeholder="+1 (555) 123-4567"
-                  className={INPUT_CLS}
-                />
-              </DrawerField>
-              <DrawerField label="Internal notes (optional)">
-                <textarea
-                  rows={3}
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  placeholder="Anything that helps your team remember the context."
-                  className={cn(INPUT_CLS, "resize-none")}
-                />
-              </DrawerField>
+              <FadeIn delay={1}>
+                <DrawerField label="Full name" required>
+                  <input
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="Maria González"
+                    className={INPUT_CLS}
+                    autoFocus
+                  />
+                </DrawerField>
+              </FadeIn>
+              <FadeIn delay={2}>
+                <DrawerField label="Email" required>
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="maria@example.com"
+                    className={INPUT_CLS}
+                  />
+                </DrawerField>
+              </FadeIn>
+              <FadeIn delay={3}>
+                <DrawerField label="Phone (optional)">
+                  <input
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    placeholder="+1 (555) 123-4567"
+                    className={INPUT_CLS}
+                  />
+                </DrawerField>
+              </FadeIn>
+              <FadeIn delay={4}>
+                <DrawerField label="Internal notes (optional)">
+                  <textarea
+                    rows={3}
+                    value={notes}
+                    onChange={(e) => setNotes(e.target.value)}
+                    placeholder="Anything that helps your team remember the context."
+                    className={cn(INPUT_CLS, "resize-none")}
+                  />
+                </DrawerField>
+              </FadeIn>
             </div>
 
-            <div className="flex items-center justify-end gap-2 border-t border-border/70 bg-surface-subtle/40 px-5 py-3.5">
+            {/* Sticky footer with luxury top divider glow */}
+            <div className="relative flex items-center justify-end gap-2 border-t border-border/70 bg-surface-subtle/40 px-5 py-3.5">
+              <span
+                aria-hidden
+                className="pointer-events-none absolute inset-x-6 -top-px h-px bg-gradient-to-r from-transparent via-brand-accent/30 to-transparent"
+              />
               <button
                 type="button"
                 onClick={onClose}
