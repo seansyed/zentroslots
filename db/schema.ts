@@ -101,6 +101,17 @@ export const users = pgTable(
     bio: text("bio"),
     specialties: text("specialties"),
 
+    // ── Security hardening (additive, 0028) ──
+    // Bulk-revoke marker: tokens with iat < session_min_iat are rejected
+    // by verifySessionFresh(). Null = no bulk revoke has ever happened.
+    sessionMinIat: timestamp("session_min_iat", { withTimezone: true }),
+    // Per-user permission overrides (jsonb) — see lib/security/permissions.ts.
+    permissionsExtra: jsonb("permissions_extra").notNull().default({}),
+    // Last-login bookkeeping for suspicious-activity heuristic.
+    lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
+    lastLoginIp: varchar("last_login_ip", { length: 45 }),
+    lastLoginUserAgent: text("last_login_user_agent"),
+
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -1279,6 +1290,79 @@ export const announcements = pgTable(
   })
 );
 
+// ─── Security hardening tables (0028) ───────────────────────────────────
+
+export const passwordResetTokens = pgTable(
+  "password_reset_tokens",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** bcrypt hash of the raw token. Raw token only ever leaves the
+     *  process inside the outbound email. NEVER stored in the clear. */
+    tokenHash: text("token_hash").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    /** Set on first (and only) successful consume. Replay protection. */
+    consumedAt: timestamp("consumed_at", { withTimezone: true }),
+    requestedIp: varchar("requested_ip", { length: 45 }),
+    consumedIp: varchar("consumed_ip", { length: 45 }),
+    consumedUserAgent: text("consumed_user_agent"),
+  },
+  (t) => ({
+    userIdx: index("prt_user_idx").on(t.userId),
+    tenantIdx: index("prt_tenant_idx").on(t.tenantId),
+    expiresIdx: index("prt_expires_idx").on(t.expiresAt),
+  })
+);
+
+export const sessionAuditEvents = pgTable(
+  "session_audit_events",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    /** Nullable for failed-login events on unknown emails. */
+    userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
+    /** Closed enum maintained in lib/security/sessionEvents.ts. */
+    eventType: varchar("event_type", { length: 40 }).notNull(),
+    sessionJti: varchar("session_jti", { length: 64 }),
+    ipAddress: varchar("ip_address", { length: 45 }),
+    userAgent: text("user_agent"),
+    deviceLabel: varchar("device_label", { length: 120 }),
+    metadata: jsonb("metadata").notNull().default({}),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    userIdx: index("sae_user_idx").on(t.userId),
+    tenantIdx: index("sae_tenant_idx").on(t.tenantId),
+    eventIdx: index("sae_event_idx").on(t.eventType),
+    createdIdx: index("sae_created_idx").on(t.createdAt),
+    tenantCreatedIdx: index("sae_tenant_created_idx").on(t.tenantId, t.createdAt),
+  })
+);
+
+export const revokedSessionJtis = pgTable(
+  "revoked_session_jtis",
+  {
+    jti: varchar("jti", { length: 64 }).primaryKey(),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }).notNull().defaultNow(),
+    /** Original token expiry — once past, cron can prune. */
+    tokenExpiresAt: timestamp("token_expires_at", { withTimezone: true }).notNull(),
+    reason: varchar("reason", { length: 40 }),
+  },
+  (t) => ({
+    userIdx: index("revoked_user_idx").on(t.userId),
+    expiresIdx: index("revoked_expires_idx").on(t.tokenExpiresAt),
+  })
+);
+
 // ─── Types ──────────────────────────────────────────────────────────────
 
 export type Tenant = typeof tenants.$inferSelect;
@@ -1321,3 +1405,9 @@ export type Announcement = typeof announcements.$inferSelect;
 export type NewAnnouncement = typeof announcements.$inferInsert;
 export type Role = (typeof roleEnum.enumValues)[number];
 export type BookingStatus = (typeof bookingStatusEnum.enumValues)[number];
+export type PasswordResetToken = typeof passwordResetTokens.$inferSelect;
+export type NewPasswordResetToken = typeof passwordResetTokens.$inferInsert;
+export type SessionAuditEvent = typeof sessionAuditEvents.$inferSelect;
+export type NewSessionAuditEvent = typeof sessionAuditEvents.$inferInsert;
+export type RevokedSessionJti = typeof revokedSessionJtis.$inferSelect;
+export type NewRevokedSessionJti = typeof revokedSessionJtis.$inferInsert;

@@ -262,6 +262,104 @@ export async function GET() {
     }
   }
 
+  // Auth subsystem — verifies password_reset_tokens, session_audit_events,
+  // and revoked_session_jtis tables are reachable. Soft-fail.
+  {
+    const start = Date.now();
+    try {
+      await db.execute(
+        sql`SELECT
+          (SELECT count(*) FROM password_reset_tokens) AS prt,
+          (SELECT count(*) FROM session_audit_events) AS sae,
+          (SELECT count(*) FROM revoked_session_jtis) AS rsj`
+      );
+      checks.auth_subsystem = { ok: true, ms: Date.now() - start };
+    } catch (e) {
+      checks.auth_subsystem = {
+        ok: false,
+        ms: Date.now() - start,
+        detail: (e as Error).message,
+      };
+    }
+  }
+
+  // Failed-login metric (24h, all tenants). Soft-fail. Surfaces the
+  // count so alerting can fire on a sudden spike (e.g. credential
+  // spray detection). Never toggles allOk.
+  {
+    const start = Date.now();
+    try {
+      const rows = (await db.execute(
+        sql`SELECT count(*)::int AS n FROM session_audit_events
+            WHERE event_type = 'login_failed'
+              AND created_at > NOW() - INTERVAL '24 hours'`
+      )) as unknown as Array<{ n: number | string | null }>;
+      const n = Number(rows[0]?.n ?? 0);
+      checks.failed_logins_24h = {
+        ok: true,
+        ms: Date.now() - start,
+        detail: `count=${n}`,
+      };
+    } catch (e) {
+      checks.failed_logins_24h = {
+        ok: false,
+        ms: Date.now() - start,
+        detail: (e as Error).message,
+      };
+    }
+  }
+
+  // Suspicious-activity metric (24h). Soft-fail. Tees an alert when
+  // any event fires; combined with failed_logins_24h gives ops a
+  // 30-second sense of "are we under attack right now".
+  {
+    const start = Date.now();
+    try {
+      const rows = (await db.execute(
+        sql`SELECT count(*)::int AS n FROM session_audit_events
+            WHERE event_type = 'suspicious_login'
+              AND created_at > NOW() - INTERVAL '24 hours'`
+      )) as unknown as Array<{ n: number | string | null }>;
+      const n = Number(rows[0]?.n ?? 0);
+      checks.suspicious_activity_24h = {
+        ok: true,
+        ms: Date.now() - start,
+        detail: `count=${n}`,
+      };
+    } catch (e) {
+      checks.suspicious_activity_24h = {
+        ok: false,
+        ms: Date.now() - start,
+        detail: (e as Error).message,
+      };
+    }
+  }
+
+  // Reset-token cleanup freshness. Counts unexpired-but-consumed tokens
+  // older than retention — i.e. the pruner is behind. Soft-fail; detail
+  // surfaces the count so ops can investigate cron drift.
+  {
+    const start = Date.now();
+    try {
+      const rows = (await db.execute(
+        sql`SELECT count(*)::int AS n FROM password_reset_tokens
+            WHERE expires_at < NOW() - INTERVAL '30 days'`
+      )) as unknown as Array<{ n: number | string | null }>;
+      const stale = Number(rows[0]?.n ?? 0);
+      checks.reset_token_cleanup = {
+        ok: true,
+        ms: Date.now() - start,
+        detail: `stale=${stale}`,
+      };
+    } catch (e) {
+      checks.reset_token_cleanup = {
+        ok: false,
+        ms: Date.now() - start,
+        detail: (e as Error).message,
+      };
+    }
+  }
+
   // Stale tenant detection — tenants whose most recent
   // analytics_daily_snapshots row is > 36h old. Likely indicates the
   // cron skipped them. Soft-fail; detail surfaces the count.

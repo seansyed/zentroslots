@@ -120,6 +120,10 @@ function buildNav(variant: SidebarVariant, role: Role): Group[] {
           { label: "Recurring bookings", href: "/dashboard/settings/recurring", icon: I.clock },
         ]
       : []),
+    // Security is available to ALL signed-in users (read access).
+    // Manage actions inside the page are further gated by
+    // canManageSecurity.
+    { label: "Security", href: "/dashboard/settings/security", icon: I.shield },
   ];
 
   return [

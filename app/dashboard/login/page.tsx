@@ -126,6 +126,15 @@ export default function LoginPage() {
         >
           {mode === "login" ? "No account? Sign up" : "Have an account? Sign in"}
         </button>
+
+        {mode === "login" && (
+          <a
+            href="/forgot-password"
+            className="block w-full text-center text-xs text-slate-500 hover:text-slate-700"
+          >
+            Forgot your password?
+          </a>
+        )}
       </div>
     </div>
   );
