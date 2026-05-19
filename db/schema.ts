@@ -5,6 +5,7 @@ import {
   varchar,
   text,
   integer,
+  bigint,
   timestamp,
   time,
   date,
@@ -737,6 +738,45 @@ export const calendarSyncLogs = pgTable(
     tenantIdx: index("calendar_sync_logs_tenant_idx").on(t.tenantId, t.createdAt),
     connectionIdx: index("calendar_sync_logs_connection_idx").on(t.connectionId, t.createdAt),
     bookingIdx: index("calendar_sync_logs_booking_idx").on(t.bookingId),
+  })
+);
+
+// ─── Canonical billing ledger ───────────────────────────────────────────
+// Captures Stripe webhook events (and manual adjustments) as the source
+// of truth for revenue analytics. Strictly additive — tenants without
+// Stripe traffic continue normally. Stripe retry idempotency via partial
+// unique indexes on stripe_event_id + stripe_payment_intent_id (handler
+// swallows 23505).
+export const billingTransactions = pgTable(
+  "billing_transactions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    stripeEventId: varchar("stripe_event_id", { length: 120 }),
+    stripeInvoiceId: varchar("stripe_invoice_id", { length: 120 }),
+    stripePaymentIntentId: varchar("stripe_payment_intent_id", { length: 120 }),
+    stripeCustomerId: varchar("stripe_customer_id", { length: 120 }),
+    customerId: uuid("customer_id"),
+    bookingId: uuid("booking_id"),
+    subscriptionId: uuid("subscription_id"),
+    // bigint(mode:'number') maps int8 → number — safe up to 2^53 cents
+    // ($90T), more than enough headroom for per-transaction amounts.
+    amountCents: bigint("amount_cents", { mode: "number" }).notNull(),
+    currency: varchar("currency", { length: 8 }).notNull().default("usd"),
+    transactionType: varchar("transaction_type", { length: 30 }).notNull(),
+    status: varchar("status", { length: 20 }).notNull(),
+    paidAt: timestamp("paid_at", { withTimezone: true }),
+    refundedAt: timestamp("refunded_at", { withTimezone: true }),
+    metadata: jsonb("metadata").notNull().default({}),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    tenantPaidIdx: index("billing_transactions_tenant_paid_idx").on(t.tenantId, t.paidAt),
+    tenantStatusIdx: index("billing_transactions_tenant_status_idx").on(t.tenantId, t.status),
+    tenantTypeIdx: index("billing_transactions_tenant_type_idx").on(t.tenantId, t.transactionType),
   })
 );
 

@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db/client";
 import { tenants } from "@/db/schema";
 import { getStripe, isStripeConfigured } from "@/lib/stripe";
+import { recordBillingEvent } from "@/lib/billing/recordBillingEvent";
 
 // Use Node runtime so we can read the raw body for signature verification.
 export const runtime = "nodejs";
@@ -37,6 +38,22 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     console.error("Stripe webhook signature verification failed:", err);
     return NextResponse.json({ error: "Invalid signature" }, { status: 400 });
+  }
+
+  // ─── Billing ledger (additive) ──────────────────────────────────────
+  // Recording is invoked BEFORE the existing switch so retries land
+  // even if a downstream handler errors. The helper NEVER throws —
+  // it returns a structured result and logs internally. Existing
+  // handler behavior below is preserved exactly.
+  try {
+    const result = await recordBillingEvent(event);
+    if (!result.ok) {
+      console.warn(`[billing] event ${event.id} not recorded:`, result.reason);
+    }
+  } catch (ledgerErr) {
+    // Defense-in-depth — record helper already wraps everything but
+    // we double-guard here. Webhook MUST not 500 due to ledger writes.
+    console.error("[billing] ledger crashed (webhook unaffected):", ledgerErr);
   }
 
   try {

@@ -16,6 +16,7 @@ import { analyticsDailySnapshots } from "@/db/schema";
 
 import { aggregateAutomationMetrics } from "./automationMetrics";
 import { aggregateBookingMetrics } from "./bookingMetrics";
+import { aggregateRevenueMetrics } from "./revenueMetrics";
 import { aggregateRoutingMetrics } from "./routingMetrics";
 import { aggregateWaitlistMetrics } from "./waitlistMetrics";
 import type { DailyAggregate, SnapshotExtras } from "./types";
@@ -37,13 +38,15 @@ export async function aggregateDailyAnalytics(input: AggregateInput): Promise<Ag
     const dayEnd = new Date(input.dayStart.getTime() + ONE_DAY_MS);
     const snapshotDate = input.dayStart.toISOString().slice(0, 10);
 
-    // Run all four metric families in parallel — each is a single
-    // tenant-scoped read.
-    const [bookingCounts, routing, waitlist, automation] = await Promise.all([
+    // Run all metric families in parallel — each is a single
+    // tenant-scoped read. Revenue is additive; it returns an empty
+    // shape when the tenant has no billing_transactions rows.
+    const [bookingCounts, routing, waitlist, automation, revenue] = await Promise.all([
       aggregateBookingMetrics({ tenantId: input.tenantId, dayStart: input.dayStart, dayEnd }),
       aggregateRoutingMetrics({ tenantId: input.tenantId, dayStart: input.dayStart, dayEnd }),
       aggregateWaitlistMetrics({ tenantId: input.tenantId, dayStart: input.dayStart, dayEnd }),
       aggregateAutomationMetrics({ tenantId: input.tenantId, dayStart: input.dayStart, dayEnd }),
+      aggregateRevenueMetrics({ tenantId: input.tenantId, dayStart: input.dayStart, dayEnd }),
     ]);
 
     const extras: SnapshotExtras = {
@@ -64,6 +67,18 @@ export async function aggregateDailyAnalytics(input: AggregateInput): Promise<Ag
         totalFailed: automation.totalFailed,
         totalSkipped: automation.totalSkipped,
       },
+      // Only attach revenue when there's actual data — keeps the
+      // dashboard "no revenue yet" branch clean and prevents zero
+      // rows from cluttering otherwise-quiet snapshots.
+      ...(revenue.summary.grossRevenueCents > 0 ||
+      revenue.summary.refundedRevenueCents > 0 ||
+      revenue.summary.failedPayments > 0
+        ? {
+            revenue: revenue.summary,
+            serviceRevenue: revenue.serviceRevenue,
+            staffRevenue: revenue.staffRevenue,
+          }
+        : {}),
     };
 
     const aggregate: DailyAggregate = {

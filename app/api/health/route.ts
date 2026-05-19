@@ -50,6 +50,54 @@ export async function GET() {
     }
   }
 
+  // Billing ledger reachable — verifies the billing_transactions table
+  // exists and is queryable. SOFT-FAIL (warning only, doesn't toggle
+  // allOk) so a missing migration on a fresh deploy can't take the
+  // load balancer down. The booking engine doesn't depend on the ledger.
+  {
+    const start = Date.now();
+    try {
+      await db.execute(sql`SELECT 1 FROM billing_transactions LIMIT 1`);
+      checks.billing_ledger = { ok: true, ms: Date.now() - start };
+    } catch (e) {
+      checks.billing_ledger = {
+        ok: false,
+        ms: Date.now() - start,
+        detail: (e as Error).message,
+      };
+    }
+  }
+
+  // Analytics aggregation freshness — when was the most recent
+  // analytics_daily_snapshots row written? Older than 48h flags stale
+  // (cron is supposed to run nightly). Soft-fail — a missed cron
+  // shouldn't take the app down.
+  {
+    const start = Date.now();
+    try {
+      const rows = (await db.execute(
+        sql`SELECT MAX(created_at) AS last_at FROM analytics_daily_snapshots`
+      )) as unknown as Array<{ last_at: string | Date | null }>;
+      const lastAtRaw = rows[0]?.last_at;
+      const lastAt = lastAtRaw ? new Date(lastAtRaw) : null;
+      const ageMs = lastAt ? Date.now() - lastAt.getTime() : null;
+      const stale = ageMs === null || ageMs > 48 * 60 * 60_000;
+      checks.analytics_aggregation = {
+        ok: !stale,
+        ms: Date.now() - start,
+        detail: lastAt
+          ? `last_at=${lastAt.toISOString()}; age_hours=${Math.round((ageMs ?? 0) / 3_600_000)}`
+          : "never_aggregated",
+      };
+    } catch (e) {
+      checks.analytics_aggregation = {
+        ok: false,
+        ms: Date.now() - start,
+        detail: (e as Error).message,
+      };
+    }
+  }
+
   return NextResponse.json(
     {
       ok: allOk,

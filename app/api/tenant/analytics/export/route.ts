@@ -50,10 +50,32 @@ export async function GET(req: NextRequest) {
       "reminder_emails_suppressed",
       "followups_sent",
       "avg_lead_hours",
+      // Revenue columns (additive — empty for tenants without
+      // billing_transactions on that day).
+      "gross_revenue_cents",
+      "refunded_revenue_cents",
+      "net_revenue_cents",
+      "successful_payments",
+      "failed_payments",
+      "avg_booking_value_cents",
     ];
+
+    type RevenueExtras = {
+      grossRevenueCents: number;
+      refundedRevenueCents: number;
+      netRevenueCents: number;
+      successfulPayments: number;
+      failedPayments: number;
+      avgBookingValueCents: number;
+    };
 
     const lines = [header.join(",")];
     for (const r of rows) {
+      const extras =
+        r.extras && typeof r.extras === "object" && !Array.isArray(r.extras)
+          ? (r.extras as { revenue?: RevenueExtras })
+          : null;
+      const rev = extras?.revenue;
       lines.push(
         [
           r.snapshotDate,
@@ -69,6 +91,12 @@ export async function GET(req: NextRequest) {
           r.reminderEmailsSuppressed,
           r.followupsSent,
           r.averageBookingLeadHours ?? "",
+          rev?.grossRevenueCents ?? "",
+          rev?.refundedRevenueCents ?? "",
+          rev?.netRevenueCents ?? "",
+          rev?.successfulPayments ?? "",
+          rev?.failedPayments ?? "",
+          rev?.avgBookingValueCents ?? "",
         ].join(",")
       );
     }

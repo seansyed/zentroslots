@@ -164,6 +164,62 @@ export default async function AnalyticsPage() {
     .sort((a, b) => b.count - a.count);
   const staffTotal = staffRows.reduce((acc, s) => acc + s.count, 0);
 
+  // ─── Revenue computations from snapshot extras ────────────────────
+  // Only shown when at least one snapshot in the window carries
+  // revenue data (i.e. the tenant has billing_transactions). The
+  // estimated "Revenue est." card above remains for backward compat
+  // until tenants accumulate real revenue history.
+  const revenueByDay: { date: string; gross: number; refunded: number; net: number }[] = [];
+  let totalGross = 0;
+  let totalRefunded = 0;
+  let totalFailed = 0;
+  let totalSuccessful = 0;
+  let avgAcrossDays = 0;
+  let avgDaysWithBookings = 0;
+  const serviceRevenueAgg: Record<string, { name: string; revenue: number; bookings: number }> = {};
+  const staffRevenueAgg: Record<string, { name: string; revenue: number; bookings: number }> = {};
+
+  for (const s of aggregates) {
+    const r = s.extras.revenue;
+    if (!r) continue;
+    revenueByDay.push({
+      date: s.snapshotDate,
+      gross: r.grossRevenueCents,
+      refunded: r.refundedRevenueCents,
+      net: r.netRevenueCents,
+    });
+    totalGross += r.grossRevenueCents;
+    totalRefunded += r.refundedRevenueCents;
+    totalFailed += r.failedPayments;
+    totalSuccessful += r.successfulPayments;
+    if (r.avgBookingValueCents > 0) {
+      avgAcrossDays += r.avgBookingValueCents;
+      avgDaysWithBookings++;
+    }
+    for (const sv of s.extras.serviceRevenue ?? []) {
+      const key = sv.serviceId;
+      serviceRevenueAgg[key] = serviceRevenueAgg[key] ?? { name: sv.serviceName, revenue: 0, bookings: 0 };
+      serviceRevenueAgg[key].revenue += sv.revenueCents;
+      serviceRevenueAgg[key].bookings += sv.bookings;
+    }
+    for (const sv of s.extras.staffRevenue ?? []) {
+      const key = sv.staffId;
+      staffRevenueAgg[key] = staffRevenueAgg[key] ?? { name: sv.staffName, revenue: 0, bookings: 0 };
+      staffRevenueAgg[key].revenue += sv.revenueCents;
+      staffRevenueAgg[key].bookings += sv.bookings;
+    }
+  }
+  const hasRevenue = revenueByDay.length > 0;
+  const totalNet = totalGross - totalRefunded;
+  const avgBookingValue = avgDaysWithBookings > 0 ? Math.round(avgAcrossDays / avgDaysWithBookings) : 0;
+  const topRevenueServices = Object.values(serviceRevenueAgg)
+    .sort((a, b) => b.revenue - a.revenue)
+    .slice(0, 8);
+  const topRevenueStaff = Object.values(staffRevenueAgg)
+    .sort((a, b) => b.revenue - a.revenue)
+    .slice(0, 8);
+  const dollars = (cents: number) => `$${(cents / 100).toFixed(2)}`;
+
   return (
     <Shell {...shellProps}>
       <h1 className="text-heading font-semibold text-ink">Analytics</h1>
@@ -274,6 +330,83 @@ export default async function AnalyticsPage() {
         </div>
       )}
 
+      {/* REVENUE PERFORMANCE — only when billing data present.
+          Graceful degradation: section absent for tenants without Stripe traffic. */}
+      {hasRevenue && (
+        <>
+          <h2 className="mt-10 text-lg font-medium">Revenue performance</h2>
+          <p className="mt-1 text-xs text-ink-muted">
+            Derived from canonical billing ledger. Reflects actual paid + refunded transactions.
+          </p>
+
+          <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <Stat label="Gross revenue" value={dollars(totalGross)} />
+            <Stat label="Net revenue" value={dollars(totalNet)} />
+            <Stat label="Refunds" value={dollars(totalRefunded)} muted />
+            <Stat label="Failed payments" value={String(totalFailed)} muted />
+          </div>
+
+          <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
+            <Stat label="Successful payments" value={String(totalSuccessful)} muted />
+            <Stat label="Avg booking value" value={dollars(avgBookingValue)} muted />
+            <Stat label="Days with revenue" value={String(revenueByDay.length)} muted />
+          </div>
+
+          <h3 className="mt-6 text-sm font-medium text-ink-muted">Revenue by day</h3>
+          <div className="mt-2 rounded-lg border bg-white p-4 shadow-sm">
+            <RevenueChart days={revenueByDay} />
+          </div>
+
+          {topRevenueServices.length > 0 && (
+            <>
+              <h3 className="mt-6 text-sm font-medium text-ink-muted">Top revenue services</h3>
+              <div className="mt-2 rounded-lg border bg-white shadow-sm">
+                <ul className="divide-y">
+                  {topRevenueServices.map((s) => (
+                    <li key={s.name} className="flex items-center justify-between px-4 py-3 text-sm">
+                      <span className="truncate">{s.name}</span>
+                      <span className="text-slate-500 tabular-nums">
+                        {dollars(s.revenue)} · {s.bookings} bookings
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </>
+          )}
+
+          {topRevenueStaff.length > 0 && (
+            <>
+              <h3 className="mt-6 text-sm font-medium text-ink-muted">Top revenue staff</h3>
+              <div className="mt-2 rounded-lg border bg-white shadow-sm">
+                <ul className="divide-y">
+                  {topRevenueStaff.map((s) => (
+                    <li key={s.name} className="flex items-center justify-between px-4 py-3 text-sm">
+                      <span className="truncate">{s.name}</span>
+                      <span className="text-slate-500 tabular-nums">
+                        {dollars(s.revenue)} · {s.bookings} bookings
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </>
+          )}
+
+          {/* PAYMENT HEALTH section — flags failed-payment activity. */}
+          {totalFailed > 0 && (
+            <>
+              <h2 className="mt-10 text-lg font-medium">Payment health</h2>
+              <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                <b>{totalFailed}</b> payment{totalFailed === 1 ? "" : "s"} failed in the last{" "}
+                {revenueByDay.length} {revenueByDay.length === 1 ? "day" : "days"}. Check the
+                customer's saved payment method or contact Stripe support if this is unexpected.
+              </div>
+            </>
+          )}
+        </>
+      )}
+
       <h2 className="mt-10 text-lg font-medium">Top services this month</h2>
       <div className="mt-3 rounded-lg border bg-white shadow-sm">
         {topServices.length === 0 ? (
@@ -299,6 +432,45 @@ function Stat({ label, value, muted }: { label: string; value: string; muted?: b
       <div className="text-xs uppercase tracking-wider text-slate-500">{label}</div>
       <div className="mt-1 text-xl font-semibold">{value}</div>
     </div>
+  );
+}
+
+function RevenueChart({
+  days,
+}: {
+  days: { date: string; gross: number; refunded: number; net: number }[];
+}) {
+  if (days.length === 0) return null;
+  const W = 720;
+  const H = 160;
+  const PAD = 24;
+  const max = Math.max(1, ...days.map((d) => d.gross));
+  const barWidth = (W - PAD * 2) / days.length - 2;
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-full" preserveAspectRatio="none">
+      <line x1={PAD} y1={H - PAD} x2={W - PAD} y2={H - PAD} stroke="#e2e8f0" />
+      {days.map((d, i) => {
+        const grossH = ((d.gross / max) * (H - PAD * 2)) || 0;
+        const refundedH = ((d.refunded / max) * (H - PAD * 2)) || 0;
+        const x = PAD + i * ((W - PAD * 2) / days.length);
+        return (
+          <g key={d.date}>
+            {/* Gross (green) */}
+            <rect x={x} y={H - PAD - grossH} width={Math.max(2, barWidth)} height={grossH} fill="#10b981" rx="2">
+              <title>{d.date}: gross ${(d.gross / 100).toFixed(2)}, net ${(d.net / 100).toFixed(2)}</title>
+            </rect>
+            {/* Refund overlay (red, drawn on top from the bottom of gross) */}
+            {refundedH > 0 && (
+              <rect x={x} y={H - PAD - refundedH} width={Math.max(2, barWidth)} height={refundedH} fill="#ef4444" opacity={0.7} rx="2">
+                <title>{d.date}: refunded ${(d.refunded / 100).toFixed(2)}</title>
+              </rect>
+            )}
+          </g>
+        );
+      })}
+      <text x={PAD} y={H - 4} fontSize="10" fill="#94a3b8">{days[0].date}</text>
+      <text x={W - PAD} y={H - 4} fontSize="10" fill="#94a3b8" textAnchor="end">{days[days.length - 1].date}</text>
+    </svg>
   );
 }
 

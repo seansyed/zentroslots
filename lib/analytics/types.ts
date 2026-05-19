@@ -54,6 +54,29 @@ export type SnapshotExtras = {
     totalFailed: number;
     totalSkipped: number;
   };
+  /** Revenue analytics — populated when billing_transactions has rows
+   *  for the tenant on this day. Absent for tenants without Stripe
+   *  traffic (graceful degradation). */
+  revenue?: {
+    grossRevenueCents: number;
+    refundedRevenueCents: number;
+    netRevenueCents: number;
+    successfulPayments: number;
+    failedPayments: number;
+    avgBookingValueCents: number;
+  };
+  serviceRevenue?: Array<{
+    serviceId: string;
+    serviceName: string;
+    revenueCents: number;
+    bookings: number;
+  }>;
+  staffRevenue?: Array<{
+    staffId: string;
+    staffName: string;
+    revenueCents: number;
+    bookings: number;
+  }>;
 };
 
 /** Empty default — used when a tenant had no activity on a given day. */
