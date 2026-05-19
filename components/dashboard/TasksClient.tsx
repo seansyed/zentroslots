@@ -301,7 +301,7 @@ export default function TasksClient({
             <FilterEmptyState filter={filter} onAddTask={() => setOpenNew(true)} />
           </FadeIn>
         ) : (
-          <div className="space-y-7">
+          <div className="space-y-6">
             {grouped.map((g, idx) => (
               <FadeIn key={g.bucket} delay={idx}>
                 <TaskGroup
@@ -377,7 +377,7 @@ function SegmentedFilterBar({
               {active && (
                 <motion.span
                   layoutId="tasks-filter-indicator"
-                  className="absolute inset-0 rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover shadow-[0_4px_12px_rgba(53,157,243,0.35)]"
+                  className="absolute inset-0 rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover shadow-[0_4px_12px_rgba(53,157,243,0.35),inset_0_1px_0_rgba(255,255,255,0.25)]"
                   aria-hidden
                   transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
                 />
@@ -442,16 +442,47 @@ function TaskGroup({
   const meta = BUCKET_LABEL[bucket];
   const reduced = useReducedMotion();
   return (
-    <section>
-      <div className="mb-2.5 flex items-baseline gap-2">
-        <span className={cn("inline-block h-1.5 w-1.5 rounded-full", meta.dotClass)} aria-hidden />
+    <section className="relative">
+      {/* Sticky group header — stays in view as you scroll a long
+          bucket, with a backdrop-blurred app-bg surface that matches
+          the global topbar's translucency rhythm. */}
+      <div className="sticky top-16 z-10 -mx-2 mb-2 flex items-baseline gap-2 bg-app-bg/80 px-2 py-1.5 backdrop-blur-md">
+        <span
+          className={cn(
+            "relative inline-block h-2 w-2 rounded-full ring-2 ring-app-bg",
+            meta.dotClass,
+          )}
+          aria-hidden
+        />
         <h3 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-subtle">
           {meta.label}
         </h3>
         <span className="text-[10px] font-medium tabular-nums text-ink-subtle">·</span>
-        <span className="text-[10px] font-medium tabular-nums text-ink-subtle">{tasks.length}</span>
+        <AnimatePresence mode="popLayout" initial={false}>
+          <motion.span
+            key={tasks.length}
+            initial={reduced ? { opacity: 1 } : { opacity: 0, y: -3 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={reduced ? { opacity: 0 } : { opacity: 0, y: 3 }}
+            transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+            className="text-[10px] font-medium tabular-nums text-ink-subtle"
+          >
+            {tasks.length}
+          </motion.span>
+        </AnimatePresence>
       </div>
-      <ul className="space-y-2">
+
+      {/* Subtle vertical timeline connector — sits behind the cards
+          and gives every group the feel of a temporal lane rather
+          than a detached list. Hidden on completed bucket. */}
+      {bucket !== "completed" && (
+        <span
+          aria-hidden
+          className="pointer-events-none absolute bottom-2 left-1 top-12 w-px bg-gradient-to-b from-border/70 via-border/30 to-transparent"
+        />
+      )}
+
+      <ul className="relative space-y-1.5">
         <AnimatePresence initial={false}>
           {tasks.map((t) => (
             <motion.li
@@ -528,8 +559,8 @@ function TaskCard({
       onKeyDown={handleCardKey}
       data-completing={completing ? "true" : undefined}
       className={cn(
-        "group relative cursor-pointer overflow-hidden rounded-2xl border bg-surface px-3 py-3 shadow-soft transition-all duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] sm:px-4 sm:py-3.5",
-        "hover:-translate-y-0.5 hover:scale-[1.004] hover:border-border-strong hover:shadow-lift",
+        "group relative cursor-pointer overflow-hidden rounded-2xl border bg-surface px-3 py-3 shadow-soft transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] sm:px-4 sm:py-3.5",
+        "hover:-translate-y-0.5 hover:scale-[1.002] hover:border-border-strong hover:shadow-lift",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-accent/40",
         isDone ? "opacity-70 border-border" : "border-border",
         // Priority-aware hover wash — extremely subtle, only visible on
@@ -559,16 +590,67 @@ function TaskCard({
           className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/60 to-transparent"
         />
       )}
+      {/* Top-edge shimmer sweep on hover — premium tactile signal that
+          fades in just at the top of the card. Uses the global
+          zm-shimmer keyframe already in globals.css. */}
+      {!isDone && (
+        <span
+          aria-hidden
+          className="pointer-events-none absolute inset-x-0 top-0 h-px overflow-hidden opacity-0 transition-opacity duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] group-hover:opacity-100"
+        >
+          <span className="absolute inset-y-0 -left-1/2 w-1/2 bg-gradient-to-r from-transparent via-brand-accent/60 to-transparent zm-shimmer" />
+        </span>
+      )}
 
       {/* Hover halo — same language as Appointments / Calendar */}
       <span
         aria-hidden
-        className="pointer-events-none absolute -inset-px rounded-2xl opacity-0 transition-opacity duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] group-hover:opacity-100"
+        className="pointer-events-none absolute -inset-px rounded-2xl opacity-0 transition-opacity duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] group-hover:opacity-100"
         style={{
           boxShadow:
             "0 0 0 1px rgba(53,157,243,0.18), 0 10px 28px rgba(53,157,243,0.10)",
         }}
       />
+
+      {/* Floating top-right glass toolbar — icon-first compact actions.
+          Hidden until card hover/focus, then fades + slides 4px down
+          into view. Glass backdrop, low visual weight. */}
+      {!isDone && (
+        <div
+          className={cn(
+            "pointer-events-none absolute right-2 top-2 z-10 flex items-center gap-0.5 rounded-lg border border-border/60 bg-surface/85 p-0.5 opacity-0 shadow-soft backdrop-blur-md",
+            "-translate-y-1 transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)]",
+            "group-hover:pointer-events-auto group-hover:translate-y-0 group-hover:opacity-100",
+            "group-focus-within:pointer-events-auto group-focus-within:translate-y-0 group-focus-within:opacity-100",
+          )}
+        >
+          <ToolbarButton
+            label="Snooze 1 day"
+            icon={Bell}
+            onClick={(e) => { e.stopPropagation(); onSnooze(task, 1); }}
+          />
+          {task.relatedCustomerId && (
+            <ToolbarLink
+              label="Open customer"
+              icon={Users}
+              href={`/dashboard/customers?focus=${task.relatedCustomerId}`}
+            />
+          )}
+          {task.relatedBookingId && (
+            <ToolbarLink
+              label="Open booking"
+              icon={CalendarIcon}
+              href="/dashboard/appointments"
+            />
+          )}
+          <ToolbarButton
+            label="Delete"
+            icon={Trash2}
+            tone="danger"
+            onClick={(e) => { e.stopPropagation(); onRemove(task); }}
+          />
+        </div>
+      )}
 
       <div className="relative flex items-start gap-3 pl-2">
         {/* Custom completion checkbox */}
@@ -643,53 +725,68 @@ function TaskCard({
                 <PriorityChip priority={priority} isDone={isDone} />
               </div>
 
-              {/* Hover-reveal quick actions — fade + 4px slide-up for a
-                  premium "rises into view" reveal. */}
-              {!isDone && (
-                <div className="pointer-events-none mt-2.5 flex items-center gap-1.5 translate-y-1 opacity-0 transition-all duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] group-hover:pointer-events-auto group-hover:translate-y-0 group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:translate-y-0 group-focus-within:opacity-100">
-                  <button
-                    type="button"
-                    onClick={(e) => { e.stopPropagation(); onSnooze(task, 1); }}
-                    className="inline-flex items-center gap-1 rounded-md border border-border bg-surface px-2 py-0.5 text-[10px] font-semibold text-ink-muted shadow-soft transition-colors hover:bg-surface-inset hover:text-ink"
-                  >
-                    <Bell className="h-2.5 w-2.5" strokeWidth={1.75} />
-                    Snooze 1d
-                  </button>
-                  {task.relatedCustomerId && (
-                    <Link
-                      href={`/dashboard/customers?focus=${task.relatedCustomerId}`}
-                      onClick={(e) => e.stopPropagation()}
-                      className="inline-flex items-center gap-1 rounded-md border border-border bg-surface px-2 py-0.5 text-[10px] font-semibold text-ink-muted shadow-soft transition-colors hover:bg-surface-inset hover:text-ink"
-                    >
-                      <ExternalLink className="h-2.5 w-2.5" strokeWidth={1.75} />
-                      Customer
-                    </Link>
-                  )}
-                  {task.relatedBookingId && (
-                    <Link
-                      href="/dashboard/appointments"
-                      onClick={(e) => e.stopPropagation()}
-                      className="inline-flex items-center gap-1 rounded-md border border-border bg-surface px-2 py-0.5 text-[10px] font-semibold text-ink-muted shadow-soft transition-colors hover:bg-surface-inset hover:text-ink"
-                    >
-                      <CalendarIcon className="h-2.5 w-2.5" strokeWidth={1.75} />
-                      Booking
-                    </Link>
-                  )}
-                  <button
-                    type="button"
-                    onClick={(e) => { e.stopPropagation(); onRemove(task); }}
-                    className="ml-auto inline-flex items-center gap-1 rounded-md border border-border bg-surface px-2 py-0.5 text-[10px] font-semibold text-ink-subtle shadow-soft transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-700"
-                  >
-                    <Trash2 className="h-2.5 w-2.5" strokeWidth={1.75} />
-                    Delete
-                  </button>
-                </div>
-              )}
+              {/* Floating top-right glass toolbar — icon-first, low
+                  opacity until hover. Reveals on hover or
+                  focus-within. Hidden on completed cards. */}
+              {/* Toolbar rendered separately at the card level (below)
+                  so it can sit absolute top-right. Markup intentionally
+                  empty here. */}
             </div>
           </div>
         </div>
       </div>
     </div>
+  );
+}
+
+function ToolbarButton({
+  label,
+  icon: Icon,
+  onClick,
+  tone = "neutral",
+}: {
+  label: string;
+  icon: React.ComponentType<{ className?: string; strokeWidth?: number }>;
+  onClick: (e: React.MouseEvent) => void;
+  tone?: "neutral" | "danger";
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={label}
+      title={label}
+      className={cn(
+        "inline-flex h-6 w-6 items-center justify-center rounded-md text-ink-subtle transition-colors duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)]",
+        tone === "danger"
+          ? "hover:bg-red-50 hover:text-red-600"
+          : "hover:bg-surface-inset hover:text-ink",
+      )}
+    >
+      <Icon className="h-3 w-3" strokeWidth={1.75} />
+    </button>
+  );
+}
+
+function ToolbarLink({
+  label,
+  icon: Icon,
+  href,
+}: {
+  label: string;
+  icon: React.ComponentType<{ className?: string; strokeWidth?: number }>;
+  href: string;
+}) {
+  return (
+    <Link
+      href={href}
+      onClick={(e) => e.stopPropagation()}
+      aria-label={label}
+      title={label}
+      className="inline-flex h-6 w-6 items-center justify-center rounded-md text-ink-subtle transition-colors duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:bg-surface-inset hover:text-ink"
+    >
+      <Icon className="h-3 w-3" strokeWidth={1.75} />
+    </Link>
   );
 }
 
@@ -807,6 +904,7 @@ function PulseTile({
   value: string;
   onClick?: () => void;
 }) {
+  const reduced = useReducedMotion();
   const toneClass =
     tone === "brand"
       ? "bg-brand-subtle text-brand-accent ring-brand-accent/15"
@@ -828,19 +926,34 @@ function PulseTile({
     <Wrap
       onClick={onClick}
       className={cn(
-        "group/tile relative w-full overflow-hidden rounded-lg border border-border bg-surface/60 p-2.5 text-left backdrop-blur-sm transition-all duration-200 ease-[cubic-bezier(0.16,1,0.3,1)]",
+        "group/tile relative w-full overflow-hidden rounded-lg border border-border bg-surface/70 p-2.5 text-left backdrop-blur-md transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)]",
         onClick
-          ? "cursor-pointer hover:-translate-y-0.5 hover:border-border-strong hover:shadow-soft"
-          : "hover:-translate-y-px hover:border-border-strong",
+          ? "cursor-pointer hover:-translate-y-0.5 hover:border-border-strong hover:bg-surface/85 hover:shadow-soft"
+          : "hover:-translate-y-px hover:border-border-strong hover:bg-surface/80",
       )}
     >
       <div className="flex items-center gap-1.5">
-        <div className={cn("inline-flex h-5 w-5 items-center justify-center rounded-md ring-1 transition-transform duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] group-hover/tile:scale-110", toneClass)}>
+        <div className={cn("inline-flex h-5 w-5 items-center justify-center rounded-md ring-1 transition-transform duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] group-hover/tile:scale-110", toneClass)}>
           <Icon className="h-3 w-3" strokeWidth={1.75} />
         </div>
         <span className="text-[10px] font-medium uppercase tracking-wider text-ink-subtle">{label}</span>
       </div>
-      <div className="mt-1 text-[16px] font-semibold tabular-nums text-ink">{value}</div>
+      {/* Animated value transitions — number swap fades + rises 3px so
+          stat changes feel deliberate without being distracting. */}
+      <div className="relative mt-1 h-[20px] overflow-hidden">
+        <AnimatePresence mode="popLayout" initial={false}>
+          <motion.div
+            key={value}
+            initial={reduced ? { opacity: 1 } : { opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={reduced ? { opacity: 0 } : { opacity: 0, y: -4 }}
+            transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+            className="text-[16px] font-semibold tabular-nums text-ink"
+          >
+            {value}
+          </motion.div>
+        </AnimatePresence>
+      </div>
       {/* Tonal under-bar */}
       <span aria-hidden className={cn("absolute inset-x-2 bottom-1 h-0.5 rounded-full", barClass)} />
     </Wrap>
