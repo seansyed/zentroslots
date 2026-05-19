@@ -120,6 +120,24 @@ export default function TasksClient({
   const [rows, setRows] = React.useState<Task[] | null>(null);
   const [openNew, setOpenNew] = React.useState(sp.get("new") === "1");
 
+  // "N" keyboard shortcut: opens the New task drawer when the user
+  // isn't typing in an input / textarea / contenteditable. Mirrors the
+  // power-user pattern in Linear / Superhuman. Stays bound regardless
+  // of demo state.
+  React.useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (openNew) return;
+      if (e.key !== "n" && e.key !== "N") return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) return;
+      e.preventDefault();
+      setOpenNew(true);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [openNew]);
+
   // Demo population: when a tenant has zero real tasks and hasn't
   // dismissed the preview, the workspace fills with a realistic
   // operational sample so every premium surface (cards, buckets,
@@ -383,10 +401,12 @@ function SegmentedFilterBar({
       <button
         type="button"
         onClick={onAddTask}
-        className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover px-3 text-[12px] font-medium text-white shadow-[0_6px_16px_rgba(53,157,243,0.35)] transition-all duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:shadow-[0_10px_24px_rgba(53,157,243,0.45)]"
+        className="group/new inline-flex h-9 items-center gap-1.5 rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover px-3 text-[12px] font-medium text-white shadow-[0_6px_16px_rgba(53,157,243,0.35)] transition-all duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:shadow-[0_10px_24px_rgba(53,157,243,0.45)]"
+        title="New task · press N"
       >
         <Plus className="h-3.5 w-3.5" strokeWidth={2.25} />
         New task
+        <kbd className="ml-0.5 hidden h-4 min-w-[16px] items-center justify-center rounded border border-white/30 bg-white/15 px-1 font-mono text-[9px] font-semibold text-white/90 transition-colors sm:inline-flex">N</kbd>
       </button>
     </div>
   );
@@ -508,19 +528,27 @@ function TaskCard({
       onKeyDown={handleCardKey}
       data-completing={completing ? "true" : undefined}
       className={cn(
-        "group relative cursor-pointer overflow-hidden rounded-2xl border bg-surface px-4 py-3.5 shadow-soft transition-all duration-200 ease-[cubic-bezier(0.16,1,0.3,1)]",
+        "group relative cursor-pointer overflow-hidden rounded-2xl border bg-surface px-3 py-3 shadow-soft transition-all duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] sm:px-4 sm:py-3.5",
         "hover:-translate-y-0.5 hover:scale-[1.004] hover:border-border-strong hover:shadow-lift",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-accent/40",
         isDone ? "opacity-70 border-border" : "border-border",
+        // Priority-aware hover wash — extremely subtle, only visible on
+        // hover so it adds presence without staining the resting state.
+        !isDone && !completing && priority === "urgent" && "hover:bg-gradient-to-br hover:from-red-50/40 hover:via-surface hover:to-surface",
+        !isDone && !completing && priority === "high"   && "hover:bg-gradient-to-br hover:from-amber-50/40 hover:via-surface hover:to-surface",
+        !isDone && !completing && priority === "medium" && "hover:bg-gradient-to-br hover:from-brand-subtle/30 hover:via-surface hover:to-surface",
         completing && "border-emerald-300 bg-gradient-to-br from-emerald-50/60 via-surface to-surface",
       )}
     >
-      {/* Priority accent rail */}
+      {/* Priority accent rail — overdue gets a warm glow so the eye
+          catches it without needing a loud chip. */}
       <div
         aria-hidden
         className={cn(
-          "absolute inset-y-0 left-0 w-1 rounded-l-2xl",
+          "absolute inset-y-0 left-0 w-1 rounded-l-2xl transition-shadow duration-200 ease-[cubic-bezier(0.16,1,0.3,1)]",
           priorityRail(priority),
+          priority === "urgent" && "shadow-[0_0_10px_rgba(239,68,68,0.45)]",
+          priority === "high" && "shadow-[0_0_8px_rgba(245,158,11,0.35)]",
         )}
       />
 
@@ -615,9 +643,10 @@ function TaskCard({
                 <PriorityChip priority={priority} isDone={isDone} />
               </div>
 
-              {/* Hover-reveal quick actions */}
+              {/* Hover-reveal quick actions — fade + 4px slide-up for a
+                  premium "rises into view" reveal. */}
               {!isDone && (
-                <div className="pointer-events-none mt-2.5 flex items-center gap-1.5 opacity-0 transition-opacity duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] group-hover:pointer-events-auto group-hover:opacity-100">
+                <div className="pointer-events-none mt-2.5 flex items-center gap-1.5 translate-y-1 opacity-0 transition-all duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] group-hover:pointer-events-auto group-hover:translate-y-0 group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:translate-y-0 group-focus-within:opacity-100">
                   <button
                     type="button"
                     onClick={(e) => { e.stopPropagation(); onSnooze(task, 1); }}
@@ -786,22 +815,34 @@ function PulseTile({
         : tone === "positive"
           ? "bg-emerald-50 text-emerald-600 ring-emerald-300/40"
           : "bg-surface-inset text-ink-subtle ring-transparent";
+  // Subtle tonal under-bar — a 2px footer stripe that picks up the
+  // tile's tone and adds a quiet sense of depth without becoming a
+  // sparkline (no analytics, just tactile breathing).
+  const barClass =
+    tone === "brand"    ? "bg-brand-accent/30"
+    : tone === "warning"  ? "bg-amber-400/40"
+    : tone === "positive" ? "bg-emerald-400/40"
+    :                       "bg-ink-subtle/15";
   const Wrap = onClick ? "button" : "div";
   return (
     <Wrap
       onClick={onClick}
       className={cn(
-        "w-full rounded-lg border border-border bg-surface/60 p-2.5 text-left backdrop-blur-sm transition-all",
-        onClick ? "cursor-pointer hover:-translate-y-0.5 hover:border-border-strong hover:shadow-soft" : "",
+        "group/tile relative w-full overflow-hidden rounded-lg border border-border bg-surface/60 p-2.5 text-left backdrop-blur-sm transition-all duration-200 ease-[cubic-bezier(0.16,1,0.3,1)]",
+        onClick
+          ? "cursor-pointer hover:-translate-y-0.5 hover:border-border-strong hover:shadow-soft"
+          : "hover:-translate-y-px hover:border-border-strong",
       )}
     >
       <div className="flex items-center gap-1.5">
-        <div className={cn("inline-flex h-5 w-5 items-center justify-center rounded-md ring-1", toneClass)}>
+        <div className={cn("inline-flex h-5 w-5 items-center justify-center rounded-md ring-1 transition-transform duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] group-hover/tile:scale-110", toneClass)}>
           <Icon className="h-3 w-3" strokeWidth={1.75} />
         </div>
         <span className="text-[10px] font-medium uppercase tracking-wider text-ink-subtle">{label}</span>
       </div>
       <div className="mt-1 text-[16px] font-semibold tabular-nums text-ink">{value}</div>
+      {/* Tonal under-bar */}
+      <span aria-hidden className={cn("absolute inset-x-2 bottom-1 h-0.5 rounded-full", barClass)} />
     </Wrap>
   );
 }
@@ -845,7 +886,7 @@ function FilterEmptyState({ filter, onAddTask }: { filter: Filter; onAddTask: ()
         className="pointer-events-none absolute -right-16 -top-16 h-40 w-40 rounded-full bg-brand-accent/10 blur-3xl"
       />
       <div className="relative flex items-start gap-3">
-        <div className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-brand-accent/15 bg-gradient-to-br from-brand-subtle to-surface text-brand-accent shadow-soft">
+        <div className="zm-pulse-glow inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-brand-accent/15 bg-gradient-to-br from-brand-subtle to-surface text-brand-accent shadow-soft">
           <Sparkles className="h-5 w-5" strokeWidth={1.75} />
         </div>
         <div className="min-w-0 flex-1">
