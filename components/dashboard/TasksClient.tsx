@@ -76,6 +76,10 @@ type Task = {
   relatedBookingId: string | null;
   createdAt: string;
   completedAt: string | null;
+  /** Client-only flag set by buildDemoTasks() when a tenant has zero
+   *  real tasks. Demo rows never reach the server — toggleStatus and
+   *  removeTask short-circuit on it. The flag is never serialized. */
+  isDemo?: boolean;
 };
 
 const FILTERS = ["all", "open", "today", "done", "mine"] as const;
@@ -111,6 +115,17 @@ export default function TasksClient({
   const [rows, setRows] = React.useState<Task[] | null>(null);
   const [openNew, setOpenNew] = React.useState(sp.get("new") === "1");
 
+  // Demo population: when a tenant has zero real tasks and hasn't
+  // dismissed the preview, the workspace fills with a realistic
+  // operational sample so every premium surface (cards, buckets,
+  // pulse, insight, filters) has something to render.
+  const [demoHidden, setDemoHidden] = React.useState(false);
+  React.useEffect(() => {
+    if (typeof window !== "undefined" && window.localStorage.getItem("tasks_demo_hidden") === "1") {
+      setDemoHidden(true);
+    }
+  }, []);
+
   // Single fetch of all tasks — filters are applied client-side so
   // switching is instant and the count badges are honest.
   const reload = React.useCallback(async () => {
@@ -124,7 +139,33 @@ export default function TasksClient({
   }, []);
   React.useEffect(() => { reload(); }, [reload]);
 
+  // Once the real fetch resolves to an empty array, swap in a demo
+  // schedule. The moment a real task arrives (next reload) the demo
+  // is replaced automatically.
+  const isDemoActive = rows !== null && rows.length === 0 && !demoHidden;
+  const effectiveRows: Task[] = React.useMemo(
+    () => (isDemoActive ? buildDemoTasks(myUserId, allStaff) : (rows ?? [])),
+    [isDemoActive, rows, myUserId, allStaff],
+  );
+
+  function dismissDemo() {
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem("tasks_demo_hidden", "1");
+    }
+    setDemoHidden(true);
+  }
+
   async function toggleStatus(t: Task) {
+    // Demo rows never reach the server — toast and update locally.
+    if (t.isDemo) {
+      toast(
+        t.status === "open"
+          ? "Preview · Sample task. Your real tasks will complete via the API."
+          : "Preview · Sample task.",
+        "info",
+      );
+      return;
+    }
     const next: Task["status"] = t.status === "open" ? "done" : "open";
     const completedAt = next === "done" ? new Date().toISOString() : null;
     setRows((cur) => cur?.map((x) => (x.id === t.id ? { ...x, status: next, completedAt } : x)) ?? null);
@@ -143,6 +184,10 @@ export default function TasksClient({
   }
 
   async function removeTask(t: Task) {
+    if (t.isDemo) {
+      toast("Preview · Sample tasks can't be deleted.", "info");
+      return;
+    }
     if (!window.confirm("Delete this task?")) return;
     setRows((cur) => cur?.filter((x) => x.id !== t.id) ?? null);
     try {
@@ -155,16 +200,22 @@ export default function TasksClient({
     }
   }
 
-  const counts = React.useMemo(() => computeCounts(rows ?? [], myUserId), [rows, myUserId]);
-  const visible = React.useMemo(() => applyFilter(rows ?? [], filter, myUserId), [rows, filter, myUserId]);
+  const counts = React.useMemo(() => computeCounts(effectiveRows, myUserId), [effectiveRows, myUserId]);
+  const visible = React.useMemo(() => applyFilter(effectiveRows, filter, myUserId), [effectiveRows, filter, myUserId]);
   const grouped = React.useMemo(() => groupByBucket(visible, filter), [visible, filter]);
-  const pulse = React.useMemo(() => computePulse(rows ?? [], myUserId), [rows, myUserId]);
+  const pulse = React.useMemo(() => computePulse(effectiveRows, myUserId), [effectiveRows, myUserId]);
 
   return (
     <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
       {/* ── Main timeline ────────────────────────────────────── */}
       <div className="min-w-0 space-y-5">
-        <FadeIn>
+        {isDemoActive && (
+          <FadeIn>
+            <SampleTasksBanner onDismiss={dismissDemo} />
+          </FadeIn>
+        )}
+
+        <FadeIn delay={isDemoActive ? 1 : 0}>
           <SegmentedFilterBar
             filter={filter}
             onChange={setFilter}
@@ -921,6 +972,263 @@ function Field({ label, children, required }: { label: string; children: React.R
       {children}
     </label>
   );
+}
+
+// ─── Sample tasks banner + generator ──────────────────────────────
+
+function SampleTasksBanner({ onDismiss }: { onDismiss: () => void }) {
+  return (
+    <div
+      className="relative flex items-center gap-3 rounded-2xl border border-brand-accent/15 bg-gradient-to-r from-brand-subtle/55 via-brand-subtle/15 to-transparent px-4 py-3"
+      role="status"
+    >
+      <div className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-brand-accent text-white shadow-sm">
+        <Sparkles className="h-3.5 w-3.5" strokeWidth={2} />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="text-[13px] font-semibold tracking-tight text-ink">
+          Sample tasks
+        </div>
+        <div className="mt-0.5 text-[11px] text-ink-muted">
+          A preview of how your operational workspace looks when active. None of these are real follow-ups.
+        </div>
+      </div>
+      <button
+        type="button"
+        onClick={onDismiss}
+        className="hidden h-7 items-center gap-1 rounded-lg border border-border bg-surface px-2.5 text-[11px] font-medium text-ink-muted transition-colors hover:bg-surface-inset hover:text-ink sm:inline-flex"
+      >
+        Hide samples
+      </button>
+      <button
+        type="button"
+        onClick={onDismiss}
+        aria-label="Hide samples"
+        className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-ink-subtle transition-colors hover:bg-surface-inset hover:text-ink sm:hidden"
+      >
+        <X className="h-3.5 w-3.5" strokeWidth={2} />
+      </button>
+    </div>
+  );
+}
+
+/**
+ * Synthesize a realistic operational queue. ~15 tasks distributed
+ * across overdue / today / tomorrow / this-week / later / completed,
+ * with a mix of priorities, assignees, and customer linkages.
+ *
+ * The demo never references real DB rows — relatedCustomerId and
+ * relatedBookingId are always null so the hover "Open customer" /
+ * "Open booking" chips don't render and the user can't accidentally
+ * navigate to a 404. The customerName / assignedName labels still
+ * display the chips.
+ */
+function buildDemoTasks(
+  myUserId: string,
+  allStaff: { id: string; name: string }[],
+): Task[] {
+  // Use the real user's name (from allStaff) when assigning to "me",
+  // so the Mine filter + assignee chip read naturally.
+  const me = allStaff.find((s) => s.id === myUserId);
+  const myName = me?.name ?? "You";
+
+  // Three rotating staff names — synthetic IDs so we don't accidentally
+  // collide with anyone real.
+  const TEAM = [
+    { id: "demo-staff-sarah",  name: "Sarah Mitchell" },
+    { id: "demo-staff-alex",   name: "Alex Chen" },
+    { id: "demo-staff-jordan", name: "Jordan Patel" },
+  ];
+
+  const ONE_DAY = 86_400_000;
+  const now = Date.now();
+  const isoOffset = (days: number, hour = 9): string => {
+    const d = new Date(now + days * ONE_DAY);
+    d.setHours(hour, 0, 0, 0);
+    return d.toISOString();
+  };
+
+  type Spec = {
+    title: string;
+    description?: string;
+    daysFromNow: number;          // 0 = today; negative = overdue
+    hour?: number;                // local clock hour
+    status: "open" | "done";
+    completedDaysAgo?: number;    // only when status === "done"
+    customerName: string;
+    assignedTo: "me" | 0 | 1 | 2; // "me" → current user, else TEAM idx
+  };
+
+  const SPECS: Spec[] = [
+    // ── Overdue ─────────────────────────────────────────────────
+    {
+      title: "Call Maria González about Q1 tax planning",
+      description: "She left a voicemail Friday — needs the updated rate table before her board meeting.",
+      daysFromNow: -2,
+      status: "open",
+      customerName: "Maria González",
+      assignedTo: "me",
+    },
+    {
+      title: "Send reminder email · David Park",
+      description: "Documents for next week's consultation are still pending.",
+      daysFromNow: -1,
+      hour: 14,
+      status: "open",
+      customerName: "David Park",
+      assignedTo: 0,
+    },
+
+    // ── Today ───────────────────────────────────────────────────
+    {
+      title: "Confirm consultation with Emily Roberts",
+      description: "Verify Zoom link and send the intake packet.",
+      daysFromNow: 0,
+      hour: 11,
+      status: "open",
+      customerName: "Emily Roberts",
+      assignedTo: "me",
+    },
+    {
+      title: "Review intake form · Marcus Johnson",
+      daysFromNow: 0,
+      hour: 13,
+      status: "open",
+      customerName: "Marcus Johnson",
+      assignedTo: 1,
+    },
+    {
+      title: "Follow up after no-show — Priya Sharma",
+      description: "Offer to reschedule. Apply the no-show fee policy.",
+      daysFromNow: 0,
+      hour: 16,
+      status: "open",
+      customerName: "Priya Sharma",
+      assignedTo: "me",
+    },
+
+    // ── Tomorrow ────────────────────────────────────────────────
+    {
+      title: "Prepare onboarding packet · Daniel Kim",
+      description: "Include the welcome PDF, brand templates, and the calendar invite.",
+      daysFromNow: 1,
+      hour: 10,
+      status: "open",
+      customerName: "Daniel Kim",
+      assignedTo: 0,
+    },
+    {
+      title: "Verify payment from Ana Silva",
+      daysFromNow: 1,
+      hour: 12,
+      status: "open",
+      customerName: "Ana Silva",
+      assignedTo: "me",
+    },
+
+    // ── This week ───────────────────────────────────────────────
+    {
+      title: "Call overdue invoice — Tom Henderson",
+      description: "Net-30 hit yesterday. Soft call first, then a formal email.",
+      daysFromNow: 3,
+      hour: 10,
+      status: "open",
+      customerName: "Tom Henderson",
+      assignedTo: 2,
+    },
+    {
+      title: "Schedule Q2 strategy review · Lisa Wong",
+      daysFromNow: 4,
+      hour: 14,
+      status: "open",
+      customerName: "Lisa Wong",
+      assignedTo: 1,
+    },
+    {
+      title: "Prep slides for Sam Taylor demo",
+      description: "Highlight the new automation features and the comparison table.",
+      daysFromNow: 5,
+      hour: 9,
+      status: "open",
+      customerName: "Sam Taylor",
+      assignedTo: "me",
+    },
+
+    // ── Later ───────────────────────────────────────────────────
+    {
+      title: "Send pricing proposal — Olivia Brown",
+      daysFromNow: 9,
+      hour: 11,
+      status: "open",
+      customerName: "Olivia Brown",
+      assignedTo: 0,
+    },
+    {
+      title: "Quarterly check-in · Raj Kumar",
+      daysFromNow: 12,
+      hour: 14,
+      status: "open",
+      customerName: "Raj Kumar",
+      assignedTo: 2,
+    },
+
+    // ── Completed ───────────────────────────────────────────────
+    {
+      title: "Confirmed booking with Noah Reyes",
+      daysFromNow: 0,
+      hour: 8,
+      status: "done",
+      completedDaysAgo: 0,
+      customerName: "Noah Reyes",
+      assignedTo: "me",
+    },
+    {
+      title: "Sent welcome email to Hannah Webb",
+      daysFromNow: -1,
+      hour: 15,
+      status: "done",
+      completedDaysAgo: 1,
+      customerName: "Hannah Webb",
+      assignedTo: 1,
+    },
+    {
+      title: "Reviewed contract with Sofia Romano",
+      description: "Marked up the SOW addendum and sent for counter-signature.",
+      daysFromNow: -3,
+      hour: 13,
+      status: "done",
+      completedDaysAgo: 3,
+      customerName: "Sofia Romano",
+      assignedTo: 0,
+    },
+  ];
+
+  return SPECS.map((s, idx) => {
+    const assigned =
+      s.assignedTo === "me"
+        ? { id: myUserId, name: myName }
+        : TEAM[s.assignedTo];
+    const createdAt = new Date(now - (Math.max(0, -s.daysFromNow) + 1) * ONE_DAY).toISOString();
+    const completedAt =
+      s.status === "done" && s.completedDaysAgo !== undefined
+        ? new Date(now - s.completedDaysAgo * ONE_DAY).toISOString()
+        : null;
+    return {
+      id: `demo-task-${idx}`,
+      title: s.title,
+      description: s.description ?? null,
+      status: s.status,
+      dueAt: isoOffset(s.daysFromNow, s.hour ?? 9),
+      assignedUserId: assigned.id,
+      assignedName: assigned.name,
+      relatedCustomerId: null, // never link demo customers — see fn doc
+      customerName: s.customerName,
+      relatedBookingId: null,
+      createdAt,
+      completedAt,
+      isDemo: true,
+    };
+  });
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────
