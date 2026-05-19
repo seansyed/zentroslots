@@ -115,6 +115,15 @@ body {
 }
 .zm-pulse-glow { animation: zm-pulse-glow 2.4s ease-in-out infinite; }
 
+/* Tactile pop-in for checkbox completion — used by the Tasks checkbox
+   and any other "this just happened" affordance. Scales from 60% to
+   100% with a faint pre-overshoot so the check lands with weight. */
+@keyframes zm-check-pop {
+  0%   { transform: scale(0.6); opacity: 0; }
+  60%  { transform: scale(1.08); opacity: 1; }
+  100% { transform: scale(1);    opacity: 1; }
+}
+
 /* Smooth focus rings everywhere */
 :focus-visible {
   outline: 2px solid var(--color-accent);

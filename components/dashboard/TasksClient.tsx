@@ -327,7 +327,7 @@ export default function TasksClient({
             <FilterEmptyState filter={filter} onAddTask={() => setOpenNew(true)} />
           </FadeIn>
         ) : (
-          <div className="space-y-6">
+          <div className="space-y-5">
             {grouped.map((g, idx) => (
               <FadeIn key={g.bucket} delay={idx}>
                 <TaskGroup
@@ -586,8 +586,8 @@ function TaskCard({
       onKeyDown={handleCardKey}
       data-completing={completing ? "true" : undefined}
       className={cn(
-        "group relative cursor-pointer overflow-hidden rounded-2xl border bg-surface px-3 py-3 shadow-soft transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] sm:px-4 sm:py-3.5",
-        "hover:-translate-y-0.5 hover:scale-[1.002] hover:border-border-strong hover:shadow-lift",
+        "group relative cursor-pointer overflow-hidden rounded-2xl border bg-surface px-3 py-2.5 shadow-soft transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] sm:px-4 sm:py-3",
+        "hover:-translate-y-0.5 hover:scale-[1.002] hover:border-border-strong hover:bg-surface hover:shadow-lift",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-accent/40",
         isDone ? "opacity-70 border-border" : "border-border",
         // Priority-aware hover wash — extremely subtle, only visible on
@@ -629,13 +629,14 @@ function TaskCard({
         </span>
       )}
 
-      {/* Hover halo — same language as Appointments / Calendar */}
+      {/* Hover halo — same language as Appointments / Calendar, with a
+          second ambient layer for richer perceived depth at hover. */}
       <span
         aria-hidden
         className="pointer-events-none absolute -inset-px rounded-2xl opacity-0 transition-opacity duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] group-hover:opacity-100"
         style={{
           boxShadow:
-            "0 0 0 1px rgba(53,157,243,0.18), 0 10px 28px rgba(53,157,243,0.10)",
+            "0 0 0 1px rgba(53,157,243,0.18), 0 10px 28px rgba(53,157,243,0.10), 0 24px 52px -8px rgba(53,157,243,0.07)",
         }}
       />
 
@@ -680,19 +681,28 @@ function TaskCard({
       )}
 
       <div className="relative flex items-start gap-3 pl-2">
-        {/* Custom completion checkbox */}
+        {/* Custom completion checkbox — soft hover ring at rest, then
+            morphs to emerald on completion. The check scales in from
+            zero for a satisfying tactile fill. */}
         <button
           type="button"
           onClick={handleToggle}
           aria-label={isDone ? "Mark open" : "Mark complete"}
           className={cn(
-            "mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition-all duration-200 ease-[cubic-bezier(0.16,1,0.3,1)]",
+            "mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)]",
             (isDone || completing)
               ? "border-emerald-500 bg-emerald-500 text-white shadow-[0_2px_10px_rgba(16,185,129,0.45)]"
-              : "border-border-strong bg-surface hover:border-brand-accent hover:bg-brand-subtle hover:scale-110",
+              : "border-border-strong bg-surface hover:scale-110 hover:border-brand-accent hover:bg-brand-subtle hover:ring-4 hover:ring-brand-accent/10",
           )}
         >
-          {(isDone || completing) && <CheckCircle2 className="h-3 w-3" strokeWidth={2.5} />}
+          {(isDone || completing) && (
+            <span
+              key={isDone ? "done" : "completing"}
+              className="inline-flex animate-[zm-check-pop_220ms_cubic-bezier(0.16,1,0.3,1)_forwards]"
+            >
+              <CheckCircle2 className="h-3 w-3" strokeWidth={2.5} />
+            </span>
+          )}
         </button>
 
         {/* Body */}
@@ -719,7 +729,7 @@ function TaskCard({
               )}
 
               {/* Meta chips */}
-              <div className="mt-2 flex flex-wrap items-center gap-1.5">
+              <div className="mt-1.5 flex flex-wrap items-center gap-1">
                 {task.assignedName && (
                   <span className="inline-flex items-center gap-1.5 rounded-full bg-surface-inset px-2 py-0.5 text-[10px] font-medium text-ink-muted">
                     <Avatar name={task.assignedName} size="sm" className="!h-4 !w-4 !text-[8px]" />
@@ -880,10 +890,10 @@ function PriorityChip({ priority, isDone }: { priority: Priority; isDone: boolea
   if (isDone) return null;
   if (priority === "low") return null; // restrained — only show ≥ medium
   const map: Record<Priority, { label: string; cls: string; dot: string }> = {
-    urgent: { label: "Urgent",  cls: "bg-red-50/80 text-red-700 ring-1 ring-red-200/50",          dot: "bg-red-500" },
-    high:   { label: "High",    cls: "bg-amber-50/80 text-amber-800 ring-1 ring-amber-200/50",    dot: "bg-amber-500" },
-    medium: { label: "Medium",  cls: "bg-brand-subtle/70 text-brand-accent ring-1 ring-brand-accent/15", dot: "bg-brand-accent" },
-    low:    { label: "Low",     cls: "",                                                          dot: "" },
+    urgent: { label: "Urgent",  cls: "bg-red-50/70 text-red-700 ring-1 ring-red-200/30",         dot: "bg-red-500" },
+    high:   { label: "High",    cls: "bg-amber-50/70 text-amber-800 ring-1 ring-amber-200/30",   dot: "bg-amber-500" },
+    medium: { label: "Medium",  cls: "bg-brand-subtle/60 text-brand-accent ring-1 ring-brand-accent/10", dot: "bg-brand-accent" },
+    low:    { label: "Low",     cls: "",                                                         dot: "" },
   };
   const m = map[priority];
   return (
@@ -1018,6 +1028,12 @@ function PulseTile({
           : "hover:-translate-y-px hover:border-border-strong hover:bg-surface/80",
       )}
     >
+      {/* Inner top-edge highlight — lifts the tile off the surface
+          at rest with a barely-there 1px white hairline. */}
+      <span
+        aria-hidden
+        className="pointer-events-none absolute inset-x-1 top-0 h-px bg-gradient-to-r from-transparent via-white/55 to-transparent"
+      />
       <div className="flex items-center gap-1.5">
         <div className={cn("inline-flex h-5 w-5 items-center justify-center rounded-md ring-1 transition-transform duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] group-hover/tile:scale-110", toneClass)}>
           <Icon className="h-3 w-3" strokeWidth={1.75} />
@@ -1243,7 +1259,7 @@ function NewTaskDrawer({
             </div>
 
             {/* Form */}
-            <div className="flex-1 space-y-4 overflow-y-auto px-5 py-5 text-sm">
+            <div className="flex-1 space-y-3.5 overflow-y-auto px-5 py-5 text-sm">
               <Field label="Title" required>
                 <input
                   value={title}
@@ -1332,7 +1348,7 @@ function NewTaskDrawer({
   );
 }
 
-const INPUT_CLS = "w-full rounded-lg border border-border bg-surface px-3 py-2 text-[13px] outline-none transition-colors focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20";
+const INPUT_CLS = "w-full rounded-lg border border-border bg-surface px-3 py-2 text-[13px] outline-none transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:border-border-strong focus:border-brand-accent focus:ring-4 focus:ring-brand-accent/15";
 
 function Field({ label, children, required }: { label: string; children: React.ReactNode; required?: boolean }) {
   return (
