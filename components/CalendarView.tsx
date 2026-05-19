@@ -56,8 +56,11 @@ import {
   Coffee,
   ArrowRight,
   Inbox,
+  Plus,
+  ExternalLink,
+  Move3D,
 } from "lucide-react";
-import { motion, useReducedMotion } from "framer-motion";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 
 import AppointmentDrawer, { type DrawerBooking } from "@/components/dashboard/AppointmentDrawer";
 import Filters, { FilterPills, type FilterDef, type FilterState } from "@/components/dashboard/Filters";
@@ -80,6 +83,10 @@ export type CalendarBooking = {
   staffName: string;
   clientName: string;
   clientEmail: string;
+  /** Optional video meeting link. When present, the event surfaces a
+   *  "Join" quick action on hover. Provided by the calendar page query;
+   *  null when the booking has no meeting attached. */
+  meetLink?: string | null;
 };
 
 const VIEWS = ["day", "week", "month", "agenda"] as const;
@@ -256,12 +263,12 @@ export default function CalendarView({
           ) : isFilteredEmpty ? (
             <FilteredEmptyState onClear={() => setFilters({})} />
           ) : (
-            <>
+            <ViewCrossfade viewKey={view}>
               {view === "day"    && <DayView anchor={anchor} timezone={timezone} byDay={byDay} onOpen={openBooking} onReschedule={canManage ? attemptReschedule : undefined} />}
               {view === "week"   && <WeekView anchor={anchor} timezone={timezone} byDay={byDay} onOpen={openBooking} onReschedule={canManage ? attemptReschedule : undefined} />}
               {view === "month"  && <MonthView anchor={anchor} timezone={timezone} byDay={byDay} onOpen={openBooking} onJump={(d) => { setAnchor(startOfDay(d)); setView("day"); }} />}
               {view === "agenda" && <AgendaView anchor={anchor} timezone={timezone} byDay={byDay} onOpen={openBooking} />}
-            </>
+            </ViewCrossfade>
           )}
         </PremiumCard>
       </FadeIn>
@@ -276,7 +283,45 @@ export default function CalendarView({
           setBookingState((cur) => cur.map((b) => (b.id === next.id ? { ...b, status: next.status } : b)));
         }}
       />
+
+      {/* Mobile floating action button — calmly invites a new service /
+          booking flow on small screens. Hidden on lg+ where the topbar
+          actions and sidebar are already comfortable. */}
+      {canManage && (
+        <a
+          href="/dashboard/services"
+          aria-label="New booking"
+          className="fixed bottom-6 right-6 z-30 inline-flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-br from-brand-accent to-brand-hover text-white shadow-[0_12px_30px_rgba(53,157,243,0.45)] transition-all duration-200 ease-out hover:-translate-y-0.5 hover:shadow-[0_16px_40px_rgba(53,157,243,0.55)] active:scale-95 lg:hidden"
+        >
+          <Plus className="h-6 w-6" strokeWidth={2.25} />
+        </a>
+      )}
     </div>
+  );
+}
+
+// ─── View crossfade wrapper ────────────────────────────────────────
+
+function ViewCrossfade({
+  viewKey,
+  children,
+}: {
+  viewKey: View;
+  children: React.ReactNode;
+}) {
+  const reduced = useReducedMotion();
+  return (
+    <AnimatePresence mode="wait" initial={false}>
+      <motion.div
+        key={viewKey}
+        initial={reduced ? { opacity: 1 } : { opacity: 0, y: 4 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={reduced ? { opacity: 1 } : { opacity: 0, y: -4 }}
+        transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+      >
+        {children}
+      </motion.div>
+    </AnimatePresence>
   );
 }
 
@@ -370,6 +415,12 @@ type Pulse = {
   utilizationPct: number;
   nextUpcoming: CalendarBooking | null;
   focusBlocks: number;
+  /** Longest contiguous unbooked window inside business hours today,
+   *  rendered as a human label like "2:00 – 4:30pm". null when none. */
+  bestFocusWindow: { label: string; minutes: number } | null;
+  /** True when any two of today's confirmed bookings touch
+   *  (no buffer between end of one and start of the next). */
+  backToBack: boolean;
   insight: string | null;
 };
 
@@ -402,16 +453,109 @@ function computePulse(
   // business window. Cheap heuristic; visual signal, not analytical truth.
   const focusBlocks = countFocusBlocks(todays, timezone);
 
-  const insight =
-    todays.length === 0
-      ? "Your day is wide open. A good window for deep work or outreach."
-      : utilizationPct >= 75
-        ? "Heavy day ahead. Consider a 10-min buffer between calls."
-        : focusBlocks >= 2
-          ? `${focusBlocks} focus windows on your calendar today.`
-          : null;
+  // Best (longest) free contiguous window inside business hours today.
+  const bestFocusWindow = computeBestFocusWindow(todays, timezone);
 
-  return { todayCount: todays.length, todayMinutes, utilizationPct, nextUpcoming, focusBlocks, insight };
+  // Back-to-back detection — any pair of bookings where one ends exactly
+  // when the next starts (touching or overlapping).
+  const sortedToday = [...todays].sort((a, b) => a.startAt.localeCompare(b.startAt));
+  let backToBack = false;
+  for (let i = 1; i < sortedToday.length; i++) {
+    if (new Date(sortedToday[i].startAt).getTime() <= new Date(sortedToday[i - 1].endAt).getTime()) {
+      backToBack = true;
+      break;
+    }
+  }
+
+  const insight = chooseInsight({
+    todayCount: todays.length,
+    utilizationPct,
+    focusBlocks,
+    bestFocusWindow,
+    backToBack,
+  });
+
+  return {
+    todayCount: todays.length,
+    todayMinutes,
+    utilizationPct,
+    nextUpcoming,
+    focusBlocks,
+    bestFocusWindow,
+    backToBack,
+    insight,
+  };
+}
+
+function computeBestFocusWindow(
+  todays: CalendarBooking[],
+  timezone: string,
+): { label: string; minutes: number } | null {
+  const dayStartMin = DAY_START_HOUR * 60;
+  const dayEndMin = DAY_END_HOUR * 60;
+  const sorted = [...todays].sort((a, b) => a.startAt.localeCompare(b.startAt));
+
+  // Build sorted (start, end) interval list in business-day minutes.
+  const ivals = sorted.map((b) => {
+    const s = formatInTimeZone(b.startAt, timezone, "HH:mm").split(":").map(Number);
+    const e = formatInTimeZone(b.endAt, timezone, "HH:mm").split(":").map(Number);
+    return [s[0] * 60 + s[1], e[0] * 60 + e[1]] as const;
+  });
+
+  let cursor = dayStartMin;
+  let best: [number, number] | null = null;
+  for (const [s, e] of ivals) {
+    if (s > cursor) {
+      const gap = s - cursor;
+      if (!best || gap > best[1] - best[0]) best = [cursor, s];
+    }
+    cursor = Math.max(cursor, e);
+  }
+  if (dayEndMin > cursor) {
+    const gap = dayEndMin - cursor;
+    if (!best || gap > best[1] - best[0]) best = [cursor, dayEndMin];
+  }
+  if (!best) return null;
+  const [s, e] = best;
+  const minutes = e - s;
+  if (minutes < 45) return null; // not a meaningful window
+  return { label: `${fmt12(s)} – ${fmt12(e)}`, minutes };
+}
+
+function fmt12(totalMin: number): string {
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  const ampm = h >= 12 ? "pm" : "am";
+  const hh = ((h + 11) % 12) + 1;
+  return m === 0 ? `${hh}${ampm}` : `${hh}:${String(m).padStart(2, "0")}${ampm}`;
+}
+
+function chooseInsight(args: {
+  todayCount: number;
+  utilizationPct: number;
+  focusBlocks: number;
+  bestFocusWindow: { label: string; minutes: number } | null;
+  backToBack: boolean;
+}): string | null {
+  if (args.todayCount === 0) {
+    return "Your day is wide open. A good window for deep work or sharing your booking link.";
+  }
+  if (args.backToBack && args.utilizationPct >= 60) {
+    return "Several back-to-back meetings today. A 10-min buffer between calls keeps the day from blurring.";
+  }
+  if (args.utilizationPct >= 75) {
+    return "Heavy day ahead — protect a short break to stay sharp through the afternoon.";
+  }
+  if (args.bestFocusWindow && args.bestFocusWindow.minutes >= 90) {
+    return `Best focus window: ${args.bestFocusWindow.label}. Reserve it before something fills it.`;
+  }
+  if (args.focusBlocks >= 2) {
+    return `${args.focusBlocks} focus windows on your calendar today. Plenty of breathing room.`;
+  }
+  if (args.utilizationPct <= 25) {
+    return "Light schedule — a strong window for outreach or planning.";
+  }
+  return null;
 }
 
 function countFocusBlocks(todays: CalendarBooking[], timezone: string): number {
@@ -492,6 +636,23 @@ function SchedulingPulse({ pulse }: { pulse: Pulse }) {
             value={`${pulse.utilizationPct}%`}
           />
         </div>
+
+        {/* Best focus window — only when meaningful (≥45min) */}
+        {pulse.bestFocusWindow && (
+          <div className="mt-3 rounded-xl border border-emerald-200/60 bg-gradient-to-br from-emerald-50/70 to-surface p-2.5">
+            <div className="flex items-center justify-between">
+              <span className="text-[9px] font-semibold uppercase tracking-wider text-emerald-700">
+                Best focus window
+              </span>
+              <span className="text-[10px] font-medium tabular-nums text-emerald-700">
+                {pulse.bestFocusWindow.minutes}m
+              </span>
+            </div>
+            <div className="mt-0.5 text-[12px] font-semibold tabular-nums text-emerald-900">
+              {pulse.bestFocusWindow.label}
+            </div>
+          </div>
+        )}
 
         {/* Next-up nano card */}
         {pulse.nextUpcoming && (
@@ -639,9 +800,10 @@ function MiniCalendar({
               key={d.toISOString()}
               onClick={() => onPick(d)}
               className={cn(
-                "relative flex h-8 items-center justify-center rounded-lg text-[12px] transition-all",
+                "relative flex h-8 items-center justify-center rounded-lg text-[12px] transition-all duration-150 ease-out",
+                "hover:ring-1 hover:ring-brand-accent/25",
                 isAnchor
-                  ? "bg-gradient-to-br from-brand-accent to-brand-hover text-white shadow-[0_4px_10px_rgba(53,157,243,0.35)]"
+                  ? "bg-gradient-to-br from-brand-accent to-brand-hover text-white shadow-[0_4px_10px_rgba(53,157,243,0.35)] hover:ring-0"
                   : isToday
                     ? "bg-brand-subtle/70 font-semibold text-brand-accent ring-1 ring-brand-accent/20"
                     : inMonth
@@ -687,6 +849,7 @@ function DayView({
 }) {
   const key = format(anchor, "yyyy-MM-dd");
   const list = byDay.get(key) ?? [];
+  const today = isSameDay(anchor, new Date());
 
   return (
     <div className="relative overflow-x-auto">
@@ -698,9 +861,10 @@ function DayView({
           timezone={timezone}
           onOpen={onOpen}
           onReschedule={onReschedule}
+          isToday={today}
         />
       </div>
-      {isSameDay(anchor, new Date()) && <CurrentTimeLine timezone={timezone} leftPx={68} />}
+      {today && <CurrentTimeLine timezone={timezone} leftPx={68} />}
     </div>
   );
 }
@@ -750,6 +914,7 @@ function WeekView({
             <TimeGutter />
             {days.map((d) => {
               const key = format(d, "yyyy-MM-dd");
+              const today = isSameDay(d, new Date());
               return (
                 <DayColumn
                   key={key}
@@ -758,6 +923,7 @@ function WeekView({
                   timezone={timezone}
                   onOpen={onOpen}
                   onReschedule={onReschedule}
+                  isToday={today}
                 />
               );
             })}
@@ -772,17 +938,21 @@ function WeekView({
 // ─── Day Column (shared Day + Week) ────────────────────────────────
 
 function DayColumn({
-  dateKey, bookings, timezone, onOpen, onReschedule,
+  dateKey, bookings, timezone, onOpen, onReschedule, isToday = false,
 }: {
   dateKey: string;
   bookings: CalendarBooking[];
   timezone: string;
   onOpen: (b: CalendarBooking) => void;
   onReschedule?: (id: string, newStartIso: string) => void;
+  /** When true the column carries a faint brand wash to anchor "today"
+   *  in week view. Day view sets this whenever the anchor === today. */
+  isToday?: boolean;
 }) {
   const totalHours = DAY_END_HOUR - DAY_START_HOUR;
   const colHeight = totalHours * PX_PER_HOUR;
   const [hoverY, setHoverY] = React.useState<number | null>(null);
+  const [hoverHourIdx, setHoverHourIdx] = React.useState<number | null>(null);
 
   function eventStyle(b: CalendarBooking): React.CSSProperties {
     const localStartLabel = formatInTimeZone(b.startAt, timezone, "HH:mm");
@@ -812,10 +982,21 @@ function DayColumn({
     onReschedule(id, newStart);
   }
 
+  function handleMove(e: React.MouseEvent<HTMLDivElement> | React.PointerEvent<HTMLDivElement>) {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const y = e.clientY - rect.top;
+    setHoverHourIdx(Math.max(0, Math.min(totalHours - 1, Math.floor(y / PX_PER_HOUR))));
+  }
+
   return (
     <div
-      className="relative border-l border-border/50"
+      className={cn(
+        "relative border-l border-border/50 transition-colors duration-200",
+        isToday && "bg-gradient-to-b from-brand-subtle/15 via-transparent to-transparent",
+      )}
       style={{ height: colHeight }}
+      onMouseMove={handleMove}
+      onMouseLeave={() => setHoverHourIdx(null)}
       onDragOver={(e) => {
         if (!onReschedule) return;
         e.preventDefault();
@@ -825,30 +1006,37 @@ function DayColumn({
       onDragLeave={() => setHoverY(null)}
       onDrop={handleDrop}
     >
-      {/* Hour grid background with alternating shading */}
-      {Array.from({ length: totalHours }).map((_, i) => (
-        <React.Fragment key={i}>
-          <div
-            className={cn(
-              "absolute inset-x-0",
-              i % 2 === 0 ? "bg-transparent" : "bg-surface-inset/15",
-            )}
-            style={{ top: i * PX_PER_HOUR, height: PX_PER_HOUR }}
-            aria-hidden
-          />
-          <div
-            className="absolute inset-x-0 border-t border-border/30"
-            style={{ top: i * PX_PER_HOUR }}
-            aria-hidden
-          />
-          {/* Half-hour ticks (very subtle) */}
-          <div
-            className="absolute inset-x-0 border-t border-dashed border-border/15"
-            style={{ top: i * PX_PER_HOUR + PX_PER_HOUR / 2 }}
-            aria-hidden
-          />
-        </React.Fragment>
-      ))}
+      {/* Hour grid background with alternating shading + business-hour wash */}
+      {Array.from({ length: totalHours }).map((_, i) => {
+        const hour = DAY_START_HOUR + i;
+        const isBusinessHour = hour >= 9 && hour < 17;
+        const isHovered = hoverHourIdx === i;
+        return (
+          <React.Fragment key={i}>
+            <div
+              className={cn(
+                "absolute inset-x-0 transition-colors duration-150",
+                i % 2 === 0 ? "bg-transparent" : "bg-surface-inset/15",
+                isBusinessHour && i % 2 === 0 && "bg-brand-subtle/[0.04]",
+                isHovered && "bg-brand-subtle/20",
+              )}
+              style={{ top: i * PX_PER_HOUR, height: PX_PER_HOUR }}
+              aria-hidden
+            />
+            <div
+              className="absolute inset-x-0 border-t border-border/30"
+              style={{ top: i * PX_PER_HOUR }}
+              aria-hidden
+            />
+            {/* Half-hour ticks (very subtle) */}
+            <div
+              className="absolute inset-x-0 border-t border-dashed border-border/15"
+              style={{ top: i * PX_PER_HOUR + PX_PER_HOUR / 2 }}
+              aria-hidden
+            />
+          </React.Fragment>
+        );
+      })}
 
       {/* Drag-to-create hint line */}
       {hoverY !== null && (
@@ -886,25 +1074,42 @@ function EventBlock({
   const durationMin = Math.max(0, Math.round((new Date(booking.endAt).getTime() - new Date(booking.startAt).getTime()) / 60_000));
   const isMuted = booking.status === "cancelled" || booking.status === "refunded";
   const start = formatInTimeZone(booking.startAt, timezone, "h:mm a");
+  const initials = customerInitials(booking.clientName);
+  const isShort = durationMin < 30;
+
+  // Read the explicit height from `style.height` so we can decide
+  // whether the hover-expansion quick-actions row should fit inside.
+  // The grid math passes height in pixels.
+  const heightPx = typeof style.height === "number" ? style.height : 0;
+  const canExpand = !isMuted && heightPx >= 50; // ≥ ~30min slot
 
   return (
-    <button
+    <div
+      role="button"
+      tabIndex={0}
       onClick={onOpen}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onOpen();
+        }
+      }}
       draggable={draggable}
       onDragStart={(e) => e.dataTransfer.setData("text/booking-id", booking.id)}
       className={cn(
-        "group relative flex flex-col items-start overflow-hidden rounded-lg border bg-surface/90 px-2.5 py-1.5 pl-3 text-left text-[11px] shadow-soft backdrop-blur-sm transition-all duration-200 ease-out",
-        "hover:-translate-y-0.5 hover:shadow-lift hover:border-border-strong hover:z-10",
+        "group/event relative flex flex-col items-start overflow-hidden rounded-lg border bg-surface/90 px-2.5 py-1.5 pl-3 text-left text-[11px] shadow-soft backdrop-blur-sm transition-all duration-200 ease-out",
+        "hover:-translate-y-0.5 hover:scale-[1.012] hover:shadow-lift hover:border-border-strong hover:z-20",
         isMuted ? "opacity-60" : "",
         draggable ? "cursor-grab active:cursor-grabbing" : "cursor-pointer",
         "border-border/70",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-accent/40",
       )}
       style={{
         ...style,
         background: `linear-gradient(135deg, ${hexAlpha(accent, 0.10)} 0%, var(--color-surface) 60%)`,
       }}
       aria-label={`${booking.serviceName} with ${booking.clientName}`}
-      title={`${booking.serviceName} · ${booking.clientName}`}
+      title={`${booking.serviceName} · ${booking.clientName} · ${start} · ${durationMin}m`}
     >
       {/* Service-color accent bar */}
       <span
@@ -912,21 +1117,141 @@ function EventBlock({
         className="absolute inset-y-1 left-0 w-1 rounded-full"
         style={{ background: accent }}
       />
-      <div className="flex w-full items-center gap-1.5">
+      {/* Soft hover-glow halo */}
+      <span
+        aria-hidden
+        className="pointer-events-none absolute -inset-px rounded-lg opacity-0 transition-opacity duration-200 group-hover/event:opacity-100"
+        style={{ boxShadow: `0 0 0 1px ${hexAlpha(accent, 0.35)}, 0 8px 22px ${hexAlpha(accent, 0.18)}` }}
+      />
+
+      <div className="relative flex w-full items-center gap-1.5">
         <span className="font-semibold tabular-nums text-ink">{start}</span>
         <span className="text-ink-subtle">·</span>
         <span className="text-[10px] text-ink-muted">{durationMin}m</span>
-        <StatusPill status={booking.status} className="ml-auto" />
+        <div className="ml-auto flex items-center gap-1">
+          {booking.meetLink && (
+            <Video
+              className="h-2.5 w-2.5 text-ink-subtle group-hover/event:text-brand-accent"
+              strokeWidth={1.75}
+              aria-label="Has meeting link"
+            />
+          )}
+          <StatusPill status={booking.status} />
+        </div>
       </div>
-      <div className={cn("mt-0.5 line-clamp-1 font-medium", isMuted ? "line-through text-ink-muted" : "text-ink")}>
+
+      <div className={cn("relative mt-0.5 line-clamp-1 font-medium", isMuted ? "line-through text-ink-muted" : "text-ink")}>
         {booking.serviceName}
       </div>
-      <div className="mt-0.5 flex items-center gap-1 text-[10px] text-ink-muted">
-        <Users className="h-2.5 w-2.5" strokeWidth={1.75} />
+
+      <div className="relative mt-0.5 flex items-center gap-1.5 text-[10px] text-ink-muted">
+        <AvatarChip initials={initials} accent={accent} />
         <span className="line-clamp-1">{booking.clientName}</span>
       </div>
+
+      {/* Hover-expansion: quick actions reveal on hover when the block has
+          enough vertical room. The actions stop propagation so they
+          don't double-trigger onOpen. */}
+      {canExpand && (
+        <div
+          className={cn(
+            "relative mt-1.5 hidden items-center gap-1 opacity-0 transition-opacity duration-200 group-hover/event:flex group-hover/event:opacity-100",
+            isShort && "group-hover/event:hidden",
+          )}
+        >
+          <EventAction
+            icon={ExternalLink}
+            label="Open"
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpen();
+            }}
+          />
+          {booking.meetLink && (
+            <EventAction
+              icon={Video}
+              label="Join"
+              href={booking.meetLink}
+            />
+          )}
+          {draggable && (
+            <span className="ml-auto inline-flex items-center gap-1 rounded-md bg-surface-inset/70 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wider text-ink-subtle">
+              <Move3D className="h-2.5 w-2.5" strokeWidth={1.75} />
+              Drag
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EventAction({
+  icon: Icon,
+  label,
+  onClick,
+  href,
+}: {
+  icon: React.ComponentType<{ className?: string; strokeWidth?: number }>;
+  label: string;
+  onClick?: (e: React.MouseEvent) => void;
+  href?: string;
+}) {
+  const cls =
+    "inline-flex items-center gap-1 rounded-md border border-border/70 bg-surface px-1.5 py-0.5 text-[9px] font-semibold text-ink-muted shadow-soft transition-colors hover:bg-surface-inset hover:text-ink";
+  if (href) {
+    return (
+      <a
+        href={href}
+        target="_blank"
+        rel="noreferrer noopener"
+        onClick={(e) => e.stopPropagation()}
+        className={cls}
+      >
+        <Icon className="h-2.5 w-2.5" strokeWidth={1.75} />
+        {label}
+      </a>
+    );
+  }
+  return (
+    <button type="button" onClick={onClick} className={cls}>
+      <Icon className="h-2.5 w-2.5" strokeWidth={1.75} />
+      {label}
     </button>
   );
+}
+
+function AvatarChip({ initials, accent }: { initials: string; accent: string }) {
+  return (
+    <span
+      aria-hidden
+      className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[8px] font-semibold uppercase tracking-wider text-white shadow-sm"
+      style={{ background: `linear-gradient(135deg, ${accent} 0%, ${shade(accent, -12)} 100%)` }}
+    >
+      {initials}
+    </span>
+  );
+}
+
+function customerInitials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
+/** Darken/lighten a hex color by `pct` percentage points. Returns the
+ *  original string when the input isn't parseable. */
+function shade(hex: string, pct: number): string {
+  const m = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) return hex;
+  let h = m[1];
+  if (h.length === 3) h = h.split("").map((c) => c + c).join("");
+  const clamp = (v: number) => Math.max(0, Math.min(255, Math.round(v)));
+  const r = clamp(parseInt(h.slice(0, 2), 16) * (1 + pct / 100));
+  const g = clamp(parseInt(h.slice(2, 4), 16) * (1 + pct / 100));
+  const b = clamp(parseInt(h.slice(4, 6), 16) * (1 + pct / 100));
+  return `#${[r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("")}`;
 }
 
 function StatusPill({ status, className }: { status: Status; className?: string }) {
@@ -971,15 +1296,24 @@ function CurrentTimeLine({ timezone, leftPx }: { timezone: string; leftPx: numbe
   const [h, m] = local.split(":").map(Number);
   if (h < DAY_START_HOUR || h >= DAY_END_HOUR) return null;
   const top = ((h - DAY_START_HOUR) * 60 + m) / 60 * PX_PER_HOUR;
+  const label = formatInTimeZone(now, timezone, "h:mm a");
   return (
     <div
-      className="pointer-events-none absolute right-0 z-20 flex items-center"
+      className="pointer-events-none absolute right-0 z-20 flex items-center gap-1.5"
       style={{ top, left: leftPx }}
       aria-label="Current time"
     >
       <div className="relative -ml-1.5">
         <div className="h-3 w-3 rounded-full bg-brand-accent shadow-[0_0_10px_rgba(53,157,243,0.6)]" />
         <div className="absolute inset-0 h-3 w-3 animate-ping rounded-full bg-brand-accent/40" />
+      </div>
+      {/* Floating "Now · h:mm" pill — rides alongside the dot so the
+          time of the indicator is always legible at a glance. */}
+      <div className="shrink-0">
+        <div className="inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-brand-accent to-brand-hover px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-white shadow-[0_4px_10px_rgba(53,157,243,0.35)]">
+          <span className="h-1 w-1 rounded-full bg-white/90" />
+          Now · {label}
+        </div>
       </div>
       <div
         className="h-px flex-1"

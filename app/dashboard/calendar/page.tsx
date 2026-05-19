@@ -35,6 +35,7 @@ export default async function CalendarPage() {
       status: bookings.status,
       clientName: bookings.clientName,
       clientEmail: bookings.clientEmail,
+      meetLink: bookings.meetLink,
       serviceId: services.id,
       serviceName: services.name,
       serviceColor: services.color,
@@ -71,6 +72,7 @@ export default async function CalendarPage() {
           staffName: r.staffName,
           clientName: r.clientName,
           clientEmail: r.clientEmail,
+          meetLink: r.meetLink ?? null,
         }))}
       />
     </Shell>
