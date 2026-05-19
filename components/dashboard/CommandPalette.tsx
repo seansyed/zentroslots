@@ -8,7 +8,7 @@ type Cmd = {
   id: string;
   label: string;
   hint?: string;
-  group: "Navigate" | "Create" | "Find";
+  group: "Navigate" | "Create" | "Find" | "Schedule";
   perform: () => void;
 };
 
@@ -95,6 +95,16 @@ export default function CommandPalette({
       { id: "go-billing",      label: "Open billing",       group: "Navigate", perform: go("/dashboard/billing") },
       { id: "go-emails",       label: "Email log",          group: "Navigate", perform: go("/dashboard/emails") },
       { id: "go-analytics",    label: "Open analytics",     group: "Navigate", perform: go("/dashboard/analytics") },
+      // Scheduling — power-user shortcuts into the scheduling workflow.
+      // Routes already exist; this just makes them ⌘K-reachable.
+      { id: "sched-today",         label: "Jump to today",          group: "Schedule", hint: "⌘ ↩",  perform: go("/dashboard/calendar") },
+      { id: "sched-availability",  label: "Manage availability",    group: "Schedule",              perform: go("/dashboard/availability") },
+      { id: "sched-focus",         label: "Block focus time",       group: "Schedule",              perform: go("/dashboard/availability/overrides") },
+      { id: "sched-rules",         label: "Open booking rules",     group: "Schedule",              perform: go("/dashboard/settings/booking-rules") },
+      { id: "sched-recurring",     label: "Open recurring bookings", group: "Schedule",             perform: go("/dashboard/settings/recurring") },
+      { id: "sched-routing",       label: "Open staff routing",     group: "Schedule",              perform: go("/dashboard/settings/staff-routing") },
+      { id: "sched-waitlists",     label: "Open waitlists",         group: "Schedule",              perform: go("/dashboard/settings/waitlists") },
+      { id: "sched-integrations",  label: "Calendar integrations",  group: "Schedule",              perform: go("/dashboard/settings/integrations") },
       // Inline create — opens a tiny form right inside the palette
       // instead of bouncing to another page. Existing /api/customers
       // and /api/tasks POST endpoints back these.

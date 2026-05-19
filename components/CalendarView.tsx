@@ -264,8 +264,8 @@ export default function CalendarView({
             <FilteredEmptyState onClear={() => setFilters({})} />
           ) : (
             <ViewCrossfade viewKey={view}>
-              {view === "day"    && <DayView anchor={anchor} timezone={timezone} byDay={byDay} onOpen={openBooking} onReschedule={canManage ? attemptReschedule : undefined} />}
-              {view === "week"   && <WeekView anchor={anchor} timezone={timezone} byDay={byDay} onOpen={openBooking} onReschedule={canManage ? attemptReschedule : undefined} />}
+              {view === "day"    && <DayView anchor={anchor} timezone={timezone} byDay={byDay} onOpen={openBooking} onReschedule={canManage ? attemptReschedule : undefined} focusOverlay={pulse.bestFocusWindow} />}
+              {view === "week"   && <WeekView anchor={anchor} timezone={timezone} byDay={byDay} onOpen={openBooking} onReschedule={canManage ? attemptReschedule : undefined} focusOverlay={pulse.bestFocusWindow} />}
               {view === "month"  && <MonthView anchor={anchor} timezone={timezone} byDay={byDay} onOpen={openBooking} onJump={(d) => { setAnchor(startOfDay(d)); setView("day"); }} />}
               {view === "agenda" && <AgendaView anchor={anchor} timezone={timezone} byDay={byDay} onOpen={openBooking} />}
             </ViewCrossfade>
@@ -416,8 +416,9 @@ type Pulse = {
   nextUpcoming: CalendarBooking | null;
   focusBlocks: number;
   /** Longest contiguous unbooked window inside business hours today,
-   *  rendered as a human label like "2:00 – 4:30pm". null when none. */
-  bestFocusWindow: { label: string; minutes: number } | null;
+   *  rendered as a human label like "2:00 – 4:30pm". null when none.
+   *  startMin/endMin are minutes-since-midnight for the lane overlay. */
+  bestFocusWindow: { label: string; minutes: number; startMin: number; endMin: number } | null;
   /** True when any two of today's confirmed bookings touch
    *  (no buffer between end of one and start of the next). */
   backToBack: boolean;
@@ -490,7 +491,7 @@ function computePulse(
 function computeBestFocusWindow(
   todays: CalendarBooking[],
   timezone: string,
-): { label: string; minutes: number } | null {
+): { label: string; minutes: number; startMin: number; endMin: number } | null {
   const dayStartMin = DAY_START_HOUR * 60;
   const dayEndMin = DAY_END_HOUR * 60;
   const sorted = [...todays].sort((a, b) => a.startAt.localeCompare(b.startAt));
@@ -519,7 +520,7 @@ function computeBestFocusWindow(
   const [s, e] = best;
   const minutes = e - s;
   if (minutes < 45) return null; // not a meaningful window
-  return { label: `${fmt12(s)} – ${fmt12(e)}`, minutes };
+  return { label: `${fmt12(s)} – ${fmt12(e)}`, minutes, startMin: s, endMin: e };
 }
 
 function fmt12(totalMin: number): string {
@@ -839,13 +840,14 @@ function MiniCalendar({
 // ─── Day View ──────────────────────────────────────────────────────
 
 function DayView({
-  anchor, timezone, byDay, onOpen, onReschedule,
+  anchor, timezone, byDay, onOpen, onReschedule, focusOverlay,
 }: {
   anchor: Date;
   timezone: string;
   byDay: Map<string, CalendarBooking[]>;
   onOpen: (b: CalendarBooking) => void;
   onReschedule?: (id: string, newStartIso: string) => void;
+  focusOverlay?: Pulse["bestFocusWindow"];
 }) {
   const key = format(anchor, "yyyy-MM-dd");
   const list = byDay.get(key) ?? [];
@@ -862,6 +864,7 @@ function DayView({
           onOpen={onOpen}
           onReschedule={onReschedule}
           isToday={today}
+          focusOverlay={today ? focusOverlay ?? null : null}
         />
       </div>
       {today && <CurrentTimeLine timezone={timezone} leftPx={68} />}
@@ -872,13 +875,14 @@ function DayView({
 // ─── Week View ─────────────────────────────────────────────────────
 
 function WeekView({
-  anchor, timezone, byDay, onOpen, onReschedule,
+  anchor, timezone, byDay, onOpen, onReschedule, focusOverlay,
 }: {
   anchor: Date;
   timezone: string;
   byDay: Map<string, CalendarBooking[]>;
   onOpen: (b: CalendarBooking) => void;
   onReschedule?: (id: string, newStartIso: string) => void;
+  focusOverlay?: Pulse["bestFocusWindow"];
 }) {
   const start = startOfWeek(anchor);
   const days = Array.from({ length: 7 }, (_, i) => addDays(start, i));
@@ -924,6 +928,7 @@ function WeekView({
                   onOpen={onOpen}
                   onReschedule={onReschedule}
                   isToday={today}
+                  focusOverlay={today ? focusOverlay ?? null : null}
                 />
               );
             })}
@@ -938,7 +943,7 @@ function WeekView({
 // ─── Day Column (shared Day + Week) ────────────────────────────────
 
 function DayColumn({
-  dateKey, bookings, timezone, onOpen, onReschedule, isToday = false,
+  dateKey, bookings, timezone, onOpen, onReschedule, isToday = false, focusOverlay = null,
 }: {
   dateKey: string;
   bookings: CalendarBooking[];
@@ -948,11 +953,15 @@ function DayColumn({
   /** When true the column carries a faint brand wash to anchor "today"
    *  in week view. Day view sets this whenever the anchor === today. */
   isToday?: boolean;
+  /** When set, renders a soft emerald focus lane covering the start/end
+   *  minute range in this column. Only set for today's column. */
+  focusOverlay?: Pulse["bestFocusWindow"] | null;
 }) {
   const totalHours = DAY_END_HOUR - DAY_START_HOUR;
   const colHeight = totalHours * PX_PER_HOUR;
   const [hoverY, setHoverY] = React.useState<number | null>(null);
   const [hoverHourIdx, setHoverHourIdx] = React.useState<number | null>(null);
+  const [dragTime, setDragTime] = React.useState<string | null>(null);
 
   function eventStyle(b: CalendarBooking): React.CSSProperties {
     const localStartLabel = formatInTimeZone(b.startAt, timezone, "HH:mm");
@@ -1001,15 +1010,24 @@ function DayColumn({
         if (!onReschedule) return;
         e.preventDefault();
         const rect = e.currentTarget.getBoundingClientRect();
-        setHoverY(e.clientY - rect.top);
+        const y = e.clientY - rect.top;
+        setHoverY(y);
+        // Compute the proposed time as a label for the drag-preview chip.
+        const totalMin = Math.round((y / PX_PER_HOUR) * 60 / 15) * 15;
+        const hh = DAY_START_HOUR + Math.floor(totalMin / 60);
+        const mm = totalMin % 60;
+        setDragTime(fmt12(hh * 60 + mm));
       }}
-      onDragLeave={() => setHoverY(null)}
-      onDrop={handleDrop}
+      onDragLeave={() => { setHoverY(null); setDragTime(null); }}
+      onDrop={(e) => { setDragTime(null); handleDrop(e); }}
     >
-      {/* Hour grid background with alternating shading + business-hour wash */}
+      {/* Hour grid background with alternating shading + atmosphere */}
       {Array.from({ length: totalHours }).map((_, i) => {
         const hour = DAY_START_HOUR + i;
         const isBusinessHour = hour >= 9 && hour < 17;
+        const isLunchHour = hour === 12; // gentle amber wash
+        const isMorningEdge = hour < 9;   // soft cool wash before 9am
+        const isEveningEdge = hour >= 17; // soft cool wash after 5pm
         const isHovered = hoverHourIdx === i;
         return (
           <React.Fragment key={i}>
@@ -1018,6 +1036,9 @@ function DayColumn({
                 "absolute inset-x-0 transition-colors duration-150",
                 i % 2 === 0 ? "bg-transparent" : "bg-surface-inset/15",
                 isBusinessHour && i % 2 === 0 && "bg-brand-subtle/[0.04]",
+                isMorningEdge && "bg-slate-100/30",
+                isEveningEdge && "bg-slate-100/20",
+                isLunchHour && "bg-amber-50/40",
                 isHovered && "bg-brand-subtle/20",
               )}
               style={{ top: i * PX_PER_HOUR, height: PX_PER_HOUR }}
@@ -1038,13 +1059,47 @@ function DayColumn({
         );
       })}
 
-      {/* Drag-to-create hint line */}
+      {/* Focus block overlay — only on today's column when a meaningful
+          window exists. Sits behind events (z-0) but above background. */}
+      {focusOverlay && (() => {
+        const startPx = ((focusOverlay.startMin - DAY_START_HOUR * 60) / 60) * PX_PER_HOUR;
+        const heightPx = ((focusOverlay.endMin - focusOverlay.startMin) / 60) * PX_PER_HOUR;
+        if (heightPx < 24) return null;
+        return (
+          <div
+            className="pointer-events-none absolute inset-x-1 z-0 rounded-xl border border-emerald-300/40 bg-gradient-to-b from-emerald-50/70 via-emerald-50/40 to-emerald-50/20 shadow-[inset_0_0_0_1px_rgba(16,185,129,0.08)]"
+            style={{ top: startPx, height: heightPx }}
+            aria-hidden
+          >
+            <div className="absolute left-2 top-2 inline-flex items-center gap-1 rounded-full bg-emerald-500/95 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-white shadow-[0_2px_8px_rgba(16,185,129,0.35)]">
+              <Coffee className="h-2.5 w-2.5" strokeWidth={2} />
+              Focus · {focusOverlay.minutes}m
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Drag-to-create hint line + floating time chip */}
       {hoverY !== null && (
-        <div
-          className="pointer-events-none absolute inset-x-1 h-0.5 rounded-full bg-brand-accent/70 shadow-[0_0_6px_rgba(53,157,243,0.45)]"
-          style={{ top: hoverY - 1 }}
-          aria-hidden
-        />
+        <>
+          <div
+            className="pointer-events-none absolute inset-x-1 h-0.5 rounded-full bg-brand-accent shadow-[0_0_10px_rgba(53,157,243,0.55)]"
+            style={{ top: hoverY - 1 }}
+            aria-hidden
+          />
+          {dragTime && (
+            <div
+              className="pointer-events-none absolute -translate-y-1/2 right-2 z-30"
+              style={{ top: hoverY }}
+              aria-hidden
+            >
+              <div className="inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-brand-accent to-brand-hover px-2 py-0.5 text-[10px] font-semibold tabular-nums text-white shadow-[0_4px_12px_rgba(53,157,243,0.45)]">
+                <ArrowRight className="h-2.5 w-2.5" strokeWidth={2.25} />
+                {dragTime}
+              </div>
+            </div>
+          )}
+        </>
       )}
 
       {bookings.map((b) => (
@@ -1097,7 +1152,7 @@ function EventBlock({
       draggable={draggable}
       onDragStart={(e) => e.dataTransfer.setData("text/booking-id", booking.id)}
       className={cn(
-        "group/event relative flex flex-col items-start overflow-hidden rounded-lg border bg-surface/90 px-2.5 py-1.5 pl-3 text-left text-[11px] shadow-soft backdrop-blur-sm transition-all duration-200 ease-out",
+        "group/event relative flex flex-col items-start overflow-hidden rounded-xl border bg-surface/90 px-2.5 py-1.5 pl-3 text-left text-[11px] shadow-soft backdrop-blur-sm transition-all duration-200 ease-out",
         "hover:-translate-y-0.5 hover:scale-[1.012] hover:shadow-lift hover:border-border-strong hover:z-20",
         isMuted ? "opacity-60" : "",
         draggable ? "cursor-grab active:cursor-grabbing" : "cursor-pointer",
@@ -1120,7 +1175,7 @@ function EventBlock({
       {/* Soft hover-glow halo */}
       <span
         aria-hidden
-        className="pointer-events-none absolute -inset-px rounded-lg opacity-0 transition-opacity duration-200 group-hover/event:opacity-100"
+        className="pointer-events-none absolute -inset-px rounded-xl opacity-0 transition-opacity duration-200 group-hover/event:opacity-100"
         style={{ boxShadow: `0 0 0 1px ${hexAlpha(accent, 0.35)}, 0 8px 22px ${hexAlpha(accent, 0.18)}` }}
       />
 
