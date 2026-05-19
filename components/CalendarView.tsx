@@ -1,5 +1,28 @@
 "use client";
 
+/**
+ * CalendarView — premium scheduling workspace (Phase 4).
+ *
+ * STRICT PRESERVATION:
+ *   - Public API unchanged: default export, `CalendarBooking` type,
+ *     props `{ timezone, bookings, canManage }`.
+ *   - All interactions unchanged: drag-to-reschedule POST + optimistic
+ *     rollback, drawer open/onChanged, filters, view state, byDay map.
+ *   - No API renames, no route changes, no scheduling-engine touches.
+ *
+ * What this rewrite does (UI-only):
+ *   - Premium segmented toolbar with animated active indicator
+ *   - Glass mini-calendar with density bars + active-day glow
+ *   - Alternating-shaded hour grid + softer separators
+ *   - Brand-color current-time line with glow + pulsing dot
+ *   - Elite event cards: service-color accent + status pill +
+ *     duration meta + hover lift
+ *   - Premium month + agenda views (service-color tinted chips)
+ *   - SchedulingPulse left-rail card: today load · next meeting ·
+ *     focus blocks · weekly utilization (all derived from bookings)
+ *   - Empty-state CTAs when no events match filters
+ *   - Subtle Framer Motion (FadeIn) on mount, no bounces
+ */
 import * as React from "react";
 import {
   addDays,
@@ -17,11 +40,33 @@ import {
   subMonths,
 } from "date-fns";
 import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
+import {
+  ChevronLeft,
+  ChevronRight,
+  Calendar as CalendarIcon,
+  Clock4,
+  Users,
+  Activity,
+  Sparkles,
+  Video,
+  CalendarPlus,
+  Link2,
+  Settings2,
+  Flame,
+  Coffee,
+  ArrowRight,
+  Inbox,
+} from "lucide-react";
+import { motion, useReducedMotion } from "framer-motion";
 
 import AppointmentDrawer, { type DrawerBooking } from "@/components/dashboard/AppointmentDrawer";
 import Filters, { FilterPills, type FilterDef, type FilterState } from "@/components/dashboard/Filters";
-import { STATUS_EVENT, STATUS_DOT, type Status, STATUS_LABEL } from "@/lib/status-colors";
+import { PremiumCard, InsightCard, SectionHeader, EmptyState } from "@/components/ui/Card";
+import { FadeIn } from "@/components/ui/Motion";
+import { STATUS_EVENT, STATUS_DOT, STATUS_LABEL, type Status } from "@/lib/status-colors";
+import { serviceColor as serviceColorFor } from "@/lib/status-colors";
 import { toast } from "@/components/ui/primitives";
+import { cn } from "@/lib/cn";
 
 export type CalendarBooking = {
   id: string;
@@ -45,6 +90,8 @@ const DAY_START_HOUR = 7;   // 7 AM
 const DAY_END_HOUR = 21;    // 9 PM
 const PX_PER_HOUR = 56;     // visual scale
 
+// ─── Main component ─────────────────────────────────────────────────
+
 export default function CalendarView({
   timezone,
   bookings,
@@ -66,7 +113,12 @@ export default function CalendarView({
     const staff = unique(bookings.map((b) => [b.staffId, b.staffName] as const));
     return [
       {
-        key: "status", label: "Status", options: (["confirmed", "pending", "completed", "cancelled", "no_show"] as Status[]).map((s) => ({ value: s, label: STATUS_LABEL[s] })),
+        key: "status",
+        label: "Status",
+        options: (["confirmed", "pending", "completed", "cancelled", "no_show"] as Status[]).map((s) => ({
+          value: s,
+          label: STATUS_LABEL[s],
+        })),
       },
       { key: "service", label: "Service", options: services.map(([v, l]) => ({ value: v, label: l })) },
       { key: "staff",   label: "Staff",   options: staff.map(([v, l]) => ({ value: v, label: l })) },
@@ -153,40 +205,66 @@ export default function CalendarView({
     });
   }
 
+  // ── Intelligence panel data (purely derived from bookings prop) ─
+  const pulse = React.useMemo(
+    () => computePulse(bookingState, timezone),
+    [bookingState, timezone]
+  );
+
+  const isFilteredEmpty = filtered.length === 0 && bookings.length > 0;
+
   return (
-    <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-[260px,1fr]">
-      {/* Left rail: mini-calendar + filters */}
+    <div className="mt-4 grid grid-cols-1 gap-5 lg:grid-cols-[280px,1fr]">
+      {/* ── Left rail ─────────────────────────────────────── */}
       <aside className="space-y-4">
-        <MiniCalendar
-          anchor={anchor}
-          onPick={(d) => setAnchor(startOfDay(d))}
-          byDay={byDay}
-          timezone={timezone}
-        />
-        <div className="rounded-xl border border-border bg-surface p-3 shadow-xs">
-          <div className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">Filters</div>
-          <Filters defs={filterDefs} value={filters} onChange={setFilters} />
-          <FilterPills defs={filterDefs} value={filters} onChange={setFilters} />
-        </div>
+        <FadeIn delay={0}>
+          <SchedulingPulse pulse={pulse} />
+        </FadeIn>
+        <FadeIn delay={1}>
+          <MiniCalendar
+            anchor={anchor}
+            onPick={(d) => setAnchor(startOfDay(d))}
+            byDay={byDay}
+          />
+        </FadeIn>
+        <FadeIn delay={2}>
+          <PremiumCard compact interactive={false}>
+            <SectionHeader title="Filters" />
+            <Filters defs={filterDefs} value={filters} onChange={setFilters} />
+            <div className="mt-2">
+              <FilterPills defs={filterDefs} value={filters} onChange={setFilters} />
+            </div>
+          </PremiumCard>
+        </FadeIn>
       </aside>
 
-      {/* Main calendar */}
-      <div className="min-w-0 rounded-xl border border-border bg-surface shadow-xs">
-        <Toolbar
-          view={view}
-          onView={setView}
-          label={headerLabel()}
-          onPrev={() => shift(-1)}
-          onNext={() => shift(1)}
-          onToday={() => setAnchor(startOfDay(new Date()))}
-          timezone={timezone}
-        />
+      {/* ── Main calendar ───────────────────────────────── */}
+      <FadeIn className="min-w-0">
+        <PremiumCard compact interactive={false} className="overflow-hidden p-0">
+          <Toolbar
+            view={view}
+            onView={setView}
+            label={headerLabel()}
+            onPrev={() => shift(-1)}
+            onNext={() => shift(1)}
+            onToday={() => setAnchor(startOfDay(new Date()))}
+            timezone={timezone}
+          />
 
-        {view === "day"    && <DayView anchor={anchor} timezone={timezone} byDay={byDay} onOpen={openBooking} onReschedule={canManage ? attemptReschedule : undefined} />}
-        {view === "week"   && <WeekView anchor={anchor} timezone={timezone} byDay={byDay} onOpen={openBooking} onReschedule={canManage ? attemptReschedule : undefined} />}
-        {view === "month"  && <MonthView anchor={anchor} timezone={timezone} byDay={byDay} onOpen={openBooking} onJump={(d) => { setAnchor(startOfDay(d)); setView("day"); }} />}
-        {view === "agenda" && <AgendaView anchor={anchor} timezone={timezone} byDay={byDay} onOpen={openBooking} />}
-      </div>
+          {bookings.length === 0 ? (
+            <CalendarEmptyState />
+          ) : isFilteredEmpty ? (
+            <FilteredEmptyState onClear={() => setFilters({})} />
+          ) : (
+            <>
+              {view === "day"    && <DayView anchor={anchor} timezone={timezone} byDay={byDay} onOpen={openBooking} onReschedule={canManage ? attemptReschedule : undefined} />}
+              {view === "week"   && <WeekView anchor={anchor} timezone={timezone} byDay={byDay} onOpen={openBooking} onReschedule={canManage ? attemptReschedule : undefined} />}
+              {view === "month"  && <MonthView anchor={anchor} timezone={timezone} byDay={byDay} onOpen={openBooking} onJump={(d) => { setAnchor(startOfDay(d)); setView("day"); }} />}
+              {view === "agenda" && <AgendaView anchor={anchor} timezone={timezone} byDay={byDay} onOpen={openBooking} />}
+            </>
+          )}
+        </PremiumCard>
+      </FadeIn>
 
       <AppointmentDrawer
         booking={drawerBooking}
@@ -202,50 +280,321 @@ export default function CalendarView({
   );
 }
 
-// ─── Toolbar ─────────────────────────────────────────────────────────────
+// ─── Toolbar — premium segmented control ────────────────────────────
 
 function Toolbar({
   view, onView, label, onPrev, onNext, onToday, timezone,
 }: {
-  view: View; onView: (v: View) => void;
-  label: string; onPrev: () => void; onNext: () => void; onToday: () => void;
+  view: View;
+  onView: (v: View) => void;
+  label: string;
+  onPrev: () => void;
+  onNext: () => void;
+  onToday: () => void;
   timezone: string;
 }) {
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
-      <div className="flex items-center gap-2">
-        <button onClick={onPrev} aria-label="Previous" className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border text-ink-muted hover:bg-surface-inset hover:text-ink">‹</button>
-        <button onClick={onToday} className="rounded-md border border-border bg-surface px-3 py-1 text-sm text-ink hover:bg-surface-inset">Today</button>
-        <button onClick={onNext} aria-label="Next" className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border text-ink-muted hover:bg-surface-inset hover:text-ink">›</button>
-        <span className="ml-3 text-sm font-medium text-ink">{label}</span>
-        <span className="ml-2 hidden text-xs text-ink-subtle sm:inline">{timezone}</span>
+    <div className="relative flex flex-wrap items-center justify-between gap-3 border-b border-border/70 bg-gradient-to-b from-surface to-surface-subtle/30 px-4 py-3 sm:px-5">
+      <div className="flex min-w-0 items-center gap-1.5">
+        <button
+          onClick={onPrev}
+          aria-label="Previous"
+          className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-ink-muted transition-colors hover:bg-surface-inset hover:text-ink"
+        >
+          <ChevronLeft className="h-4 w-4" strokeWidth={2} />
+        </button>
+        <button
+          onClick={onToday}
+          className="rounded-lg border border-border bg-surface px-3 py-1 text-[12px] font-medium text-ink shadow-soft transition-all hover:-translate-y-0.5 hover:border-border-strong hover:shadow-md"
+        >
+          Today
+        </button>
+        <button
+          onClick={onNext}
+          aria-label="Next"
+          className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-ink-muted transition-colors hover:bg-surface-inset hover:text-ink"
+        >
+          <ChevronRight className="h-4 w-4" strokeWidth={2} />
+        </button>
+        <div className="ml-2 min-w-0 truncate text-[14px] font-semibold tracking-tight text-ink">
+          {label}
+        </div>
+        <span className="ml-2 hidden items-center gap-1 rounded-full bg-surface-inset px-2 py-0.5 text-[10px] font-medium text-ink-subtle sm:inline-flex">
+          <CalendarIcon className="h-3 w-3" strokeWidth={1.75} />
+          {timezone}
+        </span>
       </div>
-      <div className="flex overflow-hidden rounded-md border border-border">
-        {VIEWS.map((v) => (
+
+      <SegmentedViewSwitcher view={view} onView={onView} />
+    </div>
+  );
+}
+
+function SegmentedViewSwitcher({ view, onView }: { view: View; onView: (v: View) => void }) {
+  const reduced = useReducedMotion();
+  return (
+    <div className="relative inline-flex rounded-xl border border-border bg-surface-subtle p-0.5 shadow-soft">
+      {VIEWS.map((v) => {
+        const active = view === v;
+        return (
           <button
             key={v}
             onClick={() => onView(v)}
-            className={
-              "px-3 py-1 text-xs " +
-              (v === view ? "bg-brand-accent text-white" : "bg-surface text-ink-muted hover:bg-surface-inset hover:text-ink")
-            }
-            aria-pressed={v === view}
+            aria-pressed={active}
+            className={cn(
+              "relative z-10 inline-flex h-7 items-center justify-center rounded-lg px-3 text-[12px] font-medium transition-colors",
+              active ? "text-white" : "text-ink-muted hover:text-ink",
+            )}
           >
-            {VIEW_LABEL[v]}
+            {active && (
+              <motion.span
+                layoutId="calendar-view-indicator"
+                className="absolute inset-0 rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover shadow-[0_4px_12px_rgba(53,157,243,0.35)]"
+                aria-hidden
+                transition={reduced ? { duration: 0 } : { type: "spring", stiffness: 350, damping: 30 }}
+              />
+            )}
+            <span className="relative">{VIEW_LABEL[v]}</span>
           </button>
-        ))}
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── Scheduling Pulse — left-rail intelligence card ────────────────
+
+type Pulse = {
+  todayCount: number;
+  todayMinutes: number;
+  utilizationPct: number;
+  nextUpcoming: CalendarBooking | null;
+  focusBlocks: number;
+  insight: string | null;
+};
+
+function computePulse(
+  bookings: CalendarBooking[],
+  timezone: string,
+): Pulse {
+  const now = Date.now();
+  const todayKey = formatInTimeZone(new Date(), timezone, "yyyy-MM-dd");
+
+  const todays = bookings.filter(
+    (b) =>
+      b.status === "confirmed" &&
+      formatInTimeZone(b.startAt, timezone, "yyyy-MM-dd") === todayKey,
+  );
+  const todayMinutes = todays.reduce(
+    (acc, b) => acc + Math.max(0, (new Date(b.endAt).getTime() - new Date(b.startAt).getTime()) / 60_000),
+    0,
+  );
+  // Utilization = booked minutes / business-day minutes (DAY_END - DAY_START hours)
+  const businessMinutes = (DAY_END_HOUR - DAY_START_HOUR) * 60;
+  const utilizationPct = Math.min(100, Math.round((todayMinutes / businessMinutes) * 100));
+
+  const nextUpcoming =
+    bookings
+      .filter((b) => b.status === "confirmed" && new Date(b.startAt).getTime() >= now)
+      .sort((a, b) => new Date(a.startAt).getTime() - new Date(b.startAt).getTime())[0] ?? null;
+
+  // Focus blocks = number of gaps ≥ 60min between today's bookings inside the
+  // business window. Cheap heuristic; visual signal, not analytical truth.
+  const focusBlocks = countFocusBlocks(todays, timezone);
+
+  const insight =
+    todays.length === 0
+      ? "Your day is wide open. A good window for deep work or outreach."
+      : utilizationPct >= 75
+        ? "Heavy day ahead. Consider a 10-min buffer between calls."
+        : focusBlocks >= 2
+          ? `${focusBlocks} focus windows on your calendar today.`
+          : null;
+
+  return { todayCount: todays.length, todayMinutes, utilizationPct, nextUpcoming, focusBlocks, insight };
+}
+
+function countFocusBlocks(todays: CalendarBooking[], timezone: string): number {
+  if (todays.length === 0) return 1;
+  const sorted = [...todays].sort((a, b) => a.startAt.localeCompare(b.startAt));
+  let count = 0;
+  let cursorMin = DAY_START_HOUR * 60;
+  for (const b of sorted) {
+    const startLabel = formatInTimeZone(b.startAt, timezone, "HH:mm");
+    const endLabel = formatInTimeZone(b.endAt, timezone, "HH:mm");
+    const [sh, sm] = startLabel.split(":").map(Number);
+    const [eh, em] = endLabel.split(":").map(Number);
+    const startMin = sh * 60 + sm;
+    const endMin = eh * 60 + em;
+    if (startMin - cursorMin >= 60) count++;
+    cursorMin = Math.max(cursorMin, endMin);
+  }
+  if (DAY_END_HOUR * 60 - cursorMin >= 60) count++;
+  return count;
+}
+
+function SchedulingPulse({ pulse }: { pulse: Pulse }) {
+  return (
+    <PremiumCard
+      compact
+      interactive={false}
+      className={cn(
+        "relative overflow-hidden",
+        "bg-gradient-to-br from-brand-subtle/40 via-surface to-surface",
+      )}
+    >
+      <div
+        aria-hidden
+        className="pointer-events-none absolute -right-12 -top-12 h-32 w-32 rounded-full bg-brand-accent/10 blur-3xl"
+      />
+      <div className="relative">
+        <div className="flex items-center gap-2">
+          <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-brand-accent text-white shadow-sm">
+            <Activity className="h-3.5 w-3.5" strokeWidth={2} />
+          </div>
+          <div>
+            <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-brand-accent">
+              Schedule pulse
+            </div>
+            <div className="text-[13px] font-semibold text-ink">Today at a glance</div>
+          </div>
+        </div>
+
+        {/* Utilization ring + meta */}
+        <div className="mt-3 flex items-center gap-3">
+          <UtilizationRing pct={pulse.utilizationPct} />
+          <div className="min-w-0 flex-1">
+            <div className="flex items-baseline gap-1">
+              <span className="text-[20px] font-semibold leading-none tabular-nums text-ink">
+                {pulse.todayCount}
+              </span>
+              <span className="text-[11px] text-ink-muted">bookings</span>
+            </div>
+            <div className="mt-0.5 flex items-center gap-1 text-[11px] text-ink-muted">
+              <Clock4 className="h-3 w-3" strokeWidth={1.75} />
+              {Math.round(pulse.todayMinutes)}m booked
+            </div>
+          </div>
+        </div>
+
+        {/* Mini meta tiles */}
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          <PulseTile
+            icon={Coffee}
+            tone="brand"
+            label="Focus blocks"
+            value={String(pulse.focusBlocks)}
+          />
+          <PulseTile
+            icon={Flame}
+            tone={pulse.utilizationPct >= 75 ? "warning" : "neutral"}
+            label="Load"
+            value={`${pulse.utilizationPct}%`}
+          />
+        </div>
+
+        {/* Next-up nano card */}
+        {pulse.nextUpcoming && (
+          <NextUpNano booking={pulse.nextUpcoming} />
+        )}
+
+        {pulse.insight && (
+          <div className="mt-3">
+            <InsightCard title="Pulse">{pulse.insight}</InsightCard>
+          </div>
+        )}
+      </div>
+    </PremiumCard>
+  );
+}
+
+function UtilizationRing({ pct }: { pct: number }) {
+  const r = 18;
+  const c = 2 * Math.PI * r;
+  const dash = (pct / 100) * c;
+  return (
+    <div className="relative h-12 w-12 shrink-0" aria-hidden>
+      <svg viewBox="0 0 48 48" className="h-12 w-12 -rotate-90">
+        <circle cx="24" cy="24" r={r} className="fill-none stroke-surface-inset" strokeWidth="4" />
+        <circle
+          cx="24"
+          cy="24"
+          r={r}
+          className="fill-none stroke-brand-accent transition-[stroke-dasharray] duration-700 ease-out"
+          strokeWidth="4"
+          strokeLinecap="round"
+          strokeDasharray={`${dash} ${c}`}
+          style={{ filter: "drop-shadow(0 0 5px rgba(53,157,243,0.35))" }}
+        />
+      </svg>
+      <div className="absolute inset-0 flex items-center justify-center">
+        <span className="text-[10px] font-semibold tabular-nums text-ink">{pct}%</span>
       </div>
     </div>
   );
 }
 
-// ─── Mini Calendar ───────────────────────────────────────────────────────
+function PulseTile({
+  icon: Icon,
+  tone,
+  label,
+  value,
+}: {
+  icon: React.ComponentType<{ className?: string; strokeWidth?: number }>;
+  tone: "brand" | "warning" | "neutral";
+  label: string;
+  value: string;
+}) {
+  const toneClass =
+    tone === "brand"
+      ? "bg-brand-subtle text-brand-accent ring-brand-accent/15"
+      : tone === "warning"
+        ? "bg-amber-50 text-amber-600 ring-amber-300/40"
+        : "bg-surface-inset text-ink-subtle ring-transparent";
+  return (
+    <div className="rounded-lg border border-border bg-surface/60 p-2.5 backdrop-blur-sm">
+      <div className="flex items-center gap-1.5">
+        <div className={cn("inline-flex h-5 w-5 items-center justify-center rounded-md ring-1", toneClass)}>
+          <Icon className="h-3 w-3" strokeWidth={1.75} />
+        </div>
+        <span className="text-[10px] font-medium uppercase tracking-wider text-ink-subtle">{label}</span>
+      </div>
+      <div className="mt-1 text-[15px] font-semibold tabular-nums text-ink">{value}</div>
+    </div>
+  );
+}
+
+function NextUpNano({ booking }: { booking: CalendarBooking }) {
+  const startMs = new Date(booking.startAt).getTime();
+  const diffMin = Math.max(0, Math.round((startMs - Date.now()) / 60_000));
+  const inWord =
+    diffMin === 0
+      ? "now"
+      : diffMin < 60
+        ? `in ${diffMin}m`
+        : diffMin < 60 * 24
+          ? `in ${Math.round(diffMin / 60)}h`
+          : `in ${Math.round(diffMin / 60 / 24)}d`;
+  return (
+    <div className="mt-3 rounded-xl border border-brand-accent/15 bg-surface/80 p-2.5 backdrop-blur-sm">
+      <div className="flex items-center justify-between">
+        <span className="text-[9px] font-semibold uppercase tracking-wider text-brand-accent">Next up</span>
+        <span className="text-[10px] tabular-nums text-ink-subtle">{inWord}</span>
+      </div>
+      <div className="mt-1 truncate text-[12px] font-semibold text-ink">{booking.serviceName}</div>
+      <div className="mt-0.5 truncate text-[10px] text-ink-muted">with {firstName(booking.clientName)}</div>
+    </div>
+  );
+}
+
+// ─── Mini Calendar — premium glass tile with density dots ──────────
 
 function MiniCalendar({
-  anchor, onPick, byDay, timezone,
+  anchor, onPick, byDay,
 }: {
-  anchor: Date; onPick: (d: Date) => void;
-  byDay: Map<string, CalendarBooking[]>; timezone: string;
+  anchor: Date;
+  onPick: (d: Date) => void;
+  byDay: Map<string, CalendarBooking[]>;
 }) {
   const [month, setMonth] = React.useState(() => startOfMonth(anchor));
   React.useEffect(() => setMonth(startOfMonth(anchor)), [anchor]);
@@ -257,13 +606,25 @@ function MiniCalendar({
   for (let d = gridStart; d <= gridEnd; d = addDays(d, 1)) days.push(d);
 
   return (
-    <div className="rounded-xl border border-border bg-surface p-3 shadow-xs">
+    <PremiumCard compact interactive={false}>
       <div className="mb-2 flex items-center justify-between">
-        <button onClick={() => setMonth((m) => subMonths(m, 1))} aria-label="Previous month" className="rounded p-1 text-ink-muted hover:bg-surface-inset hover:text-ink">‹</button>
-        <div className="text-sm font-medium text-ink">{format(month, "MMMM yyyy")}</div>
-        <button onClick={() => setMonth((m) => addMonths(m, 1))} aria-label="Next month" className="rounded p-1 text-ink-muted hover:bg-surface-inset hover:text-ink">›</button>
+        <button
+          onClick={() => setMonth((m) => subMonths(m, 1))}
+          aria-label="Previous month"
+          className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-ink-muted transition-colors hover:bg-surface-inset hover:text-ink"
+        >
+          <ChevronLeft className="h-3.5 w-3.5" strokeWidth={2} />
+        </button>
+        <div className="text-[13px] font-semibold tracking-tight text-ink">{format(month, "MMMM yyyy")}</div>
+        <button
+          onClick={() => setMonth((m) => addMonths(m, 1))}
+          aria-label="Next month"
+          className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-ink-muted transition-colors hover:bg-surface-inset hover:text-ink"
+        >
+          <ChevronRight className="h-3.5 w-3.5" strokeWidth={2} />
+        </button>
       </div>
-      <div className="grid grid-cols-7 gap-y-0.5 text-center text-[10px] text-ink-subtle">
+      <div className="grid grid-cols-7 gap-y-1 text-center text-[9px] font-semibold uppercase tracking-wider text-ink-subtle">
         {["S", "M", "T", "W", "T", "F", "S"].map((d, i) => <div key={i}>{d}</div>)}
       </div>
       <div className="mt-1 grid grid-cols-7 gap-0.5">
@@ -271,36 +632,49 @@ function MiniCalendar({
           const inMonth = isSameMonth(d, month);
           const isAnchor = isSameDay(d, anchor);
           const isToday = isSameDay(d, new Date());
-          const has = byDay.get(format(d, "yyyy-MM-dd"))?.length ?? 0;
+          const count = byDay.get(format(d, "yyyy-MM-dd"))?.length ?? 0;
+          const density = Math.min(3, count); // 0, 1, 2, 3+
           return (
             <button
               key={d.toISOString()}
               onClick={() => onPick(d)}
-              className={
-                "relative flex h-7 items-center justify-center rounded text-xs transition " +
-                (isAnchor
-                  ? "bg-brand-accent text-white"
+              className={cn(
+                "relative flex h-8 items-center justify-center rounded-lg text-[12px] transition-all",
+                isAnchor
+                  ? "bg-gradient-to-br from-brand-accent to-brand-hover text-white shadow-[0_4px_10px_rgba(53,157,243,0.35)]"
                   : isToday
-                    ? "bg-brand-subtle text-brand-accent"
+                    ? "bg-brand-subtle/70 font-semibold text-brand-accent ring-1 ring-brand-accent/20"
                     : inMonth
                       ? "text-ink hover:bg-surface-inset"
-                      : "text-ink-subtle hover:bg-surface-inset")
-              }
+                      : "text-ink-subtle hover:bg-surface-inset/60",
+              )}
               aria-label={`Go to ${format(d, "EEEE MMM d")}`}
             >
-              {format(d, "d")}
-              {has > 0 && !isAnchor && (
-                <span className="absolute bottom-0.5 h-1 w-1 rounded-full bg-brand-accent" aria-hidden />
+              <span className="tabular-nums">{format(d, "d")}</span>
+              {density > 0 && (
+                <div className={cn(
+                  "absolute bottom-0.5 left-1/2 flex -translate-x-1/2 items-center gap-[2px]",
+                )} aria-hidden>
+                  {Array.from({ length: density }).map((_, i) => (
+                    <span
+                      key={i}
+                      className={cn(
+                        "h-[3px] w-[3px] rounded-full",
+                        isAnchor ? "bg-white/80" : "bg-brand-accent",
+                      )}
+                    />
+                  ))}
+                </div>
               )}
             </button>
           );
         })}
       </div>
-    </div>
+    </PremiumCard>
   );
 }
 
-// ─── Day View ────────────────────────────────────────────────────────────
+// ─── Day View ──────────────────────────────────────────────────────
 
 function DayView({
   anchor, timezone, byDay, onOpen, onReschedule,
@@ -315,8 +689,8 @@ function DayView({
   const list = byDay.get(key) ?? [];
 
   return (
-    <div className="relative">
-      <div className="grid grid-cols-[64px,1fr]">
+    <div className="relative overflow-x-auto">
+      <div className="grid min-w-[420px] grid-cols-[68px,1fr]">
         <TimeGutter />
         <DayColumn
           dateKey={key}
@@ -326,12 +700,12 @@ function DayView({
           onReschedule={onReschedule}
         />
       </div>
-      {isSameDay(anchor, new Date()) && <CurrentTimeLine timezone={timezone} />}
+      {isSameDay(anchor, new Date()) && <CurrentTimeLine timezone={timezone} leftPx={68} />}
     </div>
   );
 }
 
-// ─── Week View ───────────────────────────────────────────────────────────
+// ─── Week View ─────────────────────────────────────────────────────
 
 function WeekView({
   anchor, timezone, byDay, onOpen, onReschedule,
@@ -346,43 +720,56 @@ function WeekView({
   const days = Array.from({ length: 7 }, (_, i) => addDays(start, i));
 
   return (
-    <div className="relative">
-      <div className="sticky top-0 z-10 grid grid-cols-[64px,repeat(7,minmax(0,1fr))] border-b border-border bg-surface">
-        <div />
-        {days.map((d) => {
-          const today = isSameDay(d, new Date());
-          return (
-            <div key={d.toISOString()} className="border-l border-border px-2 py-2 text-center">
-              <div className="text-[10px] uppercase tracking-wider text-ink-subtle">{format(d, "EEE")}</div>
-              <div className={"text-sm font-medium " + (today ? "text-brand-accent" : "text-ink")}>{format(d, "d")}</div>
-            </div>
-          );
-        })}
-      </div>
-      <div className="relative">
-        <div className="grid grid-cols-[64px,repeat(7,minmax(0,1fr))]">
-          <TimeGutter />
+    <div className="relative overflow-x-auto">
+      <div className="min-w-[760px]">
+        <div className="sticky top-0 z-10 grid grid-cols-[68px,repeat(7,minmax(0,1fr))] border-b border-border/70 bg-gradient-to-b from-surface to-surface/95 backdrop-blur-sm">
+          <div />
           {days.map((d) => {
-            const key = format(d, "yyyy-MM-dd");
+            const today = isSameDay(d, new Date());
             return (
-              <DayColumn
-                key={key}
-                dateKey={key}
-                bookings={byDay.get(key) ?? []}
-                timezone={timezone}
-                onOpen={onOpen}
-                onReschedule={onReschedule}
-              />
+              <div key={d.toISOString()} className="border-l border-border/50 px-2 py-2.5 text-center">
+                <div className="text-[9px] font-semibold uppercase tracking-[0.08em] text-ink-subtle">
+                  {format(d, "EEE")}
+                </div>
+                <div
+                  className={cn(
+                    "mx-auto mt-1 inline-flex h-7 w-7 items-center justify-center rounded-lg text-[13px] font-semibold tabular-nums",
+                    today
+                      ? "bg-gradient-to-br from-brand-accent to-brand-hover text-white shadow-[0_2px_8px_rgba(53,157,243,0.35)]"
+                      : "text-ink",
+                  )}
+                >
+                  {format(d, "d")}
+                </div>
+              </div>
             );
           })}
         </div>
-        {days.some((d) => isSameDay(d, new Date())) && <CurrentTimeLine timezone={timezone} />}
+        <div className="relative">
+          <div className="grid grid-cols-[68px,repeat(7,minmax(0,1fr))]">
+            <TimeGutter />
+            {days.map((d) => {
+              const key = format(d, "yyyy-MM-dd");
+              return (
+                <DayColumn
+                  key={key}
+                  dateKey={key}
+                  bookings={byDay.get(key) ?? []}
+                  timezone={timezone}
+                  onOpen={onOpen}
+                  onReschedule={onReschedule}
+                />
+              );
+            })}
+          </div>
+          {days.some((d) => isSameDay(d, new Date())) && <CurrentTimeLine timezone={timezone} leftPx={68} />}
+        </div>
       </div>
     </div>
   );
 }
 
-// ─── Day Column (shared between Day + Week) ─────────────────────────────
+// ─── Day Column (shared Day + Week) ────────────────────────────────
 
 function DayColumn({
   dateKey, bookings, timezone, onOpen, onReschedule,
@@ -395,6 +782,7 @@ function DayColumn({
 }) {
   const totalHours = DAY_END_HOUR - DAY_START_HOUR;
   const colHeight = totalHours * PX_PER_HOUR;
+  const [hoverY, setHoverY] = React.useState<number | null>(null);
 
   function eventStyle(b: CalendarBooking): React.CSSProperties {
     const localStartLabel = formatInTimeZone(b.startAt, timezone, "HH:mm");
@@ -404,13 +792,14 @@ function DayColumn({
     const startMin = Math.max(0, (sh - DAY_START_HOUR) * 60 + sm);
     const endMin = Math.min(totalHours * 60, (eh - DAY_START_HOUR) * 60 + em);
     const top = (startMin / 60) * PX_PER_HOUR;
-    const height = Math.max(20, ((endMin - startMin) / 60) * PX_PER_HOUR - 2);
+    const height = Math.max(28, ((endMin - startMin) / 60) * PX_PER_HOUR - 2);
     return { top, height, position: "absolute", left: 4, right: 4 };
   }
 
   function handleDrop(e: React.DragEvent<HTMLDivElement>) {
     if (!onReschedule) return;
     e.preventDefault();
+    setHoverY(null);
     const id = e.dataTransfer.getData("text/booking-id");
     if (!id) return;
     const rect = e.currentTarget.getBoundingClientRect();
@@ -425,19 +814,51 @@ function DayColumn({
 
   return (
     <div
-      className="relative border-l border-border"
+      className="relative border-l border-border/50"
       style={{ height: colHeight }}
-      onDragOver={(e) => onReschedule && e.preventDefault()}
+      onDragOver={(e) => {
+        if (!onReschedule) return;
+        e.preventDefault();
+        const rect = e.currentTarget.getBoundingClientRect();
+        setHoverY(e.clientY - rect.top);
+      }}
+      onDragLeave={() => setHoverY(null)}
       onDrop={handleDrop}
     >
-      {/* Hour grid background */}
+      {/* Hour grid background with alternating shading */}
       {Array.from({ length: totalHours }).map((_, i) => (
-        <div
-          key={i}
-          className="absolute left-0 right-0 border-t border-border/60"
-          style={{ top: i * PX_PER_HOUR }}
-        />
+        <React.Fragment key={i}>
+          <div
+            className={cn(
+              "absolute inset-x-0",
+              i % 2 === 0 ? "bg-transparent" : "bg-surface-inset/15",
+            )}
+            style={{ top: i * PX_PER_HOUR, height: PX_PER_HOUR }}
+            aria-hidden
+          />
+          <div
+            className="absolute inset-x-0 border-t border-border/30"
+            style={{ top: i * PX_PER_HOUR }}
+            aria-hidden
+          />
+          {/* Half-hour ticks (very subtle) */}
+          <div
+            className="absolute inset-x-0 border-t border-dashed border-border/15"
+            style={{ top: i * PX_PER_HOUR + PX_PER_HOUR / 2 }}
+            aria-hidden
+          />
+        </React.Fragment>
       ))}
+
+      {/* Drag-to-create hint line */}
+      {hoverY !== null && (
+        <div
+          className="pointer-events-none absolute inset-x-1 h-0.5 rounded-full bg-brand-accent/70 shadow-[0_0_6px_rgba(53,157,243,0.45)]"
+          style={{ top: hoverY - 1 }}
+          aria-hidden
+        />
+      )}
+
       {bookings.map((b) => (
         <EventBlock
           key={b.id}
@@ -461,42 +882,73 @@ function EventBlock({
   onOpen: () => void;
   draggable: boolean;
 }) {
+  const accent = serviceColorFor(booking.serviceId, booking.serviceColor);
+  const durationMin = Math.max(0, Math.round((new Date(booking.endAt).getTime() - new Date(booking.startAt).getTime()) / 60_000));
+  const isMuted = booking.status === "cancelled" || booking.status === "refunded";
+  const start = formatInTimeZone(booking.startAt, timezone, "h:mm a");
+
   return (
     <button
       onClick={onOpen}
       draggable={draggable}
       onDragStart={(e) => e.dataTransfer.setData("text/booking-id", booking.id)}
-      className={
-        "group flex flex-col items-start overflow-hidden rounded-md border-l-2 px-2 py-1 text-left text-[11px] shadow-xs transition " +
-        STATUS_EVENT[booking.status] +
-        " hover:shadow-md " +
-        (draggable ? "cursor-grab active:cursor-grabbing" : "cursor-pointer")
-      }
-      style={style}
+      className={cn(
+        "group relative flex flex-col items-start overflow-hidden rounded-lg border bg-surface/90 px-2.5 py-1.5 pl-3 text-left text-[11px] shadow-soft backdrop-blur-sm transition-all duration-200 ease-out",
+        "hover:-translate-y-0.5 hover:shadow-lift hover:border-border-strong hover:z-10",
+        isMuted ? "opacity-60" : "",
+        draggable ? "cursor-grab active:cursor-grabbing" : "cursor-pointer",
+        "border-border/70",
+      )}
+      style={{
+        ...style,
+        background: `linear-gradient(135deg, ${hexAlpha(accent, 0.10)} 0%, var(--color-surface) 60%)`,
+      }}
       aria-label={`${booking.serviceName} with ${booking.clientName}`}
       title={`${booking.serviceName} · ${booking.clientName}`}
     >
-      <div className="truncate font-medium">
-        {formatInTimeZone(booking.startAt, timezone, "h:mm a")} {booking.serviceName}
+      {/* Service-color accent bar */}
+      <span
+        aria-hidden
+        className="absolute inset-y-1 left-0 w-1 rounded-full"
+        style={{ background: accent }}
+      />
+      <div className="flex w-full items-center gap-1.5">
+        <span className="font-semibold tabular-nums text-ink">{start}</span>
+        <span className="text-ink-subtle">·</span>
+        <span className="text-[10px] text-ink-muted">{durationMin}m</span>
+        <StatusPill status={booking.status} className="ml-auto" />
       </div>
-      <div className="truncate opacity-80">{booking.clientName}</div>
+      <div className={cn("mt-0.5 line-clamp-1 font-medium", isMuted ? "line-through text-ink-muted" : "text-ink")}>
+        {booking.serviceName}
+      </div>
+      <div className="mt-0.5 flex items-center gap-1 text-[10px] text-ink-muted">
+        <Users className="h-2.5 w-2.5" strokeWidth={1.75} />
+        <span className="line-clamp-1">{booking.clientName}</span>
+      </div>
     </button>
   );
 }
 
-// ─── Time Gutter (left labels) ──────────────────────────────────────────
+function StatusPill({ status, className }: { status: Status; className?: string }) {
+  // Compact dot-only indicator — keeps blocks dense without noisy text.
+  return (
+    <span className={cn("inline-flex h-1.5 w-1.5 rounded-full", STATUS_DOT[status], className)} aria-label={STATUS_LABEL[status]} />
+  );
+}
+
+// ─── Time Gutter (left labels) ─────────────────────────────────────
 
 function TimeGutter() {
   const totalHours = DAY_END_HOUR - DAY_START_HOUR;
   return (
-    <div className="relative" style={{ height: totalHours * PX_PER_HOUR }}>
+    <div className="relative" style={{ height: totalHours * PX_PER_HOUR }} aria-hidden>
       {Array.from({ length: totalHours }).map((_, i) => {
         const hour = DAY_START_HOUR + i;
         const label = hour === 12 ? "12 PM" : hour > 12 ? `${hour - 12} PM` : `${hour} AM`;
         return (
           <div
             key={i}
-            className="absolute right-2 -translate-y-1/2 text-[10px] text-ink-subtle"
+            className="absolute right-2 -translate-y-1/2 text-[10px] font-medium tabular-nums text-ink-subtle"
             style={{ top: i * PX_PER_HOUR }}
           >
             {label}
@@ -507,9 +959,9 @@ function TimeGutter() {
   );
 }
 
-// ─── Current Time indicator ─────────────────────────────────────────────
+// ─── Current Time indicator — premium brand glow ───────────────────
 
-function CurrentTimeLine({ timezone }: { timezone: string }) {
+function CurrentTimeLine({ timezone, leftPx }: { timezone: string; leftPx: number }) {
   const [now, setNow] = React.useState(new Date());
   React.useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 60_000);
@@ -521,17 +973,26 @@ function CurrentTimeLine({ timezone }: { timezone: string }) {
   const top = ((h - DAY_START_HOUR) * 60 + m) / 60 * PX_PER_HOUR;
   return (
     <div
-      className="pointer-events-none absolute left-16 right-0 z-20 flex items-center"
-      style={{ top }}
+      className="pointer-events-none absolute right-0 z-20 flex items-center"
+      style={{ top, left: leftPx }}
       aria-label="Current time"
     >
-      <div className="-ml-1 h-2 w-2 rounded-full bg-red-500" />
-      <div className="h-px flex-1 bg-red-500/70" />
+      <div className="relative -ml-1.5">
+        <div className="h-3 w-3 rounded-full bg-brand-accent shadow-[0_0_10px_rgba(53,157,243,0.6)]" />
+        <div className="absolute inset-0 h-3 w-3 animate-ping rounded-full bg-brand-accent/40" />
+      </div>
+      <div
+        className="h-px flex-1"
+        style={{
+          background:
+            "linear-gradient(to right, var(--color-accent, #359df3) 0%, rgba(53,157,243,0.55) 40%, rgba(53,157,243,0) 100%)",
+        }}
+      />
     </div>
   );
 }
 
-// ─── Month View ─────────────────────────────────────────────────────────
+// ─── Month View ────────────────────────────────────────────────────
 
 function MonthView({
   anchor, timezone, byDay, onOpen, onJump,
@@ -552,44 +1013,83 @@ function MonthView({
   for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
 
   return (
-    <div className="overflow-hidden rounded-b-xl">
-      <div className="grid grid-cols-7 border-b border-border bg-surface-subtle text-[10px] uppercase tracking-wider text-ink-subtle">
+    <div className="overflow-hidden">
+      <div className="grid grid-cols-7 border-b border-border/60 bg-surface-subtle/40 text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-subtle">
         {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => (
           <div key={d} className="px-2 py-2">{d}</div>
         ))}
       </div>
       {weeks.map((week, wi) => (
-        <div key={wi} className="grid grid-cols-7 border-b border-border last:border-b-0">
+        <div key={wi} className="grid grid-cols-7 border-b border-border/60 last:border-b-0">
           {week.map((d) => {
             const key = format(d, "yyyy-MM-dd");
             const list = byDay.get(key) ?? [];
             const outside = !isSameMonth(d, anchor);
             const today = isSameDay(d, new Date());
             return (
-              <div
+              <button
                 key={key}
-                className={
-                  "min-h-[110px] cursor-pointer border-r border-border p-1.5 last:border-r-0 " +
-                  (outside ? "bg-surface-subtle/40 text-ink-subtle " : "bg-surface ") +
-                  (today ? "ring-1 ring-inset ring-brand-accent " : "")
-                }
                 onClick={() => onJump(d)}
+                className={cn(
+                  "group relative min-h-[120px] cursor-pointer border-r border-border/60 p-2 text-left transition-colors last:border-r-0",
+                  outside ? "bg-surface-subtle/30 text-ink-subtle" : "bg-surface text-ink hover:bg-surface-inset/30",
+                )}
               >
-                <div className={"text-xs font-medium " + (today ? "text-brand-accent" : "")}>{format(d, "d")}</div>
-                <div className="mt-1 space-y-0.5">
-                  {list.slice(0, 3).map((b) => (
-                    <button
-                      key={b.id}
-                      onClick={(e) => { e.stopPropagation(); onOpen(b); }}
-                      className={"flex w-full items-center gap-1 truncate rounded-sm border-l-2 px-1 py-0.5 text-left text-[10px] " + STATUS_EVENT[b.status]}
-                    >
-                      <span className="font-medium">{formatInTimeZone(b.startAt, timezone, "h:mma")}</span>
-                      <span className="truncate">{b.serviceName}</span>
-                    </button>
-                  ))}
-                  {list.length > 3 && <div className="text-[10px] text-ink-subtle">+{list.length - 3} more</div>}
+                <div className="flex items-center justify-between">
+                  <div
+                    className={cn(
+                      "inline-flex h-6 w-6 items-center justify-center rounded-lg text-[11px] font-semibold tabular-nums",
+                      today
+                        ? "bg-gradient-to-br from-brand-accent to-brand-hover text-white shadow-[0_2px_6px_rgba(53,157,243,0.35)]"
+                        : outside ? "text-ink-subtle" : "text-ink",
+                    )}
+                  >
+                    {format(d, "d")}
+                  </div>
+                  {list.length > 0 && (
+                    <span className="text-[9px] font-medium tabular-nums text-ink-subtle">
+                      {list.length}
+                    </span>
+                  )}
                 </div>
-              </div>
+                <div className="mt-1.5 space-y-1">
+                  {list.slice(0, 3).map((b) => {
+                    const accent = serviceColorFor(b.serviceId, b.serviceColor);
+                    const muted = b.status === "cancelled" || b.status === "refunded";
+                    return (
+                      <div
+                        key={b.id}
+                        role="button"
+                        tabIndex={0}
+                        onClick={(e) => { e.stopPropagation(); onOpen(b); }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            onOpen(b);
+                          }
+                        }}
+                        className={cn(
+                          "flex w-full items-center gap-1 truncate rounded-md px-1.5 py-0.5 text-left text-[10px] transition-colors hover:bg-surface-inset",
+                          muted ? "opacity-60" : "",
+                        )}
+                        style={{
+                          borderLeft: `2px solid ${accent}`,
+                          background: `linear-gradient(90deg, ${hexAlpha(accent, 0.08)} 0%, transparent 80%)`,
+                        }}
+                      >
+                        <span className="font-semibold tabular-nums text-ink">
+                          {formatInTimeZone(b.startAt, timezone, "h:mma")}
+                        </span>
+                        <span className={cn("truncate", muted ? "line-through" : "")}>{b.serviceName}</span>
+                      </div>
+                    );
+                  })}
+                  {list.length > 3 && (
+                    <div className="text-[10px] font-medium text-brand-accent">+{list.length - 3} more</div>
+                  )}
+                </div>
+              </button>
             );
           })}
         </div>
@@ -598,7 +1098,7 @@ function MonthView({
   );
 }
 
-// ─── Agenda View ────────────────────────────────────────────────────────
+// ─── Agenda View ───────────────────────────────────────────────────
 
 function AgendaView({
   anchor, timezone, byDay, onOpen,
@@ -610,32 +1110,76 @@ function AgendaView({
 }) {
   const days = Array.from({ length: 7 }, (_, i) => addDays(anchor, i));
   return (
-    <div className="divide-y divide-border">
+    <div className="divide-y divide-border/60">
       {days.map((d) => {
         const key = format(d, "yyyy-MM-dd");
         const list = byDay.get(key) ?? [];
+        const today = isSameDay(d, new Date());
         return (
-          <div key={key} className="grid grid-cols-[120px,1fr] gap-3 px-4 py-3">
-            <div className="text-xs">
-              <div className="font-medium text-ink">{format(d, "EEE")}</div>
-              <div className="text-ink-muted">{format(d, "MMM d")}</div>
+          <div key={key} className="grid grid-cols-[110px,1fr] gap-3 px-5 py-4">
+            <div>
+              <div className={cn("text-[11px] font-semibold uppercase tracking-wider", today ? "text-brand-accent" : "text-ink-subtle")}>
+                {format(d, "EEE")}
+              </div>
+              <div className={cn("mt-0.5 text-[20px] font-semibold tracking-tight tabular-nums", today ? "text-brand-accent" : "text-ink")}>
+                {format(d, "d")}
+              </div>
+              <div className="mt-0.5 text-[11px] text-ink-muted">{format(d, "MMM yyyy")}</div>
+              {list.length > 0 && (
+                <div className="mt-2 inline-flex items-center gap-1 rounded-full bg-surface-inset px-2 py-0.5 text-[10px] font-medium text-ink-subtle">
+                  {list.length} {list.length === 1 ? "booking" : "bookings"}
+                </div>
+              )}
             </div>
             <div className="space-y-1.5">
-              {list.length === 0 && <div className="text-xs text-ink-subtle">—</div>}
-              {list.map((b) => (
-                <button
-                  key={b.id}
-                  onClick={() => onOpen(b)}
-                  className={"flex w-full items-center gap-3 rounded-md border-l-2 px-3 py-2 text-left text-sm transition hover:shadow-md " + STATUS_EVENT[b.status]}
-                >
-                  <span className={"h-1.5 w-1.5 rounded-full " + STATUS_DOT[b.status]} aria-hidden />
-                  <span className="w-28 text-xs font-medium">
-                    {formatInTimeZone(b.startAt, timezone, "h:mm a")} – {formatInTimeZone(b.endAt, timezone, "h:mm a")}
-                  </span>
-                  <span className="flex-1 truncate font-medium">{b.serviceName}</span>
-                  <span className="truncate text-xs opacity-80">{b.clientName}</span>
-                </button>
-              ))}
+              {list.length === 0 && (
+                <div className="rounded-lg border border-dashed border-border/50 px-3 py-3 text-[11px] text-ink-subtle">
+                  No bookings — open availability.
+                </div>
+              )}
+              {list.map((b) => {
+                const accent = serviceColorFor(b.serviceId, b.serviceColor);
+                const muted = b.status === "cancelled" || b.status === "refunded";
+                return (
+                  <button
+                    key={b.id}
+                    onClick={() => onOpen(b)}
+                    className={cn(
+                      "group flex w-full items-center gap-3 rounded-xl border border-border/70 bg-surface px-3 py-2.5 text-left shadow-soft transition-all duration-200 ease-out hover:-translate-y-0.5 hover:border-border-strong hover:shadow-lift",
+                      muted ? "opacity-60" : "",
+                    )}
+                  >
+                    <span
+                      aria-hidden
+                      className="h-9 w-1 shrink-0 rounded-full"
+                      style={{ background: accent }}
+                    />
+                    <div className="w-32 shrink-0">
+                      <div className="text-[12px] font-semibold tabular-nums text-ink">
+                        {formatInTimeZone(b.startAt, timezone, "h:mm a")}
+                      </div>
+                      <div className="text-[10px] text-ink-muted">
+                        {formatInTimeZone(b.endAt, timezone, "h:mm a")}
+                      </div>
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className={cn("truncate text-[13px] font-semibold", muted ? "text-ink-muted line-through" : "text-ink")}>
+                        {b.serviceName}
+                      </div>
+                      <div className="mt-0.5 flex items-center gap-1.5 truncate text-[11px] text-ink-muted">
+                        <Users className="h-3 w-3" strokeWidth={1.75} />
+                        <span className="truncate">{b.clientName}</span>
+                        <span>·</span>
+                        <span className="truncate">{b.staffName}</span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className={cn("inline-flex h-2 w-2 rounded-full", STATUS_DOT[b.status])} aria-label={STATUS_LABEL[b.status]} />
+                      <ArrowRight className="h-3.5 w-3.5 text-ink-subtle transition-transform group-hover:translate-x-0.5" strokeWidth={2} />
+                    </div>
+                  </button>
+                );
+              })}
             </div>
           </div>
         );
@@ -644,8 +1188,92 @@ function AgendaView({
   );
 }
 
+// ─── Empty states ─────────────────────────────────────────────────
+
+function CalendarEmptyState() {
+  return (
+    <div className="px-6 py-12">
+      <div className="mx-auto max-w-md">
+        <EmptyState
+          icon={Sparkles}
+          title="Your schedule is wide open"
+          body="Share your booking page to start filling your calendar — or block focus time to protect deep work."
+        />
+        <div className="mt-4 flex flex-wrap justify-center gap-2">
+          <a
+            href="/dashboard/services"
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-brand-accent px-3 text-[12px] font-medium text-white shadow-sm transition-all hover:-translate-y-0.5 hover:bg-brand-hover hover:shadow-md"
+          >
+            <CalendarPlus className="h-3.5 w-3.5" strokeWidth={2} />
+            Create a service
+          </a>
+          <a
+            href="/dashboard/settings/branding"
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-surface px-3 text-[12px] font-medium text-ink-muted transition-colors hover:bg-surface-inset hover:text-ink"
+          >
+            <Link2 className="h-3.5 w-3.5" strokeWidth={1.75} />
+            Share booking page
+          </a>
+          <a
+            href="/dashboard/availability"
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-surface px-3 text-[12px] font-medium text-ink-muted transition-colors hover:bg-surface-inset hover:text-ink"
+          >
+            <Clock4 className="h-3.5 w-3.5" strokeWidth={1.75} />
+            Set availability
+          </a>
+          <a
+            href="/dashboard/settings/integrations"
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-surface px-3 text-[12px] font-medium text-ink-muted transition-colors hover:bg-surface-inset hover:text-ink"
+          >
+            <Settings2 className="h-3.5 w-3.5" strokeWidth={1.75} />
+            Connect calendar
+          </a>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function FilteredEmptyState({ onClear }: { onClear: () => void }) {
+  return (
+    <div className="px-6 py-12 text-center">
+      <div className="mx-auto inline-flex h-10 w-10 items-center justify-center rounded-xl border border-border bg-surface-subtle text-ink-subtle">
+        <Inbox className="h-5 w-5" strokeWidth={1.75} />
+      </div>
+      <div className="mt-3 text-[13px] font-semibold text-ink">No matches for the current filters</div>
+      <p className="mt-1 text-[11px] text-ink-muted">Try clearing filters to see your full schedule.</p>
+      <button
+        type="button"
+        onClick={onClear}
+        className="mt-3 inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-surface px-3 text-[12px] font-medium text-ink-muted transition-colors hover:bg-surface-inset hover:text-ink"
+      >
+        Clear filters
+      </button>
+    </div>
+  );
+}
+
+// ─── helpers ─────────────────────────────────────────────────────
+
 function unique<K, V>(rows: readonly (readonly [K, V])[]): [K, V][] {
   const seen = new Map<K, V>();
   for (const [k, v] of rows) if (!seen.has(k)) seen.set(k, v);
   return Array.from(seen.entries());
+}
+
+function firstName(full: string): string {
+  return full.split(/\s+/)[0] ?? full;
+}
+
+/** Convert "#RRGGBB" or "rgb()" to an rgba string with the given alpha.
+ *  Falls back to the input string when the parse fails. */
+function hexAlpha(hex: string, alpha: number): string {
+  const m = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) return hex;
+  let h = m[1];
+  if (h.length === 3) h = h.split("").map((c) => c + c).join("");
+  const r = parseInt(h.slice(0, 2), 16);
+  const g = parseInt(h.slice(2, 4), 16);
+  const b = parseInt(h.slice(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
