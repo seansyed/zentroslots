@@ -5,11 +5,12 @@
 /* ─── Design tokens — light (default) ──────────────────────────────── */
 :root,
 [data-theme="light"] {
-  --color-accent:            #2563eb;
-  --color-accent-hover:      #1d4ed8;
-  --color-accent-subtle:     #eff6ff;
+  /* ZentroMeet brand — premium scheduling blue */
+  --color-accent:            #359df3;
+  --color-accent-hover:      #1f8de8;
+  --color-accent-subtle:     #ecf6ff;
   --color-accent-foreground: #ffffff;
-  --color-accent-ring:       rgba(37, 99, 235, 0.18);
+  --color-accent-ring:       rgba(53, 157, 243, 0.18);
 
   --color-surface:           #ffffff;
   --color-surface-subtle:    #f8fafc;
@@ -27,11 +28,11 @@
 
 /* ─── Design tokens — dark ─────────────────────────────────────────── */
 [data-theme="dark"] {
-  --color-accent:            #60a5fa;
-  --color-accent-hover:      #3b82f6;
-  --color-accent-subtle:     rgba(96, 165, 250, 0.12);
+  --color-accent:            #5cb1f5;
+  --color-accent-hover:      #359df3;
+  --color-accent-subtle:     rgba(53, 157, 243, 0.14);
   --color-accent-foreground: #0b1220;
-  --color-accent-ring:       rgba(96, 165, 250, 0.28);
+  --color-accent-ring:       rgba(92, 177, 245, 0.28);
 
   --color-surface:           #0b1220;
   --color-surface-subtle:    #0f172a;

@@ -8,6 +8,9 @@ import DashboardBookings from "@/components/DashboardBookings";
 import Shell from "@/components/dashboard/Shell";
 import OnboardingChecklist, { type ChecklistItem } from "@/components/dashboard/OnboardingChecklist";
 import TenantAnnouncementBanner from "@/components/dashboard/TenantAnnouncementBanner";
+import DashboardHero from "@/components/dashboard/DashboardHero";
+import DashboardKpiGrid from "@/components/dashboard/DashboardKpiGrid";
+import DashboardSidePanel from "@/components/dashboard/DashboardSidePanel";
 
 export default async function DashboardPage(props: {
   searchParams: Promise<{ tab?: string }>;
@@ -222,22 +225,22 @@ export default async function DashboardPage(props: {
       user={{ name: user.name, email: user.email, role: user.role }}
       tenant={tenant ? { name: tenant.name, slug: tenant.slug, plan: tenant.plan, logoUrl: tenant.logoUrl } : undefined}
       title="Dashboard"
-      subtitle={`${user.role} · ${user.timezone}`}
+      subtitle={user.timezone}
     >
       <TenantAnnouncementBanner announcement={topAnnouncement} />
 
       {showGoogleReconnect && (
-        <div className="mb-4 flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+        <div className="mb-4 flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="mt-0.5 h-4 w-4 shrink-0" aria-hidden>
             <path d="M12 9v4M12 17h.01M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
           <div className="flex-1">
             <div className="font-medium">Google Calendar needs to be reconnected.</div>
             <div className="mt-0.5 text-xs">
-              The last calendar sync failed at {user.googleLastErrorAt?.toISOString() ?? "an unknown time"}. New bookings will be created without Meet links until you reconnect.
+              The last calendar sync failed. New bookings will be created without Meet links until you reconnect.
             </div>
           </div>
-          <a href="/api/google/connect" className="rounded-md bg-amber-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-800">
+          <a href="/api/google/connect" className="rounded-lg bg-amber-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-800">
             Reconnect Google
           </a>
         </div>
@@ -245,140 +248,73 @@ export default async function DashboardPage(props: {
 
       <OnboardingChecklist items={checklistItems} />
 
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <div className="text-xs font-medium uppercase tracking-wider text-ink-subtle">
-            {tenant?.name ?? "Workspace"}
-          </div>
-          <h2 className="mt-1 text-heading font-semibold text-ink">Overview</h2>
-          <p className="mt-1 text-sm text-ink-muted">
-            Signed in as {user.name} ({user.role}) • {user.timezone}
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <a href="/dashboard/calendar" className="rounded-md border bg-white px-3 py-2 text-sm hover:bg-slate-50">Calendar</a>
-          <a href="/dashboard/availability" className="rounded-md border bg-white px-3 py-2 text-sm hover:bg-slate-50">Weekly hours</a>
-          <a href="/dashboard/availability/overrides" className="rounded-md border bg-white px-3 py-2 text-sm hover:bg-slate-50">Overrides</a>
-          <a href="/dashboard/analytics" className="rounded-md border bg-white px-3 py-2 text-sm hover:bg-slate-50">Analytics</a>
-          {user.role === "admin" && (
-            <>
-              <a href="/dashboard/billing" className="rounded-md border bg-white px-3 py-2 text-sm hover:bg-slate-50">Billing</a>
-              <a href="/dashboard/settings/branding" className="rounded-md border bg-white px-3 py-2 text-sm hover:bg-slate-50">Branding</a>
-            </>
-          )}
-          {!user.googleRefreshToken && (user.role === "admin" || user.role === "staff") && (
-            <a href="/api/google/connect" className="rounded-md border bg-white px-3 py-2 text-sm hover:bg-slate-50">Connect Google</a>
-          )}
-          <form action="/api/auth/logout" method="POST">
-            <button className="rounded-md border bg-white px-3 py-2 text-sm hover:bg-slate-50">Sign out</button>
-          </form>
-        </div>
-      </div>
+      {/* ── HERO ────────────────────────────────────────────────── */}
+      <DashboardHero
+        userName={user.name}
+        userRole={user.role}
+        tenantName={tenant?.name ?? "Workspace"}
+        timezone={user.timezone}
+        todayCount={Number(todayCount?.n ?? 0)}
+        weekCount={Number(weekCount?.n ?? 0)}
+        utilizationPct={utilizationPct}
+        showGoogleConnect={!user.googleRefreshToken && (user.role === "admin" || user.role === "staff")}
+      />
 
-      {/* KPI cards — operations row */}
-      <div className="mt-8 grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <KpiCard label="Today" value={String(Number(todayCount?.n ?? 0))} />
-        <KpiCard label="This week" value={String(Number(weekCount?.n ?? 0))} />
-        <KpiCard label="Utilization" value={`${utilizationPct}%`} />
-        <KpiCard
-          label="Revenue est (week)"
-          value={"$" + Math.round(weekRevenueCents / 100).toLocaleString()}
+      {/* ── KPI GRID ────────────────────────────────────────────── */}
+      <div className="mt-8">
+        <DashboardKpiGrid
+          todayCount={Number(todayCount?.n ?? 0)}
+          weekCount={Number(weekCount?.n ?? 0)}
+          weekRevenueCents={weekRevenueCents}
+          utilizationPct={utilizationPct}
+          noShowRatePct={noShowRatePct}
+          staffCount={staffCount}
+          cancellationsCount={Number(cancelledCount?.n ?? 0)}
+          openTasksCount={pendingTasksCount}
         />
       </div>
-      {/* KPI cards — quality / pipeline row */}
-      <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <KpiCard label="Cancellations (30d)" value={String(Number(cancelledCount?.n ?? 0))} />
-        <KpiCard label="No-show rate (30d)" value={noShowRatePct != null ? `${noShowRatePct}%` : "—"} />
-        <KpiCard label="Open tasks" value={String(pendingTasksCount)} />
-        <KpiCard label="Staff" value={String(staffCount)} muted />
-      </div>
 
-      {/* Operational widgets row */}
-      <div className="mt-6 grid gap-4 lg:grid-cols-2">
-        <section className="rounded-lg border bg-white p-5 shadow-sm">
-          <div className="flex items-baseline justify-between">
-            <h3 className="text-base font-medium">Pending tasks</h3>
-            <a href="/dashboard/tasks" className="text-xs text-brand-accent hover:underline">View all →</a>
+      {/* ── MAIN GRID: timeline + side panel ───────────────────── */}
+      <div className="mt-8 grid gap-6 lg:grid-cols-3">
+        <section className="lg:col-span-2">
+          <div className="rounded-2xl border border-border bg-surface p-6 shadow-xs">
+            <div className="mb-4 flex items-baseline justify-between">
+              <div>
+                <h3 className="text-base font-semibold text-ink">Upcoming appointments</h3>
+                <p className="mt-0.5 text-xs text-ink-muted">Today and the next 7 days</p>
+              </div>
+              <div className="flex gap-1">
+                <TabLink active={tab === "today"} label="Today" href="?tab=today" />
+                <TabLink active={tab === "upcoming"} label="Upcoming" href="?tab=upcoming" />
+                <TabLink active={tab === "cancelled"} label="Cancelled" href="?tab=cancelled" />
+                <TabLink active={tab === "completed"} label="Completed" href="?tab=completed" />
+              </div>
+            </div>
+            <DashboardBookings
+              rows={rows.map((r) => ({ ...r, startAt: r.startAt.toISOString(), endAt: r.endAt.toISOString() }))}
+              canManage={user.role === "admin" || user.role === "staff" || user.role === "manager"}
+              userTimezone={user.timezone}
+            />
           </div>
-          {pendingTasks.length === 0 ? (
-            <p className="mt-3 text-sm text-ink-muted">No open tasks. Nice work.</p>
-          ) : (
-            <ul className="mt-3 divide-y text-sm">
-              {pendingTasks.map((t) => {
-                const overdue = t.dueAt ? t.dueAt.getTime() < Date.now() : false;
-                return (
-                  <li key={t.id} className="flex items-center justify-between gap-3 py-2">
-                    <span className="min-w-0 truncate">{t.title}</span>
-                    <span
-                      className={
-                        "shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium " +
-                        (overdue ? "bg-red-100 text-red-700"
-                                : t.dueAt ? "bg-amber-100 text-amber-800"
-                                          : "bg-slate-100 text-slate-600")
-                      }
-                    >
-                      {t.dueAt
-                        ? `${overdue ? "Overdue · " : "Due "}${t.dueAt.toISOString().slice(0, 10)}`
-                        : "No due date"}
-                    </span>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
         </section>
 
-        <section className="rounded-lg border bg-white p-5 shadow-sm">
-          <div className="flex items-baseline justify-between">
-            <h3 className="text-base font-medium">Top services (30d)</h3>
-            <a href="/dashboard/services" className="text-xs text-brand-accent hover:underline">Manage →</a>
-          </div>
-          {topServices.length === 0 ? (
-            <p className="mt-3 text-sm text-ink-muted">No confirmed bookings in the last 30 days.</p>
-          ) : (
-            <ul className="mt-3 divide-y text-sm">
-              {topServices.map((s) => (
-                <li key={s.id} className="flex items-center justify-between gap-3 py-2">
-                  <span className="min-w-0 truncate">{s.name}</span>
-                  <span className="shrink-0 text-xs text-ink-muted">
-                    <span className="font-medium text-ink">{Number(s.n)}</span> bookings ·{" "}
-                    ${Math.round(Number(s.revenue) / 100).toLocaleString()}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
+        <DashboardSidePanel
+          pendingTasks={pendingTasks.map((t) => ({
+            id: t.id,
+            title: t.title,
+            dueAt: t.dueAt ? t.dueAt.toISOString() : null,
+          }))}
+          topServices={topServices.map((s) => ({
+            id: s.id,
+            name: s.name,
+            bookings: Number(s.n),
+            revenueCents: Number(s.revenue),
+          }))}
+          totalBookings={bookingCount}
+          plan={tenant?.plan ?? "free"}
+        />
       </div>
-
-      <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
-        <KpiCard label="Plan" value={tenant?.plan ?? "free"} muted />
-        <KpiCard label="Bookings total" value={String(bookingCount)} muted />
-      </div>
-
-      {/* Tabs */}
-      <div className="mt-10 flex gap-1 border-b">
-        <TabLink active={tab === "today"} label="Today" href="?tab=today" />
-        <TabLink active={tab === "upcoming"} label="Upcoming" href="?tab=upcoming" />
-        <TabLink active={tab === "cancelled"} label="Cancelled" href="?tab=cancelled" />
-        <TabLink active={tab === "completed"} label="Completed" href="?tab=completed" />
-      </div>
-
-      <DashboardBookings
-        rows={rows.map((r) => ({ ...r, startAt: r.startAt.toISOString(), endAt: r.endAt.toISOString() }))}
-        canManage={user.role === "admin" || user.role === "staff" || user.role === "manager"}
-        userTimezone={user.timezone}
-      />
     </Shell>
-  );
-}
-
-function KpiCard({ label, value, muted }: { label: string; value: string; muted?: boolean }) {
-  return (
-    <div className={"rounded-lg border bg-white p-4 shadow-sm " + (muted ? "opacity-90" : "")}>
-      <div className="text-xs uppercase tracking-wider text-slate-500">{label}</div>
-      <div className="mt-1 text-xl font-semibold capitalize">{value}</div>
-    </div>
   );
 }
 
@@ -387,8 +323,10 @@ function TabLink({ active, label, href }: { active: boolean; label: string; href
     <a
       href={href}
       className={
-        "border-b-2 px-3 py-2 text-sm " +
-        (active ? "border-brand-accent font-medium text-brand-accent" : "border-transparent text-slate-600 hover:text-slate-900")
+        "rounded-lg px-2.5 py-1.5 text-[12px] font-medium transition-colors " +
+        (active
+          ? "bg-brand-subtle text-brand-accent"
+          : "text-ink-muted hover:bg-surface-inset hover:text-ink")
       }
     >
       {label}
