@@ -88,14 +88,16 @@ type CustomerDetail = {
   }>;
 };
 
-type Filter = "all" | "active" | "vip" | "archived" | "recent";
+type Filter = "all" | "active" | "vip" | "prospect" | "archived" | "recent";
+type CustomerStatus = "active" | "vip" | "prospect" | "archived";
 
-const FILTERS: Filter[] = ["all", "active", "vip", "archived", "recent"];
+const FILTERS: Filter[] = ["all", "active", "vip", "prospect", "archived", "recent"];
 
 const FILTER_LABEL: Record<Filter, string> = {
   all:      "All",
   active:   "Active",
   vip:      "VIP",
+  prospect: "Prospect",
   archived: "Archived",
   recent:   "Recent · 30d",
 };
@@ -111,6 +113,7 @@ export default function CustomersClient({ userTimezone, canManage }: { userTimez
   const [filter, setFilter] = React.useState<Filter>("all");
   const [openId, setOpenId] = React.useState<string | null>(null);
   const [openNew, setOpenNew] = React.useState(false);
+  const [comingSoon, setComingSoon] = React.useState<null | "import" | "invite">(null);
 
   const reload = React.useCallback(() => {
     const url = new URL("/api/customers", window.location.origin);
@@ -153,6 +156,8 @@ export default function CustomersClient({ userTimezone, canManage }: { userTimez
         <Hero
           canManage={canManage}
           onAdd={() => setOpenNew(true)}
+          onImport={() => setComingSoon("import")}
+          onInvite={() => setComingSoon("invite")}
         />
       </FadeIn>
 
@@ -207,7 +212,11 @@ export default function CustomersClient({ userTimezone, canManage }: { userTimez
         <LoadingSkeleton />
       ) : rows.length === 0 ? (
         <FadeIn delay={4}>
-          <PremiumEmptyState canManage={canManage} onAdd={() => setOpenNew(true)} />
+          <PremiumEmptyState
+            canManage={canManage}
+            onAdd={() => setOpenNew(true)}
+            onImport={() => setComingSoon("import")}
+          />
         </FadeIn>
       ) : filtered.length === 0 ? (
         <FadeIn delay={4}>
@@ -243,13 +252,28 @@ export default function CustomersClient({ userTimezone, canManage }: { userTimez
         onClose={() => setOpenNew(false)}
         onCreated={() => { setOpenNew(false); reload(); }}
       />
+
+      <ComingSoonModal
+        kind={comingSoon}
+        onClose={() => setComingSoon(null)}
+      />
     </div>
   );
 }
 
 // ─── Hero ──────────────────────────────────────────────────────────
 
-function Hero({ canManage, onAdd }: { canManage: boolean; onAdd: () => void }) {
+function Hero({
+  canManage,
+  onAdd,
+  onImport,
+  onInvite,
+}: {
+  canManage: boolean;
+  onAdd: () => void;
+  onImport: () => void;
+  onInvite: () => void;
+}) {
   return (
     <PremiumCard
       compact
@@ -276,8 +300,8 @@ function Hero({ canManage, onAdd }: { canManage: boolean; onAdd: () => void }) {
 
         {canManage && (
           <div className="flex flex-wrap items-center gap-1.5">
-            <SecondaryAction icon={Upload} label="Import" disabled title="CSV import — coming soon" />
-            <SecondaryAction icon={Mail} label="Invite" disabled title="Email invite — coming soon" />
+            <SecondaryAction icon={Upload} label="Import" onClick={onImport} />
+            <SecondaryAction icon={Mail} label="Invite" onClick={onInvite} />
             <button
               type="button"
               onClick={onAdd}
@@ -296,24 +320,184 @@ function Hero({ canManage, onAdd }: { canManage: boolean; onAdd: () => void }) {
 function SecondaryAction({
   icon: Icon,
   label,
-  disabled,
-  title,
+  onClick,
 }: {
   icon: React.ComponentType<{ className?: string; strokeWidth?: number }>;
   label: string;
-  disabled?: boolean;
-  title?: string;
+  onClick: () => void;
 }) {
   return (
     <button
       type="button"
-      disabled={disabled}
-      title={title}
-      className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-border bg-surface px-3 text-[12px] font-medium text-ink-muted shadow-soft transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:bg-surface-inset hover:text-ink hover:shadow-md disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:bg-surface"
+      onClick={onClick}
+      className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-border bg-surface px-3 text-[12px] font-medium text-ink-muted shadow-soft transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:bg-surface-inset hover:text-ink hover:shadow-md"
     >
       <Icon className="h-3.5 w-3.5" strokeWidth={1.75} />
       {label}
     </button>
+  );
+}
+
+// ─── Coming-soon modal ─────────────────────────────────────────────
+
+function ComingSoonModal({
+  kind,
+  onClose,
+}: {
+  kind: null | "import" | "invite";
+  onClose: () => void;
+}) {
+  const reduced = useReducedMotion();
+  React.useEffect(() => {
+    function onKey(e: KeyboardEvent) { if (e.key === "Escape" && kind) onClose(); }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [kind, onClose]);
+
+  const content = kind === "import"
+    ? {
+        eyebrow: "CSV import",
+        title: "Bulk import is coming soon",
+        body: "Drop a CSV of customers (name, email, phone, tags) and we'll deduplicate against your existing workspace. This is in active development.",
+        icon: Upload,
+      }
+    : {
+        eyebrow: "Customer invites",
+        title: "Email invites are coming soon",
+        body: "Send branded invite emails so customers can complete their profile and book themselves in. We're polishing the SES integration for this.",
+        icon: Mail,
+      };
+  const Icon = content?.icon ?? Upload;
+
+  return (
+    <AnimatePresence>
+      {kind && (
+        <>
+          <motion.div
+            className="fixed inset-0 z-40 bg-black/30 backdrop-blur-sm"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+            onClick={onClose}
+            aria-hidden
+          />
+          <motion.div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Coming soon"
+            className="fixed left-1/2 top-1/2 z-50 w-[92%] max-w-md -translate-x-1/2 -translate-y-1/2"
+            initial={reduced ? { opacity: 1, scale: 1 } : { opacity: 0, scale: 0.96, y: 8 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={reduced ? { opacity: 0 } : { opacity: 0, scale: 0.96, y: 8 }}
+            transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+          >
+            <div className="zm-border-sweep relative overflow-hidden rounded-2xl">
+              <div className="relative overflow-hidden rounded-2xl border border-brand-accent/15 bg-gradient-to-br from-brand-subtle/45 via-surface to-surface shadow-2xl">
+                <div
+                  aria-hidden
+                  className="pointer-events-none absolute -right-16 -top-16 h-40 w-40 rounded-full bg-brand-accent/12 blur-3xl"
+                />
+                <span
+                  aria-hidden
+                  className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/60 to-transparent"
+                />
+                <div className="relative flex items-start gap-3 p-5">
+                  <div className="zm-pulse-glow inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-brand-accent to-brand-hover text-white shadow-[0_4px_12px_rgba(53,157,243,0.35)]">
+                    <Icon className="h-5 w-5" strokeWidth={1.75} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[10px] font-semibold uppercase tracking-[0.10em] text-brand-accent">
+                      {content.eyebrow}
+                    </div>
+                    <h3 className="mt-0.5 text-[15px] font-semibold tracking-tight text-ink">
+                      {content.title}
+                    </h3>
+                    <p className="mt-1 text-[12px] leading-relaxed text-ink-muted">
+                      {content.body}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={onClose}
+                    aria-label="Close"
+                    className="-mr-1 -mt-1 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-ink-subtle transition-colors hover:bg-surface-inset hover:text-ink"
+                  >
+                    <X className="h-4 w-4" strokeWidth={2} />
+                  </button>
+                </div>
+                <div className="relative flex justify-end gap-2 border-t border-border/70 bg-surface-subtle/40 px-5 py-3.5">
+                  <span
+                    aria-hidden
+                    className="pointer-events-none absolute inset-x-6 -top-px h-px bg-gradient-to-r from-transparent via-brand-accent/30 to-transparent"
+                  />
+                  <button
+                    type="button"
+                    onClick={onClose}
+                    className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover px-3 text-[12px] font-medium text-white shadow-[0_6px_16px_rgba(53,157,243,0.35)] transition-all hover:-translate-y-0.5 hover:shadow-[0_10px_24px_rgba(53,157,243,0.45)]"
+                  >
+                    Got it
+                  </button>
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        </>
+      )}
+    </AnimatePresence>
+  );
+}
+
+// ─── Status selector — Standard / VIP / Prospect ──────────────────
+
+function StatusSelector({
+  value,
+  onChange,
+  layoutGroupId,
+}: {
+  value: CustomerStatus;
+  onChange: (next: CustomerStatus) => void;
+  layoutGroupId: string;
+}) {
+  const reduced = useReducedMotion();
+  const options: Array<{ value: CustomerStatus; label: string; dot: string; subtleBg: string; activeFrom: string; activeTo: string }> = [
+    { value: "active",   label: "Standard", dot: "bg-brand-accent",  subtleBg: "bg-brand-subtle/60", activeFrom: "from-brand-accent",  activeTo: "to-brand-hover"  },
+    { value: "vip",      label: "VIP",      dot: "bg-amber-500",     subtleBg: "bg-amber-50",        activeFrom: "from-amber-400",     activeTo: "to-amber-500"    },
+    { value: "prospect", label: "Prospect", dot: "bg-slate-400",     subtleBg: "bg-slate-100",       activeFrom: "from-slate-500",     activeTo: "to-slate-600"    },
+  ];
+  return (
+    <div className="relative inline-flex rounded-lg border border-border bg-surface-subtle p-0.5 shadow-soft">
+      {options.map((opt) => {
+        const active = value === opt.value;
+        return (
+          <button
+            key={opt.value}
+            type="button"
+            onClick={() => onChange(opt.value)}
+            aria-pressed={active}
+            className={cn(
+              "relative z-10 inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-[11px] font-medium transition-colors duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] active:scale-[0.97]",
+              active ? "text-white" : "text-ink-muted hover:text-ink",
+            )}
+          >
+            {active && (
+              <motion.span
+                layoutId={`status-indicator-${layoutGroupId}`}
+                className={cn(
+                  "absolute inset-0 rounded-md bg-gradient-to-br shadow-[0_4px_12px_rgba(0,0,0,0.15),inset_0_1px_0_rgba(255,255,255,0.25)]",
+                  opt.activeFrom,
+                  opt.activeTo,
+                )}
+                aria-hidden
+                transition={reduced ? { duration: 0 } : { duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+              />
+            )}
+            <span aria-hidden className={cn("relative inline-block h-1.5 w-1.5 rounded-full", active ? "bg-white/85" : opt.dot)} />
+            <span className="relative">{opt.label}</span>
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
@@ -498,6 +682,7 @@ function CustomerRowCard({
     : "Never booked";
   const isVip = row.status === "vip";
   const isArchived = row.status === "archived";
+  const isProspect = row.status === "prospect";
 
   // Rule-derived lifecycle signal — UI scaffolding for future
   // engagement scoring without any backend dependency.
@@ -569,6 +754,9 @@ function CustomerRowCard({
                   <Crown className="h-2.5 w-2.5" strokeWidth={2} />
                   VIP
                 </span>
+              )}
+              {isProspect && (
+                <LifecycleChip label="Prospect" tone="brand" />
               )}
               {lifecycleSignal && (
                 <LifecycleChip label={lifecycleSignal.label} tone={lifecycleSignal.tone} />
@@ -658,9 +846,11 @@ function MetaChip({
 function PremiumEmptyState({
   canManage,
   onAdd,
+  onImport,
 }: {
   canManage: boolean;
   onAdd: () => void;
+  onImport: () => void;
 }) {
   return (
     <PremiumCard interactive={false} className="relative overflow-hidden bg-gradient-to-br from-brand-subtle/35 via-surface to-brand-subtle/20">
@@ -722,9 +912,8 @@ function PremiumEmptyState({
             </button>
             <button
               type="button"
-              disabled
-              title="CSV import — coming soon"
-              className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-border bg-surface px-3 text-[12px] font-medium text-ink-muted shadow-soft disabled:cursor-not-allowed disabled:opacity-50"
+              onClick={onImport}
+              className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-border bg-surface px-3 text-[12px] font-medium text-ink-muted shadow-soft transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:bg-surface-inset hover:text-ink hover:shadow-md"
             >
               <Upload className="h-3.5 w-3.5" strokeWidth={1.75} />
               Import CSV
@@ -793,12 +982,25 @@ function NewCustomerDrawer({
   const [email, setEmail] = React.useState("");
   const [phone, setPhone] = React.useState("");
   const [notes, setNotes] = React.useState("");
+  const [status, setStatus] = React.useState<CustomerStatus>("active");
+  const [tags, setTags] = React.useState<string[]>([]);
+  const [tagDraft, setTagDraft] = React.useState("");
   const [busy, setBusy] = React.useState(false);
   const reduced = useReducedMotion();
 
   React.useEffect(() => {
-    if (open) { setName(""); setEmail(""); setPhone(""); setNotes(""); }
+    if (open) { setName(""); setEmail(""); setPhone(""); setNotes(""); setStatus("active"); setTags([]); setTagDraft(""); }
   }, [open]);
+
+  function addTag() {
+    const t = tagDraft.trim().toLowerCase();
+    if (!t || tags.includes(t)) { setTagDraft(""); return; }
+    setTags([...tags, t]);
+    setTagDraft("");
+  }
+  function removeTag(t: string) {
+    setTags(tags.filter((x) => x !== t));
+  }
 
   React.useEffect(() => {
     function onKey(e: KeyboardEvent) { if (e.key === "Escape" && open) onClose(); }
@@ -819,6 +1021,8 @@ function NewCustomerDrawer({
           email: email.trim(),
           phone: phone.trim() || null,
           notes: notes.trim() || null,
+          status,
+          tags,
         }),
       });
       if (!r.ok) {
@@ -919,6 +1123,65 @@ function NewCustomerDrawer({
                 </DrawerField>
               </FadeIn>
               <FadeIn delay={4}>
+                <DrawerField label="Relationship tier">
+                  <div className="flex">
+                    <StatusSelector
+                      layoutGroupId="new-customer"
+                      value={status}
+                      onChange={setStatus}
+                    />
+                  </div>
+                </DrawerField>
+              </FadeIn>
+              <FadeIn delay={5}>
+                <DrawerField label="Tags (optional)">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {tags.length === 0 && (
+                        <span className="text-[11px] text-ink-subtle">No tags yet — add labels like &quot;enterprise&quot;, &quot;referral&quot;, &quot;priority&quot;.</span>
+                      )}
+                      {tags.map((t) => (
+                        <span
+                          key={t}
+                          className="inline-flex items-center gap-1 rounded-full bg-violet-50/80 px-2 py-0.5 text-[10px] font-medium text-violet-700 ring-1 ring-violet-200/40"
+                        >
+                          {t}
+                          <button
+                            type="button"
+                            onClick={() => removeTag(t)}
+                            aria-label={`Remove tag ${t}`}
+                            className="text-violet-500 hover:text-red-600"
+                          >
+                            ×
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                    <div className="mt-2 flex gap-2">
+                      <input
+                        value={tagDraft}
+                        onChange={(e) => setTagDraft(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") { e.preventDefault(); addTag(); }
+                        }}
+                        placeholder="Add a tag…"
+                        className={cn(INPUT_CLS, "flex-1")}
+                        maxLength={40}
+                      />
+                      <button
+                        type="button"
+                        onClick={addTag}
+                        disabled={!tagDraft.trim()}
+                        className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-border bg-surface px-3 text-[12px] font-medium text-ink-muted shadow-soft transition-all hover:-translate-y-0.5 hover:bg-surface-inset hover:text-ink disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:bg-surface"
+                      >
+                        Add
+                      </button>
+                    </div>
+                  </div>
+                </DrawerField>
+              </FadeIn>
+
+              <FadeIn delay={6}>
                 <DrawerField label="Internal notes (optional)">
                   <textarea
                     rows={3}
@@ -1004,6 +1267,7 @@ function applyFilter(rows: Row[], filter: Filter): Row[] {
     case "all":      return rows;
     case "active":   return rows.filter((r) => r.status === "active");
     case "vip":      return rows.filter((r) => r.status === "vip");
+    case "prospect": return rows.filter((r) => r.status === "prospect");
     case "archived": return rows.filter((r) => r.status === "archived");
     case "recent": {
       const cutoff = Date.now() - 30 * 86_400_000;
@@ -1018,6 +1282,7 @@ function computeCounts(rows: Row[]): Record<Filter, number> {
     all:      rows.length,
     active:   rows.filter((r) => r.status === "active").length,
     vip:      rows.filter((r) => r.status === "vip").length,
+    prospect: rows.filter((r) => r.status === "prospect").length,
     archived: rows.filter((r) => r.status === "archived").length,
     recent:   rows.filter((r) => r.lastAppointmentAt && new Date(r.lastAppointmentAt).getTime() >= cutoff).length,
   };
@@ -1070,6 +1335,29 @@ function CustomerDrawer({
     }
   }
 
+  async function setRelationshipStatus(next: CustomerStatus) {
+    if (!id || !data) return;
+    const previous = data.customer.status as CustomerStatus;
+    // Optimistic update
+    setData({ ...data, customer: { ...data.customer, status: next } });
+    try {
+      const res = await fetch(`/api/customers/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: next }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        throw new Error(d?.error ?? "Failed");
+      }
+      toast(`Marked as ${next === "active" ? "Standard" : next.charAt(0).toUpperCase() + next.slice(1)}`, "success");
+    } catch (e) {
+      // Roll back
+      setData({ ...data, customer: { ...data.customer, status: previous } });
+      toast(e instanceof Error ? e.message : "Failed", "error");
+    }
+  }
+
   const open = Boolean(id);
 
   return (
@@ -1096,10 +1384,12 @@ function CustomerDrawer({
                     <span className={cn(
                       "inline-flex h-1.5 w-1.5 rounded-full",
                       data.customer.status === "vip" ? "bg-amber-500" :
-                      data.customer.status === "archived" ? "bg-slate-400" : "bg-brand-accent",
+                      data.customer.status === "archived" ? "bg-slate-400" :
+                      data.customer.status === "prospect" ? "bg-slate-500" : "bg-brand-accent",
                     )} />
                     {data.customer.status === "vip" ? "VIP" :
-                     data.customer.status === "archived" ? "Archived" : "Active"}
+                     data.customer.status === "archived" ? "Archived" :
+                     data.customer.status === "prospect" ? "Prospect" : "Active"}
                   </span>
                   <h2 className="mt-1.5 text-[17px] font-semibold tracking-tight text-ink">{data.customer.name}</h2>
                   <a className="text-[12px] text-brand-accent transition-colors hover:text-brand-hover" href={`mailto:${data.customer.email}`}>
@@ -1140,6 +1430,22 @@ function CustomerDrawer({
           <div className="flex-1 overflow-y-auto p-5">
             {tab === "overview" && (
               <div>
+                {canManage && (
+                  <div className="mb-5">
+                    <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-subtle">
+                      Relationship tier
+                    </div>
+                    <div className="mt-2">
+                      <StatusSelector
+                        layoutGroupId={`drawer-${data.customer.id}`}
+                        value={(["active", "vip", "prospect", "archived"].includes(data.customer.status)
+                          ? data.customer.status
+                          : "active") as CustomerStatus}
+                        onChange={(next) => setRelationshipStatus(next)}
+                      />
+                    </div>
+                  </div>
+                )}
                 <div className="grid grid-cols-2 gap-3">
                   <Stat label="Total bookings" value={String(data.history.length)} />
                   <Stat label="Completed" value={String(data.history.filter((h) => h.status === "completed").length)} />

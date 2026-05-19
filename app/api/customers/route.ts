@@ -6,11 +6,15 @@ import { db } from "@/db/client";
 import { bookings, customers } from "@/db/schema";
 import { errorResponse, HttpError, requireUser } from "@/lib/auth";
 
+const STATUS_VALUES = ["active", "vip", "archived", "prospect"] as const;
+
 const createSchema = z.object({
   name: z.string().min(1).max(120),
   email: z.string().email(),
   phone: z.string().max(40).nullable().optional(),
   notes: z.string().max(5000).nullable().optional(),
+  status: z.enum(STATUS_VALUES).optional(),
+  tags: z.array(z.string().min(1).max(40)).max(50).optional(),
 });
 
 export async function GET(req: NextRequest) {
@@ -87,6 +91,15 @@ export async function POST(req: NextRequest) {
       throw new HttpError(409, "A customer with this email already exists");
     }
 
+    // Normalize tags: trim, lowercase, dedup, drop empty.
+    let normalizedTags: string[] | undefined = undefined;
+    if (body.tags) {
+      const seen = new Set<string>();
+      normalizedTags = body.tags
+        .map((t) => t.trim().toLowerCase())
+        .filter((t) => t && !seen.has(t) && (seen.add(t), true));
+    }
+
     const [row] = await db
       .insert(customers)
       .values({
@@ -95,6 +108,8 @@ export async function POST(req: NextRequest) {
         email: body.email,
         phone: body.phone ?? null,
         notes: body.notes ?? null,
+        ...(body.status ? { status: body.status } : {}),
+        ...(normalizedTags ? { tags: normalizedTags } : {}),
       })
       .returning();
 

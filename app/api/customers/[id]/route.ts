@@ -10,7 +10,10 @@ const patchSchema = z.object({
   name: z.string().min(1).max(120).optional(),
   phone: z.string().max(40).nullable().optional(),
   notes: z.string().max(5000).nullable().optional(),
-  status: z.enum(["active", "vip", "archived"]).optional(),
+  // "prospect" added in Phase 6C — pre-customer relationship tier
+  // for nurture / outreach flows. DB column is varchar(40) so this
+  // string fits without a schema change.
+  status: z.enum(["active", "vip", "archived", "prospect"]).optional(),
   // Free-form labels: dedup + lowercase happens server-side so the UI
   // doesn't have to. Cap arbitrary count for safety.
   tags: z.array(z.string().min(1).max(40)).max(50).optional(),
