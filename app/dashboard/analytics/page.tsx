@@ -1,10 +1,12 @@
 import { redirect } from "next/navigation";
-import { and, count, desc, eq, gte, lt, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, lt, sql } from "drizzle-orm";
 import { db } from "@/db/client";
-import { bookings, services, tenants, users } from "@/db/schema";
+import { analyticsDailySnapshots, bookings, services, tenants, users } from "@/db/schema";
 import { getSession } from "@/lib/auth";
 import { planFeature } from "@/lib/quotas";
 import Shell from "@/components/dashboard/Shell";
+import { generateInsights, type Insight } from "@/lib/analytics/insights";
+import type { DailyAggregate, SnapshotExtras } from "@/lib/analytics/types";
 
 export default async function AnalyticsPage() {
   const session = await getSession();
@@ -88,6 +90,80 @@ export default async function AnalyticsPage() {
   const conversionPct = created > 0 ? Math.round(((created - cancelled) / created) * 100) : 0;
   const revenue = Number(revenueMonthRow?.revenue ?? 0);
 
+  // ─── Snapshot-backed sections ───────────────────────────────────────
+  // Load the last 30 days of analytics_daily_snapshots. Tenants who
+  // haven't accumulated snapshots yet (new feature) get an empty array
+  // — the UI gracefully shows "more data appearing soon" rather than
+  // empty charts.
+  const thirtyDayCutoff = new Date(now.getTime() - 30 * 24 * 60 * 60_000)
+    .toISOString().slice(0, 10);
+  const snapshotRows = await db
+    .select()
+    .from(analyticsDailySnapshots)
+    .where(
+      and(
+        eq(analyticsDailySnapshots.tenantId, user.tenantId),
+        gte(analyticsDailySnapshots.snapshotDate, thirtyDayCutoff)
+      )
+    )
+    .orderBy(asc(analyticsDailySnapshots.snapshotDate));
+
+  const aggregates: DailyAggregate[] = snapshotRows.map((r) => ({
+    tenantId: r.tenantId,
+    snapshotDate: r.snapshotDate,
+    totalBookings: r.totalBookings,
+    completedBookings: r.completedBookings,
+    cancelledBookings: r.cancelledBookings,
+    noShowBookings: r.noShowBookings,
+    recurringBookings: r.recurringBookings,
+    waitlistJoins: r.waitlistJoins,
+    waitlistConversions: r.waitlistConversions,
+    reviewRequestsSent: r.reviewRequestsSent,
+    reviewsCompleted: r.reviewsCompleted,
+    reminderEmailsSent: r.reminderEmailsSent,
+    reminderEmailsSuppressed: r.reminderEmailsSuppressed,
+    followupsSent: r.followupsSent,
+    averageBookingLeadHours: r.averageBookingLeadHours,
+    extras: (r.extras as SnapshotExtras) ?? {},
+  }));
+
+  const insights = generateInsights(aggregates);
+
+  // Sum-across-window totals for the section cards.
+  const sumWindow = aggregates.reduce(
+    (acc, s) => ({
+      reminderEmailsSent: acc.reminderEmailsSent + s.reminderEmailsSent,
+      reminderEmailsSuppressed: acc.reminderEmailsSuppressed + s.reminderEmailsSuppressed,
+      reviewRequestsSent: acc.reviewRequestsSent + s.reviewRequestsSent,
+      followupsSent: acc.followupsSent + s.followupsSent,
+      waitlistJoins: acc.waitlistJoins + s.waitlistJoins,
+      waitlistConversions: acc.waitlistConversions + s.waitlistConversions,
+      recurringBookings: acc.recurringBookings + s.recurringBookings,
+    }),
+    {
+      reminderEmailsSent: 0,
+      reminderEmailsSuppressed: 0,
+      reviewRequestsSent: 0,
+      followupsSent: 0,
+      waitlistJoins: 0,
+      waitlistConversions: 0,
+      recurringBookings: 0,
+    }
+  );
+
+  // Aggregate per-staff counts across the snapshot window.
+  const staffTotals: Record<string, number> = {};
+  for (const s of aggregates) {
+    const map = s.extras.staffAssignments ?? {};
+    for (const [k, v] of Object.entries(map)) {
+      staffTotals[k] = (staffTotals[k] ?? 0) + v;
+    }
+  }
+  const staffRows = Object.entries(staffTotals)
+    .map(([staffName, n]) => ({ staffName, count: n }))
+    .sort((a, b) => b.count - a.count);
+  const staffTotal = staffRows.reduce((acc, s) => acc + s.count, 0);
+
   return (
     <Shell {...shellProps}>
       <h1 className="text-heading font-semibold text-ink">Analytics</h1>
@@ -110,6 +186,93 @@ export default async function AnalyticsPage() {
       <div className="mt-3 rounded-lg border bg-white p-4 shadow-sm">
         <BarChart days={days} />
       </div>
+
+      {/* OPERATIONAL INSIGHTS — only shown when generators emit. */}
+      {insights.length > 0 && (
+        <>
+          <h2 className="mt-10 text-lg font-medium">Operational insights</h2>
+          <ul className="mt-3 space-y-2">
+            {insights.map((it) => (
+              <li
+                key={it.code}
+                className={
+                  "rounded-lg border p-3 text-sm " +
+                  (it.kind === "warning"
+                    ? "border-amber-200 bg-amber-50 text-amber-900"
+                    : it.kind === "positive"
+                      ? "border-green-200 bg-green-50 text-green-900"
+                      : "border-slate-200 bg-slate-50 text-slate-700")
+                }
+              >
+                {it.message}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+
+      {/* SNAPSHOT-BACKED SECTIONS — show only when we have snapshot history. */}
+      {aggregates.length > 0 ? (
+        <>
+          <div className="mt-10 flex items-baseline justify-between gap-3">
+            <h2 className="text-lg font-medium">Last {aggregates.length}-day rollup</h2>
+            <a
+              href="/api/tenant/analytics/export?range=30"
+              className="text-xs text-slate-500 underline-offset-2 hover:text-slate-900 hover:underline"
+            >
+              ↓ Export CSV
+            </a>
+          </div>
+
+          <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <Stat label="Reminder emails sent" value={String(sumWindow.reminderEmailsSent)} muted />
+            <Stat label="Reminders suppressed" value={String(sumWindow.reminderEmailsSuppressed)} muted />
+            <Stat label="Review requests sent" value={String(sumWindow.reviewRequestsSent)} muted />
+            <Stat label="Follow-ups sent" value={String(sumWindow.followupsSent)} muted />
+          </div>
+
+          <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
+            <Stat label="Waitlist joins" value={String(sumWindow.waitlistJoins)} muted />
+            <Stat label="Waitlist conversions" value={String(sumWindow.waitlistConversions)} muted />
+            <Stat label="Recurring bookings" value={String(sumWindow.recurringBookings)} muted />
+          </div>
+
+          {staffRows.length > 0 && (
+            <>
+              <h2 className="mt-10 text-lg font-medium">Staff utilization</h2>
+              <div className="mt-3 rounded-lg border bg-white shadow-sm">
+                <ul className="divide-y">
+                  {staffRows.slice(0, 8).map((s) => {
+                    const share = staffTotal > 0 ? Math.round((s.count / staffTotal) * 100) : 0;
+                    return (
+                      <li key={s.staffName} className="px-4 py-3 text-sm">
+                        <div className="flex items-center justify-between">
+                          <span className="truncate">{s.staffName}</span>
+                          <span className="text-slate-500 tabular-nums">
+                            {s.count} ({share}%)
+                          </span>
+                        </div>
+                        <div className="mt-1 h-1.5 rounded-full bg-slate-100">
+                          <div
+                            className="h-1.5 rounded-full bg-blue-500"
+                            style={{ width: `${share}%` }}
+                          />
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            </>
+          )}
+        </>
+      ) : (
+        <div className="mt-10 rounded-lg border border-dashed border-slate-300 bg-slate-50 p-6 text-center text-sm text-slate-500">
+          More analytics appear once daily snapshots accumulate. The
+          first snapshot is generated overnight; backfill is available
+          via <code className="font-mono text-xs">BACKFILL_DAYS</code>.
+        </div>
+      )}
 
       <h2 className="mt-10 text-lg font-medium">Top services this month</h2>
       <div className="mt-3 rounded-lg border bg-white shadow-sm">

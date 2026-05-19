@@ -740,6 +740,42 @@ export const calendarSyncLogs = pgTable(
   })
 );
 
+// ─── Analytics daily snapshots ──────────────────────────────────────────
+// One row per (tenant, day). The aggregation worker upserts this table
+// nightly. Without rows, the analytics page falls back to live queries
+// — preserves the existing pre-feature behavior (rule #12).
+export const analyticsDailySnapshots = pgTable(
+  "analytics_daily_snapshots",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    snapshotDate: date("snapshot_date").notNull(),
+    totalBookings: integer("total_bookings").notNull().default(0),
+    completedBookings: integer("completed_bookings").notNull().default(0),
+    cancelledBookings: integer("cancelled_bookings").notNull().default(0),
+    noShowBookings: integer("no_show_bookings").notNull().default(0),
+    recurringBookings: integer("recurring_bookings").notNull().default(0),
+    waitlistJoins: integer("waitlist_joins").notNull().default(0),
+    waitlistConversions: integer("waitlist_conversions").notNull().default(0),
+    reviewRequestsSent: integer("review_requests_sent").notNull().default(0),
+    reviewsCompleted: integer("reviews_completed").notNull().default(0),
+    reminderEmailsSent: integer("reminder_emails_sent").notNull().default(0),
+    reminderEmailsSuppressed: integer("reminder_emails_suppressed").notNull().default(0),
+    followupsSent: integer("followups_sent").notNull().default(0),
+    averageBookingLeadHours: integer("average_booking_lead_hours"),
+    /** jsonb side-channel — keys defined by aggregation modules. */
+    extras: jsonb("extras").notNull().default({}),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    tenantIdx: index("analytics_daily_snapshots_tenant_idx").on(t.tenantId),
+    dateIdx: index("analytics_daily_snapshots_date_idx").on(t.snapshotDate),
+    unique: uniqueIndex("analytics_daily_snapshots_unique").on(t.tenantId, t.snapshotDate),
+  })
+);
+
 // ─── Recurring bookings (series + occurrences) ─────────────────────────
 // One series per recurring appointment. The materialization worker
 // rolls a 30-day window forward, generating occurrence rows and
