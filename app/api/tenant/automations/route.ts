@@ -9,7 +9,8 @@ import {
   services,
 } from "@/db/schema";
 import { audit, ipFromHeaders } from "@/lib/audit";
-import { errorResponse, HttpError, requireRole } from "@/lib/auth";
+import { errorResponse, HttpError } from "@/lib/auth";
+import { requirePermissionOrRole } from "@/lib/security/permissions";
 import {
   FOLLOWUP_TRIGGER_EVENTS,
   REVIEW_PLATFORMS,
@@ -21,7 +22,11 @@ import {
 // to power the scope picker. Tenant-isolated.
 export async function GET() {
   try {
-    const admin = await requireRole(["admin", "manager"]);
+    const admin = await requirePermissionOrRole({
+      allowRoles: ["admin", "manager"],
+      requirePermission: "canManageAutomation",
+      auditPath: "/api/tenant/automations",
+    });
 
     const [reviews, followups, allServices] = await Promise.all([
       db
@@ -90,7 +95,11 @@ const putSchema = z.discriminatedUnion("kind", [reviewUpsertSchema, followupUpse
 
 export async function PUT(req: NextRequest) {
   try {
-    const admin = await requireRole(["admin", "manager"]);
+    const admin = await requirePermissionOrRole({
+      allowRoles: ["admin", "manager"],
+      requirePermission: "canManageAutomation",
+      auditPath: "/api/tenant/automations",
+    });
     const body = putSchema.parse(await req.json());
 
     // Validate any referenced serviceId belongs to this tenant.
@@ -210,7 +219,11 @@ export async function PUT(req: NextRequest) {
 //   |    /api/tenant/automations?kind=followup&id=...
 export async function DELETE(req: NextRequest) {
   try {
-    const admin = await requireRole(["admin", "manager"]);
+    const admin = await requirePermissionOrRole({
+      allowRoles: ["admin", "manager"],
+      requirePermission: "canManageAutomation",
+      auditPath: "/api/tenant/automations",
+    });
     const kind = req.nextUrl.searchParams.get("kind");
     const id = req.nextUrl.searchParams.get("id");
     if (!id || (kind !== "review" && kind !== "followup")) {

@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 
-import { errorResponse, requireRole } from "@/lib/auth";
+import { errorResponse } from "@/lib/auth";
+import { requirePermissionOrRole } from "@/lib/security/permissions";
 import { db } from "@/db/client";
 import { analyticsDailySnapshots } from "@/db/schema";
 import { and, asc, eq, gte, lte } from "drizzle-orm";
@@ -22,7 +23,11 @@ import type { DailyAggregate, SnapshotExtras } from "@/lib/analytics/types";
 // breakdowns. Wide; suitable for stakeholder distribution.
 export async function GET(req: NextRequest) {
   try {
-    const admin = await requireRole(["admin", "manager"]);
+    const admin = await requirePermissionOrRole({
+      allowRoles: ["admin", "manager"],
+      requirePermission: "canExportReports",
+      auditPath: "/api/tenant/analytics/executive/export",
+    });
     const days = Math.max(14, Math.min(365, Number(req.nextUrl.searchParams.get("range") ?? 60)));
 
     const today = new Date();

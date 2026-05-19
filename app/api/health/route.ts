@@ -360,6 +360,59 @@ export async function GET() {
     }
   }
 
+  // Permission denials (24h) — counts security.permission.denied
+  // audit rows. A sudden spike signals either misconfigured
+  // permissions OR an active probing attempt. Soft-fail; detail
+  // surfaces the count.
+  {
+    const start = Date.now();
+    try {
+      const rows = (await db.execute(
+        sql`SELECT count(*)::int AS n FROM audit_logs
+            WHERE action = 'security.permission.denied'
+              AND created_at > NOW() - INTERVAL '24 hours'`
+      )) as unknown as Array<{ n: number | string | null }>;
+      const n = Number(rows[0]?.n ?? 0);
+      checks.permission_denials_24h = {
+        ok: true,
+        ms: Date.now() - start,
+        detail: `count=${n}`,
+      };
+    } catch (e) {
+      checks.permission_denials_24h = {
+        ok: false,
+        ms: Date.now() - start,
+        detail: (e as Error).message,
+      };
+    }
+  }
+
+  // Permission-override count — total users with a non-empty
+  // permissions_extra jsonb. Useful for seeing how widely the granular
+  // system has been adopted vs the default role grants.
+  {
+    const start = Date.now();
+    try {
+      const rows = (await db.execute(
+        sql`SELECT count(*)::int AS n FROM users
+            WHERE permissions_extra IS NOT NULL
+              AND permissions_extra <> '{}'::jsonb`
+      )) as unknown as Array<{ n: number | string | null }>;
+      const n = Number(rows[0]?.n ?? 0);
+      checks.permission_overrides = {
+        ok: true,
+        ms: Date.now() - start,
+        detail: `users_with_overrides=${n}`,
+      };
+    } catch (e) {
+      checks.permission_overrides = {
+        ok: false,
+        ms: Date.now() - start,
+        detail: (e as Error).message,
+      };
+    }
+  }
+
   // Stale tenant detection — tenants whose most recent
   // analytics_daily_snapshots row is > 36h old. Likely indicates the
   // cron skipped them. Soft-fail; detail surfaces the count.

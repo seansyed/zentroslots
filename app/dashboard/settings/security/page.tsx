@@ -12,7 +12,7 @@ import {
 import { getSession } from "@/lib/auth";
 import Shell from "@/components/dashboard/Shell";
 import SecurityClient from "@/components/dashboard/SecurityClient";
-import { userHasPermission, effectivePermissions } from "@/lib/security/permissions";
+import { userHasPermission, effectivePermissions, PERMISSION_FLAGS } from "@/lib/security/permissions";
 
 export const metadata = { title: "Security" };
 export const dynamic = "force-dynamic";
@@ -118,9 +118,42 @@ export default async function SecurityPage() {
     revoked: revokedSet.has(e.sessionJti!),
   }));
 
+  // Tenant user list for the permissions manager — only loaded when
+  // the caller can manage security (gates DB read too, not just UI).
+  let tenantUsers: Array<{
+    id: string;
+    email: string;
+    name: string;
+    role: string;
+    effective: Record<string, boolean>;
+    overrides: Record<string, boolean>;
+    isCaller: boolean;
+  }> = [];
+  if (canManage) {
+    const rows = await db
+      .select({
+        id: users.id,
+        email: users.email,
+        name: users.name,
+        role: users.role,
+        permissionsExtra: users.permissionsExtra,
+      })
+      .from(users)
+      .where(eq(users.tenantId, tenant.id));
+    tenantUsers = rows.map((r) => ({
+      id: r.id,
+      email: r.email,
+      name: r.name,
+      role: r.role,
+      effective: effectivePermissions({ ...r } as Parameters<typeof effectivePermissions>[0]),
+      overrides: (r.permissionsExtra ?? {}) as Record<string, boolean>,
+      isCaller: r.id === user.id,
+    }));
+  }
+
   return (
     <Shell
-      user={{ name: user.name, email: user.email, role: user.role }}
+      user={{ name: user.name, email: user.email, role: user.role, permissions }}
       tenant={{
         name: tenant.name,
         slug: tenant.slug,
@@ -149,6 +182,8 @@ export default async function SecurityPage() {
       <SecurityClient
         canManage={canManage}
         permissions={permissions}
+        permissionFlags={[...PERMISSION_FLAGS]}
+        tenantUsers={tenantUsers}
         activeSessions={activeSessions}
         recentLogins={recentLogins.map(serialize)}
         failedLogins={failedLogins.map(serialize)}

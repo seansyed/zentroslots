@@ -6,6 +6,7 @@ import { getSession } from "@/lib/auth";
 import { planFeature } from "@/lib/quotas";
 import Shell from "@/components/dashboard/Shell";
 import { generateInsights, type Insight } from "@/lib/analytics/insights";
+import { effectivePermissions } from "@/lib/security/permissions";
 import type { DailyAggregate, SnapshotExtras } from "@/lib/analytics/types";
 
 export default async function AnalyticsPage() {
@@ -16,8 +17,9 @@ export default async function AnalyticsPage() {
   const tenant = await db.query.tenants.findFirst({ where: eq(tenants.id, user.tenantId) });
   if (!tenant) redirect("/dashboard");
 
+  const permissions = effectivePermissions(user);
   const shellProps = {
-    user: { name: user.name, email: user.email, role: user.role },
+    user: { name: user.name, email: user.email, role: user.role, permissions },
     tenant: { name: tenant.name, slug: tenant.slug, plan: tenant.currentPlan, logoUrl: tenant.logoUrl },
     title: "Analytics",
     crumbs: [{ label: "Dashboard", href: "/dashboard" }, { label: "Analytics" }],

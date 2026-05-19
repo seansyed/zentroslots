@@ -16,6 +16,7 @@ import {
   loadRepeatCustomerForComparison,
 } from "@/lib/analytics/customerIntelligence";
 import { buildOptimizationRecommendations } from "@/lib/analytics/optimizationEngine";
+import { effectivePermissions } from "@/lib/security/permissions";
 import type { DailyAggregate, SnapshotExtras } from "@/lib/analytics/types";
 
 export const metadata = { title: "Executive analytics" };
@@ -31,8 +32,9 @@ export default async function ExecutiveAnalyticsPage() {
   const tenant = await db.query.tenants.findFirst({ where: eq(tenants.id, user.tenantId) });
   if (!tenant) redirect("/dashboard");
 
+  const permissions = effectivePermissions(user);
   const shellProps = {
-    user: { name: user.name, email: user.email, role: user.role },
+    user: { name: user.name, email: user.email, role: user.role, permissions },
     tenant: {
       name: tenant.name,
       slug: tenant.slug,
@@ -155,12 +157,14 @@ export default async function ExecutiveAnalyticsPage() {
             Business-level KPIs comparing the last {halfDays} days against the prior {halfDays}.
           </p>
         </div>
-        <a
-          href={`/api/tenant/analytics/executive/export?range=${WINDOW_DAYS}`}
-          className="rounded-md border border-border bg-surface px-3 py-1.5 text-sm text-ink hover:bg-surface-inset"
-        >
-          ↓ Export executive CSV
-        </a>
+        {permissions.canExportReports && (
+          <a
+            href={`/api/tenant/analytics/executive/export?range=${WINDOW_DAYS}`}
+            className="rounded-md border border-border bg-surface px-3 py-1.5 text-sm text-ink hover:bg-surface-inset"
+          >
+            ↓ Export executive CSV
+          </a>
+        )}
       </div>
 
       {/* EXECUTIVE SUMMARY */}

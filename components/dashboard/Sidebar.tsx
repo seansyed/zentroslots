@@ -14,6 +14,18 @@ export type SidebarUser = {
   name: string;
   email: string;
   role: Role;
+  /** Optional granular permission map. When present, nav links can hide
+   *  based on specific flags (in addition to role gates below). When
+   *  absent, the sidebar falls back to role-only gating — existing
+   *  Shell callers that don't pass this map keep working unchanged. */
+  permissions?: Partial<Record<
+    | "canViewExecutiveAnalytics"
+    | "canManageAutomation"
+    | "canExportReports"
+    | "canManageSecurity"
+    | "canViewAuditLogs",
+    boolean
+  >>;
 };
 
 export type SidebarTenant = {
@@ -52,7 +64,22 @@ const I = {
   flag:      <Icon path="M4 22V4M4 4l12 4-3 3 3 3-12 4" />,
 };
 
-function buildNav(variant: SidebarVariant, role: Role): Group[] {
+function buildNav(
+  variant: SidebarVariant,
+  role: Role,
+  permissions?: SidebarUser["permissions"]
+): Group[] {
+  // Helper: a flag passes if explicitly true, OR if it's missing (server
+  // hasn't passed it yet) and the role would default to true. This keeps
+  // back-compat for any caller that doesn't yet plumb permissions through.
+  const flagOrRoleDefault = (
+    flag: keyof NonNullable<SidebarUser["permissions"]>,
+    fallback: boolean
+  ): boolean => {
+    if (permissions === undefined) return fallback;
+    if (permissions[flag] !== undefined) return permissions[flag] === true;
+    return fallback;
+  };
   if (variant === "super") {
     return [
       {
@@ -99,9 +126,21 @@ function buildNav(variant: SidebarVariant, role: Role): Group[] {
     { label: "Calendar sync", href: "/dashboard/settings/calendar",       icon: I.link },
   ];
 
+  // Role-default helpers — match ROLE_DEFAULTS in lib/security/permissions.ts.
+  const roleDefaults = {
+    canViewExecutiveAnalytics: role === "admin" || role === "manager",
+    canManageAutomation:       role === "admin" || role === "manager",
+    canExportReports:          role === "admin" || role === "manager",
+    canViewAuditLogs:          role === "admin" || role === "manager",
+  };
+
   const insightAndSettings: Item[] = [
     { label: "Analytics",    href: "/dashboard/analytics",           icon: I.bar },
-    { label: "Executive",    href: "/dashboard/analytics/executive", icon: I.bar },
+    // Executive link hides when the user lacks canViewExecutiveAnalytics
+    // (admins/managers see it by default; staff with override see it).
+    ...(flagOrRoleDefault("canViewExecutiveAnalytics", roleDefaults.canViewExecutiveAnalytics)
+      ? [{ label: "Executive", href: "/dashboard/analytics/executive", icon: I.bar }]
+      : []),
     { label: "Reports",      href: "/dashboard/reports",             icon: I.receipt },
     ...(role === "admin"
       ? [
@@ -115,14 +154,22 @@ function buildNav(variant: SidebarVariant, role: Role): Group[] {
           { label: "Feature controls", href: "/dashboard/settings/features", icon: I.flag },
           { label: "Staff routing", href: "/dashboard/settings/routing", icon: I.bar },
           { label: "Booking rules", href: "/dashboard/settings/booking-rules", icon: I.clock },
-          { label: "Follow-up automations", href: "/dashboard/settings/automations", icon: I.bell },
+        ]
+      : []),
+    // Automations link hides when the user lacks canManageAutomation
+    // (admin/manager default, staff with override).
+    ...(flagOrRoleDefault("canManageAutomation", roleDefaults.canManageAutomation)
+      ? [{ label: "Follow-up automations", href: "/dashboard/settings/automations", icon: I.bell }]
+      : []),
+    ...(role === "admin"
+      ? [
           { label: "Waitlists", href: "/dashboard/settings/waitlists", icon: I.users },
           { label: "Recurring bookings", href: "/dashboard/settings/recurring", icon: I.clock },
         ]
       : []),
     // Security is available to ALL signed-in users (read access).
     // Manage actions inside the page are further gated by
-    // canManageSecurity.
+    // canManageSecurity (server-enforced + UI-gated).
     { label: "Security", href: "/dashboard/settings/security", icon: I.shield },
   ];
 
@@ -151,7 +198,7 @@ export default function Sidebar({
   variant?: SidebarVariant;
 }) {
   const pathname = usePathname();
-  const groups = buildNav(variant, user.role);
+  const groups = buildNav(variant, user.role, user.permissions);
 
   return (
     <div className="flex h-full flex-col">

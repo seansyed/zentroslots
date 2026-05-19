@@ -3,7 +3,8 @@ import { and, asc, eq, gte, lte } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import { analyticsDailySnapshots } from "@/db/schema";
-import { errorResponse, requireRole } from "@/lib/auth";
+import { errorResponse } from "@/lib/auth";
+import { requirePermissionOrRole } from "@/lib/security/permissions";
 
 // GET /api/tenant/analytics/export?range=30
 //
@@ -15,7 +16,11 @@ const MAX_DAYS = 365;
 
 export async function GET(req: NextRequest) {
   try {
-    const admin = await requireRole(["admin", "manager"]);
+    const admin = await requirePermissionOrRole({
+      allowRoles: ["admin", "manager"],
+      requirePermission: "canExportReports",
+      auditPath: "/api/tenant/analytics/export",
+    });
     const rangeParam = Number(req.nextUrl.searchParams.get("range") ?? DEFAULT_DAYS);
     const days = Math.max(1, Math.min(MAX_DAYS, isFinite(rangeParam) ? rangeParam : DEFAULT_DAYS));
 

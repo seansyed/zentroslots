@@ -3,7 +3,8 @@ import { and, asc, eq, gte, lte } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import { analyticsDailySnapshots } from "@/db/schema";
-import { errorResponse, requireRole } from "@/lib/auth";
+import { errorResponse } from "@/lib/auth";
+import { requirePermissionOrRole } from "@/lib/security/permissions";
 import { generateInsights } from "@/lib/analytics/insights";
 import type { DailyAggregate, SnapshotExtras } from "@/lib/analytics/types";
 
@@ -17,7 +18,15 @@ const MAX_DAYS = 365;
 
 export async function GET(req: NextRequest) {
   try {
-    const admin = await requireRole(["admin", "manager"]);
+    // Granular gate: canViewExecutiveAnalytics (admin + manager have
+    // it by default — back-compat). allowRoles is kept so a legacy
+    // admin/manager passes even if a per-user override revoked the
+    // flag from them.
+    const admin = await requirePermissionOrRole({
+      allowRoles: ["admin", "manager"],
+      requirePermission: "canViewExecutiveAnalytics",
+      auditPath: "/api/tenant/analytics",
+    });
     const rangeParam = Number(req.nextUrl.searchParams.get("range") ?? DEFAULT_DAYS);
     const days = Math.max(1, Math.min(MAX_DAYS, isFinite(rangeParam) ? rangeParam : DEFAULT_DAYS));
 

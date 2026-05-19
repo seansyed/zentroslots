@@ -32,9 +32,21 @@ type ResetRow = {
   consumedIp: string | null;
 };
 
+type TenantUserRow = {
+  id: string;
+  email: string;
+  name: string;
+  role: string;
+  effective: Record<string, boolean>;
+  overrides: Record<string, boolean>;
+  isCaller: boolean;
+};
+
 export default function SecurityClient(props: {
   canManage: boolean;
   permissions: Record<string, boolean>;
+  permissionFlags?: string[];
+  tenantUsers?: TenantUserRow[];
   activeSessions: SessionRow[];
   recentLogins: EventRow[];
   failedLogins: EventRow[];
@@ -244,6 +256,26 @@ export default function SecurityClient(props: {
         </div>
       </section>
 
+      {/* ── Tenant user permissions manager ─────────────────────── */}
+      {props.canManage && props.tenantUsers && props.permissionFlags && (
+        <section>
+          <h2 className="mb-2 text-sm font-semibold text-ink">User permissions</h2>
+          <p className="mb-3 text-xs text-ink-muted">
+            Per-user overrides for granular permission flags. Each toggle
+            grants, revokes, or clears the override (reverting to the role
+            default). Cannot modify your own permissions. Cannot grant a flag
+            you don&rsquo;t hold.
+          </p>
+          <TenantUserPermissionsTable
+            users={props.tenantUsers}
+            flags={props.permissionFlags}
+            callerPermissions={props.permissions}
+            onChanged={() => startTransition(() => router.refresh())}
+            onError={(msg) => setError(msg)}
+          />
+        </section>
+      )}
+
       {/* Revoke-all confirmation modal */}
       {confirmAll && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
@@ -329,4 +361,129 @@ function EventList({ events, variant }: { events: EventRow[]; variant?: "warning
 function fmt(iso: string): string {
   const d = new Date(iso);
   return d.toLocaleString();
+}
+
+function TenantUserPermissionsTable(props: {
+  users: TenantUserRow[];
+  flags: string[];
+  callerPermissions: Record<string, boolean>;
+  onChanged: () => void;
+  onError: (msg: string) => void;
+}) {
+  const [pendingKey, setPendingKey] = useState<string | null>(null);
+
+  async function patchOverride(userId: string, flag: string, value: boolean | null) {
+    const key = `${userId}|${flag}`;
+    setPendingKey(key);
+    props.onError("");
+    try {
+      const res = await fetch(`/api/tenant/users/${encodeURIComponent(userId)}/permissions`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ flag, value }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        props.onError(data?.error ?? "Could not update permissions.");
+        return;
+      }
+      props.onChanged();
+    } catch (e) {
+      props.onError(e instanceof Error ? e.message : "Could not update permissions.");
+    } finally {
+      setPendingKey(null);
+    }
+  }
+
+  return (
+    <div className="overflow-x-auto rounded-lg border bg-white shadow-sm">
+      <table className="w-full text-sm">
+        <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
+          <tr>
+            <th className="px-3 py-2">User</th>
+            <th className="px-3 py-2">Role</th>
+            {props.flags.map((f) => (
+              <th key={f} className="px-3 py-2 text-center font-mono text-[10px] normal-case">
+                {f.replace(/^can/, "")}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {props.users.map((u) => (
+            <tr key={u.id} className="border-t border-slate-100">
+              <td className="px-3 py-2">
+                <div className="text-ink">
+                  {u.name}
+                  {u.isCaller && (
+                    <span className="ml-2 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-slate-600">
+                      you
+                    </span>
+                  )}
+                </div>
+                <div className="text-xs text-slate-500">{u.email}</div>
+              </td>
+              <td className="px-3 py-2 text-xs">
+                <span className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-slate-700">{u.role}</span>
+              </td>
+              {props.flags.map((f) => {
+                const effective = u.effective[f];
+                const hasOverride = Object.prototype.hasOwnProperty.call(u.overrides, f);
+                const callerCan = props.callerPermissions[f] === true;
+                const cellKey = `${u.id}|${f}`;
+                const busy = pendingKey === cellKey;
+                const disabled = u.isCaller || busy;
+                return (
+                  <td key={f} className="px-3 py-2 text-center">
+                    <div className="flex flex-col items-center gap-1">
+                      <span
+                        className={
+                          "rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase " +
+                          (effective ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500")
+                        }
+                      >
+                        {effective ? "✓" : "—"}
+                      </span>
+                      {hasOverride && (
+                        <span className="text-[9px] uppercase tracking-wider text-amber-600">override</span>
+                      )}
+                      {!u.isCaller && (
+                        <div className="flex gap-0.5">
+                          <button
+                            disabled={disabled || !callerCan}
+                            onClick={() => patchOverride(u.id, f, true)}
+                            title={callerCan ? "Grant" : "You don't hold this permission"}
+                            className="rounded border border-slate-200 px-1 py-0.5 text-[9px] hover:bg-emerald-50 disabled:opacity-30"
+                          >
+                            grant
+                          </button>
+                          <button
+                            disabled={disabled}
+                            onClick={() => patchOverride(u.id, f, false)}
+                            className="rounded border border-slate-200 px-1 py-0.5 text-[9px] hover:bg-red-50 disabled:opacity-30"
+                          >
+                            revoke
+                          </button>
+                          {hasOverride && (
+                            <button
+                              disabled={disabled}
+                              onClick={() => patchOverride(u.id, f, null)}
+                              title="Clear override (use role default)"
+                              className="rounded border border-slate-200 px-1 py-0.5 text-[9px] hover:bg-slate-50 disabled:opacity-30"
+                            >
+                              clear
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
 }

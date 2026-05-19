@@ -3,7 +3,8 @@ import { and, desc, eq } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import { scheduledReports } from "@/db/schema";
-import { errorResponse, requireRole } from "@/lib/auth";
+import { errorResponse } from "@/lib/auth";
+import { requirePermissionOrRole } from "@/lib/security/permissions";
 
 // GET /api/tenant/scheduled-reports?period_type=weekly
 //
@@ -11,7 +12,11 @@ import { errorResponse, requireRole } from "@/lib/auth";
 // The cron worker populates rows; this endpoint is read-only.
 export async function GET(req: NextRequest) {
   try {
-    const admin = await requireRole(["admin", "manager"]);
+    const admin = await requirePermissionOrRole({
+      allowRoles: ["admin", "manager"],
+      requirePermission: "canViewExecutiveAnalytics",
+      auditPath: "/api/tenant/scheduled-reports",
+    });
     const periodTypeParam = req.nextUrl.searchParams.get("period_type");
 
     const conds = [eq(scheduledReports.tenantId, admin.tenantId)];

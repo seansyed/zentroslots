@@ -6,6 +6,7 @@ import { tenants, users } from "@/db/schema";
 import { getSession } from "@/lib/auth";
 import Shell from "@/components/dashboard/Shell";
 import AutomationsClient from "@/components/dashboard/AutomationsClient";
+import { effectivePermissions, userHasPermission } from "@/lib/security/permissions";
 
 export const metadata = { title: "Follow-up automations" };
 export const dynamic = "force-dynamic";
@@ -14,13 +15,20 @@ export default async function AutomationsPage() {
   const session = await getSession();
   if (!session) redirect("/dashboard/login");
   const user = await db.query.users.findFirst({ where: eq(users.id, session.sub) });
-  if (!user || (user.role !== "admin" && user.role !== "manager")) redirect("/dashboard");
+  if (!user) redirect("/dashboard/login");
+  // Additive: admin/manager pass via existing role check; staff who
+  // have been granted canManageAutomation via per-user override also
+  // pass now. Existing admin/manager behavior preserved.
+  if (user.role !== "admin" && user.role !== "manager" && !userHasPermission(user, "canManageAutomation")) {
+    redirect("/dashboard");
+  }
   const tenant = await db.query.tenants.findFirst({ where: eq(tenants.id, user.tenantId) });
   if (!tenant) redirect("/dashboard");
 
+  const permissions = effectivePermissions(user);
   return (
     <Shell
-      user={{ name: user.name, email: user.email, role: user.role }}
+      user={{ name: user.name, email: user.email, role: user.role, permissions }}
       tenant={{ name: tenant.name, slug: tenant.slug, plan: tenant.currentPlan, logoUrl: tenant.logoUrl }}
       title="Follow-up automations"
       crumbs={[

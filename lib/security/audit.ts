@@ -46,6 +46,11 @@ export const SECURITY_AUDIT_CATEGORIES = [
   // Access failures
   "security.access.denied",
   "security.access.failed_login",
+  /** Emitted when a granular permission check denies a request. The
+   *  metadata includes the flag name + route so dashboards can identify
+   *  where authorization is being exercised. Distinct from
+   *  security.access.denied which is reserved for role-level denials. */
+  "security.permission.denied",
 ] as const;
 
 export type SecurityAuditCategory = (typeof SECURITY_AUDIT_CATEGORIES)[number];
@@ -68,6 +73,7 @@ const SEVERITY_FOR: Record<SecurityAuditCategory, Severity> = {
   "security.automation.deleted": "notice",
   "security.access.denied": "warning",
   "security.access.failed_login": "info",
+  "security.permission.denied": "info",
 };
 
 export type SecurityAuditEntry = {
