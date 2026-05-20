@@ -28,9 +28,6 @@ export default async function StaffPage() {
       title="Staff"
       crumbs={[{ label: "Dashboard", href: "/dashboard" }, { label: "Staff" }]}
     >
-      <h1 className="text-heading font-semibold text-ink">Staff</h1>
-      <p className="mt-1 text-sm text-ink-muted">Manage who delivers your services.</p>
-
       <StaffClient
         userTimezone={user.timezone}
         isAdmin={user.role === "admin" || user.role === "manager"}

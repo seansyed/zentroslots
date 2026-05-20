@@ -162,6 +162,16 @@ body {
 .zm-ring-pulse-2 { animation: zm-ring-pulse 5.4s ease-in-out infinite 0.7s; }
 .zm-ring-pulse-3 { animation: zm-ring-pulse 6.8s ease-in-out infinite 1.4s; }
 
+/* Calm row entrance — used by operational directories (Phase 11A
+   Staff workforce rows; reusable across future workspaces). The
+   transform is deliberately small so the cascade reads as a settle
+   rather than a slide. Pair with a staggered animation-delay on
+   each item for the executive stagger choreography. */
+@keyframes zm-row-in {
+  0%   { opacity: 0; transform: translateY(6px); }
+  100% { opacity: 1; transform: translateY(0);   }
+}
+
 /* Animated gradient border — used by the AI summary banner. A
    conic-gradient masked to the border by linear-gradient masks
    sweeps every 10s with a calm easing curve. The masks let us keep
