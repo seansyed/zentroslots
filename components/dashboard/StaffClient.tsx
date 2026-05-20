@@ -1514,7 +1514,7 @@ function StaffDrawer({
   const workload = data ? deriveWorkload(data.upcoming.length) : "available";
 
   return (
-    <Drawer open={open} onClose={onClose} side="right" ariaLabel="Staff">
+    <Drawer open={open} onClose={onClose} side="right" size="workspace" ariaLabel="Staff">
       {!data ? (
         <div className="space-y-3 p-5">
           <Skeleton className="h-6 w-1/2" />

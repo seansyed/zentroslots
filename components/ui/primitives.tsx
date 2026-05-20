@@ -138,18 +138,46 @@ export function Modal({
   );
 }
 
-// ─── Drawer (slide-in from right or left, used for nav on mobile) ───────
+// ─── Drawer (slide-in operational workspace) ────────────────────────────
+//
+// Sized for the operational role it plays:
+//
+//   default   — 288px hard width. Mobile sidebar nav use case (Shell).
+//               Stays 288px even on narrow phones; backward-compatible.
+//   lg        — up to 440px. Focused detail drawers (appointment,
+//               delivery log).
+//   xl        — up to 600px. Task workspaces (assign staff, share
+//               service).
+//   workspace — up to 680px. Rich multi-section workspaces with
+//               tabs (staff profile, service editor, customer profile).
+//
+// All non-default sizes use w-full on mobile so they fill the viewport
+// on phones; they cap at their max width on tablet/desktop so the
+// canvas behind the drawer stays visible and the workspace feels
+// like a side workspace, not a takeover. Motion stays on the
+// ease-out-expo curve (cubic-bezier(0.16, 1, 0.3, 1)).
+
+export type DrawerSize = "default" | "lg" | "xl" | "workspace";
+
+const DRAWER_SIZE_CLASSES: Record<DrawerSize, string> = {
+  default:   "w-72",
+  lg:        "w-full max-w-[440px]",
+  xl:        "w-full max-w-[600px]",
+  workspace: "w-full max-w-[680px]",
+};
 
 export function Drawer({
   open,
   onClose,
   side = "right",
+  size = "default",
   children,
   ariaLabel,
 }: {
   open: boolean;
   onClose: () => void;
   side?: "left" | "right";
+  size?: DrawerSize;
   children: React.ReactNode;
   ariaLabel?: string;
 }) {
@@ -168,7 +196,7 @@ export function Drawer({
     <>
       <div
         className={
-          "fixed inset-0 z-40 bg-black/30 transition-opacity " +
+          "fixed inset-0 z-40 bg-black/30 transition-opacity duration-300 ease-out-expo " +
           (open ? "opacity-100" : "pointer-events-none opacity-0")
         }
         onClick={onClose}
@@ -179,7 +207,8 @@ export function Drawer({
         aria-modal="true"
         aria-label={ariaLabel}
         className={
-          "fixed top-0 z-50 flex h-full w-72 flex-col bg-surface shadow-lg transition-transform duration-300 ease-out-expo " +
+          "fixed top-0 z-50 flex h-full flex-col bg-surface shadow-lg transition-transform duration-300 ease-out-expo " +
+          DRAWER_SIZE_CLASSES[size] + " " +
           (side === "right" ? "right-0 " : "left-0 ") +
           (open
             ? "translate-x-0"

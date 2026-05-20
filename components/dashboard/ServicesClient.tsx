@@ -1616,7 +1616,7 @@ function ServiceDrawer({
   void allDepartments; // currently surfaced via the GET response's departmentNames; reserved for the future explicit department assignment drawer surface.
 
   return (
-    <Drawer open={open} onClose={onClose} side="right" ariaLabel="Service editor">
+    <Drawer open={open} onClose={onClose} side="right" size="workspace" ariaLabel="Service editor">
       <div className="flex h-full flex-col">
         {/* Header */}
         <div className="relative overflow-hidden border-b border-border bg-gradient-to-br from-brand-subtle/30 via-surface to-surface p-5">
@@ -1917,7 +1917,7 @@ function AssignStaffPanel({
   const available = filteredStaff.filter((u) => !selected.has(u.id));
 
   return (
-    <Drawer open={open} onClose={onClose} side="right" ariaLabel="Assign staff to service">
+    <Drawer open={open} onClose={onClose} side="right" size="xl" ariaLabel="Assign staff to service">
       {!svc ? null : (
         <div className="flex h-full flex-col">
           {/* Header */}
@@ -2179,7 +2179,7 @@ function ShareServicePanel({
   const noStaff = svc !== null && svc.staff.length === 0;
 
   return (
-    <Drawer open={open} onClose={onClose} side="right" ariaLabel="Share service booking link">
+    <Drawer open={open} onClose={onClose} side="right" size="xl" ariaLabel="Share service booking link">
       {!svc ? null : (
         <div className="flex h-full flex-col">
           {/* Header */}

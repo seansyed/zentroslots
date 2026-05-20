@@ -130,7 +130,7 @@ export default function AppointmentDrawer({
   const open = Boolean(booking);
 
   return (
-    <Drawer open={open} onClose={onClose} side="right" ariaLabel="Appointment details">
+    <Drawer open={open} onClose={onClose} side="right" size="lg" ariaLabel="Appointment details">
       {booking && (
         <div className="flex h-full flex-col bg-surface">
           {/* ── Hero ─────────────────────────────────────────────── */}

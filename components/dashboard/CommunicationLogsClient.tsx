@@ -248,7 +248,7 @@ export default function CommunicationLogsClient({
       </ul>
 
       {/* DRAWER — full detail on row click */}
-      <Drawer open={Boolean(openRow)} onClose={() => setOpenRow(null)} side="right" ariaLabel="Delivery log detail">
+      <Drawer open={Boolean(openRow)} onClose={() => setOpenRow(null)} side="right" size="lg" ariaLabel="Delivery log detail">
         {openRow && <LogDetail row={openRow} />}
       </Drawer>
     </>

@@ -1361,7 +1361,7 @@ function CustomerDrawer({
   const open = Boolean(id);
 
   return (
-    <Drawer open={open} onClose={onClose} side="right" ariaLabel="Customer">
+    <Drawer open={open} onClose={onClose} side="right" size="workspace" ariaLabel="Customer">
       {!data ? (
         <div className="space-y-3 p-5">
           <Skeleton className="h-6 w-1/2" />
