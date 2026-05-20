@@ -48,6 +48,11 @@ import {
   Link2,
   PlayCircle,
   Pencil,
+  MapPin,
+  Building2,
+  Video,
+  AlertTriangle,
+  Star as StarIcon,
   type LucideIcon,
 } from "lucide-react";
 
@@ -104,14 +109,36 @@ type StaffDetail = {
     // render paths fall back to `name` / omit title when null.
     publicDisplayName?: string | null;
     publicTitle?: string | null;
+    // Workforce delivery mode (migration 0037). Defaults to
+    // 'hybrid' for any pre-migration staff.
+    deliveryMode?: "in_person" | "virtual" | "hybrid";
   };
   assignedServices: { id: string; name: string }[];
   weeklyAvailability: { dayOfWeek: number; startTime: string; endTime: string }[];
+  // Per-staff location pivot rows (migration 0037). Empty array =
+  // "no explicit presence" → routing layer (future) will fall back
+  // to legacy primaryLocationId or workspace-wide visibility.
+  locationAssignments?: WorkforceLocationAssignment[];
   stats: { completed30d: number; cancelled30d: number };
   upcoming: {
     id: string; startAt: string; endAt: string; status: string;
     clientName: string; clientEmail: string; meetLink: string | null; serviceName: string;
   }[];
+};
+
+// One row per (staff, location) — see lib/workforce-location.ts.
+// daysOfWeek empty = "any day they work"; non-empty restricts to
+// those weekday keys. At most one isPrimary=true per staff.
+type WorkforceLocationAssignment = {
+  id: string;
+  locationId: string;
+  locationName: string;
+  locationType: "physical" | "virtual" | "hybrid";
+  logoUrl: string | null;
+  isActive: boolean;
+  isSystem: boolean;
+  daysOfWeek: Array<"0" | "1" | "2" | "3" | "4" | "5" | "6">;
+  isPrimary: boolean;
 };
 
 // Top-level tabs:
@@ -1708,13 +1735,36 @@ function StaffDrawer({
             )}
 
             {tab === "profile" && (
-              <ProfileTab
-                staff={data.staff}
-                canEdit={isAdmin}
-                onChange={(patch) =>
-                  setData((prev) => (prev ? { ...prev, staff: { ...prev.staff, ...patch } } : prev))
-                }
-              />
+              <div className="space-y-4">
+                <ProfileTab
+                  staff={data.staff}
+                  canEdit={isAdmin}
+                  onChange={(patch) =>
+                    setData((prev) => (prev ? { ...prev, staff: { ...prev.staff, ...patch } } : prev))
+                  }
+                />
+                {/* Workforce delivery + location assignments
+                    (migration 0037). Lives inside Profile because
+                    "where + how this person delivers" is identity-
+                    level metadata, not a calendar-policy decision. */}
+                <WorkforceLocationSection
+                  staffId={data.staff.id}
+                  deliveryMode={data.staff.deliveryMode ?? "hybrid"}
+                  initialAssignments={data.locationAssignments ?? []}
+                  canEdit={isAdmin}
+                  onChange={(patch) =>
+                    setData((prev) =>
+                      prev
+                        ? {
+                            ...prev,
+                            staff: { ...prev.staff, deliveryMode: patch.deliveryMode ?? prev.staff.deliveryMode },
+                            locationAssignments: patch.assignments ?? prev.locationAssignments,
+                          }
+                        : prev,
+                    )
+                  }
+                />
+              </div>
             )}
 
             {tab === "calendar" && (
@@ -1866,6 +1916,618 @@ function ScaffoldModule({
       </div>
     </div>
   );
+}
+
+// ─── Workforce location section (Profile tab subsection) ──────────
+//
+// Phase 16 — enterprise workforce delivery + location pivot.
+// Three stacked sections:
+//   A. Delivery mode segmented selector (in-person | virtual | hybrid)
+//   B. Location assignments — multi-pick from workspace locations
+//      with optional day-restrictions and at most one Primary.
+//   C. Weekly presence map — read-only resolver showing the per-day
+//      "where will this person be" decision (day-pinned > primary >
+//      any-day > none) so admins can see the routing-layer answer
+//      without booking a slot first.
+//
+// PATCH /api/staff/[id] handles deliveryMode.
+// PUT  /api/staff/[id]/locations handles the assignment set.
+// They're split because the assignment surface is shared by the
+// future bulk-assign panel; the column edit can be made from any
+// admin context.
+
+type DayKey = "0" | "1" | "2" | "3" | "4" | "5" | "6";
+const DAY_LABELS_SHORT: readonly { key: DayKey; label: string }[] = [
+  { key: "0", label: "Sun" },
+  { key: "1", label: "Mon" },
+  { key: "2", label: "Tue" },
+  { key: "3", label: "Wed" },
+  { key: "4", label: "Thu" },
+  { key: "5", label: "Fri" },
+  { key: "6", label: "Sat" },
+];
+
+type LocationListItem = {
+  id: string;
+  name: string;
+  locationType: "physical" | "virtual" | "hybrid";
+  logoUrl: string | null;
+  isActive: boolean;
+  isSystem: boolean;
+};
+
+function locationTypeIcon(t: "physical" | "virtual" | "hybrid"): LucideIcon {
+  if (t === "virtual") return Video;
+  if (t === "hybrid") return Globe;
+  return Building2;
+}
+
+function locationTypeChipTone(t: "physical" | "virtual" | "hybrid"): string {
+  if (t === "virtual") return "bg-violet-50 text-violet-700 ring-violet-200/60";
+  if (t === "hybrid") return "bg-sky-50 text-sky-700 ring-sky-200/60";
+  return "bg-emerald-50 text-emerald-700 ring-emerald-200/60";
+}
+
+// Resolution mirror of lib/workforce-location.getStaffPresenceForDay.
+// Pure UI mirror — never used by the booking engine; rendered here
+// so admins can preview the per-day decision without a round-trip.
+function resolvePresenceForDay(
+  assignments: WorkforceLocationAssignment[],
+  day: DayKey,
+): { assignment: WorkforceLocationAssignment; reason: "day-pinned" | "primary" | "any-day" } | null {
+  if (assignments.length === 0) return null;
+  const pinned = assignments.find((a) => a.daysOfWeek.includes(day));
+  if (pinned) return { assignment: pinned, reason: "day-pinned" };
+  const primary = assignments.find((a) => a.isPrimary);
+  if (primary) return { assignment: primary, reason: "primary" };
+  const any = assignments.find((a) => a.daysOfWeek.length === 0);
+  if (any) return { assignment: any, reason: "any-day" };
+  return null;
+}
+
+function WorkforceLocationSection({
+  staffId,
+  deliveryMode: initialDeliveryMode,
+  initialAssignments,
+  canEdit,
+  onChange,
+}: {
+  staffId: string;
+  deliveryMode: "in_person" | "virtual" | "hybrid";
+  initialAssignments: WorkforceLocationAssignment[];
+  canEdit: boolean;
+  onChange: (patch: {
+    deliveryMode?: "in_person" | "virtual" | "hybrid";
+    assignments?: WorkforceLocationAssignment[];
+  }) => void;
+}) {
+  const [deliveryMode, setDeliveryMode] = React.useState(initialDeliveryMode);
+  const [assignments, setAssignments] = React.useState<WorkforceLocationAssignment[]>(initialAssignments);
+  const [locations, setLocations] = React.useState<LocationListItem[]>([]);
+  const [loadingLocations, setLoadingLocations] = React.useState(true);
+  const [modeSaving, setModeSaving] = React.useState(false);
+  const [assignmentsSaving, setAssignmentsSaving] = React.useState(false);
+
+  // Resync when parent record refreshes (e.g. drawer re-opened for
+  // the same staff after a refetch elsewhere).
+  React.useEffect(() => {
+    setDeliveryMode(initialDeliveryMode);
+  }, [initialDeliveryMode]);
+  React.useEffect(() => {
+    setAssignments(initialAssignments);
+  }, [initialAssignments]);
+
+  // Load locations the workspace owns — used to expand assignments
+  // and surface picker rows. Filters to active + non-system unless
+  // already assigned (so existing virtual-hub rows still render).
+  React.useEffect(() => {
+    let abort = false;
+    setLoadingLocations(true);
+    fetch("/api/locations")
+      .then((r) => r.json())
+      .then((d) => {
+        if (abort) return;
+        const rows = Array.isArray(d) ? d : Array.isArray(d?.locations) ? d.locations : [];
+        setLocations(
+          rows.map((r: Record<string, unknown>) => ({
+            id: String(r.id),
+            name: String(r.name ?? "Untitled"),
+            locationType: ((r.locationType as string) ?? "physical") as "physical" | "virtual" | "hybrid",
+            logoUrl: (r.logoUrl as string | null) ?? null,
+            isActive: Boolean(r.isActive ?? true),
+            isSystem: Boolean(r.isSystem ?? false),
+          })),
+        );
+      })
+      .catch(() => {
+        if (!abort) toast("Failed to load locations", "error");
+      })
+      .finally(() => {
+        if (!abort) setLoadingLocations(false);
+      });
+    return () => {
+      abort = true;
+    };
+  }, []);
+
+  const dirty =
+    deliveryMode !== initialDeliveryMode ||
+    !sameAssignments(assignments, initialAssignments);
+
+  async function saveDeliveryMode(next: "in_person" | "virtual" | "hybrid") {
+    if (!canEdit) return;
+    const prev = deliveryMode;
+    setDeliveryMode(next);
+    setModeSaving(true);
+    try {
+      const res = await fetch(`/api/staff/${staffId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ deliveryMode: next }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d?.error ?? "Failed");
+      onChange({ deliveryMode: next });
+      toast("Delivery mode updated", "success");
+    } catch (e) {
+      setDeliveryMode(prev);
+      toast(e instanceof Error ? e.message : "Failed", "error");
+    } finally {
+      setModeSaving(false);
+    }
+  }
+
+  async function saveAssignments() {
+    if (!canEdit) return;
+    setAssignmentsSaving(true);
+    try {
+      const res = await fetch(`/api/staff/${staffId}/locations`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          assignments: assignments.map((a) => ({
+            locationId: a.locationId,
+            daysOfWeek: a.daysOfWeek,
+            isPrimary: a.isPrimary,
+          })),
+        }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d?.error ?? "Failed");
+      // Refetch to pick up any platform-spawned virtual hub the
+      // server attached transparently.
+      const refresh = await fetch(`/api/staff/${staffId}/locations`).then((r) => r.json());
+      if (Array.isArray(refresh?.assignments)) {
+        setAssignments(refresh.assignments);
+        onChange({ assignments: refresh.assignments });
+      }
+      toast("Location assignments saved", "success");
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed", "error");
+    } finally {
+      setAssignmentsSaving(false);
+    }
+  }
+
+  function addLocation(locId: string) {
+    const loc = locations.find((l) => l.id === locId);
+    if (!loc) return;
+    if (assignments.some((a) => a.locationId === locId)) return;
+    setAssignments((cur) => [
+      ...cur,
+      {
+        id: `tmp-${locId}`,
+        locationId: locId,
+        locationName: loc.name,
+        locationType: loc.locationType,
+        logoUrl: loc.logoUrl,
+        isActive: loc.isActive,
+        isSystem: loc.isSystem,
+        daysOfWeek: [],
+        // First assignment auto-becomes primary; subsequent ones
+        // stay non-primary so we never accidentally violate the
+        // single-primary invariant.
+        isPrimary: cur.length === 0,
+      },
+    ]);
+  }
+
+  function removeAssignment(locId: string) {
+    setAssignments((cur) => cur.filter((a) => a.locationId !== locId));
+  }
+
+  function toggleDay(locId: string, day: DayKey) {
+    setAssignments((cur) =>
+      cur.map((a) => {
+        if (a.locationId !== locId) return a;
+        const has = a.daysOfWeek.includes(day);
+        const nextDays = has ? a.daysOfWeek.filter((d) => d !== day) : [...a.daysOfWeek, day];
+        return { ...a, daysOfWeek: nextDays };
+      }),
+    );
+  }
+
+  function setPrimary(locId: string) {
+    setAssignments((cur) => cur.map((a) => ({ ...a, isPrimary: a.locationId === locId })));
+  }
+
+  const unassignedLocations = locations.filter(
+    (l) => l.isActive && !assignments.some((a) => a.locationId === l.id),
+  );
+
+  // Delivery-mode badge meta. Used in the segmented control and
+  // also as a contextual sentence beneath it.
+  const DELIVERY_OPTIONS: Array<{
+    value: "in_person" | "virtual" | "hybrid";
+    label: string;
+    icon: LucideIcon;
+    caption: string;
+  }> = [
+    {
+      value: "in_person",
+      label: "In-person",
+      icon: Building2,
+      caption: "Meets clients at one or more physical locations.",
+    },
+    {
+      value: "virtual",
+      label: "Virtual",
+      icon: Video,
+      caption: "Meets clients online — Virtual Hub auto-attached when saved.",
+    },
+    {
+      value: "hybrid",
+      label: "Hybrid",
+      icon: Globe,
+      caption: "Mix of physical and virtual delivery — any combination allowed.",
+    },
+  ];
+
+  const activeMode = DELIVERY_OPTIONS.find((o) => o.value === deliveryMode);
+
+  // Phase 10 violation hints — surfaced inline so admins know why
+  // a save will fail before clicking. Mirror of
+  // assertValidLocationAssignments().
+  const primaryCount = assignments.filter((a) => a.isPrimary).length;
+  const hasPhysical = assignments.some(
+    (a) => a.locationType === "physical" || a.locationType === "hybrid",
+  );
+  const invalid: string[] = [];
+  if (primaryCount > 1) invalid.push("Only one location can be Primary.");
+  if (deliveryMode === "in_person" && assignments.length > 0 && !hasPhysical) {
+    invalid.push("In-person delivery requires at least one physical or hybrid location.");
+  }
+  for (const a of assignments) {
+    const seen = new Set<string>();
+    for (const d of a.daysOfWeek) {
+      if (seen.has(d)) {
+        invalid.push(`Duplicate day in "${a.locationName}" — clear and re-pick.`);
+        break;
+      }
+      seen.add(d);
+    }
+  }
+
+  return (
+    <>
+      {/* Section A — Delivery mode */}
+      <PremiumCard className="p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="text-[10px] font-semibold uppercase tracking-[0.10em] text-brand-accent">Workforce delivery</div>
+            <h3 className="mt-0.5 text-[14px] font-semibold tracking-tight text-ink">How does this person meet clients?</h3>
+            <p className="mt-0.5 text-[11.5px] text-ink-muted">
+              Sets the delivery model the booking engine will use to filter visible slots.
+              Availability stays staff-owned — this only affects which surfaces serve them.
+            </p>
+          </div>
+        </div>
+        <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
+          {DELIVERY_OPTIONS.map((opt) => {
+            const Icon = opt.icon;
+            const on = deliveryMode === opt.value;
+            return (
+              <button
+                key={opt.value}
+                type="button"
+                disabled={!canEdit || modeSaving}
+                onClick={() => saveDeliveryMode(opt.value)}
+                className={cn(
+                  "relative overflow-hidden rounded-xl border px-3 py-3 text-left transition-all duration-[220ms] ease-[cubic-bezier(0.16,1,0.3,1)]",
+                  on
+                    ? "border-brand-accent/40 bg-brand-subtle/40 ring-2 ring-brand-accent/30 shadow-soft"
+                    : "border-border bg-surface hover:-translate-y-0.5 hover:shadow-soft",
+                  (!canEdit || modeSaving) && "cursor-not-allowed opacity-70",
+                )}
+              >
+                <div className="flex items-center gap-2">
+                  <span
+                    className={cn(
+                      "inline-flex h-7 w-7 items-center justify-center rounded-lg ring-1",
+                      on ? "bg-brand-accent/10 text-brand-accent ring-brand-accent/20" : "bg-surface-inset text-ink-muted ring-border/40",
+                    )}
+                  >
+                    <Icon className="h-3.5 w-3.5" strokeWidth={1.75} />
+                  </span>
+                  <span className={cn("text-[13px] font-semibold tracking-tight", on ? "text-brand-accent" : "text-ink")}>
+                    {opt.label}
+                  </span>
+                </div>
+                <p className="mt-1.5 text-[11px] leading-relaxed text-ink-muted">{opt.caption}</p>
+              </button>
+            );
+          })}
+        </div>
+        {activeMode && (
+          <p className="mt-3 text-[11.5px] text-ink-subtle">
+            <span className="font-medium text-ink-muted">Current:</span> {activeMode.caption}
+          </p>
+        )}
+      </PremiumCard>
+
+      {/* Section B — Location assignments */}
+      <PremiumCard className="p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="text-[10px] font-semibold uppercase tracking-[0.10em] text-brand-accent">Location assignments</div>
+            <h3 className="mt-0.5 text-[14px] font-semibold tracking-tight text-ink">Where does this person work?</h3>
+            <p className="mt-0.5 text-[11.5px] text-ink-muted">
+              Add the locations this person is assigned to. Restrict by weekday or leave open to
+              all days. Mark exactly one as Primary — that&apos;s the default fallback when no day
+              restriction matches.
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-3 space-y-2">
+          {assignments.length === 0 && (
+            <div className="rounded-xl border border-dashed border-border bg-surface-inset/30 px-3 py-6 text-center">
+              <MapPin className="mx-auto h-5 w-5 text-ink-subtle" strokeWidth={1.5} />
+              <p className="mt-2 text-[12.5px] text-ink-muted">
+                No locations assigned yet.{" "}
+                {deliveryMode === "virtual"
+                  ? "Virtual Hub will auto-attach when you save."
+                  : "Pick a location below to start."}
+              </p>
+            </div>
+          )}
+
+          {assignments.map((a) => {
+            const Icon = locationTypeIcon(a.locationType);
+            return (
+              <div
+                key={a.locationId}
+                className={cn(
+                  "rounded-xl border bg-surface p-3 transition-all duration-[220ms] ease-[cubic-bezier(0.16,1,0.3,1)]",
+                  a.isPrimary ? "border-brand-accent/40 ring-1 ring-brand-accent/20" : "border-border",
+                )}
+              >
+                <div className="flex items-start gap-3">
+                  <span className={cn("inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ring-1", locationTypeChipTone(a.locationType))}>
+                    <Icon className="h-4 w-4" strokeWidth={1.75} />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="truncate text-[13px] font-semibold text-ink">{a.locationName}</span>
+                      <span
+                        className={cn(
+                          "inline-flex items-center rounded-full px-1.5 py-0.5 text-[9.5px] font-semibold uppercase tracking-[0.06em] ring-1",
+                          locationTypeChipTone(a.locationType),
+                        )}
+                      >
+                        {a.locationType}
+                      </span>
+                      {a.isSystem && (
+                        <span className="inline-flex items-center rounded-full bg-violet-50 px-1.5 py-0.5 text-[9.5px] font-semibold uppercase tracking-[0.06em] text-violet-700 ring-1 ring-violet-200/60">
+                          system
+                        </span>
+                      )}
+                      {a.isPrimary && (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-brand-accent/10 px-1.5 py-0.5 text-[9.5px] font-semibold uppercase tracking-[0.06em] text-brand-accent ring-1 ring-brand-accent/20">
+                          <StarIcon className="h-2.5 w-2.5" strokeWidth={2} />
+                          primary
+                        </span>
+                      )}
+                    </div>
+                    <div className="mt-1 flex flex-wrap items-center gap-2">
+                      <span className="text-[10.5px] font-semibold uppercase tracking-[0.08em] text-ink-subtle">Days</span>
+                      <div className="flex flex-wrap items-center gap-1">
+                        {DAY_LABELS_SHORT.map(({ key, label }) => {
+                          const on = a.daysOfWeek.includes(key);
+                          return (
+                            <button
+                              key={key}
+                              type="button"
+                              disabled={!canEdit}
+                              onClick={() => toggleDay(a.locationId, key)}
+                              className={cn(
+                                "inline-flex h-6 min-w-[28px] items-center justify-center rounded-md border px-1.5 text-[10.5px] font-semibold tracking-tight transition-colors",
+                                on
+                                  ? "border-brand-accent/40 bg-brand-subtle text-brand-accent"
+                                  : "border-border bg-surface text-ink-muted hover:bg-surface-inset",
+                                !canEdit && "cursor-not-allowed opacity-60",
+                              )}
+                            >
+                              {label}
+                            </button>
+                          );
+                        })}
+                        {a.daysOfWeek.length === 0 && (
+                          <span className="ml-1 text-[10.5px] text-ink-subtle">Any day</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex flex-col items-end gap-1.5">
+                    {!a.isPrimary && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        disabled={!canEdit}
+                        onClick={() => setPrimary(a.locationId)}
+                      >
+                        Set primary
+                      </Button>
+                    )}
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      disabled={!canEdit}
+                      onClick={() => removeAssignment(a.locationId)}
+                    >
+                      <Trash2 className="mr-1 h-3.5 w-3.5" strokeWidth={1.75} />
+                      Remove
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Add picker */}
+        {canEdit && (
+          <div className="mt-3">
+            {loadingLocations ? (
+              <Skeleton className="h-9 w-full" />
+            ) : unassignedLocations.length === 0 ? (
+              <p className="text-[11.5px] text-ink-subtle">
+                {locations.length === 0
+                  ? "No locations exist in this workspace yet — create one in Settings → Locations first."
+                  : "Every active workspace location is already assigned."}
+              </p>
+            ) : (
+              <div className="flex items-center gap-2">
+                <select
+                  className="flex-1 rounded-md border border-border bg-surface px-3 py-2 text-[12.5px]"
+                  value=""
+                  onChange={(e) => {
+                    if (e.target.value) {
+                      addLocation(e.target.value);
+                      e.target.value = "";
+                    }
+                  }}
+                >
+                  <option value="" disabled>
+                    + Add a location…
+                  </option>
+                  {unassignedLocations.map((l) => (
+                    <option key={l.id} value={l.id}>
+                      {l.name} {`(${l.locationType})`}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </div>
+        )}
+
+        {invalid.length > 0 && (
+          <div className="mt-3 rounded-xl border border-amber-200/60 bg-amber-50/60 p-3">
+            <div className="flex items-start gap-2">
+              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 text-amber-600" strokeWidth={1.75} />
+              <div className="space-y-0.5">
+                {invalid.map((msg, i) => (
+                  <p key={i} className="text-[11.5px] text-amber-800">{msg}</p>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Save bar for the assignment set. Delivery mode is saved
+            on click; assignments batch on Save. */}
+        {canEdit && (
+          <div
+            className={cn(
+              "pointer-events-none mt-3 flex translate-y-2 items-center justify-end gap-3 opacity-0 transition-all duration-[260ms] ease-[cubic-bezier(0.16,1,0.3,1)]",
+              dirty && invalid.length === 0 && "pointer-events-auto translate-y-0 opacity-100",
+            )}
+            aria-hidden={!dirty || invalid.length > 0}
+          >
+            <span className="text-[11.5px] text-ink-muted">
+              <Pencil className="mr-1 inline-block h-3 w-3 text-brand-accent" strokeWidth={2} />
+              Unsaved assignment changes.
+            </span>
+            <Button
+              type="button"
+              size="sm"
+              onClick={saveAssignments}
+              disabled={assignmentsSaving || invalid.length > 0 || !dirty}
+            >
+              {assignmentsSaving ? "Saving…" : "Save assignments"}
+            </Button>
+          </div>
+        )}
+      </PremiumCard>
+
+      {/* Section C — Weekly presence map */}
+      <PremiumCard className="p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="text-[10px] font-semibold uppercase tracking-[0.10em] text-brand-accent">Weekly presence</div>
+            <h3 className="mt-0.5 text-[14px] font-semibold tracking-tight text-ink">Per-day resolved location</h3>
+            <p className="mt-0.5 text-[11.5px] text-ink-muted">
+              How the routing layer will answer &quot;where is this person on each weekday?&quot;
+              Day-pinned wins, then Primary, then any-day. Read-only — adjust assignments
+              above to change.
+            </p>
+          </div>
+        </div>
+        <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-7">
+          {DAY_LABELS_SHORT.map(({ key, label }) => {
+            const resolved = resolvePresenceForDay(assignments, key);
+            if (!resolved) {
+              return (
+                <div
+                  key={key}
+                  className="rounded-xl border border-dashed border-border bg-surface-inset/30 p-2.5 text-center"
+                >
+                  <div className="text-[10px] font-semibold uppercase tracking-[0.10em] text-ink-subtle">{label}</div>
+                  <div className="mt-1 text-[11.5px] text-ink-subtle">No presence</div>
+                </div>
+              );
+            }
+            const Icon = locationTypeIcon(resolved.assignment.locationType);
+            return (
+              <div
+                key={key}
+                className="rounded-xl border border-border bg-surface p-2.5"
+                title={`Resolved via ${resolved.reason}`}
+              >
+                <div className="text-[10px] font-semibold uppercase tracking-[0.10em] text-ink-subtle">{label}</div>
+                <div className="mt-1 flex items-center gap-1.5">
+                  <span className={cn("inline-flex h-5 w-5 items-center justify-center rounded-md ring-1", locationTypeChipTone(resolved.assignment.locationType))}>
+                    <Icon className="h-3 w-3" strokeWidth={1.75} />
+                  </span>
+                  <span className="truncate text-[11.5px] font-semibold text-ink">{resolved.assignment.locationName}</span>
+                </div>
+                <div className="mt-1 text-[9.5px] font-semibold uppercase tracking-[0.10em] text-ink-subtle">
+                  {resolved.reason}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </PremiumCard>
+    </>
+  );
+}
+
+function sameAssignments(a: WorkforceLocationAssignment[], b: WorkforceLocationAssignment[]): boolean {
+  if (a.length !== b.length) return false;
+  const byIdA = new Map(a.map((x) => [x.locationId, x]));
+  for (const y of b) {
+    const x = byIdA.get(y.locationId);
+    if (!x) return false;
+    if (x.isPrimary !== y.isPrimary) return false;
+    if (x.daysOfWeek.length !== y.daysOfWeek.length) return false;
+    const setX = new Set(x.daysOfWeek);
+    for (const d of y.daysOfWeek) if (!setX.has(d)) return false;
+  }
+  return true;
 }
 
 // ─── Profile tab — editable workforce identity ────────────────────

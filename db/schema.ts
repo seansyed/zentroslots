@@ -125,8 +125,20 @@ export const users = pgTable(
     googleStatus: varchar("google_status", { length: 20 }),
     googleLastErrorAt: timestamp("google_last_error_at", { withTimezone: true }),
 
+    // Legacy single-location pointer. Kept for backward compat;
+    // the canonical source of truth after migration 0037 is the
+    // `staff_location_assignments` pivot below. New code reads
+    // assignments via lib/workforce-location.ts.
     primaryLocationId: uuid("primary_location_id"),
     departmentId: uuid("department_id"),
+
+    // Per-staff delivery mode (migration 0037).
+    //   in_person → only physical / hybrid location bookings
+    //   virtual   → only virtual-location bookings
+    //   hybrid    → either (default; preserves current behavior)
+    // The engine doesn't enforce this directly — the routing +
+    // presence layers consume it as context.
+    deliveryMode: varchar("delivery_mode", { length: 20 }).notNull().default("hybrid"),
 
     avatarUrl: text("avatar_url"),
     bio: text("bio"),
@@ -186,6 +198,15 @@ export const services = pgTable(
     minNoticeMinutes: integer("min_notice_minutes"),
     maxAdvanceDays: integer("max_advance_days"),
     videoProvider: varchar("video_provider", { length: 20 }).notNull().default("google_meet"),
+
+    // Per-service delivery compatibility (migration 0037).
+    // jsonb array of allowed delivery modes — e.g. ["virtual"],
+    // ["in_person"], or both. Default is both, preserving existing
+    // behavior for every service alive today. Future routing
+    // enforcement layer reads this when matching customers to
+    // staff-by-day. The slot generator never reads this — it
+    // remains a routing/visibility filter, not an availability gate.
+    deliveryModes: jsonb("delivery_modes").notNull().default(["virtual", "in_person"]),
 
     // ── Department primary ownership (migration 0032) ──
     // Nullable so existing services start "unassigned" without a
@@ -250,6 +271,54 @@ export const availability = pgTable(
   (t) => ({
     tenantIdx: index("availability_tenant_idx").on(t.tenantId),
     userDayIdx: index("availability_user_day_idx").on(t.userId, t.dayOfWeek),
+  })
+);
+
+// ─── Staff ↔ Location assignments (migration 0037) ──────────────────────
+//
+// Multi-location workforce pivot. One row per (tenant, staff,
+// location). Replaces the legacy single-pointer `users.primary_location_id`
+// as the source of truth for "where does this staff member work."
+//
+// `daysOfWeek` semantics:
+//   • [] (empty)         → staff is at this location on ANY day they work
+//   • ["1","2"]          → staff is at this location ONLY on Mon/Tue
+//   Stringified 0..6 (Sun..Sat) to match how default_workspace_hours
+//   and availability already represent days.
+//
+// `isPrimary`: at most one true per (tenant, staffId). Enforcement
+// lives in the API write path — partial unique indexes get clumsy
+// when you also need a "no primaries" state, and centralizing the
+// rule in code makes it readable for anyone touching the routes.
+//
+// Booking engine remains untouched: this pivot is a CONTEXT layer,
+// consumed by the (future) routing-presence filter, never by the
+// slot generator.
+export const staffLocationAssignments = pgTable(
+  "staff_location_assignments",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    staffId: uuid("staff_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    locationId: uuid("location_id")
+      .notNull()
+      .references(() => locations.id, { onDelete: "cascade" }),
+    daysOfWeek: jsonb("days_of_week").notNull().default([]),
+    isPrimary: boolean("is_primary").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    staffIdx: index("staff_location_assignments_staff_idx").on(t.staffId),
+    locationIdx: index("staff_location_assignments_location_idx").on(t.locationId),
+    tenantIdx: index("staff_location_assignments_tenant_idx").on(t.tenantId),
+    pairUnique: uniqueIndex("staff_location_assignments_pair_unique").on(
+      t.tenantId, t.staffId, t.locationId,
+    ),
   })
 );
 
@@ -424,6 +493,13 @@ export const locations = pgTable(
     logoUrl: text("logo_url"),
     locationType: varchar("location_type", { length: 20 }).notNull().default("physical"),
     notes: text("notes"),
+
+    // System-protected location (migration 0037). True when the
+    // platform created this row — e.g. the auto-spawned "Virtual
+    // Hub" produced when a tenant first sets a staff member to
+    // delivery_mode='virtual'. /api/locations/[id] DELETE refuses
+    // to remove rows where is_system=true.
+    isSystem: boolean("is_system").notNull().default(false),
 
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -1214,8 +1290,11 @@ export const staffAssignmentRules = pgTable(
       .notNull()
       .references(() => tenants.id, { onDelete: "cascade" }),
     serviceId: uuid("service_id").references(() => services.id, { onDelete: "cascade" }),
-    // Schema-ready for location-pinned pools; enforcement deferred
-    // until staff_location pivot exists. NULL = scope ignores location.
+    // Location-pinned pool scope. The staff_location pivot now
+    // exists (migration 0037) and is the canonical source of per-
+    // staff presence; the routing-presence filter (future) will
+    // consume it ABOVE slot generation. This column stays as the
+    // pool-level location pin — NULL = scope ignores location.
     locationId: uuid("location_id"),
     mode: varchar("mode", { length: 20 }).notNull().default("manual"),
     enabled: boolean("enabled").notNull().default(true),

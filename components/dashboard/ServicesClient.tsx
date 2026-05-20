@@ -79,6 +79,13 @@ type Svc = {
   color: string | null;
   isActive: number;
   videoProvider?: string | null;
+  // Phase 16 — per-service delivery compatibility (migration 0037).
+  // jsonb array of allowed delivery modes. Defaults to both at the
+  // DB layer so existing services stay bookable in either mode;
+  // future routing filter intersects with each staff's per-day
+  // location-type to determine eligibility — never gates slot
+  // generation directly.
+  deliveryModes?: Array<"in_person" | "virtual"> | null;
   staff: { userId: string; name: string }[];
   // Direct department ownership (migration 0032). Primary signal.
   // `null` = explicitly unassigned. `undefined` = legacy row before
@@ -106,6 +113,34 @@ const PROVIDERS = [
   { id: "teams",       label: "Microsoft Teams", note: "Manual link · OAuth in a future release" },
   { id: "none",        label: "No video",        note: "In-person or phone" },
 ] as const;
+
+const DELIVERY_MODE_OPTIONS = [
+  {
+    value: "in_person" as const,
+    label: "In-person",
+    caption: "Bookable by staff with a physical or hybrid location.",
+  },
+  {
+    value: "virtual" as const,
+    label: "Virtual",
+    caption: "Bookable by staff who deliver virtually (Virtual Hub or hybrid).",
+  },
+];
+
+// Normalize whatever shape the server returns into a clean,
+// de-duplicated array. Falls back to BOTH when missing — matches the
+// migration default so old services never appear "no-mode" in the UI.
+function normalizeDeliveryModes(
+  raw: Array<"in_person" | "virtual"> | null | undefined,
+): Array<"in_person" | "virtual"> {
+  if (!Array.isArray(raw) || raw.length === 0) return ["virtual", "in_person"];
+  const set = new Set<"in_person" | "virtual">();
+  for (const v of raw) {
+    if (v === "in_person" || v === "virtual") set.add(v);
+  }
+  if (set.size === 0) return ["virtual", "in_person"];
+  return Array.from(set);
+}
 
 // Readiness derivation — honest signal from real fields.
 type Readiness = "ready" | "partial" | "inactive";
@@ -1629,6 +1664,13 @@ function ServiceDrawer({
   const [color, setColor] = React.useState<string>(DEFAULT_COLORS[0]);
   const [isActive, setIsActive] = React.useState(true);
   const [videoProvider, setVideoProvider] = React.useState<string>("google_meet");
+  // Phase 16 — per-service delivery compatibility (migration 0037).
+  // Service must accept at least one mode; default to BOTH so every
+  // existing service stays bookable in either delivery model.
+  const [deliveryModes, setDeliveryModes] = React.useState<Array<"in_person" | "virtual">>([
+    "virtual",
+    "in_person",
+  ]);
   const [selectedStaff, setSelectedStaff] = React.useState<Set<string>>(new Set());
   // Direct department ownership (migration 0032). `null` = explicit
   // "no department". The drawer never persists `undefined` — we
@@ -1646,6 +1688,7 @@ function ServiceDrawer({
       setColor(svc.color ?? DEFAULT_COLORS[0]);
       setIsActive(svc.isActive === 1);
       setVideoProvider(svc.videoProvider ?? "google_meet");
+      setDeliveryModes(normalizeDeliveryModes(svc.deliveryModes));
       setSelectedStaff(new Set(svc.staff.map((s) => s.userId)));
       setDepartmentId(svc.departmentId ?? null);
       setDeptQuery("");
@@ -1654,6 +1697,7 @@ function ServiceDrawer({
       setPrice(0); setBufferBefore(0); setBufferAfter(0);
       setColor(DEFAULT_COLORS[0]); setIsActive(true);
       setVideoProvider("google_meet");
+      setDeliveryModes(["virtual", "in_person"]);
       setSelectedStaff(new Set());
       setDepartmentId(null);
       setDeptQuery("");
@@ -1685,11 +1729,19 @@ function ServiceDrawer({
     if (!name.trim()) { toast("Name is required", "error"); return; }
     setBusy(true);
     try {
+      if (deliveryModes.length === 0) {
+        toast("Pick at least one delivery mode", "error");
+        setBusy(false);
+        return;
+      }
       const payload = {
         name, description: description || null,
         durationMinutes, price, bufferBefore, bufferAfter, color,
         isActive,
         videoProvider,
+        // Phase 16 (migration 0037). Sorted for deterministic
+        // payloads — the server normalizes ordering anyway.
+        deliveryModes: [...deliveryModes].sort(),
         staffUserIds: Array.from(selectedStaff),
         // Direct department ownership (migration 0032).
         // `null` clears the assignment server-side; a uuid sets it.
@@ -1829,6 +1881,54 @@ function ServiceDrawer({
                 );
               })}
             </div>
+          </Field>
+
+          {/* Phase 16 — per-service delivery compatibility
+              (migration 0037). Determines which staff are eligible
+              once the routing layer intersects with each staff's
+              per-day location type. Defaults to BOTH so existing
+              services stay bookable in either mode. */}
+          <Field label="Delivery modes">
+            <div className="space-y-1.5">
+              {DELIVERY_MODE_OPTIONS.map((opt) => {
+                const on = deliveryModes.includes(opt.value);
+                return (
+                  <label
+                    key={opt.value}
+                    className={
+                      "flex cursor-pointer items-start gap-2 rounded-md border border-border bg-surface px-3 py-2 text-sm " +
+                      (on ? "ring-1 ring-brand-accent/30" : "")
+                    }
+                  >
+                    <input
+                      type="checkbox"
+                      checked={on}
+                      disabled={!isAdmin}
+                      onChange={() => {
+                        setDeliveryModes((cur) => {
+                          if (cur.includes(opt.value)) {
+                            // Block deselect of the last remaining mode — server
+                            // would reject anyway; cleaner to no-op here.
+                            if (cur.length <= 1) return cur;
+                            return cur.filter((v) => v !== opt.value);
+                          }
+                          return [...cur, opt.value];
+                        });
+                      }}
+                      className="mt-0.5 h-4 w-4 accent-brand-accent"
+                    />
+                    <span className="flex-1">
+                      <span className="block text-ink">{opt.label}</span>
+                      <span className="block text-[11px] text-ink-subtle">{opt.caption}</span>
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+            <p className="mt-1.5 text-[11px] text-ink-subtle">
+              At least one mode is required. Both selected = service is visible to every
+              eligible staff regardless of delivery surface.
+            </p>
           </Field>
 
           <Field label="Status">

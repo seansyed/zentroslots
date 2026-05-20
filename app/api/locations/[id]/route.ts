@@ -86,6 +86,18 @@ export async function DELETE(
     });
     if (!existing) throw new HttpError(404, "Location not found");
 
+    // System-protected locations (migration 0037) cannot be deleted.
+    // The Virtual Hub gets auto-spawned by ensureVirtualHub() and is
+    // referenced by virtual-mode staff assignments — removing it
+    // would orphan those rows. Operators who want to "remove" it
+    // should instead set every staff member off virtual delivery.
+    if (existing.isSystem) {
+      throw new HttpError(
+        409,
+        "System locations cannot be deleted. The Virtual Hub is auto-managed by the platform.",
+      );
+    }
+
     // Soft-delete when any booking references the location. Hard-
     // delete only when there are zero references — keeps historical
     // bookings intact and preserves audit / reporting accuracy.

@@ -5,6 +5,7 @@ import { z } from "zod";
 import { db } from "@/db/client";
 import { bookings, departments, serviceStaff, services, users } from "@/db/schema";
 import { errorResponse, HttpError, requireRole } from "@/lib/auth";
+import { serviceDeliveryModesSchema } from "@/lib/workforce-location";
 
 const patchSchema = z.object({
   name: z.string().min(1).max(120).optional(),
@@ -22,6 +23,12 @@ const patchSchema = z.object({
   // clear the assignment, a uuid to assign, or omit to leave the
   // current value unchanged. Tenant-scoped validation below.
   departmentId: z.string().uuid().nullable().optional(),
+  // Service delivery compatibility (migration 0037). jsonb array of
+  // allowed modes. Default at the DB layer is `["virtual","in_person"]`
+  // so existing services stay bookable in both modes. Future routing
+  // filter intersects this with each staff's per-day location type
+  // — never gates slot generation directly.
+  deliveryModes: serviceDeliveryModesSchema.optional(),
 });
 
 export async function PATCH(

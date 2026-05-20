@@ -3,8 +3,22 @@ import { and, count, desc, eq, gte, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "@/db/client";
-import { availability, bookings, serviceStaff, services, users } from "@/db/schema";
+import {
+  availability,
+  bookings,
+  locations,
+  serviceStaff,
+  services,
+  staffLocationAssignments,
+  users,
+} from "@/db/schema";
 import { errorResponse, HttpError, requireRole, requireUser } from "@/lib/auth";
+import {
+  deliveryModeSchema,
+  readDaysOfWeek,
+  type DeliveryMode,
+  type LocationType,
+} from "@/lib/workforce-location";
 
 // Accept either a full http(s) URL OR a local upload path served by
 // Next out of /public — see /api/users/[id]/avatar (multipart upload
@@ -32,6 +46,12 @@ const patchSchema = z.object({
   // — render paths fall back to `name` / omit title when null.
   publicDisplayName: z.string().max(120).nullable().optional(),
   publicTitle: z.string().max(120).nullable().optional(),
+  // Workforce delivery mode (migration 0037). Changing this here
+  // performs a column update only — the actual location pivot
+  // lives at PUT /api/staff/[id]/locations. Switching to
+  // "virtual" without any virtual assignment is fine; the pivot
+  // PUT will lazy-spawn the Virtual Hub on next save.
+  deliveryMode: deliveryModeSchema.optional(),
 });
 
 export async function GET(
@@ -51,7 +71,7 @@ export async function GET(
     });
     if (!staff) throw new HttpError(404, "Staff not found");
 
-    const [assignedServices, weeklyRules, completed30, cancelled30, upcoming] = await Promise.all([
+    const [assignedServices, weeklyRules, completed30, cancelled30, upcoming, locationRows] = await Promise.all([
       db
         .select({ id: services.id, name: services.name, durationMinutes: services.durationMinutes, color: services.color })
         .from(serviceStaff)
@@ -105,6 +125,29 @@ export async function GET(
         )
         .orderBy(bookings.startAt)
         .limit(10),
+      // Location pivot (migration 0037). The Profile tab's
+      // "Location assignments" + "Weekly presence" sections read
+      // from this. Slot generation never does.
+      db
+        .select({
+          id: staffLocationAssignments.id,
+          locationId: staffLocationAssignments.locationId,
+          daysOfWeek: staffLocationAssignments.daysOfWeek,
+          isPrimary: staffLocationAssignments.isPrimary,
+          locationName: locations.name,
+          locationType: locations.locationType,
+          logoUrl: locations.logoUrl,
+          isActive: locations.isActive,
+          isSystem: locations.isSystem,
+        })
+        .from(staffLocationAssignments)
+        .innerJoin(locations, eq(locations.id, staffLocationAssignments.locationId))
+        .where(
+          and(
+            eq(staffLocationAssignments.staffId, id),
+            eq(staffLocationAssignments.tenantId, caller.tenantId),
+          ),
+        ),
     ]);
 
     return NextResponse.json({
@@ -123,9 +166,24 @@ export async function GET(
         primaryLocationId: staff.primaryLocationId,
         departmentId: staff.departmentId,
         googleConnected: Boolean(staff.googleRefreshToken),
+        // Workforce delivery mode (migration 0037). Defaults to
+        // 'hybrid' for any staff predating the migration — most
+        // permissive setting, no observable booking change.
+        deliveryMode: (staff.deliveryMode ?? "hybrid") as DeliveryMode,
       },
       assignedServices,
       weeklyAvailability: weeklyRules,
+      locationAssignments: locationRows.map((r) => ({
+        id: r.id,
+        locationId: r.locationId,
+        locationName: r.locationName,
+        locationType: (r.locationType ?? "physical") as LocationType,
+        logoUrl: r.logoUrl ?? null,
+        isActive: r.isActive,
+        isSystem: r.isSystem,
+        daysOfWeek: readDaysOfWeek(r.daysOfWeek),
+        isPrimary: r.isPrimary,
+      })),
       stats: {
         completed30d: Number(completed30[0]?.n ?? 0),
         cancelled30d: Number(cancelled30[0]?.n ?? 0),
