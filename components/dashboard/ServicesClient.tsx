@@ -43,6 +43,12 @@ import {
   UserPlus,
   Settings,
   Pencil,
+  Share2,
+  ExternalLink,
+  Copy,
+  Globe,
+  Lock,
+  Code2,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -120,16 +126,26 @@ export default function ServicesClient({
   isAdmin,
   allStaff,
   allDepartments,
+  tenantSlug,
+  tenantName,
 }: {
   isAdmin: boolean;
   allStaff: StaffOption[];
   allDepartments: { id: string; name: string; color: string | null }[];
+  /** Tenant identifier used to construct public booking URLs.
+   *  Threaded from the server page so we never have to fetch /api/tenant
+   *  from the client. Null when the tenant lookup failed server-side
+   *  (the page redirects in that case, but we keep the type honest). */
+  tenantSlug?: string | null;
+  tenantName?: string | null;
 }) {
   const [rows, setRows] = React.useState<Svc[] | null>(null);
   // Edit-service drawer: existing "new" + service-id state
   const [openId, setOpenId] = React.useState<string | "new" | null>(null);
   // Dedicated Assign-Staff panel: separate state, separate workflow
   const [assignStaffId, setAssignStaffId] = React.useState<string | null>(null);
+  // Share Service panel: separate state, opens via the Share icon
+  const [shareId, setShareId] = React.useState<string | null>(null);
 
   async function reload() {
     // Use ?include=all so the admin services page surfaces inactive
@@ -270,6 +286,7 @@ export default function ServicesClient({
               rows={rows}
               onOpen={(id) => setOpenId(id)}
               onAssignStaff={(id) => setAssignStaffId(id)}
+              onShare={(id) => setShareId(id)}
             />
           )}
         </div>
@@ -296,6 +313,16 @@ export default function ServicesClient({
         onSaved={() => { setAssignStaffId(null); reload(); }}
         allStaff={allStaff}
         isAdmin={isAdmin}
+      />
+
+      {/* Share Service panel — operational sharing surface.
+          Public service link + per-staff pinned links + embed scaffold.
+          Read-only; no PATCH/POST anywhere. */}
+      <ShareServicePanel
+        svc={shareId ? (rows ?? []).find((r) => r.id === shareId) ?? null : null}
+        onClose={() => setShareId(null)}
+        tenantSlug={tenantSlug ?? null}
+        tenantName={tenantName ?? null}
       />
     </div>
   );
@@ -533,10 +560,12 @@ function ServiceDirectoryGrid({
   rows,
   onOpen,
   onAssignStaff,
+  onShare,
 }: {
   rows: Svc[];
   onOpen: (id: string) => void;
   onAssignStaff: (id: string) => void;
+  onShare: (id: string) => void;
 }) {
   const count = rows.length;
   const showArchitectureTile = count > 0 && count <= 2;
@@ -565,6 +594,7 @@ function ServiceDirectoryGrid({
               svc={s}
               onOpen={() => onOpen(s.id)}
               onAssignStaff={() => onAssignStaff(s.id)}
+              onShare={() => onShare(s.id)}
             />
           </li>
         ))}
@@ -606,10 +636,12 @@ function ServiceOpCard({
   svc,
   onOpen,
   onAssignStaff,
+  onShare,
 }: {
   svc: Svc;
   onOpen: () => void;
   onAssignStaff: () => void;
+  onShare: () => void;
 }) {
   const accent = serviceColor(svc.id, svc.color);
   const readiness = deriveReadiness(svc);
@@ -658,7 +690,10 @@ function ServiceOpCard({
               )}
             </div>
           </div>
-          <ReadinessChip readiness={readiness} />
+          <div className="flex shrink-0 flex-col items-end gap-1">
+            <ReadinessChip readiness={readiness} />
+            <BookableChip readiness={readiness} hasStaff={svc.staff.length > 0} />
+          </div>
         </div>
 
         {/* Description */}
@@ -746,9 +781,14 @@ function ServiceOpCard({
 
       {/* Action bar — sits OUTSIDE the click-button so we don't nest
        *  buttons. Action bar items have their own handlers and links.
-       *  Assign Staff and Edit Service now have separate handlers
-       *  that open separate operational workflows. */}
-      <ServiceActionBar svc={svc} onAssignStaff={onAssignStaff} onEdit={onOpen} />
+       *  Assign Staff, Share, and Edit Service all have separate
+       *  handlers that open distinct operational workflows. */}
+      <ServiceActionBar
+        svc={svc}
+        onAssignStaff={onAssignStaff}
+        onShare={onShare}
+        onEdit={onOpen}
+      />
     </article>
   );
 }
@@ -904,11 +944,14 @@ function ServiceInsight({
 function ServiceActionBar({
   svc,
   onAssignStaff,
+  onShare,
   onEdit,
 }: {
   svc: Svc;
   /** Opens the dedicated Assign Staff panel (workforce-only flow). */
   onAssignStaff: () => void;
+  /** Opens the Share Service panel (booking link distribution). */
+  onShare: () => void;
   /** Opens the full service-edit drawer (configuration flow). */
   onEdit: () => void;
 }) {
@@ -923,6 +966,11 @@ function ServiceActionBar({
         label="Assign staff"
         onClick={onAssignStaff}
         highlight={needsStaff}
+      />
+      <ActionButton
+        icon={Share2}
+        label="Share booking link"
+        onClick={onShare}
       />
       <ActionLink
         icon={CalendarCheck}
@@ -942,6 +990,33 @@ function ServiceActionBar({
         onClick={onEdit}
       />
     </div>
+  );
+}
+
+// ─── Bookable status chip — derived honestly from real fields ──────
+// Public bookability is a function of: isActive=1 AND staff.length > 0.
+// We surface this as a calm informational chip beside readiness.
+
+function BookableChip({
+  readiness,
+  hasStaff,
+}: {
+  readiness: Readiness;
+  hasStaff: boolean;
+}) {
+  if (readiness === "ready" && hasStaff) {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50/70 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.06em] text-emerald-700 ring-1 ring-emerald-200/40">
+        <Globe className="h-2.5 w-2.5" strokeWidth={2} />
+        Publicly bookable
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full bg-surface-inset px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.06em] text-ink-muted ring-1 ring-border/50">
+      <Lock className="h-2.5 w-2.5" strokeWidth={2} />
+      Internal only
+    </span>
   );
 }
 
@@ -1911,6 +1986,379 @@ function AssignStaffPanel({
         </div>
       )}
     </Drawer>
+  );
+}
+
+// ─── Share Service panel — booking link distribution ──────────────
+//
+// Operational sharing surface for a single service. Read-only:
+// no API mutations happen here. The panel composes URLs from
+// existing data + the existing public booking routes.
+//
+// URL composition (uses existing routes — no new pages, no schema):
+//   Public service URL : /u/{tenantSlug}/{serviceSlug}
+//   Staff-pinned URL   : /u/{tenantSlug}/{serviceSlug}?staff={userId}
+//   Embed URL          : /embed/{tenantSlug}/{serviceSlug}
+//
+// Honest scope:
+//   - Staff URLs use the existing ?staff=<userId> convention to
+//     preserve booking architecture. Users have no slug column today
+//     and we are deliberately not adding one.
+//   - Embed URL is rendered with the public route, but the actual
+//     snippet builder ("paste this iframe into your site") is
+//     scaffolded as Coming Soon — we have the route, not the
+//     snippet generator.
+//   - When a service is not publicly bookable, the panel still
+//     shows the URLs so admins can stage them, but with a calm
+//     amber notice making the operational consequence clear.
+
+function ShareServicePanel({
+  svc,
+  onClose,
+  tenantSlug,
+  tenantName,
+}: {
+  svc: Svc | null;
+  onClose: () => void;
+  tenantSlug: string | null;
+  tenantName: string | null;
+}) {
+  const open = svc !== null;
+
+  const origin = typeof window !== "undefined" ? window.location.origin : "";
+  const slug = svc?.slug ?? null;
+
+  const publicUrl = tenantSlug && slug ? `${origin}/u/${tenantSlug}/${slug}` : "";
+  const embedUrl  = tenantSlug && slug ? `${origin}/embed/${tenantSlug}/${slug}` : "";
+
+  const readiness = svc ? deriveReadiness(svc) : "inactive";
+  const publiclyBookable = svc !== null && readiness === "ready" && svc.staff.length > 0;
+  const inactive = svc !== null && svc.isActive !== 1;
+  const noStaff = svc !== null && svc.staff.length === 0;
+
+  return (
+    <Drawer open={open} onClose={onClose} side="right" ariaLabel="Share service booking link">
+      {!svc ? null : (
+        <div className="flex h-full flex-col">
+          {/* Header */}
+          <div className="relative overflow-hidden border-b border-border bg-gradient-to-br from-brand-subtle/35 via-surface to-surface p-5">
+            <div aria-hidden className="pointer-events-none absolute -right-10 -top-10 h-32 w-32 rounded-full bg-brand-accent/12 blur-3xl" />
+            <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/60 to-transparent" />
+            <div className="relative flex items-start justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div
+                  className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-white shadow-[0_2px_8px_rgba(53,157,243,0.30)]"
+                  style={{ backgroundColor: serviceColor(svc.id, svc.color) }}
+                  aria-hidden
+                >
+                  <Share2 className="h-5 w-5" strokeWidth={1.75} />
+                </div>
+                <div className="min-w-0">
+                  <div className="text-[10px] font-semibold uppercase tracking-[0.10em] text-brand-accent">
+                    Share booking link
+                  </div>
+                  <h2 className="mt-0.5 truncate text-[17px] font-semibold tracking-tight text-ink">
+                    {svc.name}
+                  </h2>
+                  <p className="mt-0.5 text-[11.5px] text-ink-muted">
+                    {tenantName ?? "Workspace"} &middot; distribute these URLs anywhere — email, Slack, your site, calendar invites.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={onClose}
+                aria-label="Close"
+                className="inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-muted hover:bg-surface-inset hover:text-ink"
+              >
+                <X className="h-4 w-4" strokeWidth={1.75} />
+              </button>
+            </div>
+          </div>
+
+          {/* Body */}
+          <div className="flex-1 space-y-4 overflow-y-auto p-5">
+            {/* Bookability status */}
+            <div className={cn(
+              "relative overflow-hidden rounded-2xl border p-3 ring-1",
+              publiclyBookable
+                ? "border-emerald-200/40 bg-emerald-50/40 ring-emerald-200/30"
+                : "border-amber-200/40 bg-amber-50/40 ring-amber-200/30",
+            )}>
+              <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/55 to-transparent" />
+              <div className="flex items-start gap-2.5">
+                <div className={cn(
+                  "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg shadow-soft",
+                  publiclyBookable ? "bg-emerald-500 text-white" : "bg-amber-500 text-white",
+                )}>
+                  {publiclyBookable ? <Globe className="h-3.5 w-3.5" strokeWidth={2} /> : <Lock className="h-3.5 w-3.5" strokeWidth={2} />}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className={cn(
+                    "text-[10px] font-semibold uppercase tracking-[0.10em]",
+                    publiclyBookable ? "text-emerald-700" : "text-amber-800",
+                  )}>
+                    {publiclyBookable ? "Publicly bookable" : "Not publicly bookable"}
+                  </div>
+                  <p className={cn(
+                    "mt-0.5 text-[12px] leading-relaxed",
+                    publiclyBookable ? "text-emerald-800/90" : "text-amber-900/90",
+                  )}>
+                    {publiclyBookable
+                      ? "Customers landing on these URLs can complete a booking through the normal scheduling flow."
+                      : inactive
+                        ? "This service is currently inactive. Reactivate it in Edit service before sharing."
+                        : noStaff
+                          ? "Public booking unavailable until workforce assignment is complete. Use the Assign staff action on the service card."
+                          : "Scheduling routing requires operational setup. Configure routing or assign staff to activate booking coverage."}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Public service URL */}
+            <ShareUrlBlock
+              label="Public service URL"
+              hint="Anyone with the link can book this service through the public booking page."
+              url={publicUrl}
+              icon={Globe}
+              iconTint="brand"
+              disabled={!publicUrl}
+            />
+
+            {/* Staff-pinned URLs */}
+            {svc.staff.length > 0 ? (
+              <div>
+                <div className="flex items-baseline justify-between">
+                  <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-subtle">
+                    Staff-pinned URLs
+                  </div>
+                  <span className="text-[10.5px] tabular-nums text-ink-subtle">
+                    {svc.staff.length} {svc.staff.length === 1 ? "member" : "members"}
+                  </span>
+                </div>
+                <p className="mt-1 text-[11.5px] leading-relaxed text-ink-muted">
+                  Each link pins the booking to a specific staff member. Useful for personal scheduling, consultant pages, and direct sales handoffs.
+                </p>
+                <ul className="mt-2 space-y-1.5">
+                  {svc.staff.map((u) => (
+                    <li key={u.userId}>
+                      <StaffShareRow
+                        name={u.name}
+                        url={publicUrl ? `${publicUrl}?staff=${u.userId}` : ""}
+                      />
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : (
+              <div className="rounded-xl border border-dashed border-border bg-surface-inset/30 p-3 text-center text-[11.5px] text-ink-muted">
+                <Users className="mx-auto mb-1.5 h-4 w-4 text-ink-subtle" strokeWidth={1.5} />
+                Staff-pinned links activate once you assign staff to this service.
+              </div>
+            )}
+
+            {/* Embed URL — scaffolded */}
+            <div>
+              <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-subtle">
+                Embed URL
+              </div>
+              <p className="mt-1 text-[11.5px] leading-relaxed text-ink-muted">
+                The dedicated embed route — use it to render the booking widget inside your own site.
+              </p>
+              <ShareUrlRow url={embedUrl} disabled={!embedUrl} />
+              <div className="mt-2 rounded-lg border border-dashed border-border bg-surface-inset/30 px-3 py-2 text-[11px] leading-relaxed text-ink-subtle">
+                <Code2 className="mr-1 inline-block h-3 w-3" strokeWidth={1.75} />
+                <span className="font-semibold uppercase tracking-wider text-ink-muted">Coming soon &middot; </span>
+                A one-click iframe snippet generator with sizing presets and brand-color tokens.
+              </div>
+            </div>
+
+            {/* Future routing scaffold */}
+            <div>
+              <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-subtle">
+                Routing &amp; distribution
+              </div>
+              <p className="mt-1 text-[11.5px] leading-relaxed text-ink-muted">
+                Round robin, department routing, weighted routing, VIP and overflow rules are configured in the routing workspace.
+              </p>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                <Link
+                  href="/dashboard/settings/routing"
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-1.5 text-[11.5px] font-semibold text-ink-muted transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:bg-surface-inset hover:text-ink hover:shadow-soft"
+                >
+                  <Settings className="h-3 w-3" strokeWidth={2} />
+                  Open routing settings
+                  <ArrowUpRight className="h-3 w-3" strokeWidth={2} />
+                </Link>
+              </div>
+            </div>
+          </div>
+
+          {/* Footer */}
+          <div className="flex items-center justify-end border-t border-border p-4">
+            <button
+              type="button"
+              onClick={onClose}
+              className="inline-flex h-9 items-center gap-1.5 rounded-lg px-3 text-[12.5px] font-medium text-ink-subtle transition-colors hover:text-ink"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
+    </Drawer>
+  );
+}
+
+// ─── Share URL primitives ─────────────────────────────────────────
+
+function ShareUrlBlock({
+  label,
+  hint,
+  url,
+  icon: Icon,
+  iconTint,
+  disabled,
+}: {
+  label: string;
+  hint: string;
+  url: string;
+  icon: LucideIcon;
+  iconTint: "brand" | "neutral";
+  disabled?: boolean;
+}) {
+  const iconBg = iconTint === "brand"
+    ? "bg-brand-subtle text-brand-accent ring-brand-accent/15"
+    : "bg-surface-inset text-ink-muted ring-border/40";
+  return (
+    <div>
+      <div className="flex items-center gap-2">
+        <div className={cn("inline-flex h-6 w-6 items-center justify-center rounded-md ring-1", iconBg)}>
+          <Icon className="h-3 w-3" strokeWidth={2} />
+        </div>
+        <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-subtle">{label}</div>
+      </div>
+      <p className="mt-1 text-[11.5px] leading-relaxed text-ink-muted">{hint}</p>
+      <ShareUrlRow url={url} disabled={disabled} />
+    </div>
+  );
+}
+
+function ShareUrlRow({ url, disabled }: { url: string; disabled?: boolean }) {
+  async function handleCopy() {
+    if (disabled || !url) return;
+    try {
+      await navigator.clipboard.writeText(url);
+      toast("Booking link copied.", "success");
+    } catch {
+      toast("Could not copy — please copy manually", "error");
+    }
+  }
+
+  return (
+    <div className="mt-1.5 flex items-stretch gap-1.5">
+      <code className={cn(
+        "flex-1 truncate rounded-lg border bg-surface-inset/60 px-3 py-2 font-mono text-[11.5px]",
+        disabled ? "border-border/60 text-ink-subtle" : "border-border text-ink",
+      )}>
+        {disabled ? "(unavailable — workspace slug missing)" : url || "(loading…)"}
+      </code>
+      <button
+        type="button"
+        onClick={handleCopy}
+        disabled={disabled || !url}
+        title="Copy link"
+        aria-label="Copy link"
+        className={cn(
+          "inline-flex shrink-0 items-center justify-center rounded-lg border border-border bg-surface px-2.5 text-ink-muted transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)]",
+          disabled || !url
+            ? "cursor-not-allowed opacity-50"
+            : "hover:-translate-y-0.5 hover:bg-surface-inset hover:text-ink hover:shadow-soft",
+        )}
+      >
+        <Copy className="h-3.5 w-3.5" strokeWidth={1.75} />
+      </button>
+      <a
+        href={disabled || !url ? undefined : url}
+        target="_blank"
+        rel="noreferrer"
+        aria-disabled={disabled || !url}
+        title="Open in new tab"
+        aria-label="Open in new tab"
+        className={cn(
+          "inline-flex shrink-0 items-center justify-center rounded-lg border border-border bg-surface px-2.5 text-ink-muted transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)]",
+          disabled || !url
+            ? "cursor-not-allowed opacity-50"
+            : "hover:-translate-y-0.5 hover:bg-surface-inset hover:text-ink hover:shadow-soft",
+        )}
+        onClick={(e) => {
+          if (disabled || !url) e.preventDefault();
+        }}
+      >
+        <ExternalLink className="h-3.5 w-3.5" strokeWidth={1.75} />
+      </a>
+    </div>
+  );
+}
+
+function StaffShareRow({ name, url }: { name: string; url: string }) {
+  const initials = name
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((s) => s[0]!)
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
+
+  async function handleCopy() {
+    if (!url) return;
+    try {
+      await navigator.clipboard.writeText(url);
+      toast(`Booking link for ${name} copied.`, "success");
+    } catch {
+      toast("Could not copy — please copy manually", "error");
+    }
+  }
+
+  return (
+    <div className="flex items-center gap-2.5 rounded-xl border border-border bg-surface px-3 py-2 transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:border-border-strong hover:shadow-soft">
+      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-brand-accent to-brand-hover text-[10px] font-semibold text-white shadow-[0_2px_6px_rgba(53,157,243,0.20)]">
+        {initials || "?"}
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-[12.5px] font-semibold tracking-tight text-ink">{name}</div>
+        <code className="block truncate text-[10.5px] font-mono text-ink-subtle">{url || "(unavailable)"}</code>
+      </div>
+      <div className="flex shrink-0 items-center gap-1">
+        <button
+          type="button"
+          onClick={handleCopy}
+          disabled={!url}
+          title={`Copy link for ${name}`}
+          aria-label={`Copy link for ${name}`}
+          className={cn(
+            "inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle transition-all duration-[160ms] ease-[cubic-bezier(0.16,1,0.3,1)]",
+            url ? "hover:-translate-y-0.5 hover:bg-surface-inset hover:text-ink" : "cursor-not-allowed opacity-50",
+          )}
+        >
+          <Copy className="h-3.5 w-3.5" strokeWidth={1.75} />
+        </button>
+        <a
+          href={url || undefined}
+          target="_blank"
+          rel="noreferrer"
+          title="Open in new tab"
+          aria-label={`Open ${name}'s booking page`}
+          onClick={(e) => { if (!url) e.preventDefault(); }}
+          className={cn(
+            "inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle transition-all duration-[160ms] ease-[cubic-bezier(0.16,1,0.3,1)]",
+            url ? "hover:-translate-y-0.5 hover:bg-surface-inset hover:text-ink" : "cursor-not-allowed opacity-50",
+          )}
+        >
+          <ExternalLink className="h-3.5 w-3.5" strokeWidth={1.75} />
+        </a>
+      </div>
+    </div>
   );
 }
 

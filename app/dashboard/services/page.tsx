@@ -57,6 +57,8 @@ export default async function ServicesPage() {
           departmentName: s.departmentName ?? null,
         }))}
         allDepartments={departmentRows.map((d) => ({ id: d.id, name: d.name, color: d.color ?? null }))}
+        tenantSlug={tenant?.slug ?? null}
+        tenantName={tenant?.name ?? null}
       />
     </Shell>
   );
