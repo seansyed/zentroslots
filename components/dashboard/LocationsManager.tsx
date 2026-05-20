@@ -124,7 +124,23 @@ export default function LocationsManager({
     const virtual = rows.filter((r) => r.locationType === "virtual" && r.isActive).length;
     const hybrid = rows.filter((r) => r.locationType === "hybrid" && r.isActive).length;
     const inactive = rows.filter((r) => !r.isActive).length;
-    return { physical, virtual, hybrid, inactive, total: rows.length, active: activeCount };
+    // Honest operational signals (Phase 15B refinement #1).
+    // Every chip below derives from a real column — no fabricated
+    // metrics. "Routing active" means at least one booking has been
+    // routed to a location in the last 30 days.
+    const staffed = rows.filter((r) => r.isActive && r.staffCount > 0).length;
+    const totalCoverage = rows
+      .filter((r) => r.isActive)
+      .reduce((sum, r) => sum + r.staffCount, 0);
+    const bookings30d = rows
+      .filter((r) => r.isActive)
+      .reduce((sum, r) => sum + r.bookingsLast30d, 0);
+    const routingActive = bookings30d > 0;
+    return {
+      physical, virtual, hybrid, inactive,
+      total: rows.length, active: activeCount,
+      staffed, totalCoverage, bookings30d, routingActive,
+    };
   }, [rows, activeCount]);
 
   return (
@@ -132,6 +148,7 @@ export default function LocationsManager({
       {/* Hero */}
       <PremiumCard className="relative overflow-hidden p-5">
         <span aria-hidden className="pointer-events-none absolute -right-12 -top-12 h-40 w-40 rounded-full bg-brand-accent/12 blur-3xl" />
+        <span aria-hidden className="pointer-events-none absolute -left-16 -bottom-16 h-44 w-44 rounded-full bg-violet-200/20 blur-3xl" />
         <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/60 to-transparent" />
         <div className="relative flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div>
@@ -146,8 +163,18 @@ export default function LocationsManager({
               staff, services, and customer bookings.
             </p>
           </div>
-          <div className="flex flex-wrap items-center gap-1.5">
-            <CountChip icon={Building2} label={`${counts.active} active`} tone="brand" />
+          <div className="flex max-w-full flex-wrap items-center gap-1.5">
+            {/* Honest operational chips — every metric derives from a
+                real column. Hidden when the count is zero to avoid
+                noisy "0 of N" badges. */}
+            <CountChip icon={Building2} label={`${counts.active} ${counts.active === 1 ? "active hub" : "active hubs"}`} tone="brand" />
+            {counts.staffed > 0 && (
+              <CountChip icon={Users} label={`${counts.staffed} staffed`} tone="emerald" />
+            )}
+            {counts.totalCoverage > 0 && (
+              <CountChip icon={Layers} label={`${counts.totalCoverage} ${counts.totalCoverage === 1 ? "team member" : "team members"}`} tone="neutral" />
+            )}
+            <RoutingStatusChip active={counts.routingActive} bookings30d={counts.bookings30d} />
             {counts.physical > 0 && <CountChip icon={MapPin} label={`${counts.physical} physical`} tone="neutral" />}
             {counts.virtual > 0 && <CountChip icon={Video} label={`${counts.virtual} virtual`} tone="violet" />}
             {counts.hybrid > 0 && <CountChip icon={Globe} label={`${counts.hybrid} hybrid`} tone="emerald" />}
@@ -155,6 +182,11 @@ export default function LocationsManager({
             <PlanChip plan={plan} activeCount={activeCount} />
           </div>
         </div>
+        {/* Operational tagline — refinement #5. Calm, sits below the
+            chips, communicates the strategic role without selling. */}
+        <p className="relative mt-3 border-t border-border/40 pt-3 text-[11.5px] italic text-ink-subtle">
+          Locations route bookings, anchor staff coverage, and shape regional scheduling intelligence.
+        </p>
       </PremiumCard>
 
       {/* Plan-gated banner */}
@@ -244,17 +276,28 @@ export default function LocationsManager({
         </FadeIn>
       )}
 
-      {/* v2 scaffolds */}
-      <PremiumCard className="p-4">
-        <div className="text-[10px] font-semibold uppercase tracking-[0.10em] text-brand-accent">
-          v2 routing foundations
+      {/* v2 routing foundations — refinement #4.
+          Softer grid separation (gap-3), hover elevation per tile,
+          dampened "SOON" chips, blueprint feel via dotted top edge
+          + ambient violet glow in the corner. */}
+      <PremiumCard className="relative overflow-hidden p-5">
+        <span aria-hidden className="pointer-events-none absolute -right-16 -top-16 h-44 w-44 rounded-full bg-violet-200/15 blur-3xl" />
+        <span aria-hidden className="pointer-events-none absolute -left-12 -bottom-12 h-36 w-36 rounded-full bg-brand-accent/8 blur-3xl" />
+        <div className="relative flex items-end justify-between gap-3">
+          <div>
+            <div className="text-[10px] font-semibold uppercase tracking-[0.10em] text-brand-accent">
+              Architectural roadmap
+            </div>
+            <h3 className="mt-0.5 text-[14.5px] font-semibold tracking-tight text-ink">
+              Routing intelligence on top of locations
+            </h3>
+            <p className="mt-0.5 max-w-xl text-[11.5px] leading-relaxed text-ink-muted">
+              Each capability layers cleanly on the existing per-location foundation — no engine
+              rewrites, no schema churn. Order reflects the natural delivery sequence.
+            </p>
+          </div>
         </div>
-        <h3 className="mt-0.5 text-[14px] font-semibold tracking-tight text-ink">Coming soon</h3>
-        <p className="mt-0.5 text-[11.5px] text-ink-muted">
-          Once locations are in place, the routing engine can layer regional intelligence on top
-          without rewriting the slot generator.
-        </p>
-        <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="relative mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
           <ScaffoldTile icon={MapPinned} title="Nearest-location booking" caption="Route customers to their closest physical hub." />
           <ScaffoldTile icon={Workflow} title="Regional routing" caption="Service-area + ZIP / country mapping rules." />
           <ScaffoldTile icon={Globe} title="Timezone-aware hubs" caption="Match customers to the hub in their local hours." />
@@ -299,6 +342,36 @@ function CountChip({
     <span className={cn("inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10.5px] font-medium ring-1", cls)}>
       <Icon className="h-3 w-3" strokeWidth={2} />
       {label}
+    </span>
+  );
+}
+
+// Routing status chip — honest derivation from bookings.locationId
+// volume in the last 30 days. When zero, surfaces the "inactive"
+// state calmly (not as a warning) so the operator immediately sees
+// whether location-aware routing is in flight.
+function RoutingStatusChip({
+  active,
+  bookings30d,
+}: {
+  active: boolean;
+  bookings30d: number;
+}) {
+  if (active) {
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50/80 px-2 py-0.5 text-[10.5px] font-medium text-emerald-700 ring-1 ring-emerald-300/40">
+        <span aria-hidden className="relative inline-flex h-1.5 w-1.5">
+          <span className="absolute inset-0 animate-ping rounded-full bg-emerald-400/55" />
+          <span className="relative h-1.5 w-1.5 rounded-full bg-emerald-500" />
+        </span>
+        Routing {bookings30d} · 30d
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-full bg-surface-inset px-2 py-0.5 text-[10.5px] font-medium text-ink-subtle ring-1 ring-border/40">
+      <span aria-hidden className="inline-block h-1.5 w-1.5 rounded-full bg-ink-subtle/40" />
+      Booking routing inactive
     </span>
   );
 }
@@ -362,10 +435,10 @@ function EmptyState({
           offices, virtual delivery hubs, or hybrid regions. They power booking routing,
           per-region branding, and service distribution.
         </p>
-        <div className="mt-5 grid grid-cols-1 gap-2 text-left sm:grid-cols-3">
-          <EmptyTile icon={MapPin} title="Offices" caption="Physical addresses where customers meet your team." />
-          <EmptyTile icon={Video} title="Virtual hubs" caption="Online-only delivery via Meet, Zoom, or Teams." />
-          <EmptyTile icon={Globe} title="Service regions" caption="Hybrid operations spanning multiple modes." />
+        <div className="mt-5 grid grid-cols-1 gap-2.5 text-left sm:grid-cols-3">
+          <EmptyTile icon={MapPin} title="Offices" caption="Physical addresses where customers meet your team." tone="brand" />
+          <EmptyTile icon={Video} title="Virtual hubs" caption="Online-only delivery via Meet, Zoom, or Teams." tone="violet" />
+          <EmptyTile icon={Globe} title="Service regions" caption="Hybrid operations spanning multiple modes." tone="emerald" />
         </div>
         {canCreate ? (
           <div className="mt-5">
@@ -375,13 +448,18 @@ function EmptyState({
             </Button>
           </div>
         ) : !planAllowsLocations ? (
+          /* Softer, SECONDARY upgrade CTA (refinement #2).
+             The primary upgrade button lives in the banner above —
+             we don't repeat the same visual weight twice on one
+             page. Here we render a calm text link with the same
+             destination, sized down to "supporting context". */
           <div className="mt-5">
             <Link
               href="/dashboard/billing"
-              className="inline-flex items-center gap-1.5 rounded-md bg-brand-accent px-4 py-2 text-[12.5px] font-semibold text-white shadow-[0_1px_3px_rgba(15,23,42,0.10)] transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:shadow-soft"
+              className="inline-flex items-center gap-1 text-[11.5px] font-medium text-brand-accent transition-opacity duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:opacity-80"
             >
-              Upgrade to unlock locations
-              <ArrowUpRight className="h-3.5 w-3.5" strokeWidth={2} />
+              See plans that include locations
+              <ArrowUpRight className="h-3 w-3" strokeWidth={2} />
             </Link>
           </div>
         ) : (
@@ -394,22 +472,62 @@ function EmptyState({
   );
 }
 
+// EmptyTile — refinement #3.
+// Each onboarding tile now carries a distinct color identity so the
+// three location modes feel visually differentiated, not text-heavy.
+// A colored glow behind the icon + a subtle border tint per tone +
+// hover elevation give them operational presence without losing the
+// calm enterprise atmosphere.
 function EmptyTile({
   icon: Icon,
   title,
   caption,
+  tone,
 }: {
   icon: typeof Building2;
   title: string;
   caption: string;
+  tone: "brand" | "violet" | "emerald";
 }) {
+  const cfg =
+    tone === "violet"
+      ? {
+          glow: "bg-violet-300/35",
+          icon: "bg-violet-50 text-violet-700 ring-violet-200/50",
+          border: "hover:border-violet-300/50",
+        }
+      : tone === "emerald"
+        ? {
+            glow: "bg-emerald-300/35",
+            icon: "bg-emerald-50 text-emerald-700 ring-emerald-200/50",
+            border: "hover:border-emerald-300/50",
+          }
+        : {
+            glow: "bg-brand-accent/30",
+            icon: "bg-brand-subtle text-brand-accent ring-brand-accent/20",
+            border: "hover:border-brand-accent/40",
+          };
   return (
-    <div className="rounded-xl border border-border bg-surface p-3 shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
-      <div className="flex items-start gap-2">
-        <div className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-brand-subtle/60 text-brand-accent ring-1 ring-brand-accent/15">
-          <Icon className="h-3.5 w-3.5" strokeWidth={1.75} />
+    <div
+      className={cn(
+        "group relative overflow-hidden rounded-xl border border-border bg-surface p-3 shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-all duration-[260ms] ease-[cubic-bezier(0.16,1,0.3,1)]",
+        "hover:-translate-y-0.5 hover:shadow-lift",
+        cfg.border,
+      )}
+    >
+      <span
+        aria-hidden
+        className={cn(
+          "pointer-events-none absolute -right-6 -top-6 h-16 w-16 rounded-full opacity-0 blur-2xl transition-opacity duration-[420ms] ease-[cubic-bezier(0.16,1,0.3,1)] group-hover:opacity-100",
+          cfg.glow,
+        )}
+      />
+      <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/55 to-transparent" />
+      <div className="relative flex items-start gap-2.5">
+        <div className={cn("inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ring-1", cfg.icon)}>
+          <Icon className="h-4 w-4" strokeWidth={1.75} />
         </div>
-        <div>
+        <div className="min-w-0">
           <div className="text-[12px] font-semibold tracking-tight text-ink">{title}</div>
           <p className="mt-0.5 text-[10.5px] leading-relaxed text-ink-muted">{caption}</p>
         </div>
@@ -439,13 +557,19 @@ function LocationCard({
   return (
     <article
       className={cn(
-        "group relative overflow-hidden rounded-2xl border bg-surface shadow-soft transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)]",
+        "group relative overflow-hidden rounded-2xl border bg-surface shadow-soft transition-all duration-[260ms] ease-[cubic-bezier(0.16,1,0.3,1)]",
         inactive
           ? "border-border opacity-80 hover:opacity-100"
           : "border-border hover:-translate-y-0.5 hover:border-border-strong hover:shadow-lift",
       )}
     >
       <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/55 to-transparent" />
+      {/* Subtle ambient glow on hover — refinement #9 motion polish.
+          Brand-tinted, almost invisible at rest, lifts the card into
+          a calm operational glow on hover. */}
+      {!inactive && (
+        <span aria-hidden className="pointer-events-none absolute -right-12 -top-12 h-32 w-32 rounded-full bg-brand-accent/0 blur-3xl transition-colors duration-[420ms] ease-[cubic-bezier(0.16,1,0.3,1)] group-hover:bg-brand-accent/15" />
+      )}
       <button
         type="button"
         onClick={onOpen}
@@ -579,17 +703,22 @@ function ScaffoldTile({
   caption: string;
 }) {
   return (
-    <div className="relative overflow-hidden rounded-xl border border-dashed border-border bg-surface-inset/30 p-3">
-      <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/50 to-transparent" />
-      <div className="flex items-start gap-2.5">
-        <div className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-surface text-ink-subtle ring-1 ring-border/40">
-          <Icon className="h-3.5 w-3.5" strokeWidth={1.75} />
+    <div className="group relative overflow-hidden rounded-xl border border-border/60 bg-surface/70 p-3 backdrop-blur-[1px] transition-all duration-[260ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:border-border-strong hover:bg-surface hover:shadow-soft">
+      {/* Dotted top edge — gives the blueprint / draft feel without
+          the dashed-border placeholder energy of before. */}
+      <span aria-hidden className="pointer-events-none absolute inset-x-3 top-0 h-px bg-[radial-gradient(circle,theme(colors.border)_1px,transparent_1px)] bg-[length:6px_1px] bg-repeat-x opacity-70" />
+      <span aria-hidden className="pointer-events-none absolute -right-8 -top-8 h-16 w-16 rounded-full bg-brand-accent/0 blur-2xl transition-colors duration-[420ms] ease-[cubic-bezier(0.16,1,0.3,1)] group-hover:bg-brand-accent/10" />
+      <div className="relative flex items-start gap-2.5">
+        <div className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-surface-inset text-ink-subtle ring-1 ring-border/50 transition-colors duration-[260ms] ease-[cubic-bezier(0.16,1,0.3,1)] group-hover:bg-brand-subtle/60 group-hover:text-brand-accent group-hover:ring-brand-accent/20">
+          <Icon className="h-4 w-4" strokeWidth={1.75} />
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
-            <h4 className="text-[12px] font-semibold tracking-tight text-ink">{title}</h4>
-            <span className="inline-flex items-center gap-1 rounded-full bg-surface px-1.5 py-0.5 text-[8.5px] font-semibold uppercase tracking-[0.06em] text-ink-subtle ring-1 ring-border/40">
-              Soon
+            <h4 className="text-[12.5px] font-semibold tracking-tight text-ink">{title}</h4>
+            {/* Softer SOON pill — borderless, almost invisible until
+                hover. Communicates state without dominating the row. */}
+            <span className="text-[9px] font-medium uppercase tracking-[0.10em] text-ink-subtle/70">
+              · Planned
             </span>
           </div>
           <p className="mt-0.5 text-[10.5px] leading-relaxed text-ink-muted">{caption}</p>
