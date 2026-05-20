@@ -38,6 +38,11 @@ import {
   CircleDot,
   AlertTriangle,
   CalendarRange,
+  Video,
+  MapPin,
+  UserPlus,
+  Settings,
+  Pencil,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -244,22 +249,16 @@ export default function ServicesClient({
           {rows === null ? (
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {Array.from({ length: 3 }).map((_, i) => (
-                <Skeleton key={i} className="h-44 rounded-2xl" />
+                <Skeleton key={i} className="h-56 rounded-2xl" />
               ))}
             </div>
           ) : rows.length === 0 ? (
             <PremiumActivationState isAdmin={isAdmin} onAdd={() => setOpenId("new")} />
           ) : (
-            <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {rows.map((s, idx) => (
-                <li
-                  key={s.id}
-                  style={{ animation: `zm-row-in 0.42s cubic-bezier(0.16,1,0.3,1) ${Math.min(idx, 8) * 50}ms both` }}
-                >
-                  <ServiceOpCard svc={s} onOpen={() => setOpenId(s.id)} />
-                </li>
-              ))}
-            </ul>
+            <ServiceDirectoryGrid
+              rows={rows}
+              onOpen={(id) => setOpenId(id)}
+            />
           )}
         </div>
       </FadeIn>
@@ -502,20 +501,92 @@ function SectionHead({
   );
 }
 
+// ─── Service directory grid ───────────────────────────────────────
+//
+// Phase 13B — adapts column count to the number of services and
+// renders an "Operational architecture" insight tile alongside small
+// grids so a single floating card doesn't look orphaned.
+
+function ServiceDirectoryGrid({
+  rows,
+  onOpen,
+}: {
+  rows: Svc[];
+  onOpen: (id: string) => void;
+}) {
+  const count = rows.length;
+  const showArchitectureTile = count > 0 && count <= 2;
+
+  // Column heuristic — keep card width comfortable at low counts so
+  // they don't stretch to absurd widths, but scale up at high counts.
+  // Three tiers: 1 / 2 / 3+
+  const gridCls =
+    count >= 3
+      ? "grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3"
+      : count === 2
+        ? "grid grid-cols-1 gap-3 lg:grid-cols-2"
+        : "grid grid-cols-1 gap-3";
+
+  return (
+    <div className={cn(showArchitectureTile && "lg:grid lg:grid-cols-[1fr_280px] lg:gap-3")}>
+      <ul className={gridCls}>
+        {rows.map((s, idx) => (
+          <li
+            key={s.id}
+            style={{
+              animation: `zm-row-in 0.42s cubic-bezier(0.16,1,0.3,1) ${Math.min(idx, 8) * 50}ms both`,
+            }}
+          >
+            <ServiceOpCard svc={s} onOpen={() => onOpen(s.id)} />
+          </li>
+        ))}
+      </ul>
+      {showArchitectureTile && (
+        <div
+          className="mt-3 lg:mt-0"
+          style={{ animation: `zm-row-in 0.5s cubic-bezier(0.16,1,0.3,1) 200ms both` }}
+        >
+          <ArchitectureInsightTile rows={rows} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Service operational card ─────────────────────────────────────
+//
+// Phase 13B — richer operational entity, not a simple booking tile.
+// The card body is divided into:
+//
+//   1. Header strip (icon swatch + name + readiness chip)
+//   2. Description (optional)
+//   3. Operational meta row (duration · price · meeting mode · 30d bookings)
+//   4. Department ownership zone (always visible — chips OR explicit
+//      "Department not assigned" warning pill)
+//   5. Staff zone with avatar group OR "No staff assigned" warning
+//   6. Calm contextual insight line (state-aware operational guidance)
+//   7. Action bar (Assign staff / Configure availability /
+//      Configure routing / Edit service) — icons only, accessible
+//      labels via aria-label + title
+//
+// The card's clickable region is the body (above the action bar);
+// action bar items are independent buttons/links so we never nest
+// buttons. e.stopPropagation guards keep them functioning even when
+// the card's surface receives a click.
 
 function ServiceOpCard({ svc, onOpen }: { svc: Svc; onOpen: () => void }) {
   const accent = serviceColor(svc.id, svc.color);
   const readiness = deriveReadiness(svc);
   const inactive = svc.isActive !== 1;
+  const meeting = deriveMeetingMode(svc.videoProvider ?? null);
+  const hasDepartment = (svc.departmentNames?.length ?? 0) > 0;
 
   return (
-    <button
-      onClick={onOpen}
+    <article
       className={cn(
-        "group relative block w-full overflow-hidden rounded-2xl border bg-surface p-4 text-left shadow-soft transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)]",
+        "group relative overflow-hidden rounded-2xl border bg-surface shadow-soft transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)]",
         inactive
-          ? "border-border opacity-80 hover:opacity-100"
+          ? "border-border opacity-85 hover:opacity-100"
           : "border-border hover:-translate-y-0.5 hover:border-border-strong hover:shadow-lift",
       )}
     >
@@ -527,64 +598,87 @@ function ServiceOpCard({ svc, onOpen }: { svc: Svc; onOpen: () => void }) {
       />
       <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/55 to-transparent" />
 
-      <div className="relative pl-2">
+      {/* Clickable body — opens the edit drawer */}
+      <button
+        type="button"
+        onClick={onOpen}
+        className="relative block w-full text-left p-4 pl-5 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-accent/40"
+        aria-label={`Open ${svc.name}`}
+      >
         {/* Header — color swatch + name + readiness */}
         <div className="flex items-start justify-between gap-2">
           <div className="flex min-w-0 items-center gap-2.5">
             <div
-              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-white shadow-[0_2px_6px_rgba(15,23,42,0.10)]"
+              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-white shadow-[0_2px_8px_rgba(15,23,42,0.10)]"
               style={{ backgroundColor: accent }}
               aria-hidden
             >
               <Briefcase className="h-4 w-4" strokeWidth={1.75} />
             </div>
-            <h3 className="min-w-0 truncate text-[14.5px] font-semibold tracking-tight text-ink">{svc.name}</h3>
+            <div className="min-w-0">
+              <h3 className="truncate text-[15px] font-semibold tracking-tight text-ink">{svc.name}</h3>
+              {svc.slug && (
+                <div className="mt-0.5 truncate text-[10.5px] font-mono text-ink-subtle">/{svc.slug}</div>
+              )}
+            </div>
           </div>
           <ReadinessChip readiness={readiness} />
         </div>
 
         {/* Description */}
         {svc.description && (
-          <p className="mt-2 line-clamp-2 text-[12px] leading-relaxed text-ink-muted">{svc.description}</p>
+          <p className="mt-2.5 line-clamp-2 text-[12px] leading-relaxed text-ink-muted">{svc.description}</p>
         )}
 
-        {/* Duration + price strip */}
-        <div className="mt-3 flex flex-wrap items-center gap-2 text-[11.5px]">
-          <span className="inline-flex items-center gap-1 rounded-md bg-surface-inset/60 px-2 py-0.5 font-medium text-ink-muted">
-            <Clock className="h-3 w-3 text-brand-accent" strokeWidth={2} />
-            <span className="tabular-nums text-ink">{svc.durationMinutes}</span> min
-          </span>
+        {/* Operational meta row */}
+        <div className="mt-3 flex flex-wrap items-center gap-1.5 text-[11.5px]">
+          <MetaPill icon={Clock} tint="brand">
+            <span className="tabular-nums font-semibold text-ink">{svc.durationMinutes}</span>
+            <span className="text-ink-muted">min</span>
+          </MetaPill>
           {svc.price > 0 && (
-            <span className="inline-flex items-center gap-1 rounded-md bg-surface-inset/60 px-2 py-0.5 font-semibold text-ink">
-              ${(svc.price / 100).toFixed(0)}
-            </span>
+            <MetaPill icon={null} tint="neutral">
+              <span className="font-semibold text-ink">${(svc.price / 100).toFixed(0)}</span>
+            </MetaPill>
           )}
+          <MetaPill icon={meeting.icon} tint={meeting.tint}>
+            <span className="text-ink-muted">{meeting.label}</span>
+          </MetaPill>
           {svc.bookingsLast30d !== undefined && svc.bookingsLast30d > 0 && (
-            <span className="inline-flex items-center gap-1 rounded-md bg-emerald-50/70 px-2 py-0.5 font-medium text-emerald-700 ring-1 ring-emerald-200/40">
-              <CalendarRange className="h-3 w-3" strokeWidth={2} />
-              <span className="tabular-nums">{svc.bookingsLast30d}</span> · 30d
-            </span>
+            <MetaPill icon={CalendarRange} tint="positive">
+              <span className="tabular-nums font-semibold text-emerald-700">{svc.bookingsLast30d}</span>
+              <span className="text-emerald-700/80">· 30d</span>
+            </MetaPill>
           )}
         </div>
 
-        {/* Department chips */}
-        {svc.departmentNames && svc.departmentNames.length > 0 && (
-          <div className="mt-3">
-            <div className="text-[9px] font-semibold uppercase tracking-[0.08em] text-ink-subtle">Departments</div>
-            <div className="mt-1 flex flex-wrap items-center gap-1">
-              {svc.departmentNames.map((d) => (
-                <DepartmentChip key={d} name={d} />
-              ))}
-              {svc.departmentCount !== undefined && svc.departmentCount > svc.departmentNames.length && (
-                <span className="text-[10px] text-ink-subtle">
-                  +{svc.departmentCount - svc.departmentNames.length} more
-                </span>
-              )}
-            </div>
+        {/* Department ownership — always visible */}
+        <div className="mt-3">
+          <div className="text-[9px] font-semibold uppercase tracking-[0.10em] text-ink-subtle">
+            Department ownership
           </div>
-        )}
+          <div className="mt-1 flex flex-wrap items-center gap-1.5">
+            {hasDepartment ? (
+              <>
+                {svc.departmentNames!.map((d) => (
+                  <DepartmentChip key={d} name={d} />
+                ))}
+                {svc.departmentCount !== undefined && svc.departmentCount > svc.departmentNames!.length && (
+                  <span className="text-[10px] text-ink-subtle">
+                    +{svc.departmentCount - svc.departmentNames!.length} more
+                  </span>
+                )}
+              </>
+            ) : (
+              <span className="inline-flex items-center gap-1 rounded-full bg-amber-50/70 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.06em] text-amber-800 ring-1 ring-amber-200/40">
+                <AlertTriangle className="h-2.5 w-2.5" strokeWidth={2} />
+                Department not assigned
+              </span>
+            )}
+          </div>
+        </div>
 
-        {/* Staff + routing footer */}
+        {/* Staff + routing row */}
         <div className="mt-3 flex items-center justify-between border-t border-border/50 pt-3 text-[11px]">
           <div className="flex items-center gap-2">
             {svc.staff.length > 0 ? (
@@ -609,8 +703,15 @@ function ServiceOpCard({ svc, onOpen }: { svc: Svc; onOpen: () => void }) {
             </span>
           )}
         </div>
-      </div>
-    </button>
+
+        {/* Contextual insight line */}
+        <ServiceInsight svc={svc} readiness={readiness} />
+      </button>
+
+      {/* Action bar — sits OUTSIDE the click-button so we don't nest
+       *  buttons. Action bar items have their own handlers and links. */}
+      <ServiceActionBar svc={svc} onEdit={onOpen} />
+    </article>
   );
 }
 
@@ -618,17 +719,14 @@ function ReadinessChip({ readiness }: { readiness: Readiness }) {
   const cfg =
     readiness === "ready" ? {
       cls: "bg-emerald-50/80 text-emerald-700 ring-emerald-200/40",
-      dot: "bg-emerald-500",
       icon: CheckCircle2,
     }
     : readiness === "partial" ? {
       cls: "bg-amber-50/80 text-amber-800 ring-amber-200/40",
-      dot: "bg-amber-500",
       icon: CircleDot,
     }
     : {
       cls: "bg-surface-inset text-ink-muted ring-border/50",
-      dot: "bg-ink-subtle/40",
       icon: X,
     };
 
@@ -647,6 +745,313 @@ function DepartmentChip({ name }: { name: string }) {
       <Building2 className="h-2.5 w-2.5 text-brand-accent" strokeWidth={2} />
       <span className="truncate max-w-[100px]">{name}</span>
     </span>
+  );
+}
+
+// ─── Meta pill primitive ──────────────────────────────────────────
+
+type MetaTint = "brand" | "neutral" | "positive" | "warning";
+
+function MetaPill({
+  icon: Icon,
+  tint,
+  children,
+}: {
+  icon: LucideIcon | null;
+  tint: MetaTint;
+  children: React.ReactNode;
+}) {
+  const cls =
+    tint === "positive" ? "bg-emerald-50/70 ring-emerald-200/40"
+    : tint === "warning"  ? "bg-amber-50/70 ring-amber-200/40"
+    : tint === "neutral"  ? "bg-surface-inset/70 ring-border/40"
+    :                       "bg-brand-subtle/40 ring-brand-accent/15";
+  const iconCls =
+    tint === "positive" ? "text-emerald-600"
+    : tint === "warning"  ? "text-amber-600"
+    : tint === "neutral"  ? "text-ink-muted"
+    :                       "text-brand-accent";
+  return (
+    <span className={cn("inline-flex items-center gap-1 rounded-md px-2 py-0.5 ring-1", cls)}>
+      {Icon && <Icon className={cn("h-3 w-3", iconCls)} strokeWidth={2} />}
+      {children}
+    </span>
+  );
+}
+
+// ─── Meeting mode derivation ──────────────────────────────────────
+// Honest: derive in-person/virtual from the existing videoProvider
+// column. Default to "Virtual" so we never label a missing field as
+// "in-person" — that would be incorrect inference.
+
+function deriveMeetingMode(provider: string | null): {
+  label: string;
+  icon: LucideIcon;
+  tint: MetaTint;
+} {
+  switch (provider) {
+    case "none":
+      return { label: "In-person", icon: MapPin, tint: "neutral" };
+    case "google_meet":
+      return { label: "Google Meet", icon: Video, tint: "brand" };
+    case "zoom":
+      return { label: "Zoom", icon: Video, tint: "brand" };
+    case "teams":
+      return { label: "Teams", icon: Video, tint: "brand" };
+    default:
+      return { label: "Virtual", icon: Video, tint: "neutral" };
+  }
+}
+
+// ─── Service insight line ─────────────────────────────────────────
+// Calm, state-aware operational guidance. Renders one line. Honest
+// signals only.
+
+function ServiceInsight({
+  svc,
+  readiness,
+}: {
+  svc: Svc;
+  readiness: Readiness;
+}) {
+  const hasStaff = svc.staff.length > 0;
+  const hasDepartment = (svc.departmentNames?.length ?? 0) > 0;
+  const hasBookings = (svc.bookingsLast30d ?? 0) > 0;
+
+  let text: string;
+  let tone: "neutral" | "positive" | "warning" | "brand";
+
+  if (readiness === "inactive") {
+    text = "This service is not yet bookable.";
+    tone = "warning";
+  } else if (!hasStaff) {
+    text = "Assign staff to activate scheduling.";
+    tone = "warning";
+  } else if (!hasDepartment) {
+    text = "Department ownership improves routing intelligence.";
+    tone = "brand";
+  } else if (hasBookings) {
+    text = `Routing active — ${svc.bookingsLast30d} ${svc.bookingsLast30d === 1 ? "booking" : "bookings"} in the last 30 days.`;
+    tone = "positive";
+  } else {
+    text = "Ready for booking. Awaiting first customer activity.";
+    tone = "brand";
+  }
+
+  const cls =
+    tone === "positive" ? "bg-emerald-50/50 text-emerald-800/90 ring-emerald-200/30"
+    : tone === "warning"  ? "bg-amber-50/40 text-amber-900/90 ring-amber-200/30"
+    : tone === "brand"    ? "bg-brand-subtle/40 text-brand-accent ring-brand-accent/15"
+    :                       "bg-surface-inset/40 text-ink-muted ring-border/40";
+
+  const dotCls =
+    tone === "positive" ? "bg-emerald-500"
+    : tone === "warning"  ? "bg-amber-500"
+    : tone === "brand"    ? "bg-brand-accent"
+    :                       "bg-ink-subtle/50";
+
+  return (
+    <div className={cn("mt-3 flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] leading-relaxed ring-1", cls)}>
+      <span aria-hidden className={cn("inline-block h-1.5 w-1.5 shrink-0 rounded-full", dotCls)} />
+      <span className="min-w-0">{text}</span>
+    </div>
+  );
+}
+
+// ─── Service action bar ───────────────────────────────────────────
+// Sits outside the card's clickable body so we don't nest buttons.
+// All items either navigate or invoke the existing drawer (no new
+// API calls, no new routes).
+
+function ServiceActionBar({
+  svc,
+  onEdit,
+}: {
+  svc: Svc;
+  onEdit: () => void;
+}) {
+  // Encourage the next operational step based on current state.
+  const needsStaff = svc.staff.length === 0;
+  const needsDept = (svc.departmentNames?.length ?? 0) === 0;
+
+  return (
+    <div className="relative flex items-center justify-end gap-0.5 border-t border-border/50 bg-surface-subtle/30 px-2 py-1.5">
+      <ActionButton
+        icon={UserPlus}
+        label="Assign staff"
+        onClick={onEdit}
+        highlight={needsStaff}
+      />
+      <ActionLink
+        icon={CalendarCheck}
+        label="Configure availability"
+        href="/dashboard/availability"
+      />
+      <ActionLink
+        icon={Settings}
+        label="Configure routing"
+        href="/dashboard/settings/routing"
+        highlight={needsDept}
+      />
+      <span aria-hidden className="mx-0.5 inline-block h-3 w-px bg-border/60" />
+      <ActionButton
+        icon={Pencil}
+        label="Edit service"
+        onClick={onEdit}
+      />
+    </div>
+  );
+}
+
+function ActionButton({
+  icon: Icon,
+  label,
+  onClick,
+  highlight,
+}: {
+  icon: LucideIcon;
+  label: string;
+  onClick: () => void;
+  highlight?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={(e) => { e.stopPropagation(); onClick(); }}
+      title={label}
+      aria-label={label}
+      className={cn(
+        "group/btn inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle transition-all duration-[160ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:bg-surface hover:text-ink hover:shadow-soft",
+        highlight && "text-amber-700 hover:text-amber-800",
+      )}
+    >
+      <Icon className="h-3.5 w-3.5" strokeWidth={1.75} />
+      {highlight && (
+        <span aria-hidden className="ml-px inline-block h-1 w-1 rounded-full bg-amber-500" />
+      )}
+    </button>
+  );
+}
+
+function ActionLink({
+  icon: Icon,
+  label,
+  href,
+  highlight,
+}: {
+  icon: LucideIcon;
+  label: string;
+  href: string;
+  highlight?: boolean;
+}) {
+  return (
+    <Link
+      href={href}
+      onClick={(e) => e.stopPropagation()}
+      title={label}
+      aria-label={label}
+      className={cn(
+        "inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle transition-all duration-[160ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:bg-surface hover:text-ink hover:shadow-soft",
+        highlight && "text-amber-700 hover:text-amber-800",
+      )}
+    >
+      <Icon className="h-3.5 w-3.5" strokeWidth={1.75} />
+      {highlight && (
+        <span aria-hidden className="ml-px inline-block h-1 w-1 rounded-full bg-amber-500" />
+      )}
+    </Link>
+  );
+}
+
+// ─── Architecture insight tile (low-density companion) ────────────
+//
+// Rendered alongside the service grid when the workspace has only
+// 1–2 services, so the page doesn't feel sparse. Calm executive
+// styling, no fabricated metrics — content adapts to what we
+// actually know about the workspace.
+
+function ArchitectureInsightTile({ rows }: { rows: Svc[] }) {
+  const totalStaff = rows.reduce((s, r) => s + r.staff.length, 0);
+  const hasAnyDept = rows.some((r) => (r.departmentNames?.length ?? 0) > 0);
+  const allReady = rows.every((r) => deriveReadiness(r) === "ready");
+
+  const items: { icon: LucideIcon; title: string; body: string; tone: "neutral" | "positive" | "brand" | "warning" }[] = [];
+
+  items.push({
+    icon: Briefcase,
+    title: `${rows.length} ${rows.length === 1 ? "service" : "services"} configured`,
+    body: rows.length === 1
+      ? "Add more services to broaden your booking surface."
+      : "Add more services to expand your operational catalog.",
+    tone: "brand",
+  });
+  items.push({
+    icon: Users,
+    title: totalStaff > 0 ? `${totalStaff} staff ${totalStaff === 1 ? "assignment" : "assignments"}` : "No staff assigned",
+    body: totalStaff > 0
+      ? "Workforce is connected to your service catalog."
+      : "Assign staff to activate routing.",
+    tone: totalStaff > 0 ? "positive" : "warning",
+  });
+  items.push({
+    icon: Building2,
+    title: hasAnyDept ? "Departments connected" : "Departments not connected",
+    body: hasAnyDept
+      ? "Department ownership is in place for routing intelligence."
+      : "Connect services to departments to enable operational routing.",
+    tone: hasAnyDept ? "positive" : "brand",
+  });
+  items.push({
+    icon: Workflow,
+    title: allReady ? "Booking coverage ready" : "Booking coverage in progress",
+    body: allReady
+      ? "All services are staffed and bookable."
+      : "Complete the steps above to activate public booking.",
+    tone: allReady ? "positive" : "neutral",
+  });
+
+  return (
+    <aside
+      className="relative overflow-hidden rounded-2xl border border-border bg-gradient-to-br from-brand-subtle/35 via-surface to-surface p-4 shadow-soft"
+      aria-label="Service architecture insight"
+    >
+      <div aria-hidden className="pointer-events-none absolute -right-12 -top-12 h-32 w-32 rounded-full bg-brand-accent/[0.12] blur-3xl" />
+      <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/55 to-transparent" />
+
+      <div className="relative">
+        <div className="text-[10px] font-semibold uppercase tracking-[0.10em] text-brand-accent">
+          Service architecture
+        </div>
+        <h3 className="mt-0.5 text-[14px] font-semibold tracking-tight text-ink">
+          Operational composition
+        </h3>
+        <p className="mt-1 text-[11.5px] leading-relaxed text-ink-muted">
+          A quick read on how your service catalog connects to staff, departments, and booking coverage.
+        </p>
+
+        <ul className="mt-3 space-y-1.5">
+          {items.map((it, i) => {
+            const Icon = it.icon;
+            const iconBg =
+              it.tone === "positive" ? "bg-emerald-50 text-emerald-700 ring-emerald-200/40"
+              : it.tone === "warning"  ? "bg-amber-50 text-amber-700 ring-amber-200/40"
+              : it.tone === "brand"    ? "bg-brand-subtle text-brand-accent ring-brand-accent/15"
+              :                          "bg-surface-inset text-ink-subtle ring-border/40";
+            return (
+              <li key={i} className="flex items-start gap-2">
+                <div className={cn("inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md ring-1", iconBg)}>
+                  <Icon className="h-3 w-3" strokeWidth={2} />
+                </div>
+                <div className="min-w-0">
+                  <div className="text-[11.5px] font-semibold tracking-tight text-ink">{it.title}</div>
+                  <div className="mt-0.5 text-[10.5px] leading-relaxed text-ink-muted">{it.body}</div>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      </div>
+    </aside>
   );
 }
 
