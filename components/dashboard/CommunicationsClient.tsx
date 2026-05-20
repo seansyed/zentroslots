@@ -42,10 +42,17 @@ import {
   Search,
   ArrowRight,
   Activity,
+  Pin,
+  PinOff,
+  ListChecks,
+  CalendarPlus,
+  BellRing,
+  Heart,
+  Flame,
   type LucideIcon,
 } from "lucide-react";
 
-import { Avatar } from "@/components/ui/primitives";
+import { Avatar, toast } from "@/components/ui/primitives";
 import { PremiumCard, MetricCard } from "@/components/ui/Card";
 import { FadeIn } from "@/components/ui/Motion";
 import { cn } from "@/lib/cn";
@@ -216,6 +223,88 @@ function deriveSignal(rows: CommLog[], stats: ReturnType<typeof computeStats>): 
   return "No urgent communication risks detected. Operational delivery is steady.";
 }
 
+// ─── Priority + relationship signals ──────────────────────────────
+
+type ThreadPriority = "urgent" | "warning" | "opportunity" | "standard";
+
+function deriveThreadPriority(t: Thread): ThreadPriority {
+  const now = Date.now();
+  if (t.hasRecentFailure) return "urgent";
+  const latestMs = new Date(t.latest.createdAt).getTime();
+  const ageDays = (now - latestMs) / 86_400_000;
+  const isVip = t.customerStatus === "vip";
+  if (isVip && ageDays >= AWAITING_DAYS) return "warning";
+  if (
+    t.bookingId &&
+    t.latest.bookingStartAt &&
+    new Date(t.latest.bookingStartAt).getTime() > now
+  ) {
+    return "opportunity";
+  }
+  if (ageDays >= 14) return "warning";
+  return "standard";
+}
+
+const PRIORITY_RAIL: Record<ThreadPriority, string> = {
+  urgent:      "bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.45)]",
+  warning:     "bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.35)]",
+  opportunity: "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.35)]",
+  standard:    "bg-brand-accent/20",
+};
+
+const PRIORITY_BG: Record<ThreadPriority, string> = {
+  urgent:      "bg-gradient-to-r from-red-50/35 via-surface to-surface",
+  warning:     "bg-gradient-to-r from-amber-50/30 via-surface to-surface",
+  opportunity: "bg-gradient-to-r from-emerald-50/30 via-surface to-surface",
+  standard:    "",
+};
+
+type Warmth = {
+  /** Lifetime touchpoint count for this customer. */
+  touches: number;
+  /** Days since first known touchpoint. 0 when only one touchpoint exists. */
+  longevityDays: number;
+  /** True when the customer has touchpoints across 3+ unique days. */
+  highlyEngaged: boolean;
+};
+
+function deriveWarmth(t: Thread): Warmth {
+  const touches = t.logs.length;
+  const ms = t.logs.map((l) => new Date(l.createdAt).getTime());
+  const earliest = Math.min(...ms);
+  const longevityDays = Math.floor((Date.now() - earliest) / 86_400_000);
+  const uniqueDays = new Set(
+    t.logs.map((l) => new Date(l.createdAt).toISOString().slice(0, 10)),
+  ).size;
+  return { touches, longevityDays, highlyEngaged: uniqueDays >= 3 };
+}
+
+type Engagement = "strong" | "steady" | "cooling";
+
+function deriveEngagement(t: Thread): Engagement {
+  const now = Date.now();
+  const latestMs = new Date(t.latest.createdAt).getTime();
+  const ageDays = (now - latestMs) / 86_400_000;
+  const w = deriveWarmth(t);
+  if (ageDays <= 3 && w.highlyEngaged) return "strong";
+  if (ageDays <= 7) return "steady";
+  return "cooling";
+}
+
+type Confidence = "high" | "medium" | "low";
+
+function deriveConfidence(t: Thread): Confidence {
+  // Confidence = how strongly we believe the suggestion fits. Driven
+  // by touch volume and recency. >= 5 recent touches → high; some
+  // history → medium; almost no signal → low.
+  const recent = t.logs.filter(
+    (l) => Date.now() - new Date(l.createdAt).getTime() < 30 * 86_400_000,
+  ).length;
+  if (recent >= 5) return "high";
+  if (recent >= 2) return "medium";
+  return "low";
+}
+
 // ─── Filters ────────────────────────────────────────────────────────
 
 /**
@@ -283,6 +372,29 @@ export default function CommunicationsClient({
   const [search, setSearch] = React.useState("");
   const [filter, setFilter] = React.useState<Filter>("all");
   const [activeKey, setActiveKey] = React.useState<string | null>(null);
+  const searchRef = React.useRef<HTMLInputElement | null>(null);
+
+  // Pinned threads — visual-only persistence in localStorage. Pinned
+  // threads sort to the top of the stream. No backend involvement.
+  const [pinnedKeys, setPinnedKeys] = React.useState<Set<string>>(new Set());
+  React.useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const raw = window.localStorage.getItem("comm_pinned_threads");
+      if (raw) setPinnedKeys(new Set(JSON.parse(raw) as string[]));
+    } catch { /* swallow */ }
+  }, []);
+  function togglePin(key: string) {
+    setPinnedKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      try {
+        window.localStorage.setItem("comm_pinned_threads", JSON.stringify(Array.from(next)));
+      } catch { /* swallow */ }
+      return next;
+    });
+    toast(pinnedKeys.has(key) ? "Unpinned" : "Pinned to top", "success");
+  }
 
   const filtered = React.useMemo(() => {
     let f = applyFilter(initial, filter);
@@ -298,7 +410,16 @@ export default function CommunicationsClient({
     return f;
   }, [initial, filter, search]);
 
-  const threads = React.useMemo(() => buildThreads(filtered), [filtered]);
+  const threads = React.useMemo(() => {
+    const built = buildThreads(filtered);
+    // Pin sort: pinned threads first, then natural order.
+    return built.sort((a, b) => {
+      const ap = pinnedKeys.has(a.key) ? 1 : 0;
+      const bp = pinnedKeys.has(b.key) ? 1 : 0;
+      if (ap !== bp) return bp - ap;
+      return new Date(b.latest.createdAt).getTime() - new Date(a.latest.createdAt).getTime();
+    });
+  }, [filtered, pinnedKeys]);
   const counts = React.useMemo(() => computeCounts(initial), [initial]);
   const stats = React.useMemo(() => computeStats(initial), [initial]);
   const signal = React.useMemo(() => deriveSignal(initial, stats), [initial, stats]);
@@ -312,22 +433,40 @@ export default function CommunicationsClient({
   }, [threads, activeKey]);
 
   // Keyboard navigation — Arrow keys / J / K to move between threads,
-  // Superhuman / Linear pattern. Ignored while the user is typing.
+  // Shift+J/K to jump 5, "/" to focus search. Superhuman / Linear
+  // pattern. Ignored while the user is typing in form fields.
   React.useEffect(() => {
     function onKey(e: KeyboardEvent) {
       const tgt = e.target as HTMLElement | null;
-      if (tgt && (tgt.tagName === "INPUT" || tgt.tagName === "TEXTAREA" || tgt.isContentEditable)) return;
+      const inField = !!(tgt && (tgt.tagName === "INPUT" || tgt.tagName === "TEXTAREA" || tgt.isContentEditable));
       if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const key = e.key;
+      const lower = key.toLowerCase();
+
+      // "/" — focus search (works even from outside an input).
+      if (!inField && key === "/") {
+        e.preventDefault();
+        searchRef.current?.focus();
+        return;
+      }
+      // Esc inside the search field clears + blurs.
+      if (inField && key === "Escape" && tgt === searchRef.current) {
+        e.preventDefault();
+        setSearch("");
+        (tgt as HTMLInputElement).blur();
+        return;
+      }
+      if (inField) return;
       if (threads.length === 0) return;
-      const key = e.key.toLowerCase();
-      const isNext = key === "arrowdown" || key === "j";
-      const isPrev = key === "arrowup" || key === "k";
+      const isNext = lower === "arrowdown" || lower === "j";
+      const isPrev = lower === "arrowup" || lower === "k";
       if (!isNext && !isPrev) return;
       e.preventDefault();
+      const step = e.shiftKey ? 5 : 1;
       const idx = Math.max(0, threads.findIndex((t) => t.key === activeKey));
       const next = isNext
-        ? Math.min(threads.length - 1, idx + 1)
-        : Math.max(0, idx - 1);
+        ? Math.min(threads.length - 1, idx + step)
+        : Math.max(0, idx - step);
       setActiveKey(threads[next].key);
     }
     window.addEventListener("keydown", onKey);
@@ -376,6 +515,7 @@ export default function CommunicationsClient({
           filter={filter}
           onFilter={setFilter}
           counts={counts}
+          searchRef={searchRef}
         />
       </FadeIn>
 
@@ -396,8 +536,14 @@ export default function CommunicationsClient({
               activeKey={activeKey}
               onSelect={setActiveKey}
               userTimezone={userTimezone}
+              pinnedKeys={pinnedKeys}
             />
-            <ActiveThread thread={activeThread} userTimezone={userTimezone} />
+            <ActiveThread
+              thread={activeThread}
+              userTimezone={userTimezone}
+              isPinned={activeThread ? pinnedKeys.has(activeThread.key) : false}
+              onTogglePin={() => activeThread && togglePin(activeThread.key)}
+            />
           </div>
         </FadeIn>
       )}
@@ -492,13 +638,14 @@ function AIStrip({ signal }: { signal: string }) {
 // ─── Search + filters ─────────────────────────────────────────────
 
 function SearchAndFilters({
-  search, onSearch, filter, onFilter, counts,
+  search, onSearch, filter, onFilter, counts, searchRef,
 }: {
   search: string;
   onSearch: (s: string) => void;
   filter: Filter;
   onFilter: (f: Filter) => void;
   counts: Record<Filter, number>;
+  searchRef?: React.RefObject<HTMLInputElement | null>;
 }) {
   return (
     <div className="relative overflow-hidden rounded-2xl border border-border bg-surface px-2.5 py-2 shadow-soft">
@@ -510,11 +657,13 @@ function SearchAndFilters({
         <div className="relative max-w-md flex-1">
           <Search className="absolute left-2.5 top-2 h-4 w-4 text-ink-subtle" strokeWidth={1.75} aria-hidden />
           <input
+            ref={searchRef}
             value={search}
             onChange={(e) => onSearch(e.target.value)}
-            placeholder="Search by customer name, email, or event…"
-            className="w-full rounded-xl border border-border bg-surface-subtle py-1.5 pl-9 pr-3 text-[13px] outline-none transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:border-border-strong focus:border-brand-accent focus:bg-surface focus:ring-4 focus:ring-brand-accent/15"
+            placeholder="Search… (press / to focus)"
+            className="w-full rounded-xl border border-border bg-surface-subtle py-1.5 pl-9 pr-10 text-[13px] outline-none transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:border-border-strong focus:border-brand-accent focus:bg-surface focus:ring-4 focus:ring-brand-accent/15"
           />
+          <kbd className="absolute right-2.5 top-1.5 hidden h-5 min-w-[18px] items-center justify-center rounded border border-border bg-surface px-1 font-mono text-[10px] font-semibold text-ink-subtle sm:inline-flex">/</kbd>
         </div>
         <div className="relative inline-flex flex-wrap items-center gap-0.5 rounded-xl border border-border bg-surface-subtle p-0.5 shadow-soft">
           {FILTERS.map((f) => {
@@ -565,11 +714,13 @@ function ThreadStream({
   activeKey,
   onSelect,
   userTimezone,
+  pinnedKeys,
 }: {
   threads: Thread[];
   activeKey: string | null;
   onSelect: (k: string) => void;
   userTimezone: string;
+  pinnedKeys: Set<string>;
 }) {
   return (
     <PremiumCard compact interactive={false} className="overflow-hidden p-0">
@@ -592,7 +743,8 @@ function ThreadStream({
           const meta = channelMeta(t.latest.channel);
           const Icon = meta.icon;
           const isVip = t.customerStatus === "vip";
-          const failed = t.latest.status === "failed";
+          const priority = deriveThreadPriority(t);
+          const isPinned = pinnedKeys.has(t.key);
           return (
             <li key={t.key}>
               <button
@@ -601,15 +753,26 @@ function ThreadStream({
                 className={cn(
                   "group relative block w-full overflow-hidden px-4 py-3 text-left transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)]",
                   "hover:bg-surface-inset/40",
+                  // Priority bg tint when not actively selected — gives
+                  // the eye an instant scan-priority signal.
+                  !isActive && PRIORITY_BG[priority],
                   isActive && "bg-gradient-to-r from-brand-subtle/40 via-surface to-surface",
                 )}
               >
-                {/* Active rail */}
-                {isActive && (
+                {/* Left rail — active state always wins; otherwise the
+                    rail color reflects the thread's priority. */}
+                {isActive ? (
                   <span
                     aria-hidden
                     className="absolute inset-y-0 left-0 w-0.5 bg-gradient-to-b from-brand-accent to-brand-hover shadow-[0_0_10px_rgba(53,157,243,0.45)]"
                   />
+                ) : (
+                  priority !== "standard" && (
+                    <span
+                      aria-hidden
+                      className={cn("absolute inset-y-0 left-0 w-0.5", PRIORITY_RAIL[priority])}
+                    />
+                  )
                 )}
                 <div className="flex items-start gap-2.5">
                   <Avatar name={t.customerName} size="sm" className="!h-9 !w-9 !text-[11px]" />
@@ -618,6 +781,9 @@ function ThreadStream({
                       <span className="truncate text-[13px] font-semibold tracking-tight text-ink">
                         {t.customerName}
                       </span>
+                      {isPinned && (
+                        <Pin className="h-2.5 w-2.5 shrink-0 text-brand-accent" strokeWidth={2.5} aria-label="Pinned" />
+                      )}
                       {isVip && (
                         <span className="inline-flex items-center gap-0.5 rounded-full bg-amber-50/80 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-amber-700 ring-1 ring-amber-200/40">
                           <Crown className="h-2.5 w-2.5" strokeWidth={2} />
@@ -630,9 +796,15 @@ function ThreadStream({
                           Failed
                         </span>
                       )}
+                      {priority === "opportunity" && !t.hasRecentFailure && (
+                        <span className="inline-flex items-center gap-0.5 rounded-full bg-emerald-50/80 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-emerald-700 ring-1 ring-emerald-200/40">
+                          <Calendar className="h-2.5 w-2.5" strokeWidth={2} />
+                          Upcoming
+                        </span>
+                      )}
                     </div>
                     <div className="mt-0.5 flex items-center gap-1 text-[11px] text-ink-muted">
-                      <Icon className={cn("h-3 w-3", meta.tone.split(" ")[1] /* text class only */)} strokeWidth={1.75} />
+                      <Icon className={cn("h-3 w-3", meta.tone.split(" ")[1])} strokeWidth={1.75} />
                       <span className="truncate">{formatEventType(t.latest.eventType)}</span>
                     </div>
                     <div className="mt-0.5 flex items-center gap-1.5 text-[10px] text-ink-subtle">
@@ -644,7 +816,7 @@ function ThreadStream({
                       <span>{t.logs.length} {t.logs.length === 1 ? "touch" : "touches"}</span>
                     </div>
                   </div>
-                  {failed && !isActive && (
+                  {t.hasRecentFailure && !isActive && (
                     <ArrowRight className="mt-1 h-3.5 w-3.5 text-red-500" strokeWidth={2} />
                   )}
                 </div>
@@ -662,9 +834,13 @@ function ThreadStream({
 function ActiveThread({
   thread,
   userTimezone,
+  isPinned,
+  onTogglePin,
 }: {
   thread: Thread | null;
   userTimezone: string;
+  isPinned: boolean;
+  onTogglePin: () => void;
 }) {
   if (!thread) {
     return (
@@ -722,6 +898,8 @@ function ActiveThread({
               <span className="inline-flex items-center gap-1 rounded-full bg-surface-inset px-1.5 py-0.5 font-medium uppercase tracking-wider">
                 {thread.logs.length} {thread.logs.length === 1 ? "touchpoint" : "touchpoints"}
               </span>
+              {/* Relationship warmth chips — calm trust-building copy */}
+              <WarmthChips thread={thread} />
               {thread.customerId && (
                 <Link
                   href={`/dashboard/customers?focus=${thread.customerId}`}
@@ -741,6 +919,36 @@ function ActiveThread({
                 </Link>
               )}
             </div>
+
+            {/* Quick action ghost row */}
+            <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+              <QuickAction
+                icon={isPinned ? PinOff : Pin}
+                label={isPinned ? "Unpin" : "Pin"}
+                onClick={onTogglePin}
+                tone={isPinned ? "brand" : "neutral"}
+              />
+              <QuickAction
+                icon={ListChecks}
+                label="Create task"
+                href="/dashboard/tasks"
+              />
+              <QuickAction
+                icon={CalendarPlus}
+                label="Schedule follow-up"
+                href="/dashboard/calendar"
+              />
+              <QuickAction
+                icon={BellRing}
+                label="Send reminder"
+                onClick={() =>
+                  toast(
+                    "Reminders fire from your automations. Configure cadence in Settings → Communications.",
+                    "info",
+                  )
+                }
+              />
+            </div>
           </div>
         </div>
       </div>
@@ -757,6 +965,86 @@ function ActiveThread({
         ))}
       </ul>
     </PremiumCard>
+  );
+}
+
+// ─── Warmth + quick-action helpers ─────────────────────────────────
+
+function WarmthChips({ thread }: { thread: Thread }) {
+  const w = deriveWarmth(thread);
+  const chips: Array<{ label: string; icon: LucideIcon; tone: string }> = [];
+  if (w.touches >= 5) {
+    chips.push({
+      label: `${w.touches} touchpoints`,
+      icon: MessageSquare,
+      tone: "bg-brand-subtle/60 text-brand-accent ring-1 ring-brand-accent/15",
+    });
+  }
+  if (w.longevityDays >= 90) {
+    chips.push({
+      label: "Long-term",
+      icon: Heart,
+      tone: "bg-emerald-50/70 text-emerald-700 ring-1 ring-emerald-200/40",
+    });
+  }
+  if (w.highlyEngaged) {
+    chips.push({
+      label: "Highly engaged",
+      icon: Flame,
+      tone: "bg-amber-50/70 text-amber-700 ring-1 ring-amber-200/40",
+    });
+  }
+  if (chips.length === 0) return null;
+  return (
+    <>
+      {chips.map((c) => {
+        const I = c.icon;
+        return (
+          <span
+            key={c.label}
+            className={cn("inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider", c.tone)}
+          >
+            <I className="h-2.5 w-2.5" strokeWidth={2} />
+            {c.label}
+          </span>
+        );
+      })}
+    </>
+  );
+}
+
+function QuickAction({
+  icon: Icon,
+  label,
+  onClick,
+  href,
+  tone = "neutral",
+}: {
+  icon: LucideIcon;
+  label: string;
+  onClick?: () => void;
+  href?: string;
+  tone?: "neutral" | "brand";
+}) {
+  const cls = cn(
+    "inline-flex h-7 items-center gap-1 rounded-md border bg-surface px-2 text-[10px] font-semibold shadow-soft transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:shadow-md",
+    tone === "brand"
+      ? "border-brand-accent/30 text-brand-accent hover:bg-brand-subtle/40"
+      : "border-border text-ink-muted hover:bg-surface-inset hover:text-ink",
+  );
+  if (href) {
+    return (
+      <Link href={href} className={cls}>
+        <Icon className="h-3 w-3" strokeWidth={1.75} />
+        {label}
+      </Link>
+    );
+  }
+  return (
+    <button type="button" onClick={onClick} className={cls}>
+      <Icon className="h-3 w-3" strokeWidth={1.75} />
+      {label}
+    </button>
   );
 }
 
@@ -831,14 +1119,48 @@ function ThreadAIAssist({ thread }: { thread: Thread }) {
             </span>
           </div>
           <div className="min-w-0 flex-1">
-            <div className="text-[10px] font-semibold uppercase tracking-[0.10em] text-brand-accent">
-              AI assistance
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] font-semibold uppercase tracking-[0.10em] text-brand-accent">
+                AI assistance
+              </span>
+              <ConfidenceChip level={deriveConfidence(thread)} />
+              <EngagementChip level={deriveEngagement(thread)} />
             </div>
             <div className="mt-0.5 text-[12px] leading-relaxed text-ink">{suggestion}</div>
           </div>
         </div>
       </div>
     </div>
+  );
+}
+
+function ConfidenceChip({ level }: { level: Confidence }) {
+  const map: Record<Confidence, { label: string; cls: string; dot: string }> = {
+    high:   { label: "High",   cls: "bg-emerald-50/80 text-emerald-700 ring-1 ring-emerald-200/40", dot: "bg-emerald-500" },
+    medium: { label: "Medium", cls: "bg-brand-subtle/70 text-brand-accent ring-1 ring-brand-accent/15", dot: "bg-brand-accent" },
+    low:    { label: "Low",    cls: "bg-surface-inset text-ink-subtle ring-1 ring-border/40",          dot: "bg-ink-subtle/50" },
+  };
+  const m = map[level];
+  return (
+    <span className={cn("inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.06em]", m.cls)}>
+      <span aria-hidden className={cn("inline-block h-1 w-1 rounded-full", m.dot)} />
+      Confidence · {m.label}
+    </span>
+  );
+}
+
+function EngagementChip({ level }: { level: Engagement }) {
+  const map: Record<Engagement, { label: string; cls: string; dot: string }> = {
+    strong:  { label: "Strong",  cls: "bg-emerald-50/80 text-emerald-700 ring-1 ring-emerald-200/40", dot: "bg-emerald-500" },
+    steady:  { label: "Steady",  cls: "bg-brand-subtle/70 text-brand-accent ring-1 ring-brand-accent/15", dot: "bg-brand-accent" },
+    cooling: { label: "Cooling", cls: "bg-amber-50/70 text-amber-700 ring-1 ring-amber-200/40",        dot: "bg-amber-500" },
+  };
+  const m = map[level];
+  return (
+    <span className={cn("inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.06em]", m.cls)}>
+      <span aria-hidden className={cn("inline-block h-1 w-1 rounded-full", m.dot)} />
+      Engagement · {m.label}
+    </span>
   );
 }
 
