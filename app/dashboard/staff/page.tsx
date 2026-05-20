@@ -33,6 +33,8 @@ export default async function StaffPage() {
         isAdmin={user.role === "admin" || user.role === "manager"}
         canChangeRoles={user.role === "admin"}
         allServices={serviceRows.map((r) => ({ id: r.id, name: r.name, durationMinutes: r.durationMinutes, color: r.color ?? null }))}
+        tenantSlug={tenant?.slug ?? null}
+        tenantName={tenant?.name ?? null}
       />
     </Shell>
   );

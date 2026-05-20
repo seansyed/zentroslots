@@ -44,6 +44,7 @@ import {
   Button,
   Card,
   Drawer,
+  Modal,
   Skeleton,
   toast,
 } from "@/components/ui/primitives";
@@ -106,6 +107,8 @@ export default function StaffClient({
   isAdmin,
   canChangeRoles,
   allServices,
+  tenantSlug,
+  tenantName,
 }: {
   userTimezone: string;
   // `isAdmin` here is the legacy name; it now means "admin OR manager" —
@@ -114,9 +117,16 @@ export default function StaffClient({
   // Strictly admin-only: who can promote/demote between staff and manager.
   canChangeRoles: boolean;
   allServices: ServiceItem[];
+  // Threaded through from the server page so the invite modal can
+  // surface the workspace sign-up share link. There is no in-app
+  // create/invite flow today — invites happen via the public sign-up
+  // flow + the tenant slug. The modal explains this calmly.
+  tenantSlug?: string | null;
+  tenantName?: string | null;
 }) {
   const [rows, setRows] = React.useState<StaffRow[] | null>(null);
   const [openId, setOpenId] = React.useState<string | null>(null);
+  const [inviteOpen, setInviteOpen] = React.useState(false);
 
   // Toolbar state
   const [q, setQ] = React.useState("");
@@ -188,7 +198,7 @@ export default function StaffClient({
 
       {/* ── Hero ──────────────────────────────────────────────── */}
       <FadeIn>
-        <StaffHero isAdmin={isAdmin} />
+        <StaffHero isAdmin={isAdmin} onInvite={() => setInviteOpen(true)} />
       </FadeIn>
 
       {/* ── AI Workforce Intelligence Strip ─────────────────── */}
@@ -235,7 +245,7 @@ export default function StaffClient({
                 ))}
               </div>
             ) : rows.length === 0 ? (
-              <PremiumEmptyState />
+              <PremiumEmptyState onInvite={() => setInviteOpen(true)} />
             ) : (filtered ?? []).length === 0 ? (
               <FilteredEmpty onClear={() => { setQ(""); setRoleFilter("all"); setWorkloadFilter("all"); }} />
             ) : (
@@ -263,13 +273,20 @@ export default function StaffClient({
         isAdmin={isAdmin}
         canChangeRoles={canChangeRoles}
       />
+
+      <InviteStaffModal
+        open={inviteOpen}
+        onClose={() => setInviteOpen(false)}
+        tenantSlug={tenantSlug ?? null}
+        tenantName={tenantName ?? null}
+      />
     </div>
   );
 }
 
 // ─── Hero ───────────────────────────────────────────────────────────
 
-function StaffHero({ isAdmin }: { isAdmin: boolean }) {
+function StaffHero({ isAdmin, onInvite }: { isAdmin: boolean; onInvite: () => void }) {
   return (
     <PremiumCard
       compact
@@ -316,9 +333,9 @@ function StaffHero({ isAdmin }: { isAdmin: boolean }) {
         </div>
         {isAdmin && (
           <div className="flex flex-wrap items-center gap-1.5">
-            <HeroAction href="/dashboard/settings" icon={Layers} label="Assign services" tone="ghost" />
-            <HeroAction href="/dashboard/settings" icon={Mail} label="Invite teammate" tone="ghost" />
-            <HeroAction href="/dashboard/signup" icon={UserPlus} label="Add staff" tone="primary" />
+            <HeroAction href="/dashboard/services" icon={Layers} label="Assign services" tone="ghost" />
+            <HeroAction onClick={onInvite} icon={Mail} label="Invite teammate" tone="ghost" />
+            <HeroAction onClick={onInvite} icon={UserPlus} label="Add staff" tone="primary" />
           </div>
         )}
       </div>
@@ -328,32 +345,37 @@ function StaffHero({ isAdmin }: { isAdmin: boolean }) {
 
 function HeroAction({
   href,
+  onClick,
   icon: Icon,
   label,
   tone,
 }: {
-  href: string;
+  // Exactly one of href / onClick must be set. `href` renders a Next.js
+  // Link (real navigation); `onClick` renders a button (opens a modal
+  // or runs a handler). This prevents any caller from accidentally
+  // routing to a dead URL.
+  href?: string;
+  onClick?: () => void;
   icon: LucideIcon;
   label: string;
   tone: "primary" | "ghost";
 }) {
-  if (tone === "primary") {
+  const primaryCls = "inline-flex h-9 items-center gap-1.5 rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover px-3 text-[12.5px] font-semibold text-white shadow-[0_6px_16px_rgba(53,157,243,0.35)] transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:shadow-[0_10px_24px_rgba(53,157,243,0.45)]";
+  const ghostCls = "inline-flex h-9 items-center gap-1.5 rounded-lg border border-border bg-surface px-3 text-[12.5px] font-medium text-ink-muted shadow-soft transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:bg-surface-inset hover:text-ink hover:shadow-md";
+  const cls = tone === "primary" ? primaryCls : ghostCls;
+  const iconStroke = tone === "primary" ? 2 : 1.75;
+
+  if (onClick) {
     return (
-      <Link
-        href={href}
-        className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover px-3 text-[12.5px] font-semibold text-white shadow-[0_6px_16px_rgba(53,157,243,0.35)] transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:shadow-[0_10px_24px_rgba(53,157,243,0.45)]"
-      >
-        <Icon className="h-3.5 w-3.5" strokeWidth={2} />
+      <button type="button" onClick={onClick} className={cls}>
+        <Icon className="h-3.5 w-3.5" strokeWidth={iconStroke} />
         {label}
-      </Link>
+      </button>
     );
   }
   return (
-    <Link
-      href={href}
-      className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-border bg-surface px-3 text-[12.5px] font-medium text-ink-muted shadow-soft transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:bg-surface-inset hover:text-ink hover:shadow-md"
-    >
-      <Icon className="h-3.5 w-3.5" strokeWidth={1.75} />
+    <Link href={href ?? "/dashboard"} className={cls}>
+      <Icon className="h-3.5 w-3.5" strokeWidth={iconStroke} />
       {label}
     </Link>
   );
@@ -779,7 +801,7 @@ function SectionHead({
 
 // ─── Premium empty state ───────────────────────────────────────────
 
-function PremiumEmptyState() {
+function PremiumEmptyState({ onInvite }: { onInvite: () => void }) {
   return (
     <PremiumCard
       interactive={false}
@@ -811,20 +833,22 @@ function PremiumEmptyState() {
           Invite staff, assign services, and coordinate workforce availability across your organization.
         </p>
         <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
-          <Link
-            href="/dashboard/signup"
+          <button
+            type="button"
+            onClick={onInvite}
             className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover px-3 text-[12.5px] font-semibold text-white shadow-[0_6px_16px_rgba(53,157,243,0.35)] transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:shadow-[0_10px_24px_rgba(53,157,243,0.45)]"
           >
             <UserPlus className="h-3.5 w-3.5" strokeWidth={2} />
             Add staff
-          </Link>
-          <Link
-            href="/dashboard/settings"
+          </button>
+          <button
+            type="button"
+            onClick={onInvite}
             className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-border bg-surface px-3 text-[12.5px] font-medium text-ink-muted shadow-soft transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:bg-surface-inset hover:text-ink hover:shadow-md"
           >
             <Mail className="h-3.5 w-3.5" strokeWidth={1.75} />
             Invite teammate
-          </Link>
+          </button>
         </div>
       </div>
     </PremiumCard>
@@ -1230,5 +1254,183 @@ function ScaffoldModule({
         </div>
       </div>
     </div>
+  );
+}
+
+// ─── Invite Staff Modal ────────────────────────────────────────────
+//
+// There is no in-app create-staff flow today. Staff are added by
+// having them sign up at /dashboard/login (signup mode) under the
+// tenant's workspace slug — see app/dashboard/login/page.tsx. This
+// modal explains that calmly and surfaces the share-able sign-up
+// URL + a copy-to-clipboard helper so admins can hand it off in
+// any messaging channel they prefer.
+//
+// This is the safe placeholder behavior called for by the routing
+// fix: we don't route to a dead URL, we don't promise a workflow
+// that doesn't exist, and we give the admin an actionable next step.
+
+function InviteStaffModal({
+  open,
+  onClose,
+  tenantSlug,
+  tenantName,
+}: {
+  open: boolean;
+  onClose: () => void;
+  tenantSlug: string | null;
+  tenantName: string | null;
+}) {
+  const [copied, setCopied] = React.useState<"link" | "slug" | null>(null);
+
+  const shareUrl = React.useMemo(() => {
+    if (typeof window === "undefined") return "";
+    const origin = window.location.origin;
+    return `${origin}/dashboard/login`;
+  }, []);
+
+  async function copy(value: string, which: "link" | "slug") {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(which);
+      toast("Copied to clipboard", "success");
+      setTimeout(() => setCopied((c) => (c === which ? null : c)), 1800);
+    } catch {
+      toast("Could not copy — please copy manually", "error");
+    }
+  }
+
+  return (
+    <Modal open={open} onClose={onClose} title="Invite a teammate">
+      <div className="space-y-4">
+        <p className="text-[13px] leading-relaxed text-ink-muted">
+          Share the sign-up link below with the person you want to invite
+          {tenantName ? (
+            <>
+              {" "}to <span className="font-medium text-ink">{tenantName}</span>
+            </>
+          ) : null}
+          . They&rsquo;ll create their account against your workspace and appear in this directory automatically.
+        </p>
+
+        {/* Operational signal */}
+        <div className="relative overflow-hidden rounded-xl border border-brand-accent/15 bg-brand-subtle/30 p-3">
+          <span
+            aria-hidden
+            className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/55 to-transparent"
+          />
+          <div className="flex items-start gap-2.5">
+            <div className="zm-pulse-glow inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover text-white shadow-[0_4px_10px_rgba(53,157,243,0.30)]">
+              <Sparkles className="h-3.5 w-3.5" strokeWidth={2} />
+            </div>
+            <div className="min-w-0">
+              <div className="text-[10px] font-semibold uppercase tracking-[0.10em] text-brand-accent">
+                Operational invite
+              </div>
+              <p className="mt-0.5 text-[12px] leading-relaxed text-ink-muted">
+                Native in-app invitations are being prepared. Until then, the shareable sign-up link is the safe, production-ready path.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Sign-up link */}
+        <div>
+          <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-subtle">
+            Sign-up link
+          </div>
+          <div className="mt-1.5 flex items-stretch gap-2">
+            <code className="flex-1 truncate rounded-lg border border-border bg-surface-inset/60 px-3 py-2 font-mono text-[12px] text-ink">
+              {shareUrl || "(loading…)"}
+            </code>
+            <button
+              type="button"
+              onClick={() => copy(shareUrl, "link")}
+              disabled={!shareUrl}
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-border bg-surface px-3 text-[12px] font-semibold text-ink-muted transition-colors hover:bg-surface-inset hover:text-ink disabled:opacity-50"
+            >
+              {copied === "link" ? (
+                <>
+                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" strokeWidth={2} />
+                  Copied
+                </>
+              ) : (
+                "Copy link"
+              )}
+            </button>
+          </div>
+          <p className="mt-1.5 text-[11px] leading-relaxed text-ink-subtle">
+            On this page, the invitee selects <span className="font-medium text-ink-muted">Create an account</span>, chooses the <span className="font-medium text-ink-muted">Staff</span> role, and enters your workspace slug below.
+          </p>
+        </div>
+
+        {/* Workspace slug */}
+        {tenantSlug && (
+          <div>
+            <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-subtle">
+              Your workspace slug
+            </div>
+            <div className="mt-1.5 flex items-stretch gap-2">
+              <code className="flex-1 truncate rounded-lg border border-border bg-surface-inset/60 px-3 py-2 font-mono text-[12px] text-ink">
+                {tenantSlug}
+              </code>
+              <button
+                type="button"
+                onClick={() => copy(tenantSlug, "slug")}
+                className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-border bg-surface px-3 text-[12px] font-semibold text-ink-muted transition-colors hover:bg-surface-inset hover:text-ink"
+              >
+                {copied === "slug" ? (
+                  <>
+                    <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" strokeWidth={2} />
+                    Copied
+                  </>
+                ) : (
+                  "Copy slug"
+                )}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* What happens next */}
+        <div className="rounded-xl border border-border bg-surface-inset/30 p-3">
+          <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-subtle">
+            What happens next
+          </div>
+          <ul className="mt-1.5 space-y-1.5 text-[12px] leading-relaxed text-ink-muted">
+            <li className="flex items-start gap-2">
+              <span aria-hidden className="mt-1.5 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-brand-accent" />
+              They sign up using the link, choosing the <span className="font-medium text-ink">Staff</span> role.
+            </li>
+            <li className="flex items-start gap-2">
+              <span aria-hidden className="mt-1.5 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-brand-accent" />
+              They appear in this directory automatically — no manual approval step.
+            </li>
+            <li className="flex items-start gap-2">
+              <span aria-hidden className="mt-1.5 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-brand-accent" />
+              Open their row to assign services and review schedule coverage.
+            </li>
+          </ul>
+        </div>
+
+        <div className="flex items-center justify-end gap-2 pt-1">
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-border bg-surface px-3 text-[12.5px] font-medium text-ink-muted transition-colors hover:bg-surface-inset hover:text-ink"
+          >
+            Close
+          </button>
+          <Link
+            href="/dashboard/services"
+            onClick={onClose}
+            className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover px-3 text-[12.5px] font-semibold text-white shadow-[0_6px_16px_rgba(53,157,243,0.35)] transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:shadow-[0_10px_24px_rgba(53,157,243,0.45)]"
+          >
+            <Layers className="h-3.5 w-3.5" strokeWidth={2} />
+            Open services
+          </Link>
+        </div>
+      </div>
+    </Modal>
   );
 }
