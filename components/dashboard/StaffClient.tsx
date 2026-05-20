@@ -1954,6 +1954,10 @@ type LocationListItem = {
   logoUrl: string | null;
   isActive: boolean;
   isSystem: boolean;
+  /** Optional metadata surfaced inside the weekly-presence hover
+   *  preview. Both nullable — render guards everywhere. */
+  address: string | null;
+  timezone: string | null;
 };
 
 function locationTypeIcon(t: "physical" | "virtual" | "hybrid"): LucideIcon {
@@ -1966,6 +1970,69 @@ function locationTypeChipTone(t: "physical" | "virtual" | "hybrid"): string {
   if (t === "virtual") return "bg-violet-50 text-violet-700 ring-violet-200/60";
   if (t === "hybrid") return "bg-sky-50 text-sky-700 ring-sky-200/60";
   return "bg-emerald-50 text-emerald-700 ring-emerald-200/60";
+}
+
+// ─── Per-location stable color palette ────────────────────────────
+//
+// The Weekly Presence Map needs each location to read as a distinct
+// operational surface — the eye should be able to trace
+// "Mon = blue, Tue = violet, Wed = amber" without reading labels.
+// We derive a stable index from the locationId so the same location
+// always paints the same color across reloads.
+//
+// Virtual locations bypass the palette and get a dedicated violet
+// "digital" treatment with a soft halo glow (see locationVisual).
+
+type LocationSwatch = {
+  /** Soft tinted surface for backgrounds */
+  surface: string;
+  /** Ring tint for outlines */
+  ring: string;
+  /** Solid dot for chips */
+  dot: string;
+  /** Text accent matching the swatch */
+  text: string;
+  /** Hover-prefixed shadow halo applied on element hover */
+  haloHover: string;
+};
+
+// Tailwind needs literal class names at build time — runtime
+// concatenation like `"hover:" + swatch.halo` is invisible to the
+// extractor. So we pre-bake each swatch's hover-prefixed variant
+// here as a single literal string. Same idea would apply for any
+// group-hover variants if/when we need them.
+const LOCATION_PALETTE: readonly LocationSwatch[] = [
+  { surface: "bg-sky-50/80",     ring: "ring-sky-300/40",     dot: "bg-sky-500",     text: "text-sky-700",     haloHover: "hover:shadow-[0_0_22px_rgba(14,165,233,0.22)]" },
+  { surface: "bg-emerald-50/80", ring: "ring-emerald-300/40", dot: "bg-emerald-500", text: "text-emerald-700", haloHover: "hover:shadow-[0_0_22px_rgba(16,185,129,0.22)]" },
+  { surface: "bg-amber-50/80",   ring: "ring-amber-300/40",   dot: "bg-amber-500",   text: "text-amber-700",   haloHover: "hover:shadow-[0_0_22px_rgba(245,158,11,0.22)]" },
+  { surface: "bg-rose-50/80",    ring: "ring-rose-300/40",    dot: "bg-rose-500",    text: "text-rose-700",    haloHover: "hover:shadow-[0_0_22px_rgba(244,63,94,0.22)]" },
+  { surface: "bg-indigo-50/80",  ring: "ring-indigo-300/40",  dot: "bg-indigo-500",  text: "text-indigo-700",  haloHover: "hover:shadow-[0_0_22px_rgba(99,102,241,0.22)]" },
+  { surface: "bg-teal-50/80",    ring: "ring-teal-300/40",    dot: "bg-teal-500",    text: "text-teal-700",    haloHover: "hover:shadow-[0_0_22px_rgba(20,184,166,0.22)]" },
+  { surface: "bg-orange-50/80",  ring: "ring-orange-300/40",  dot: "bg-orange-500",  text: "text-orange-700",  haloHover: "hover:shadow-[0_0_22px_rgba(249,115,22,0.22)]" },
+  { surface: "bg-fuchsia-50/80", ring: "ring-fuchsia-300/40", dot: "bg-fuchsia-500", text: "text-fuchsia-700", haloHover: "hover:shadow-[0_0_22px_rgba(217,70,239,0.22)]" },
+];
+
+const VIRTUAL_SWATCH: LocationSwatch = {
+  surface: "bg-violet-50/80",
+  ring: "ring-violet-300/40",
+  dot: "bg-violet-500",
+  text: "text-violet-700",
+  haloHover: "hover:shadow-[0_0_28px_rgba(139,92,246,0.32)]",
+};
+
+function stableLocationIndex(id: string): number {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) {
+    h = (h * 31 + id.charCodeAt(i)) | 0;
+  }
+  return Math.abs(h) % LOCATION_PALETTE.length;
+}
+
+function locationSwatch(locationId: string, locationType: "physical" | "virtual" | "hybrid"): LocationSwatch {
+  // Virtual locations always get the violet "digital" treatment so
+  // the operator can instantly tell which day is online.
+  if (locationType === "virtual") return VIRTUAL_SWATCH;
+  return LOCATION_PALETTE[stableLocationIndex(locationId)];
 }
 
 // Resolution mirror of lib/workforce-location.getStaffPresenceForDay.
@@ -2036,6 +2103,8 @@ function WorkforceLocationSection({
             logoUrl: (r.logoUrl as string | null) ?? null,
             isActive: Boolean(r.isActive ?? true),
             isSystem: Boolean(r.isSystem ?? false),
+            address: (r.address as string | null) ?? null,
+            timezone: (r.timezone as string | null) ?? null,
           })),
         );
       })
@@ -2155,31 +2224,62 @@ function WorkforceLocationSection({
     (l) => l.isActive && !assignments.some((a) => a.locationId === l.id),
   );
 
-  // Delivery-mode badge meta. Used in the segmented control and
-  // also as a contextual sentence beneath it.
+  // Delivery-mode visual language (Phase 16B refinement #3).
+  // Each mode has its own operational identity so the operator can
+  // tell-at-a-glance how this staff member shows up:
+  //   • in_person → warm amber tint, building texture, "physical hub"
+  //   • virtual   → cool violet with a soft animated digital halo
+  //   • hybrid    → blended amber→violet gradient + globe
+  // The selected state lifts each card with its mode-specific halo
+  // so the segmented control reads as a luxury operational selector.
   const DELIVERY_OPTIONS: Array<{
     value: "in_person" | "virtual" | "hybrid";
     label: string;
     icon: LucideIcon;
     caption: string;
+    /** Ring + bg combo applied when this mode is selected. */
+    selectedTone: string;
+    /** Icon ring + tint when the mode is selected. */
+    iconSelected: string;
+    /** Soft halo glow behind the card when selected. */
+    halo: string;
+    /** Subtle background texture/gradient that reads even when not selected. */
+    ambient: string;
+    /** Operational language for the "current mode" subtitle. */
+    operationalNote: string;
   }> = [
     {
       value: "in_person",
       label: "In-person",
       icon: Building2,
       caption: "Meets clients at one or more physical locations.",
+      selectedTone: "border-amber-300/60 bg-amber-50/60 ring-amber-300/40",
+      iconSelected: "bg-amber-100 text-amber-700 ring-amber-300/40",
+      halo: "shadow-[0_8px_28px_rgba(245,158,11,0.22)]",
+      ambient: "bg-[radial-gradient(circle_at_top_right,rgba(245,158,11,0.06),transparent_55%)]",
+      operationalNote: "Physical-only delivery. Bookings route to locations with a physical address.",
     },
     {
       value: "virtual",
       label: "Virtual",
       icon: Video,
       caption: "Meets clients online — Virtual Hub auto-attached when saved.",
+      selectedTone: "border-violet-300/60 bg-violet-50/60 ring-violet-300/40",
+      iconSelected: "bg-violet-100 text-violet-700 ring-violet-300/40",
+      halo: "shadow-[0_8px_28px_rgba(139,92,246,0.26)]",
+      ambient: "bg-[radial-gradient(circle_at_top_right,rgba(139,92,246,0.08),transparent_55%)]",
+      operationalNote: "Online-only delivery. Virtual Hub is auto-attached on save.",
     },
     {
       value: "hybrid",
       label: "Hybrid",
       icon: Globe,
       caption: "Mix of physical and virtual delivery — any combination allowed.",
+      selectedTone: "border-sky-300/60 bg-sky-50/60 ring-sky-300/40",
+      iconSelected: "bg-sky-100 text-sky-700 ring-sky-300/40",
+      halo: "shadow-[0_8px_28px_rgba(14,165,233,0.22)]",
+      ambient: "bg-[linear-gradient(120deg,rgba(245,158,11,0.06),rgba(139,92,246,0.08))]",
+      operationalNote: "Blended delivery. Eligible across every physical and virtual location.",
     },
   ];
 
@@ -2233,34 +2333,55 @@ function WorkforceLocationSection({
                 disabled={!canEdit || modeSaving}
                 onClick={() => saveDeliveryMode(opt.value)}
                 className={cn(
-                  "relative overflow-hidden rounded-xl border px-3 py-3 text-left transition-all duration-[220ms] ease-[cubic-bezier(0.16,1,0.3,1)]",
+                  "group relative overflow-hidden rounded-xl border px-3 py-3 text-left transition-all duration-[260ms] ease-[cubic-bezier(0.16,1,0.3,1)]",
+                  // Always paint the mode-specific ambient layer at
+                  // low opacity so every card feels operationally
+                  // distinct even before selection.
+                  opt.ambient,
                   on
-                    ? "border-brand-accent/40 bg-brand-subtle/40 ring-2 ring-brand-accent/30 shadow-soft"
-                    : "border-border bg-surface hover:-translate-y-0.5 hover:shadow-soft",
+                    ? cn("ring-2", opt.selectedTone, opt.halo, "-translate-y-0.5")
+                    : "border-border bg-surface hover:-translate-y-0.5 hover:shadow-soft hover:border-ink/15",
                   (!canEdit || modeSaving) && "cursor-not-allowed opacity-70",
                 )}
               >
-                <div className="flex items-center gap-2">
+                {/* Top edge sheen — premium light catch */}
+                <span
+                  aria-hidden
+                  className={cn(
+                    "pointer-events-none absolute inset-x-0 top-0 h-px transition-opacity duration-[260ms]",
+                    on ? "bg-gradient-to-r from-transparent via-white/80 to-transparent opacity-100" : "opacity-0 group-hover:opacity-60",
+                  )}
+                />
+                {/* Soft pulse halo behind virtual mode when selected.
+                    Pure CSS — uses Tailwind's animate-pulse on a low-
+                    opacity radial. Never overpowers the foreground. */}
+                {on && opt.value === "virtual" && (
+                  <span
+                    aria-hidden
+                    className="pointer-events-none absolute -inset-1 animate-pulse rounded-2xl bg-[radial-gradient(circle_at_center,rgba(139,92,246,0.18),transparent_65%)]"
+                  />
+                )}
+                <div className="relative flex items-center gap-2">
                   <span
                     className={cn(
-                      "inline-flex h-7 w-7 items-center justify-center rounded-lg ring-1",
-                      on ? "bg-brand-accent/10 text-brand-accent ring-brand-accent/20" : "bg-surface-inset text-ink-muted ring-border/40",
+                      "inline-flex h-7 w-7 items-center justify-center rounded-lg ring-1 transition-colors duration-[200ms]",
+                      on ? opt.iconSelected : "bg-surface-inset text-ink-muted ring-border/40 group-hover:bg-surface",
                     )}
                   >
                     <Icon className="h-3.5 w-3.5" strokeWidth={1.75} />
                   </span>
-                  <span className={cn("text-[13px] font-semibold tracking-tight", on ? "text-brand-accent" : "text-ink")}>
+                  <span className={cn("text-[13px] font-semibold tracking-tight", on ? "text-ink" : "text-ink")}>
                     {opt.label}
                   </span>
                 </div>
-                <p className="mt-1.5 text-[11px] leading-relaxed text-ink-muted">{opt.caption}</p>
+                <p className="relative mt-1.5 text-[11px] leading-relaxed text-ink-muted">{opt.caption}</p>
               </button>
             );
           })}
         </div>
         {activeMode && (
           <p className="mt-3 text-[11.5px] text-ink-subtle">
-            <span className="font-medium text-ink-muted">Current:</span> {activeMode.caption}
+            <span className="font-medium text-ink-muted">Current:</span> {activeMode.operationalNote}
           </p>
         )}
       </PremiumCard>
@@ -2294,6 +2415,7 @@ function WorkforceLocationSection({
 
           {assignments.map((a) => {
             const Icon = locationTypeIcon(a.locationType);
+            const swatch = locationSwatch(a.locationId, a.locationType);
             return (
               <div
                 key={a.locationId}
@@ -2303,7 +2425,10 @@ function WorkforceLocationSection({
                 )}
               >
                 <div className="flex items-start gap-3">
-                  <span className={cn("inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ring-1", locationTypeChipTone(a.locationType))}>
+                  {/* Per-location swatch icon — same color the
+                      Weekly Presence Map paints for this row, so the
+                      operator can scan color→location instantly. */}
+                  <span className={cn("inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ring-1", swatch.surface, swatch.ring, swatch.text)}>
                     <Icon className="h-4 w-4" strokeWidth={1.75} />
                   </span>
                   <div className="min-w-0 flex-1">
@@ -2463,7 +2588,13 @@ function WorkforceLocationSection({
         )}
       </PremiumCard>
 
-      {/* Section C — Weekly presence map */}
+      {/* Section C — Weekly presence map (Phase 16B refinement #1).
+          Executive-grade workforce visualization. Each day cell
+          paints in its location's stable color, virtual cells get a
+          soft "digital" halo, and hover surfaces an inline preview
+          with the resolution reason + address + timezone. The grid
+          itself becomes the operations dashboard for "where will
+          this person be." */}
       <PremiumCard className="p-4">
         <div className="flex items-start justify-between gap-3">
           <div>
@@ -2475,6 +2606,9 @@ function WorkforceLocationSection({
               above to change.
             </p>
           </div>
+          {/* Compact legend chips for distinct locations in this
+              week. Helps the operator scan the color language. */}
+          <WorkforceLegend assignments={assignments} />
         </div>
         <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-7">
           {DAY_LABELS_SHORT.map(({ key, label }) => {
@@ -2483,29 +2617,153 @@ function WorkforceLocationSection({
               return (
                 <div
                   key={key}
-                  className="rounded-xl border border-dashed border-border bg-surface-inset/30 p-2.5 text-center"
+                  className="group relative rounded-xl border border-dashed border-border bg-surface-inset/20 p-2.5 text-center transition-all duration-[260ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:bg-surface-inset/40"
                 >
                   <div className="text-[10px] font-semibold uppercase tracking-[0.10em] text-ink-subtle">{label}</div>
-                  <div className="mt-1 text-[11.5px] text-ink-subtle">No presence</div>
+                  <div className="mt-1.5 flex flex-col items-center justify-center gap-1 py-1">
+                    <span aria-hidden className="inline-flex h-5 w-5 items-center justify-center rounded-md bg-surface text-ink-subtle ring-1 ring-border/40">
+                      <MapPin className="h-2.5 w-2.5" strokeWidth={1.75} />
+                    </span>
+                    <span className="text-[10.5px] text-ink-subtle">No presence</span>
+                  </div>
                 </div>
               );
             }
-            const Icon = locationTypeIcon(resolved.assignment.locationType);
+            const a = resolved.assignment;
+            const Icon = locationTypeIcon(a.locationType);
+            const swatch = locationSwatch(a.locationId, a.locationType);
+            const meta = locations.find((l) => l.id === a.locationId);
+            const isVirtual = a.locationType === "virtual";
+            const isPinned = resolved.reason === "day-pinned";
+
             return (
               <div
                 key={key}
-                className="rounded-xl border border-border bg-surface p-2.5"
-                title={`Resolved via ${resolved.reason}`}
+                className={cn(
+                  "group relative overflow-visible rounded-xl border p-2.5 transition-all duration-[260ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5",
+                  // Tinted soft surface keyed to the resolved location
+                  // — this is what makes the week scan-readable.
+                  swatch.surface,
+                  // Subtler ring than the swatch ring so the tint
+                  // dominates; ring intensifies on hover.
+                  "ring-1 ring-inset",
+                  isPinned ? swatch.ring : "ring-border/60",
+                  "border-border/60 hover:shadow-soft",
+                  swatch.haloHover,
+                )}
               >
-                <div className="text-[10px] font-semibold uppercase tracking-[0.10em] text-ink-subtle">{label}</div>
-                <div className="mt-1 flex items-center gap-1.5">
-                  <span className={cn("inline-flex h-5 w-5 items-center justify-center rounded-md ring-1", locationTypeChipTone(resolved.assignment.locationType))}>
-                    <Icon className="h-3 w-3" strokeWidth={1.75} />
-                  </span>
-                  <span className="truncate text-[11.5px] font-semibold text-ink">{resolved.assignment.locationName}</span>
+                {/* Day-pinned cells get a thin colored left edge —
+                    operational "this is intentional" signal. */}
+                {isPinned && (
+                  <span
+                    aria-hidden
+                    className={cn(
+                      "pointer-events-none absolute inset-y-2 left-0 w-[3px] rounded-r-full",
+                      swatch.dot,
+                    )}
+                  />
+                )}
+                {/* Soft virtual-hub glow halo — pulses subtly so the
+                    "online day" is unmistakable. */}
+                {isVirtual && (
+                  <span
+                    aria-hidden
+                    className="pointer-events-none absolute -inset-0.5 animate-pulse rounded-xl bg-[radial-gradient(circle_at_center,rgba(139,92,246,0.12),transparent_70%)]"
+                  />
+                )}
+
+                <div className="relative">
+                  <div className="flex items-center justify-between gap-1">
+                    <div className="text-[10px] font-semibold uppercase tracking-[0.10em] text-ink-subtle">{label}</div>
+                    {/* Reason badge — pure semantic chip */}
+                    <span
+                      className={cn(
+                        "inline-flex items-center rounded-full px-1.5 py-px text-[8.5px] font-semibold uppercase tracking-[0.08em] ring-1",
+                        resolved.reason === "day-pinned"
+                          ? "bg-brand-accent/10 text-brand-accent ring-brand-accent/20"
+                          : resolved.reason === "primary"
+                            ? "bg-amber-50 text-amber-700 ring-amber-200/60"
+                            : "bg-surface-inset text-ink-subtle ring-border/40",
+                      )}
+                    >
+                      {resolved.reason === "day-pinned" ? "pin" : resolved.reason === "primary" ? "primary" : "any"}
+                    </span>
+                  </div>
+
+                  <div className="mt-2 flex items-center gap-1.5">
+                    <span
+                      className={cn(
+                        "inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md ring-1 transition-shadow duration-[260ms]",
+                        swatch.surface,
+                        swatch.ring,
+                        swatch.text,
+                      )}
+                    >
+                      <Icon className="h-3 w-3" strokeWidth={1.75} />
+                    </span>
+                    <span className="truncate text-[11.5px] font-semibold text-ink" title={a.locationName}>
+                      {a.locationName}
+                    </span>
+                  </div>
+
+                  {/* Color chip strip — visual brand for this
+                      location, even when name is truncated. */}
+                  <div className="mt-1.5 flex items-center gap-1">
+                    <span className={cn("inline-block h-1 w-6 rounded-full", swatch.dot)} aria-hidden />
+                    <span className={cn("text-[9.5px] font-semibold uppercase tracking-[0.10em]", swatch.text)}>
+                      {a.locationType === "virtual" ? "online" : a.locationType === "hybrid" ? "hybrid" : "physical"}
+                    </span>
+                    {a.isSystem && (
+                      <span className="ml-auto inline-flex items-center rounded-full bg-violet-50 px-1 py-px text-[8.5px] font-semibold uppercase tracking-[0.06em] text-violet-700 ring-1 ring-violet-200/60">
+                        sys
+                      </span>
+                    )}
+                  </div>
                 </div>
-                <div className="mt-1 text-[9.5px] font-semibold uppercase tracking-[0.10em] text-ink-subtle">
-                  {resolved.reason}
+
+                {/* Hover preview popover — surfaces meeting context
+                    inline, no second click required. Positioned
+                    absolute so it doesn't reflow the grid. CSS-only
+                    via group-hover for snappy interactivity. */}
+                <div
+                  role="tooltip"
+                  className={cn(
+                    "pointer-events-none absolute left-1/2 top-full z-30 mt-2 w-[220px] -translate-x-1/2 translate-y-1 rounded-xl border border-border bg-surface p-3 text-left opacity-0 shadow-[0_18px_44px_rgba(15,23,42,0.18)] backdrop-blur transition-all duration-[200ms] ease-[cubic-bezier(0.16,1,0.3,1)]",
+                    "group-hover:pointer-events-auto group-hover:translate-y-0 group-hover:opacity-100",
+                  )}
+                >
+                  <div className="flex items-center gap-1.5">
+                    <span className={cn("inline-flex h-6 w-6 items-center justify-center rounded-md ring-1", swatch.surface, swatch.ring, swatch.text)}>
+                      <Icon className="h-3 w-3" strokeWidth={1.75} />
+                    </span>
+                    <span className="truncate text-[12.5px] font-semibold tracking-tight text-ink">{a.locationName}</span>
+                  </div>
+                  <div className="mt-1.5 grid gap-1 text-[11px] leading-snug text-ink-muted">
+                    <div className="flex items-center gap-1">
+                      <span className="text-[9.5px] font-semibold uppercase tracking-[0.08em] text-ink-subtle">Resolved via</span>
+                      <span className="text-[11px] font-medium text-ink">
+                        {resolved.reason === "day-pinned"
+                          ? "Day-pinned"
+                          : resolved.reason === "primary"
+                            ? "Primary fallback"
+                            : "Any-day fallback"}
+                      </span>
+                    </div>
+                    {meta?.address && (
+                      <div className="line-clamp-2 text-[11px] text-ink-muted">{meta.address}</div>
+                    )}
+                    {meta?.timezone && (
+                      <div className="flex items-center gap-1 text-[10.5px] text-ink-subtle">
+                        <Clock className="h-2.5 w-2.5" strokeWidth={1.75} />
+                        {meta.timezone}
+                      </div>
+                    )}
+                    {isVirtual && (
+                      <div className="mt-0.5 text-[10.5px] text-violet-700">
+                        Online delivery — link auto-attached at booking time.
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             );
@@ -2513,6 +2771,51 @@ function WorkforceLocationSection({
         </div>
       </PremiumCard>
     </>
+  );
+}
+
+// Compact legend chip strip for the weekly presence map. Surfaces
+// the distinct locations + their palette swatches so operators can
+// read the color language at a glance. Skips re-render when there
+// are no assignments — keeps the header quiet on empty state.
+function WorkforceLegend({ assignments }: { assignments: WorkforceLocationAssignment[] }) {
+  if (assignments.length === 0) return null;
+  // De-dup by locationId while preserving render order.
+  const seen = new Set<string>();
+  const items = assignments.filter((a) => {
+    if (seen.has(a.locationId)) return false;
+    seen.add(a.locationId);
+    return true;
+  });
+  // Cap at 4 to keep the chip strip calm — anything beyond gets a "+N".
+  const visible = items.slice(0, 4);
+  const overflow = items.length - visible.length;
+  return (
+    <div className="hidden items-center gap-1.5 sm:flex">
+      {visible.map((a) => {
+        const swatch = locationSwatch(a.locationId, a.locationType);
+        return (
+          <span
+            key={a.locationId}
+            className={cn(
+              "inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium ring-1",
+              swatch.surface,
+              swatch.ring,
+              swatch.text,
+            )}
+            title={a.locationName}
+          >
+            <span className={cn("inline-block h-1.5 w-1.5 rounded-full", swatch.dot)} aria-hidden />
+            <span className="max-w-[88px] truncate">{a.locationName}</span>
+          </span>
+        );
+      })}
+      {overflow > 0 && (
+        <span className="inline-flex items-center rounded-full bg-surface-inset px-1.5 py-0.5 text-[10px] font-medium text-ink-muted ring-1 ring-border/40">
+          +{overflow}
+        </span>
+      )}
+    </div>
   );
 }
 

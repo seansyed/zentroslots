@@ -20,6 +20,21 @@
 // It is NEVER called from the slot generator. The booking engine
 // will read these helpers later from a routing/visibility filter
 // that sits ABOVE slot generation, never inside it.
+//
+// FUTURE — date exceptions (Phase 16B note, refinement #6):
+// Today's pivot uses `days_of_week` only — a stable weekly pattern.
+// Real workforces also need *date-scoped* overrides:
+//   • vacations / PTO
+//   • temporary relocation ("at the conference this week")
+//   • travel schedules / pop-up locations
+// The data shape leaves headroom for this without a rewrite —
+// `getStaffPresenceForDay` will gain a `(staffId, date)` overload
+// that consults a sibling table (e.g. `staff_presence_exceptions`
+// with `effective_from` / `effective_to` ranges + an optional
+// `location_id`). Callers passing only `dayOfWeek` continue to work
+// against the weekly pattern. Do NOT hardcode "weekly-only"
+// assumptions deeper than the resolver — if you add helpers above
+// it, take a date (or null) rather than a day-of-week.
 
 import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
