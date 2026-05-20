@@ -114,8 +114,14 @@ type StaffDetail = {
   }[];
 };
 
-// "profile" tab added — editable workforce identity surface.
-const TABS = ["overview", "profile", "services", "schedule", "activity"] as const;
+// Top-level tabs:
+//   overview  — read-only operational summary
+//   profile   — editable public identity (avatar, name, title, bio)
+//   calendar  — per-staff calendar connections (OAuth, sync health)
+//   services  — service assignment workflow
+//   schedule  — per-staff weekly availability (workspace inheritance toggle)
+//   activity  — booking activity timeline
+const TABS = ["overview", "profile", "calendar", "services", "schedule", "activity"] as const;
 type Tab = (typeof TABS)[number];
 
 // `DAYS` short-name array — kept reserved for any future compact
@@ -1711,6 +1717,24 @@ function StaffDrawer({
               />
             )}
 
+            {tab === "calendar" && (
+              // Calendar tab — per-staff calendar OAuth surface.
+              // Promoted from a Profile subsection to a top-level tab
+              // so connection state, sync health, and the connect
+              // workflow get the operational prominence they need.
+              // Personal calendars are STAFF-OWNED
+              // (calendarConnections, migration 0019). Workspace-
+              // level provider enablement (migration 0035) is
+              // honored: when a provider is disabled at the tenant
+              // level, Connect is blocked but existing connections
+              // remain visible and the booking engine keeps honoring
+              // their busy events.
+              <CalendarConnectionsSection
+                staffUserId={data.staff.id}
+                canEdit={isAdmin}
+              />
+            )}
+
             {tab === "services" && (
               <div>
                 {!isAdmin && (
@@ -2151,21 +2175,6 @@ function ProfileTab({
           </label>
         </div>
       </PremiumCard>
-
-      {/* Calendar connections — REFINEMENT #3 / #5 / #6 / #7 placement.
-          Personal calendars are STAFF-OWNED (calendarConnections,
-          migration 0019). This section is the operator-facing surface
-          for those connections — connect, reconnect, disconnect,
-          inspect sync health, see the connected account email.
-          Workspace-level provider enablement (migration 0035) is
-          honored: when a provider is disabled at the tenant level,
-          Connect is blocked but existing connections remain visible
-          and functional. */}
-      <CalendarConnectionsSection
-        staffUserId={staff.id}
-        isSelf={false /* derived implicitly via canEdit + caller; gate handled by server */}
-        canEdit={canEdit}
-      />
 
       {/* Booking identity preview */}
       <PremiumCard className="p-4">
