@@ -172,6 +172,7 @@ export default function ServicesClient({
   allDepartments,
   tenantSlug,
   tenantName,
+  planInfo,
 }: {
   isAdmin: boolean;
   allStaff: StaffOption[];
@@ -182,6 +183,17 @@ export default function ServicesClient({
    *  (the page redirects in that case, but we keep the type honest). */
   tenantSlug?: string | null;
   tenantName?: string | null;
+  /** Phase 18 plan capability snapshot. The component recomputes the
+   *  live "atCap" / "remaining" values from `rows` so deletes free
+   *  up capacity instantly; these seeded values matter only for the
+   *  first paint before the /api/services round-trip lands. */
+  planInfo: {
+    id: string;
+    name: string;
+    maxActiveServices: number;   // -1 = unlimited
+    initialActiveCount: number;
+    initialAtCap: boolean;
+  };
 }) {
   const [rows, setRows] = React.useState<Svc[] | null>(null);
   // Edit-service drawer: existing "new" + service-id state
@@ -232,6 +244,22 @@ export default function ServicesClient({
   // ── Operational signal ─────────────────────────────────────────
   const signal = React.useMemo(() => deriveSignal(metrics), [metrics]);
 
+  // ── Plan cap snapshot (Phase 18) ───────────────────────────────
+  // Derived live from `rows` so deletes/reactivations re-evaluate
+  // without a page refresh. Falls back to the server-seeded values
+  // before the first /api/services load completes — prevents a flash
+  // of "Add service" before the lockout state hydrates.
+  const planCap = React.useMemo(() => {
+    const max = planInfo.maxActiveServices;
+    const used = rows === null ? planInfo.initialActiveCount : metrics.active;
+    if (max < 0) {
+      return { used, max: -1, remaining: -1, atCap: false, unlimited: true };
+    }
+    const remaining = Math.max(0, max - used);
+    const atCap = used >= max;
+    return { used, max, remaining, atCap, unlimited: false };
+  }, [rows, metrics.active, planInfo.maxActiveServices, planInfo.initialActiveCount]);
+
   return (
     <div className="relative mt-2 space-y-5">
       {/* Ambient page depth */}
@@ -246,8 +274,20 @@ export default function ServicesClient({
 
       {/* ── Hero ──────────────────────────────────────────────── */}
       <FadeIn>
-        <ServicesHero isAdmin={isAdmin} onAdd={() => setOpenId("new")} />
+        <ServicesHero
+          isAdmin={isAdmin}
+          onAdd={() => setOpenId("new")}
+          planCap={planCap}
+          planName={planInfo.name}
+        />
       </FadeIn>
+
+      {/* ── Cap-reached upgrade card (Phase 18) ──────────────── */}
+      {isAdmin && planCap.atCap && (
+        <FadeIn delay={1}>
+          <ServiceCapUpgradeCard planName={planInfo.name} max={planCap.max} />
+        </FadeIn>
+      )}
 
       {/* ── Operational signal ──────────────────────────────── */}
       <FadeIn delay={1}>
@@ -261,8 +301,16 @@ export default function ServicesClient({
             label="Active services"
             value={String(metrics.active)}
             icon={Briefcase}
-            tone="brand"
-            hint={metrics.active === 0 ? "Awaiting service catalog" : `${metrics.total} total`}
+            tone={planCap.atCap ? "warning" : "brand"}
+            hint={
+              planCap.unlimited
+                ? metrics.active === 0
+                  ? "Awaiting service catalog"
+                  : `${metrics.total} total`
+                : planCap.atCap
+                  ? `Plan cap reached · ${planCap.max} max on ${planInfo.name}`
+                  : `${planCap.used} of ${planCap.max} on ${planInfo.name}`
+            }
             inactive={metrics.active === 0}
           />
           <KpiCard
@@ -382,9 +430,13 @@ export default function ServicesClient({
 function ServicesHero({
   isAdmin,
   onAdd,
+  planCap,
+  planName,
 }: {
   isAdmin: boolean;
   onAdd: () => void;
+  planCap: { used: number; max: number; remaining: number; atCap: boolean; unlimited: boolean };
+  planName: string;
 }) {
   return (
     <PremiumCard
@@ -420,11 +472,130 @@ function ServicesHero({
         </div>
         {isAdmin && (
           <div className="flex flex-wrap items-center gap-1.5">
+            {/* Phase 18 capacity chip — calm pill that lives next
+                to the action buttons. Hidden on unlimited plans. */}
+            {!planCap.unlimited && (
+              <ServiceCapChip used={planCap.used} max={planCap.max} atCap={planCap.atCap} planName={planName} />
+            )}
             <HeroAction href="/dashboard/availability" icon={CalendarCheck} label="Configure scheduling" tone="ghost" />
             <HeroAction href="/dashboard/staff" icon={Users} label="Assign staff" tone="ghost" />
-            <HeroAction onClick={onAdd} icon={Plus} label="Add service" tone="primary" />
+            {planCap.atCap ? (
+              <HeroAction
+                href="/dashboard/billing"
+                icon={Sparkles}
+                label="Upgrade to add more"
+                tone="primary"
+              />
+            ) : (
+              <HeroAction onClick={onAdd} icon={Plus} label="Add service" tone="primary" />
+            )}
           </div>
         )}
+      </div>
+    </PremiumCard>
+  );
+}
+
+// Plan-cap chip surfaced in the hero action row. Calm tones when
+// there's headroom; amber when the cap is reached so the operator
+// understands why "Add service" is locked.
+function ServiceCapChip({
+  used,
+  max,
+  atCap,
+  planName,
+}: {
+  used: number;
+  max: number;
+  atCap: boolean;
+  planName: string;
+}) {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium shadow-[0_1px_2px_rgba(15,23,42,0.04)]",
+        atCap
+          ? "border-amber-300/40 bg-amber-50/80 text-amber-800"
+          : "border-border bg-surface/80 text-ink-muted",
+      )}
+      title={`${planName} plan supports up to ${max} active services`}
+    >
+      <Briefcase
+        className={cn("h-3 w-3", atCap ? "text-amber-600" : "text-brand-accent")}
+        strokeWidth={2}
+      />
+      <span className="tabular-nums">
+        <span className="font-semibold text-ink">{used}</span>
+        <span className="text-ink-subtle"> / {max}</span>
+      </span>
+      <span>services</span>
+    </span>
+  );
+}
+
+// Premium cap-reached upgrade card (Phase 18 refinement #6).
+// Renders only when the workspace is at its active-services cap.
+// Tone is aspirational — surfaces what Pro+ unlocks rather than
+// lecturing about the limit.
+function ServiceCapUpgradeCard({
+  planName,
+  max,
+}: {
+  planName: string;
+  max: number;
+}) {
+  const perks: string[] = [
+    "Unlimited active services",
+    "Advanced routing across the workforce",
+    "Multi-location delivery hubs",
+    "Departments + service ownership",
+    "Operational analytics dashboards",
+  ];
+  return (
+    <PremiumCard className="relative overflow-hidden p-5">
+      <span aria-hidden className="pointer-events-none absolute -right-16 -top-16 h-48 w-48 rounded-full bg-amber-400/[0.10] blur-3xl" />
+      <span aria-hidden className="pointer-events-none absolute -left-12 bottom-0 h-32 w-32 rounded-full bg-brand-accent/[0.10] blur-3xl" />
+      <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/60 to-transparent" />
+
+      <div className="relative flex flex-wrap items-start gap-4">
+        <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-50 text-amber-700 ring-1 ring-amber-200/60">
+          <Sparkles className="h-5 w-5" strokeWidth={1.75} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="text-[10px] font-semibold uppercase tracking-[0.10em] text-amber-700">
+            Service capacity reached
+          </div>
+          <h2 className="mt-0.5 text-[15px] font-semibold tracking-tight text-ink">
+            You&apos;re using all {max} active services on {planName}.
+          </h2>
+          <p className="mt-1 max-w-2xl text-[12.5px] leading-relaxed text-ink-muted">
+            Expand your booking surface with unlimited services and the full operational stack — or archive
+            an existing service to free up a slot on your current plan.
+          </p>
+          <ul className="mt-3 grid grid-cols-1 gap-1 text-[11.5px] text-ink-muted sm:grid-cols-2">
+            {perks.map((p) => (
+              <li key={p} className="flex items-start gap-1.5">
+                <span aria-hidden className="mt-1.5 inline-block h-1 w-1 shrink-0 rounded-full bg-brand-accent" />
+                <span>{p}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+        <div className="flex shrink-0 flex-wrap items-center gap-2 self-center">
+          <Link
+            href="/dashboard/billing"
+            className="inline-flex items-center gap-1.5 rounded-md bg-brand-accent px-3 py-1.5 text-[12px] font-semibold text-white shadow-[0_2px_8px_rgba(53,157,243,0.20)] transition-all duration-[220ms] hover:-translate-y-0.5 hover:shadow-[0_4px_14px_rgba(53,157,243,0.30)]"
+          >
+            <Sparkles className="h-3 w-3" strokeWidth={2} />
+            Upgrade plan
+          </Link>
+          <Link
+            href="#services-grid"
+            className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-3 py-1.5 text-[12px] font-medium text-ink-muted transition-colors duration-[200ms] hover:bg-surface-inset"
+          >
+            Manage existing
+          </Link>
+        </div>
       </div>
     </PremiumCard>
   );

@@ -1,11 +1,12 @@
 import { redirect } from "next/navigation";
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 
 import { db } from "@/db/client";
-import { departments, tenants, users } from "@/db/schema";
+import { departments, services, tenants, users } from "@/db/schema";
 import { getSession } from "@/lib/auth";
 import Shell from "@/components/dashboard/Shell";
 import ServicesClient from "@/components/dashboard/ServicesClient";
+import { canCreateService, getPlan } from "@/lib/plans";
 
 export default async function ServicesPage() {
   const session = await getSession();
@@ -42,6 +43,19 @@ export default async function ServicesPage() {
     .where(eq(departments.tenantId, user.tenantId))
     .orderBy(asc(departments.name));
 
+  // ── Phase 18: plan cap snapshot ──────────────────────────────
+  // Active services count is computed server-side so the page hero
+  // already knows whether to show the lockout state on first paint
+  // (no flash of "Add service" before client decides). The client
+  // recomputes after creates/deletes — this is the seed value.
+  const [activeCountRow] = await db
+    .select({ c: sql<number>`count(*)::int` })
+    .from(services)
+    .where(and(eq(services.tenantId, user.tenantId), eq(services.isActive, 1)));
+  const initialActiveCount = Number(activeCountRow?.c ?? 0);
+  const plan = getPlan(tenant?.currentPlan ?? null);
+  const initialCapability = canCreateService(plan, initialActiveCount);
+
   return (
     <Shell
       user={{ name: user.name, email: user.email, role: user.role }}
@@ -61,6 +75,13 @@ export default async function ServicesPage() {
         allDepartments={departmentRows.map((d) => ({ id: d.id, name: d.name, color: d.color ?? null }))}
         tenantSlug={tenant?.slug ?? null}
         tenantName={tenant?.name ?? null}
+        planInfo={{
+          id: plan.id,
+          name: plan.name,
+          maxActiveServices: plan.limits.maxActiveServices,
+          initialActiveCount,
+          initialAtCap: initialCapability.cap.atCap,
+        }}
       />
     </Shell>
   );

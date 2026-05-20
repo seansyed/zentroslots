@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "@/db/client";
-import { bookings, departments, serviceStaff, services, users } from "@/db/schema";
+import { bookings, departments, serviceStaff, services, tenants, users } from "@/db/schema";
 import { errorResponse, HttpError, requireRole } from "@/lib/auth";
+import { canActivateService, getPlan } from "@/lib/plans";
 import { serviceDeliveryModesSchema } from "@/lib/workforce-location";
 
 const patchSchema = z.object({
@@ -59,8 +60,33 @@ export async function PATCH(
 
     const { staffUserIds, isActive, ...rest } = body;
     const updates: Record<string, unknown> = { ...rest, updatedAt: new Date() };
-    if (typeof isActive === "boolean") updates.isActive = isActive ? 1 : 0;
-    else if (typeof isActive === "number") updates.isActive = isActive;
+    const nextIsActive =
+      typeof isActive === "boolean" ? (isActive ? 1 : 0)
+      : typeof isActive === "number" ? isActive
+      : undefined;
+    if (nextIsActive !== undefined) updates.isActive = nextIsActive;
+
+    // ── Plan cap enforcement on reactivation (Phase 18) ────────
+    // If the operator is flipping a previously-inactive service
+    // back to active, the active-services count goes up by 1.
+    // Block when the new count would exceed the plan cap. Same
+    // shared helper as POST /api/services so UI + API never drift.
+    if (nextIsActive === 1 && existing.isActive !== 1) {
+      const [tenantRow] = await db
+        .select({ currentPlan: tenants.currentPlan })
+        .from(tenants)
+        .where(eq(tenants.id, admin.tenantId));
+      const plan = getPlan(tenantRow?.currentPlan ?? null);
+      const [activeCountRow] = await db
+        .select({ c: sql<number>`count(*)::int` })
+        .from(services)
+        .where(and(eq(services.tenantId, admin.tenantId), eq(services.isActive, 1)));
+      const activeCount = Number(activeCountRow?.c ?? 0);
+      const capability = canActivateService(plan, activeCount);
+      if (!capability.allowed) {
+        throw new HttpError(403, capability.reason ?? "Plan limit reached");
+      }
+    }
 
     if (Object.keys(updates).length > 1) {
       await db

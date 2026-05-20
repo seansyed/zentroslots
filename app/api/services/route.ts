@@ -2,8 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { and, eq, gte, inArray, sql } from "drizzle-orm";
 
 import { db } from "@/db/client";
-import { bookings, departments, serviceStaff, services, users } from "@/db/schema";
+import { bookings, departments, serviceStaff, services, tenants, users } from "@/db/schema";
 import { errorResponse, getTenantId, requireRole, HttpError } from "@/lib/auth";
+import { canCreateService, getPlan } from "@/lib/plans";
 import { serviceSchema } from "@/lib/validation";
 
 // GET: by default tenant-scoped to the caller and limited to active
@@ -143,6 +144,26 @@ export async function POST(req: NextRequest) {
   try {
     const admin = await requireRole(["admin", "manager"]);
     const body = serviceSchema.parse(await req.json());
+
+    // ── Plan cap enforcement (Phase 18) ─────────────────────────
+    // Block creates when the tenant has hit its active-services
+    // cap. New services default to is_active=1 so every create
+    // counts immediately. UI surfaces this state too, but the
+    // 403 here is the source of truth against API bypass.
+    const [tenantRow] = await db
+      .select({ currentPlan: tenants.currentPlan })
+      .from(tenants)
+      .where(eq(tenants.id, admin.tenantId));
+    const plan = getPlan(tenantRow?.currentPlan ?? null);
+    const [activeCountRow] = await db
+      .select({ c: sql<number>`count(*)::int` })
+      .from(services)
+      .where(and(eq(services.tenantId, admin.tenantId), eq(services.isActive, 1)));
+    const activeCount = Number(activeCountRow?.c ?? 0);
+    const capability = canCreateService(plan, activeCount);
+    if (!capability.allowed) {
+      throw new HttpError(403, capability.reason ?? "Plan limit reached");
+    }
 
     // Verify all staff being assigned belong to this admin's tenant.
     if (body.staffUserIds.length > 0) {
