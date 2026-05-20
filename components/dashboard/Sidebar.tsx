@@ -172,7 +172,10 @@ function buildNav(
   const advanced: Item[] = [
     ...(role === "admin"
       ? [
-          { label: "Workspace hours",        href: "/dashboard/settings/workspace-hours", icon: Clock },
+          // Workforce Availability Intelligence Center now lives at
+          // /dashboard/availability (sidebar "Working hours" entry).
+          // The old standalone "Workspace hours" link was removed —
+          // workspace defaults are edited inside the new page.
           { label: "Feature controls",       href: "/dashboard/settings/features",        icon: Settings2 },
           { label: "Staff routing",          href: "/dashboard/settings/routing",         icon: GitBranch },
           { label: "Booking rules",          href: "/dashboard/settings/booking-rules",   icon: Clock },

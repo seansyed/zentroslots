@@ -3840,7 +3840,7 @@ function ScheduleTab({
             </div>
             {canEdit && wsHasAny && (
               <Link
-                href="/dashboard/settings/workspace-hours"
+                href="/dashboard/availability"
                 className="inline-flex items-center gap-1 text-[11.5px] font-medium text-brand-accent hover:underline"
               >
                 Edit workspace hours
