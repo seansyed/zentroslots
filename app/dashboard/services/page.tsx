@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import { departments, tenants, users } from "@/db/schema";
@@ -14,11 +14,13 @@ export default async function ServicesPage() {
   if (!user) redirect("/dashboard/login");
   const tenant = await db.query.tenants.findFirst({ where: eq(tenants.id, user.tenantId) });
 
-  // Staff catalog (for the assignment editor inside the service drawer
-  // AND the dedicated Assign Staff panel). Enriched with department
-  // info so the panel can offer department-aware filtering. Same
-  // role gating as before (staff only — managers are not assignable
-  // to services here).
+  // Workforce catalog (for the assignment editor inside the service
+  // drawer AND the dedicated Assign Staff panel). Enriched with
+  // department info so the panel can offer department-aware
+  // filtering. Workforce = admin + manager + staff — every
+  // operational human in this tenant. This matches the rest of the
+  // workforce surfaces (Staff page, seat licensing). Only "client"
+  // rows are excluded.
   const staffRows = await db
     .select({
       id: users.id,
@@ -29,7 +31,7 @@ export default async function ServicesPage() {
     })
     .from(users)
     .leftJoin(departments, eq(departments.id, users.departmentId))
-    .where(and(eq(users.tenantId, user.tenantId), eq(users.role, "staff")))
+    .where(and(eq(users.tenantId, user.tenantId), inArray(users.role, ["admin", "manager", "staff"])))
     .orderBy(asc(users.name));
 
   // Department catalog (for in-drawer scaffolding + the empty-state

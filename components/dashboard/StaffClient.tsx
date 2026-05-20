@@ -75,7 +75,13 @@ type StaffRow = {
 type ServiceItem = { id: string; name: string; durationMinutes: number; color: string | null };
 
 type StaffDetail = {
-  staff: StaffRow & { primaryLocationId: string | null; departmentId: string | null; role: "staff" | "manager" };
+  // role widened to include "admin" — workspace owners are
+  // first-class workforce members and now surface in the Staff
+  // workspace alongside managers and staff (see /api/staff query
+  // change). The role-change UI in the drawer hides itself when
+  // the viewed user is an admin so the workspace owner isn't
+  // accidentally demoted through the staff toggle.
+  staff: StaffRow & { primaryLocationId: string | null; departmentId: string | null; role: "admin" | "manager" | "staff" };
   assignedServices: { id: string; name: string }[];
   weeklyAvailability: { dayOfWeek: number; startTime: string; endTime: string }[];
   stats: { completed30d: number; cancelled30d: number };
@@ -1601,7 +1607,7 @@ function StaffDrawer({
                         )}
                       </div>
                     </div>
-                    {canChangeRoles && (
+                    {canChangeRoles && data.staff.role !== "admin" && (
                       <div className="flex items-center gap-2">
                         <select
                           value={data.staff.role}
@@ -1613,6 +1619,11 @@ function StaffDrawer({
                           <option value="manager">Manager</option>
                         </select>
                       </div>
+                    )}
+                    {data.staff.role === "admin" && (
+                      <span className="text-[11px] text-ink-subtle">
+                        Workspace owner — manage admin status elsewhere.
+                      </span>
                     )}
                   </div>
                 </Card>

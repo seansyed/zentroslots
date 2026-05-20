@@ -25,11 +25,19 @@ export async function getTenantUsage(tenantId: string): Promise<UsageSnapshot> {
   const plan = getPlan(tenant.currentPlan);
   const monthStart = startOfMonthUtc();
 
-  // Staff count is people who *deliver services* — includes both raw
-  // staff and managers (a manager is a senior staff seat). Manager count
-  // is just the managers, used to enforce the manager-seat quota.
+  // Staff count is every operational human who delivers services or
+  // holds workforce capacity. Admins, managers, and staff all count
+  // as one seat each — admins are first-class workforce members who
+  // can be assigned to services, hold availability, and appear in
+  // the Staff workspace. Manager count is just managers, used to
+  // enforce the separate manager-seat quota.
+  //
+  // Effect on Free plan (limit=1): a newly-signed-up admin shows as
+  // 1/1 seats used, matching the operational reality that the owner
+  // IS the workforce on day one. Adding a second teammate requires
+  // upgrading.
   const [[staffRow], [managerRow], [bookingRow]] = await Promise.all([
-    db.select({ n: count() }).from(users).where(and(eq(users.tenantId, tenantId), inArray(users.role, ["staff", "manager"]))),
+    db.select({ n: count() }).from(users).where(and(eq(users.tenantId, tenantId), inArray(users.role, ["admin", "manager", "staff"]))),
     db.select({ n: count() }).from(users).where(and(eq(users.tenantId, tenantId), eq(users.role, "manager"))),
     db.select({ n: count() }).from(bookings).where(and(eq(bookings.tenantId, tenantId), gte(bookings.createdAt, monthStart))),
   ]);

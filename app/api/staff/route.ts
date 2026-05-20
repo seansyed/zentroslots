@@ -23,10 +23,12 @@ export async function GET() {
         createdAt: users.createdAt,
       })
       .from(users)
-      // Show both 'staff' and 'manager' rows here — managers are an
-      // ops-team member with extra power, but UI-wise live in the same
-      // "Staff" page.
-      .where(and(eq(users.tenantId, caller.tenantId), inArray(users.role, ["staff", "manager"])));
+      // Workforce = every operational human in this tenant. That
+      // includes admins — they are first-class workforce members
+      // who can deliver services, hold availability, and consume
+      // operational seats. Managers and staff are listed alongside
+      // them. Only "client" rows are excluded.
+      .where(and(eq(users.tenantId, caller.tenantId), inArray(users.role, ["admin", "manager", "staff"])));
 
     // Stats: upcoming + completed counts per staff member.
     const now = new Date();

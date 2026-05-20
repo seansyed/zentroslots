@@ -96,15 +96,19 @@ export async function getWorkforceSeats(tenantId: string): Promise<WorkforceSeat
   const extraSeats = 0; // future Stripe seat add-on; see file header.
   const unlimited = isUnlimited(includedSeats);
 
-  // Count seats the same way assertCanAddStaff() does — staff +
-  // manager role rows for this tenant. Mirrors lib/quotas exactly.
-  // Note: selecting `id` only keeps the row payload tiny; the count
+  // Count seats the same way assertCanAddStaff() does. Workforce =
+  // every operational human (admin + manager + staff). Admins are
+  // first-class workforce members who deliver services and consume
+  // a seat exactly like any other staff/manager — see the matching
+  // change in lib/quotas.ts. Only `client` rows are excluded.
+  //
+  // Selecting `id` only keeps the row payload tiny; the count
   // happens in JS, which is fine for the size of any tenant's
   // workforce in practice.
   const seatRows = await db
     .select({ id: users.id })
     .from(users)
-    .where(and(eq(users.tenantId, tenantId), inArray(users.role, ["staff", "manager"])));
+    .where(and(eq(users.tenantId, tenantId), inArray(users.role, ["admin", "manager", "staff"])));
   const usedSeats = seatRows.length;
 
   const planMeta = {
