@@ -257,21 +257,30 @@ export default function StaffClient({
   }, [rows, q, roleFilter, workloadFilter]);
 
   // ── Operational signal ────────────────────────────────────────
-  // The seat-capacity signal takes precedence over workload signals
-  // when present (at-capacity > 80%-warning > everything else),
-  // because seat headroom is the most actionable signal an admin
-  // can see in the strip.
-  const signal = React.useMemo(() => {
-    if (seats && !seats.unlimited) {
-      if (seats.atCapacity) {
-        return `Workforce capacity has been reached — ${seats.usedSeats} of ${seats.totalSeats ?? seats.usedSeats} operational seats in use. Additional staffing requires more seats.`;
-      }
-      if (seats.nearLimit) {
-        return `Workforce capacity nearing limit — ${seats.usedSeats} of ${seats.totalSeats ?? seats.usedSeats} operational seats in use (${seats.percent}%).`;
-      }
-    }
-    return deriveSignal(metrics);
-  }, [metrics, seats]);
+  // Priority order:
+  //   1. Seat-capacity warnings (at-capacity > 80%-warning) — these
+  //      are the most actionable signals so they override everything.
+  //   2. Workforce-empty: rotate through activation insights so the
+  //      strip feels alive even with zero staff.
+  //   3. Populated workforce: deriveSignal(metrics) — capacity-balanced
+  //      operational read.
+  const seatSignal: string | null =
+    seats && !seats.unlimited
+      ? seats.atCapacity
+        ? `Workforce capacity has been reached — ${seats.usedSeats} of ${seats.totalSeats ?? seats.usedSeats} operational seats in use. Additional staffing requires more seats.`
+        : seats.nearLimit
+          ? `Workforce capacity nearing limit — ${seats.usedSeats} of ${seats.totalSeats ?? seats.usedSeats} operational seats in use (${seats.percent}%).`
+          : null
+      : null;
+
+  const isEmptyWorkforce = rows !== null && rows.length === 0;
+  const rotatingSignal = useRotatingSignal(
+    isEmptyWorkforce && !seatSignal ? ACTIVATION_SIGNALS : null,
+  );
+
+  const signal: string =
+    seatSignal ??
+    (isEmptyWorkforce ? rotatingSignal : deriveSignal(metrics));
 
   return (
     <div className="relative mt-2 space-y-5">
@@ -304,12 +313,58 @@ export default function StaffClient({
       {/* ── KPI grid ─────────────────────────────────────────── */}
       <FadeIn delay={2}>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-          <KpiCard label="Total staff"        value={String(metrics.total)}            icon={Users}        tone="brand"     hint="In your organization" />
-          <KpiCard label="Active this week"   value={String(metrics.activeThisWeek)}   icon={Activity}     tone="positive"  hint={`${metrics.total > 0 ? Math.round((metrics.activeThisWeek / Math.max(1, metrics.total)) * 100) : 0}% of staff`} />
-          <KpiCard label="Avg upcoming load"  value={String(metrics.avgUpcoming)}      icon={CalendarRange} tone="brand"     hint="Bookings per staff" />
-          <KpiCard label="Completed (month)"  value={String(metrics.totalCompleted)}   icon={CalendarCheck} tone="positive"  hint="Across the team" />
-          <KpiCard label="Calendar coverage"  value={`${metrics.calendarCoveragePct}%`} icon={Gauge}        tone={metrics.calendarCoveragePct >= 75 ? "positive" : "warning"} hint={`${metrics.calendarConnected} connected`} />
-          <KpiCard label="Manager ratio"      value={`${metrics.managerRatioPct}%`}    icon={Crown}        tone="neutral"   hint={`${metrics.managers} manager${metrics.managers === 1 ? "" : "s"}`} />
+          <KpiCard
+            label="Total staff"
+            value={String(metrics.total)}
+            icon={Users}
+            tone="brand"
+            hint={metrics.total === 0 ? "No active workforce yet" : "In your organization"}
+            inactive={metrics.total === 0}
+          />
+          <KpiCard
+            label="Active this week"
+            value={String(metrics.activeThisWeek)}
+            icon={Activity}
+            tone="positive"
+            hint={
+              metrics.total === 0
+                ? "Awaiting workforce activation"
+                : `${Math.round((metrics.activeThisWeek / Math.max(1, metrics.total)) * 100)}% of staff`
+            }
+            inactive={metrics.total === 0}
+          />
+          <KpiCard
+            label="Avg upcoming load"
+            value={String(metrics.avgUpcoming)}
+            icon={CalendarRange}
+            tone="brand"
+            hint={metrics.total === 0 ? "Bookings per staff member" : "Bookings per staff"}
+            inactive={metrics.total === 0}
+          />
+          <KpiCard
+            label="Completed (month)"
+            value={String(metrics.totalCompleted)}
+            icon={CalendarCheck}
+            tone="positive"
+            hint={metrics.total === 0 ? "Tracks once staff begin delivering" : "Across the team"}
+            inactive={metrics.total === 0}
+          />
+          <KpiCard
+            label="Calendar coverage"
+            value={`${metrics.calendarCoveragePct}%`}
+            icon={Gauge}
+            tone={metrics.total === 0 ? "neutral" : metrics.calendarCoveragePct >= 75 ? "positive" : "warning"}
+            hint={metrics.total === 0 ? "Connect staff calendars" : `${metrics.calendarConnected} connected`}
+            inactive={metrics.total === 0}
+          />
+          <KpiCard
+            label="Manager ratio"
+            value={`${metrics.managerRatioPct}%`}
+            icon={Crown}
+            tone="neutral"
+            hint={metrics.total === 0 ? "Assign operational oversight" : `${metrics.managers} manager${metrics.managers === 1 ? "" : "s"}`}
+            inactive={metrics.total === 0}
+          />
         </div>
       </FadeIn>
 
@@ -340,7 +395,12 @@ export default function StaffClient({
                 ))}
               </div>
             ) : rows.length === 0 ? (
-              <PremiumEmptyState onAddStaff={handleAddStaffClick} onInvite={handleInviteClick} />
+              <PremiumEmptyState
+                onAddStaff={handleAddStaffClick}
+                onInvite={handleInviteClick}
+                allServicesCount={allServices.length}
+                anyCalendarConnected={metrics.calendarConnected > 0}
+              />
             ) : (filtered ?? []).length === 0 ? (
               <FilteredEmpty onClear={() => { setQ(""); setRoleFilter("all"); setWorkloadFilter("all"); }} />
             ) : (
@@ -553,11 +613,21 @@ function WorkforceSignalStrip({ text, loading }: { text: string; loading: boolea
             <div className="text-[10px] font-semibold uppercase tracking-[0.10em] text-brand-accent">
               Workforce signal
             </div>
-            <div className="mt-0.5 text-[13px] leading-relaxed text-ink">
+            <div className="relative mt-0.5 min-h-[1.5em] text-[13px] leading-relaxed text-ink">
               {loading ? (
                 <span className="inline-block h-3 w-2/3 animate-pulse rounded bg-surface-inset" />
               ) : (
-                text
+                // Re-key on the actual text so rotating insights
+                // cross-fade smoothly via the entrance animation.
+                <span
+                  key={text}
+                  className="block"
+                  style={{
+                    animation: "zm-row-in 0.55s cubic-bezier(0.16,1,0.3,1) both",
+                  }}
+                >
+                  {text}
+                </span>
               )}
             </div>
           </div>
@@ -595,6 +665,37 @@ function deriveSignal(m: {
   return `Workforce load is balanced. ${m.activeThisWeek} of ${m.total} staff active this week, calendar coverage at ${m.calendarCoveragePct}%.`;
 }
 
+// Activation insights — shown only when workforce is empty. Rotates
+// on a calm 6.5-second cadence so the strip feels alive while
+// guiding the admin through the first operational setup steps.
+const ACTIVATION_SIGNALS: string[] = [
+  "Invite your first teammate to begin workforce coordination.",
+  "Assign services to improve scheduling coverage.",
+  "Connect staff calendars for real-time availability.",
+  "Operational staffing intelligence activates automatically as your workforce grows.",
+];
+
+const ROTATION_INTERVAL_MS = 6500;
+
+function useRotatingSignal(signals: string[] | null): string {
+  const [index, setIndex] = React.useState(0);
+
+  React.useEffect(() => {
+    if (!signals || signals.length <= 1) return;
+    const id = window.setInterval(() => {
+      setIndex((i) => (i + 1) % signals.length);
+    }, ROTATION_INTERVAL_MS);
+    return () => window.clearInterval(id);
+  }, [signals]);
+
+  // Reset to first signal whenever the input set itself changes
+  React.useEffect(() => {
+    setIndex(0);
+  }, [signals]);
+
+  return signals?.[index] ?? "";
+}
+
 // ─── KPI card (real data only — no fake sparklines) ────────────────
 
 function KpiCard({
@@ -603,12 +704,17 @@ function KpiCard({
   icon,
   tone,
   hint,
+  inactive,
 }: {
   label: string;
   value: string;
   icon: LucideIcon;
   tone: "brand" | "positive" | "warning" | "neutral";
   hint: string;
+  /** When true (workforce empty / metric zero), the hint reads as a
+   *  calm activation prompt rather than a real metric. Adds a subtle
+   *  pulsing dot to signal "waiting for activation". */
+  inactive?: boolean;
 }) {
   return (
     <MetricCard
@@ -616,9 +722,16 @@ function KpiCard({
       value={value}
       icon={icon}
       tone={tone}
+      muted={inactive}
       sparkline={
-        <div className="text-right text-[10px] font-medium text-ink-subtle">
-          {hint}
+        <div className="flex items-center justify-end gap-1.5 text-right text-[10px] font-medium text-ink-subtle">
+          {inactive && (
+            <span aria-hidden className="relative inline-flex h-1.5 w-1.5">
+              <span className="absolute inset-0 animate-ping rounded-full bg-brand-accent/40" />
+              <span className="relative h-1.5 w-1.5 rounded-full bg-brand-accent/60" />
+            </span>
+          )}
+          <span className={cn(inactive && "italic")}>{hint}</span>
         </div>
       }
     />
@@ -943,18 +1056,45 @@ function SectionHead({
 
 // ─── Premium empty state ───────────────────────────────────────────
 
+// ─── Premium empty-state activation experience ─────────────────────
+//
+// Replaces the prior sparse empty state with a guided operational
+// activation surface. Atmosphere = subtle topology dot mesh +
+// constellation accent + layered glow. Body = a five-step
+// onboarding checklist that routes into real workspaces. Completion
+// is derived from honest data:
+//   - Step 1 (Add workforce members): never marked done here, since
+//     this state only renders when rows.length === 0.
+//   - Step 2 (Assign operational services): "Ready" when at least
+//     one service exists in the workspace (allServicesCount > 0).
+//     Service-staff assignment can't be done until staff exists,
+//     so this step routes to /dashboard/services where the editor
+//     lives.
+//   - Step 3 (Connect calendars): derived from
+//     anyCalendarConnected (false in the empty-workforce state by
+//     definition — but the prop is threaded for forward-compat).
+//   - Step 4 (Configure availability): no completion derivation
+//     today — routes to /dashboard/availability.
+//   - Step 5 (Activate scheduling coverage): celebration row.
+
 function PremiumEmptyState({
   onAddStaff,
   onInvite,
+  allServicesCount,
+  anyCalendarConnected,
 }: {
   onAddStaff: () => void;
   onInvite: () => void;
+  allServicesCount: number;
+  anyCalendarConnected: boolean;
 }) {
   return (
     <PremiumCard
       interactive={false}
       className="relative overflow-hidden bg-gradient-to-br from-brand-subtle/40 via-surface to-surface"
     >
+      {/* ─── Atmosphere layers ──────────────────────────────── */}
+      {/* Cinematic glow halos */}
       <div aria-hidden className="pointer-events-none absolute -right-20 -top-20 h-64 w-64 rounded-full bg-brand-accent/15 blur-3xl" />
       <div aria-hidden className="pointer-events-none absolute -left-16 -bottom-16 h-48 w-48 rounded-full bg-emerald-200/20 blur-3xl" />
       <div
@@ -965,21 +1105,41 @@ function PremiumEmptyState({
             "radial-gradient(700px 200px at 70% 10%, rgba(53,157,243,0.06), transparent 70%), radial-gradient(500px 180px at 10% 90%, rgba(16,185,129,0.05), transparent 70%)",
         }}
       />
+      {/* Topology dot-mesh — very subtle */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 opacity-[0.45]"
+        style={{
+          backgroundImage:
+            "radial-gradient(circle at 1px 1px, rgba(53,157,243,0.18) 1px, transparent 0)",
+          backgroundSize: "22px 22px",
+          maskImage:
+            "radial-gradient(ellipse 80% 70% at 50% 40%, black 30%, transparent 75%)",
+          WebkitMaskImage:
+            "radial-gradient(ellipse 80% 70% at 50% 40%, black 30%, transparent 75%)",
+        }}
+      />
+      {/* Constellation accent — 3 connected glowing nodes */}
+      <Constellation />
+
       <span
         aria-hidden
         className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/70 to-transparent"
       />
 
-      <div className="relative px-2 py-6 text-center sm:px-6 sm:py-8">
+      <div className="relative px-2 py-7 text-center sm:px-6 sm:py-9">
+        {/* Headline cluster */}
         <div className="zm-pulse-glow mx-auto inline-flex h-14 w-14 items-center justify-center rounded-2xl border border-brand-accent/15 bg-gradient-to-br from-brand-subtle to-surface text-brand-accent shadow-soft">
           <Users className="h-7 w-7" strokeWidth={1.5} />
         </div>
-        <h3 className="mt-4 text-[17px] font-semibold tracking-tight text-ink">
+        <h3 className="mt-4 text-[18px] font-semibold tracking-tight text-ink">
           Build your operational team
         </h3>
         <p className="mx-auto mt-1.5 max-w-md text-[12.5px] leading-relaxed text-ink-muted">
           Invite staff, assign services, and coordinate workforce availability across your organization.
         </p>
+
+        {/* Primary CTAs */}
         <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
           <button
             type="button"
@@ -998,8 +1158,255 @@ function PremiumEmptyState({
             Invite teammate
           </button>
         </div>
+
+        {/* Activation checklist */}
+        <ActivationChecklist
+          onAddStaff={onAddStaff}
+          allServicesCount={allServicesCount}
+          anyCalendarConnected={anyCalendarConnected}
+        />
       </div>
     </PremiumCard>
+  );
+}
+
+// ─── Constellation accent — 3 calm pulsing nodes + connecting lines.
+// Positioned absolute over the empty-state canvas to add subtle
+// operational atmosphere without crowding the content.
+
+function Constellation() {
+  return (
+    <svg
+      aria-hidden
+      className="pointer-events-none absolute inset-0 h-full w-full opacity-[0.55]"
+      preserveAspectRatio="none"
+      viewBox="0 0 400 240"
+    >
+      <defs>
+        <radialGradient id="zm-node-glow" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stopColor="rgba(53,157,243,0.55)" />
+          <stop offset="100%" stopColor="rgba(53,157,243,0)" />
+        </radialGradient>
+        <radialGradient id="zm-node-emerald" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stopColor="rgba(16,185,129,0.55)" />
+          <stop offset="100%" stopColor="rgba(16,185,129,0)" />
+        </radialGradient>
+      </defs>
+      {/* Connecting lines */}
+      <line x1="55" y1="38" x2="320" y2="56"  stroke="rgba(53,157,243,0.18)" strokeWidth="0.6" strokeDasharray="3 5" />
+      <line x1="320" y1="56" x2="86" y2="202" stroke="rgba(16,185,129,0.16)" strokeWidth="0.6" strokeDasharray="3 5" />
+      <line x1="86" y1="202" x2="55" y2="38"  stroke="rgba(53,157,243,0.14)" strokeWidth="0.6" strokeDasharray="3 5" />
+      {/* Halo nodes */}
+      <circle cx="55"  cy="38"  r="18" fill="url(#zm-node-glow)" />
+      <circle cx="320" cy="56"  r="22" fill="url(#zm-node-emerald)" />
+      <circle cx="86"  cy="202" r="20" fill="url(#zm-node-glow)" />
+      {/* Cores */}
+      <circle cx="55"  cy="38"  r="1.8" fill="rgba(53,157,243,0.85)" />
+      <circle cx="320" cy="56"  r="2.0" fill="rgba(16,185,129,0.85)" />
+      <circle cx="86"  cy="202" r="1.8" fill="rgba(53,157,243,0.85)" />
+    </svg>
+  );
+}
+
+// ─── Activation checklist — 5 calm operational steps ───────────────
+
+type ActivationStep = {
+  key: string;
+  title: string;
+  description: string;
+  done: boolean;
+  icon: LucideIcon;
+  action:
+    | { kind: "onAddStaff" }
+    | { kind: "link"; href: string; label: string }
+    | { kind: "none" };
+};
+
+function ActivationChecklist({
+  onAddStaff,
+  allServicesCount,
+  anyCalendarConnected,
+}: {
+  onAddStaff: () => void;
+  allServicesCount: number;
+  anyCalendarConnected: boolean;
+}) {
+  const steps: ActivationStep[] = [
+    {
+      key: "add-staff",
+      title: "Add workforce members",
+      description: "Invite teammates or provision staff directly into your workspace.",
+      done: false, // empty state by definition
+      icon: UserPlus,
+      action: { kind: "onAddStaff" },
+    },
+    {
+      key: "assign-services",
+      title: "Assign operational services",
+      description: allServicesCount > 0
+        ? `${allServicesCount} service${allServicesCount === 1 ? "" : "s"} ready to be assigned to staff.`
+        : "Create services and assign them to the staff members who deliver them.",
+      done: false, // requires staff to exist before assignment is meaningful
+      icon: Layers,
+      action: { kind: "link", href: "/dashboard/services", label: "Open services" },
+    },
+    {
+      key: "connect-calendars",
+      title: "Connect calendars",
+      description: "Connect Google Calendar for real-time availability and automatic event creation.",
+      done: anyCalendarConnected,
+      icon: CalendarCheck,
+      action: { kind: "link", href: "/dashboard/settings/calendar", label: "Calendar settings" },
+    },
+    {
+      key: "configure-availability",
+      title: "Configure availability",
+      description: "Set weekly hours, holidays, and per-staff overrides so the scheduler routes around them.",
+      done: false,
+      icon: Clock,
+      action: { kind: "link", href: "/dashboard/availability", label: "Open availability" },
+    },
+    {
+      key: "activate-coverage",
+      title: "Activate scheduling coverage",
+      description: "Once the steps above are in place, your workforce intelligence activates automatically across the platform.",
+      done: false,
+      icon: Workflow,
+      action: { kind: "none" },
+    },
+  ];
+
+  const completedCount = steps.filter((s) => s.done).length;
+
+  return (
+    <div className="mt-8 text-left">
+      {/* Heading */}
+      <div className="flex items-baseline justify-between gap-3">
+        <div>
+          <div className="text-[10px] font-semibold uppercase tracking-[0.10em] text-brand-accent">
+            Operational activation
+          </div>
+          <div className="mt-0.5 text-[14px] font-semibold tracking-tight text-ink">
+            Five steps to a fully active workspace
+          </div>
+        </div>
+        <span className="text-[10.5px] font-medium uppercase tracking-wider text-ink-subtle">
+          {completedCount} of {steps.length} complete
+        </span>
+      </div>
+
+      {/* Progress rail */}
+      <span aria-hidden className="relative mt-2 inline-block h-1 w-full overflow-hidden rounded-full bg-surface-inset/60">
+        <span
+          className="absolute inset-y-0 left-0 rounded-full bg-brand-accent shadow-[0_0_8px_rgba(53,157,243,0.35)] transition-all duration-500 ease-[cubic-bezier(0.16,1,0.3,1)]"
+          style={{ width: `${(completedCount / steps.length) * 100}%` }}
+        />
+      </span>
+
+      {/* Steps */}
+      <ol className="mt-4 space-y-2">
+        {steps.map((step, i) => (
+          <li
+            key={step.key}
+            style={{
+              animation: `zm-row-in 0.42s cubic-bezier(0.16,1,0.3,1) ${i * 60}ms both`,
+            }}
+          >
+            <ActivationStepCard step={step} index={i + 1} onAddStaff={onAddStaff} />
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
+function ActivationStepCard({
+  step,
+  index,
+  onAddStaff,
+}: {
+  step: ActivationStep;
+  index: number;
+  onAddStaff: () => void;
+}) {
+  const Icon = step.icon;
+
+  const numberCls = step.done
+    ? "bg-emerald-50 text-emerald-700 ring-emerald-200/40"
+    : "bg-brand-subtle/70 text-brand-accent ring-brand-accent/15";
+
+  const Action = () => {
+    if (step.action.kind === "onAddStaff") {
+      return (
+        <button
+          type="button"
+          onClick={onAddStaff}
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-1.5 text-[11.5px] font-semibold text-ink-muted transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:bg-surface-inset hover:text-ink hover:shadow-soft"
+        >
+          Add staff
+          <ArrowUpRight className="h-3 w-3" strokeWidth={2} />
+        </button>
+      );
+    }
+    if (step.action.kind === "link") {
+      return (
+        <Link
+          href={step.action.href}
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-1.5 text-[11.5px] font-semibold text-ink-muted transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:bg-surface-inset hover:text-ink hover:shadow-soft"
+        >
+          {step.action.label}
+          <ArrowUpRight className="h-3 w-3" strokeWidth={2} />
+        </Link>
+      );
+    }
+    return null;
+  };
+
+  return (
+    <div
+      className={cn(
+        "group relative overflow-hidden rounded-2xl border bg-surface/80 p-3.5 shadow-[0_1px_2px_rgba(15,23,42,0.04)] backdrop-blur-sm transition-all duration-[200ms] ease-[cubic-bezier(0.16,1,0.3,1)]",
+        step.done
+          ? "border-emerald-200/40 ring-1 ring-emerald-200/30"
+          : "border-border hover:-translate-y-0.5 hover:border-border-strong hover:shadow-soft",
+      )}
+    >
+      <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/55 to-transparent" />
+      <div className="relative flex items-center gap-3">
+        {/* Step number / done glyph */}
+        <div className={cn(
+          "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ring-1",
+          numberCls,
+        )}>
+          {step.done ? (
+            <CheckCircle2 className="h-4 w-4" strokeWidth={2} />
+          ) : (
+            <span className="text-[12px] font-semibold tabular-nums">{index}</span>
+          )}
+        </div>
+
+        {/* Icon */}
+        <div className="hidden h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-surface-inset text-ink-muted ring-1 ring-border/40 sm:inline-flex">
+          <Icon className="h-3.5 w-3.5" strokeWidth={1.75} />
+        </div>
+
+        {/* Copy */}
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1.5">
+            <h4 className="truncate text-[13px] font-semibold tracking-tight text-ink">{step.title}</h4>
+            {step.done && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50/80 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.06em] text-emerald-700 ring-1 ring-emerald-200/40">
+                Done
+              </span>
+            )}
+          </div>
+          <p className="mt-0.5 text-[11.5px] leading-relaxed text-ink-muted">{step.description}</p>
+        </div>
+
+        {/* Action */}
+        <Action />
+      </div>
+    </div>
   );
 }
 
