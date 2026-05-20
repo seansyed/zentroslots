@@ -95,6 +95,10 @@ const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 // unlimited — the `unlimited` flag is the authoritative signal.
 type SeatsSnapshot = {
   plan: string;
+  planName: string;
+  planPriceCents: number | null;
+  planInterval: "month" | null;
+  planDescription: string;
   includedSeats: number;
   extraSeats: number;
   totalSeats: number | null;
@@ -150,6 +154,7 @@ export default function StaffClient({
   const [openId, setOpenId] = React.useState<string | null>(null);
   const [inviteOpen, setInviteOpen] = React.useState(false);
   const [capacityOpen, setCapacityOpen] = React.useState(false);
+  const [overviewOpen, setOverviewOpen] = React.useState(false);
   const [seats, setSeats] = React.useState<SeatsSnapshot | null>(null);
 
   // Toolbar state
@@ -271,7 +276,12 @@ export default function StaffClient({
 
       {/* ── Hero ──────────────────────────────────────────────── */}
       <FadeIn>
-        <StaffHero isAdmin={isAdmin} onInvite={handleAddStaffClick} seats={seats} />
+        <StaffHero
+          isAdmin={isAdmin}
+          onInvite={handleAddStaffClick}
+          seats={seats}
+          onOpenCapacityOverview={() => setOverviewOpen(true)}
+        />
       </FadeIn>
 
       {/* ── AI Workforce Intelligence Strip ─────────────────── */}
@@ -359,6 +369,16 @@ export default function StaffClient({
         onClose={() => setCapacityOpen(false)}
         seats={seats}
       />
+
+      <WorkforceCapacityOverviewModal
+        open={overviewOpen}
+        onClose={() => setOverviewOpen(false)}
+        seats={seats}
+        onAddStaff={() => {
+          setOverviewOpen(false);
+          handleAddStaffClick();
+        }}
+      />
     </div>
   );
 }
@@ -369,10 +389,12 @@ function StaffHero({
   isAdmin,
   onInvite,
   seats,
+  onOpenCapacityOverview,
 }: {
   isAdmin: boolean;
   onInvite: () => void;
   seats: SeatsSnapshot | null;
+  onOpenCapacityOverview: () => void;
 }) {
   return (
     <PremiumCard
@@ -418,10 +440,13 @@ function StaffHero({
             Monitor staffing health, scheduling balance, responsiveness, and operational coverage across your service organization.
           </p>
 
-          {/* Operational seats chip — always visible to anyone with
-              hero access; the data is calm and informational. */}
-          <div className="mt-3">
-            <SeatCapacityChip seats={seats} />
+          {/* Workforce capacity chip cluster — plan / seat usage /
+              capacity status. All three open the WorkforceCapacityOverviewModal
+              so the user has a single calm intelligence surface. */}
+          <div className="mt-3 flex flex-wrap items-center gap-1.5">
+            <PlanChip seats={seats} onOpen={onOpenCapacityOverview} />
+            <SeatCapacityChip seats={seats} onOpen={onOpenCapacityOverview} />
+            <CapacityStatusChip seats={seats} onOpen={onOpenCapacityOverview} />
           </div>
         </div>
         {isAdmin && (
@@ -1350,17 +1375,66 @@ function ScaffoldModule({
   );
 }
 
-// ─── Seat Capacity Chip ────────────────────────────────────────────
+// ─── Capacity chip cluster ─────────────────────────────────────────
 //
-// Surfaces the operational seat headroom directly on the hero. Calm
-// glass-style chip with subtle hover halo. Tonal level is driven by
-// the helper (healthy / warning / critical / unlimited). Clicking
-// the chip navigates to /dashboard/billing — the existing billing
-// workspace owns the upgrade flow.
+// Three calm executive chips that together communicate the entire
+// operational workforce picture:
+//
+//   PlanChip            — subscription tier + cadence
+//   SeatCapacityChip    — N / M operational seats used (+ progress)
+//   CapacityStatusChip  — Healthy / Near limit / At capacity / Unlimited
+//
+// All three open the WorkforceCapacityOverviewModal — a single
+// canonical surface for the full workforce-capacity breakdown.
 
-function SeatCapacityChip({ seats }: { seats: SeatsSnapshot | null }) {
+function PlanChip({
+  seats,
+  onOpen,
+}: {
+  seats: SeatsSnapshot | null;
+  onOpen: () => void;
+}) {
   if (!seats) {
-    // Initial load — render a calm skeleton instead of a "0/0".
+    return (
+      <span className="inline-flex h-7 items-center gap-2 rounded-full border border-border bg-surface/70 px-3 text-[11px] font-medium text-ink-subtle shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
+        <span aria-hidden className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-ink-subtle/40" />
+        Loading plan…
+      </span>
+    );
+  }
+
+  // Cadence label — honest about what lib/plans actually models.
+  const cadence =
+    seats.planInterval === "month"
+      ? "Monthly"
+      : seats.planPriceCents === 0
+        ? "Free"
+        : "Custom";
+
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      aria-label={`Current plan: ${seats.planName} · ${cadence}`}
+      className="group inline-flex h-7 items-center gap-2 rounded-full border border-brand-accent/20 bg-gradient-to-br from-brand-subtle/60 via-surface to-surface px-3 text-[11px] font-medium text-ink-muted shadow-[0_1px_2px_rgba(15,23,42,0.04)] ring-1 ring-brand-accent/10 transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:shadow-soft hover:ring-brand-accent/25"
+    >
+      <Sparkles className="h-3 w-3 text-brand-accent" strokeWidth={2} />
+      <span className="text-[9px] font-semibold uppercase tracking-[0.10em] text-brand-accent">Plan</span>
+      <span className="font-semibold text-ink">{seats.planName}</span>
+      <span className="text-ink-subtle">·</span>
+      <span className="text-ink-muted">{cadence}</span>
+    </button>
+  );
+}
+
+function SeatCapacityChip({
+  seats,
+  onOpen,
+}: {
+  seats: SeatsSnapshot | null;
+  onOpen: () => void;
+}) {
+  if (!seats) {
     return (
       <span className="inline-flex h-7 items-center gap-2 rounded-full border border-border bg-surface/70 px-3 text-[11px] font-medium text-ink-subtle shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
         <span aria-hidden className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-ink-subtle/40" />
@@ -1371,19 +1445,20 @@ function SeatCapacityChip({ seats }: { seats: SeatsSnapshot | null }) {
 
   if (seats.unlimited) {
     return (
-      <Link
-        href="/dashboard/billing"
+      <button
+        type="button"
+        onClick={onOpen}
+        aria-label={`${seats.usedSeats} operational seats in use — unlimited`}
         className="group inline-flex h-7 items-center gap-2 rounded-full border border-border bg-surface/80 px-3 text-[11px] font-medium text-ink-muted shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:bg-surface hover:text-ink hover:shadow-soft"
       >
         <InfinityIcon className="h-3 w-3 text-brand-accent" strokeWidth={2} />
         <span className="font-semibold tabular-nums text-ink">{seats.usedSeats}</span>
         <span className="text-ink-subtle">operational seats</span>
         <span className="text-[9px] font-semibold uppercase tracking-wider text-brand-accent">unlimited</span>
-      </Link>
+      </button>
     );
   }
 
-  // Tonal style mapping
   const tone =
     seats.level === "critical" ? {
       bg: "bg-red-50/80",
@@ -1411,29 +1486,61 @@ function SeatCapacityChip({ seats }: { seats: SeatsSnapshot | null }) {
     };
 
   return (
-    <Link
-      href="/dashboard/billing"
+    <button
+      type="button"
+      onClick={onOpen}
+      title={`Workforce utilization at ${seats.percent}% — click for the capacity overview`}
       className={cn(
         "group inline-flex h-7 items-center gap-2 rounded-full px-3 text-[11px] font-medium ring-1 shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:shadow-soft",
         tone.bg,
         tone.ring,
         tone.text,
       )}
-      aria-label={`${seats.usedSeats} of ${seats.totalSeats ?? seats.usedSeats} operational seats used`}
+      aria-label={`${seats.usedSeats} of ${seats.totalSeats ?? seats.usedSeats} operational seats used — open capacity overview`}
     >
       <span aria-hidden className={cn("inline-block h-1.5 w-1.5 rounded-full", tone.dot)} />
       <span className="font-semibold tabular-nums text-ink">{seats.usedSeats}</span>
       <span className="text-ink-subtle">/</span>
       <span className="font-semibold tabular-nums text-ink">{seats.totalSeats ?? seats.usedSeats}</span>
       <span className="text-ink-subtle">seats</span>
-      {/* Inline mini progress rail */}
       <span aria-hidden className={cn("relative ml-1 inline-block h-1 w-12 overflow-hidden rounded-full", tone.track)}>
         <span
           className={cn("absolute inset-y-0 left-0 rounded-full", tone.bar)}
           style={{ width: `${seats.percent}%` }}
         />
       </span>
-    </Link>
+    </button>
+  );
+}
+
+function CapacityStatusChip({
+  seats,
+  onOpen,
+}: {
+  seats: SeatsSnapshot | null;
+  onOpen: () => void;
+}) {
+  if (!seats) return null;
+
+  const cfg =
+    seats.unlimited           ? { label: "Unlimited capacity", cls: "bg-brand-subtle/70 text-brand-accent ring-brand-accent/15", dot: "bg-brand-accent" }
+    : seats.level === "critical" ? { label: "At capacity",        cls: "bg-red-50/80 text-red-700 ring-red-200/40",                dot: "bg-red-500" }
+    : seats.level === "warning"  ? { label: "Near limit",          cls: "bg-amber-50/80 text-amber-800 ring-amber-200/40",         dot: "bg-amber-500" }
+    :                              { label: "Healthy capacity",    cls: "bg-emerald-50/80 text-emerald-700 ring-emerald-200/40",   dot: "bg-emerald-500" };
+
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      aria-label={`Capacity status: ${cfg.label} — open capacity overview`}
+      className={cn(
+        "group inline-flex h-7 items-center gap-2 rounded-full px-3 text-[11px] font-semibold uppercase tracking-[0.08em] ring-1 shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:shadow-soft",
+        cfg.cls
+      )}
+    >
+      <span aria-hidden className={cn("inline-block h-1.5 w-1.5 rounded-full", cfg.dot)} />
+      {cfg.label}
+    </button>
   );
 }
 
@@ -1562,6 +1669,256 @@ function CapacityReachedModal({
         </div>
       </div>
     </Modal>
+  );
+}
+
+// ─── Workforce Capacity Overview Modal ─────────────────────────────
+//
+// Single canonical surface for the full workforce-capacity breakdown.
+// Opened by clicking any of the three hero chips (plan / seats /
+// status). Calm executive layout — feels operationally intelligent,
+// NOT billing-heavy.
+//
+// Honest data discipline:
+//   - "Inactive staff" line is rendered only when the schema actually
+//     supports it (hasSoftDeactivation flag). We don't surface a
+//     fake "0 inactive" count today.
+//   - "Extra seats purchased" is rendered only when addOnSupported
+//     is true. Today it always reads "Plan included" — no fabricated
+//     add-on ledger.
+
+function WorkforceCapacityOverviewModal({
+  open,
+  onClose,
+  seats,
+  onAddStaff,
+}: {
+  open: boolean;
+  onClose: () => void;
+  seats: SeatsSnapshot | null;
+  onAddStaff: () => void;
+}) {
+  if (!seats) {
+    return (
+      <Modal open={open} onClose={onClose} title="Workforce capacity overview">
+        <div className="space-y-3">
+          <Skeleton className="h-4 w-3/4" />
+          <Skeleton className="h-20 w-full" />
+          <Skeleton className="h-32 w-full" />
+        </div>
+      </Modal>
+    );
+  }
+
+  const totalLabel = seats.unlimited ? "Unlimited" : String(seats.totalSeats ?? seats.usedSeats);
+  const availableLabel = seats.unlimited
+    ? "Unlimited"
+    : String(Math.max(0, (seats.totalSeats ?? 0) - seats.usedSeats));
+  const cadence =
+    seats.planInterval === "month"
+      ? "Monthly"
+      : seats.planPriceCents === 0
+        ? "Free"
+        : "Custom";
+
+  // Calm operational insight — single line, tone-aware.
+  const insight: { text: string; tone: "positive" | "warning" | "brand" | "neutral" } = seats.unlimited
+    ? {
+        text: "Your plan grants unlimited operational seats. Scale your workforce as demand grows.",
+        tone: "brand",
+      }
+    : seats.atCapacity
+      ? {
+          text: "Additional staffing requires more operational seats. Upgrading your plan unlocks immediate capacity.",
+          tone: "warning",
+        }
+      : seats.nearLimit
+        ? {
+            text: "Operational workforce capacity is nearing limit. Additional seats may improve scheduling flexibility.",
+            tone: "warning",
+          }
+        : seats.usedSeats === 0
+          ? {
+              text: "No staff seats are currently in use. Invite your first teammates to begin building your workforce.",
+              tone: "neutral",
+            }
+          : {
+              text: "Your workforce utilization remains healthy. Capacity headroom supports current scheduling demand.",
+              tone: "positive",
+            };
+
+  const insightTint =
+    insight.tone === "positive" ? "bg-emerald-50/60 ring-emerald-200/40"
+    : insight.tone === "warning"  ? "bg-amber-50/60 ring-amber-200/40"
+    : insight.tone === "brand"    ? "bg-brand-subtle/40 ring-brand-accent/15"
+    :                                "bg-surface-inset/40 ring-border/40";
+
+  return (
+    <Modal open={open} onClose={onClose} title="Workforce capacity overview">
+      <div className="space-y-4">
+        {/* Plan card */}
+        <div className="relative overflow-hidden rounded-2xl border border-brand-accent/15 bg-gradient-to-br from-brand-subtle/40 via-surface to-surface p-4">
+          <span aria-hidden className="pointer-events-none absolute -right-12 -top-12 h-32 w-32 rounded-full bg-brand-accent/12 blur-3xl" />
+          <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/60 to-transparent" />
+          <div className="relative flex items-start gap-3">
+            <div className="zm-pulse-glow inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-brand-accent/15 bg-gradient-to-br from-brand-subtle to-surface text-brand-accent shadow-soft">
+              <Sparkles className="h-4 w-4" strokeWidth={1.75} />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="text-[10px] font-semibold uppercase tracking-[0.10em] text-brand-accent">
+                Current plan
+              </div>
+              <div className="mt-0.5 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                <span className="text-[18px] font-semibold tracking-tight text-ink">{seats.planName}</span>
+                <span className="text-[11.5px] font-medium text-ink-muted">{cadence}</span>
+              </div>
+              <p className="mt-1 text-[12px] leading-relaxed text-ink-muted">{seats.planDescription}</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Seat breakdown card */}
+        <div className="rounded-2xl border border-border bg-surface p-4">
+          <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-subtle">
+            Operational seats
+          </div>
+          <div className="mt-1 flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
+            <span className="text-[28px] font-semibold leading-none tabular-nums tracking-tight text-ink">
+              {seats.usedSeats}
+            </span>
+            <span className="text-[14px] font-medium text-ink-muted tabular-nums">
+              / {totalLabel} {seats.unlimited ? "" : "seats used"}
+            </span>
+            {!seats.unlimited && (
+              <span className="ml-auto text-[11.5px] font-semibold uppercase tracking-wider text-ink-subtle">
+                {seats.percent}% utilized
+              </span>
+            )}
+          </div>
+
+          {/* Progress rail */}
+          {!seats.unlimited && (
+            <span aria-hidden className="relative mt-2 inline-block h-1.5 w-full overflow-hidden rounded-full bg-surface-inset/60">
+              <span
+                className={cn(
+                  "absolute inset-y-0 left-0 rounded-full transition-all duration-500 ease-[cubic-bezier(0.16,1,0.3,1)]",
+                  seats.level === "critical" ? "bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.40)]"
+                  : seats.level === "warning"  ? "bg-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.35)]"
+                  :                               "bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.35)]"
+                )}
+                style={{ width: `${seats.percent}%` }}
+              />
+            </span>
+          )}
+
+          {/* Detail grid */}
+          <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-2 text-[12px]">
+            <CapacityRow label="Included with plan" value={seats.unlimited ? "Unlimited" : String(seats.includedSeats)} />
+            <CapacityRow
+              label="Extra seats"
+              value={seats.addOnSupported ? String(seats.extraSeats) : "Plan included"}
+              hint={seats.addOnSupported ? undefined : "Per-seat add-ons coming soon"}
+            />
+            <CapacityRow label="Active staff" value={String(seats.usedSeats)} />
+            <CapacityRow
+              label="Available seats"
+              value={availableLabel}
+              tone={!seats.unlimited && (seats.totalSeats ?? 0) - seats.usedSeats <= 1 ? "warning" : "default"}
+            />
+            {seats.hasSoftDeactivation && (
+              <CapacityRow label="Inactive staff" value="0" />
+            )}
+          </dl>
+
+          {!seats.hasSoftDeactivation && (
+            <div className="mt-3 rounded-lg border border-dashed border-border bg-surface-inset/30 px-3 py-2 text-[11px] leading-relaxed text-ink-subtle">
+              <span className="font-semibold uppercase tracking-wider text-ink-muted">Coming soon · </span>
+              Soft-deactivated staff will be tracked separately and won&rsquo;t consume operational seats.
+            </div>
+          )}
+        </div>
+
+        {/* Smart operational insight */}
+        <div className={cn("rounded-2xl border border-border p-3.5 ring-1", insightTint)}>
+          <div className="flex items-start gap-2.5">
+            <div className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-surface text-ink-muted ring-1 ring-border/40">
+              <Workflow className="h-3.5 w-3.5" strokeWidth={1.75} />
+            </div>
+            <div className="min-w-0">
+              <div className="text-[10px] font-semibold uppercase tracking-[0.10em] text-ink-subtle">
+                Operational insight
+              </div>
+              <p className="mt-0.5 text-[12.5px] leading-relaxed text-ink">{insight.text}</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Actions */}
+        <div className="flex flex-wrap items-center gap-2 pt-1">
+          {seats.atCapacity ? (
+            <Link
+              href="/dashboard/billing"
+              onClick={onClose}
+              className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover px-3 text-[12.5px] font-semibold text-white shadow-[0_6px_16px_rgba(53,157,243,0.35)] transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:shadow-[0_10px_24px_rgba(53,157,243,0.45)]"
+            >
+              <ArrowUpRight className="h-3.5 w-3.5" strokeWidth={2} />
+              Upgrade plan
+            </Link>
+          ) : (
+            <button
+              type="button"
+              onClick={onAddStaff}
+              className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover px-3 text-[12.5px] font-semibold text-white shadow-[0_6px_16px_rgba(53,157,243,0.35)] transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:shadow-[0_10px_24px_rgba(53,157,243,0.45)]"
+            >
+              <UserPlus className="h-3.5 w-3.5" strokeWidth={2} />
+              Add staff
+            </button>
+          )}
+          <Link
+            href="/dashboard/billing"
+            onClick={onClose}
+            className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-border bg-surface px-3 text-[12.5px] font-medium text-ink-muted shadow-soft transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:bg-surface-inset hover:text-ink hover:shadow-md"
+          >
+            <CreditCard className="h-3.5 w-3.5" strokeWidth={1.75} />
+            Manage subscription
+          </Link>
+          <button
+            type="button"
+            onClick={onClose}
+            className="ml-auto inline-flex h-9 items-center gap-1.5 rounded-lg px-3 text-[12.5px] font-medium text-ink-subtle transition-colors hover:text-ink"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function CapacityRow({
+  label,
+  value,
+  hint,
+  tone = "default",
+}: {
+  label: string;
+  value: string;
+  hint?: string;
+  tone?: "default" | "warning";
+}) {
+  return (
+    <div>
+      <dt className="text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-subtle">{label}</dt>
+      <dd className={cn(
+        "mt-0.5 text-[14px] font-semibold tabular-nums tracking-tight",
+        tone === "warning" ? "text-amber-700" : "text-ink"
+      )}>
+        {value}
+      </dd>
+      {hint && (
+        <div className="mt-0.5 text-[10.5px] text-ink-subtle">{hint}</div>
+      )}
+    </div>
   );
 }
 

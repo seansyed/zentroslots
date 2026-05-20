@@ -43,6 +43,14 @@ export type SeatLevel = "healthy" | "warning" | "critical" | "unlimited";
 export type WorkforceSeats = {
   /** Plan ID the math is anchored to. */
   plan: PlanId;
+  /** Display name of the plan (e.g. "Pro"). */
+  planName: string;
+  /** Plan price in cents per interval. null = "contact us" (enterprise). */
+  planPriceCents: number | null;
+  /** "month" today, or null for enterprise/custom plans. */
+  planInterval: "month" | null;
+  /** One-line marketing description from the plan catalog. */
+  planDescription: string;
   /** Plan-included seat limit. -1 if the plan grants unlimited seats. */
   includedSeats: number;
   /** Add-on seats purchased on top of the plan. 0 today. */
@@ -99,9 +107,17 @@ export async function getWorkforceSeats(tenantId: string): Promise<WorkforceSeat
     .where(and(eq(users.tenantId, tenantId), inArray(users.role, ["staff", "manager"])));
   const usedSeats = seatRows.length;
 
+  const planMeta = {
+    plan: plan.id,
+    planName: plan.name,
+    planPriceCents: plan.priceCents,
+    planInterval: plan.interval,
+    planDescription: plan.description,
+  };
+
   if (unlimited) {
     return {
-      plan: plan.id,
+      ...planMeta,
       includedSeats,
       extraSeats,
       totalSeats: Infinity,
@@ -130,7 +146,7 @@ export async function getWorkforceSeats(tenantId: string): Promise<WorkforceSeat
       : "healthy";
 
   return {
-    plan: plan.id,
+    ...planMeta,
     includedSeats,
     extraSeats,
     totalSeats,
