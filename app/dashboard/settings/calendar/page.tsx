@@ -5,12 +5,15 @@ import { db } from "@/db/client";
 import {
   calendarConnections,
   calendarSyncLogs,
+  serviceStaff,
+  services,
   tenants,
   users,
 } from "@/db/schema";
 import { getSession, isManagerial } from "@/lib/auth";
 import Shell from "@/components/dashboard/Shell";
 import CalendarConnectionsClient, {
+  type BookingImpact,
   type CalendarKpis,
   type ConnectionRow,
   type StaffLite,
@@ -203,6 +206,102 @@ export default async function CalendarInfrastructurePage(props: {
     providerDistribution,
   };
 
+  // ── Last successful sync per connection (Phase 17B) ───────────
+  // Stricter signal than connection.lastSyncedAt: only counts
+  // events the engine actually completed without error. Surfaces
+  // as a separate column so operators can tell "we touched it
+  // recently" apart from "we touched it recently AND it worked."
+  const lastSuccessRows = connectionRows.length > 0
+    ? await db
+        .select({
+          connectionId: calendarSyncLogs.connectionId,
+          lastAt: sql<Date>`max(${calendarSyncLogs.createdAt})`,
+        })
+        .from(calendarSyncLogs)
+        .where(
+          and(
+            eq(calendarSyncLogs.tenantId, tenant.id),
+            eq(calendarSyncLogs.status, "ok"),
+            inArray(
+              calendarSyncLogs.connectionId,
+              connectionRows.map((c) => c.id),
+            ),
+          ),
+        )
+        .groupBy(calendarSyncLogs.connectionId)
+    : [];
+  const lastSuccessByConnection = new Map<string, string>();
+  for (const r of lastSuccessRows) {
+    if (r.connectionId && r.lastAt) {
+      lastSuccessByConnection.set(r.connectionId, new Date(r.lastAt).toISOString());
+    }
+  }
+
+  // ── Booking impact intelligence (Phase 17B refinement #6) ─────
+  // Honest aggregates only. Computed per-service:
+  //   • For each service, how many assigned staff have a HEALTHY
+  //     connection (status='active' AND no trailing lastError) or
+  //     are inheriting in a way that doesn't require sync?
+  //
+  // Two derived counters:
+  //   - servicesAtRiskCount       : any service where at least one
+  //                                 assigned staff is uncovered
+  //   - servicesUncoveredCount    : services where 100% of assigned
+  //                                 staff are uncovered (booking-blocker)
+  //
+  // "Uncovered" = staff has no calendar connection OR a connection
+  //               that isn't actively healthy. This is a conservative
+  //               infrastructure signal — booking engine still works
+  //               without calendar sync, but routing-quality drops
+  //               (no busy-time skew, no auto-event-create).
+  const healthyStaffIds = new Set(
+    connectionRows
+      .filter((c) => c.status === "active" && !c.lastError)
+      .map((c) => c.userId),
+  );
+  const disconnectedStaffCount = managerial
+    ? workforce.filter((w) => !healthyStaffIds.has(w.id)).length
+    : healthyStaffIds.has(user.id) ? 0 : 1;
+
+  let servicesAtRiskCount = 0;
+  let servicesUncoveredCount = 0;
+  // Only run service-impact query for admins — staff don't need
+  // workspace-wide booking metrics on their personal view.
+  if (managerial && workforce.length > 0) {
+    const serviceStaffRows = await db
+      .select({
+        serviceId: serviceStaff.serviceId,
+        userId: serviceStaff.userId,
+        serviceName: services.name,
+        isActive: services.isActive,
+      })
+      .from(serviceStaff)
+      .innerJoin(services, eq(services.id, serviceStaff.serviceId))
+      .where(eq(serviceStaff.tenantId, tenant.id));
+
+    const perService = new Map<string, { total: number; healthy: number }>();
+    for (const r of serviceStaffRows) {
+      if (!r.isActive) continue;
+      const m = perService.get(r.serviceId) ?? { total: 0, healthy: 0 };
+      m.total += 1;
+      if (healthyStaffIds.has(r.userId)) m.healthy += 1;
+      perService.set(r.serviceId, m);
+    }
+    for (const m of perService.values()) {
+      if (m.total === 0) continue;
+      if (m.healthy < m.total) servicesAtRiskCount += 1;
+      if (m.healthy === 0) servicesUncoveredCount += 1;
+    }
+  }
+
+  const bookingImpact: BookingImpact = {
+    disconnectedStaffCount,
+    servicesAtRiskCount,
+    servicesUncoveredCount,
+    // No infrastructure routing-mode data exposed yet, so we
+    // honestly leave that signal out for now.
+  };
+
   const params = await props.searchParams;
 
   // Serialize connection rows for the client component (timestamps
@@ -215,6 +314,7 @@ export default async function CalendarInfrastructurePage(props: {
     accountEmail: c.accountEmail ?? null,
     calendarId: c.calendarId,
     lastSyncedAt: c.lastSyncedAt?.toISOString() ?? null,
+    lastSuccessfulSyncAt: lastSuccessByConnection.get(c.id) ?? null,
     lastError: c.lastError ?? null,
     lastErrorAt: c.lastErrorAt?.toISOString() ?? null,
     createdAt: c.createdAt.toISOString(),
@@ -256,6 +356,7 @@ export default async function CalendarInfrastructurePage(props: {
         connections={connections}
         logs={logs}
         kpis={kpis}
+        bookingImpact={bookingImpact}
         flashConnected={params.connected ?? null}
         flashError={params.error ?? null}
       />

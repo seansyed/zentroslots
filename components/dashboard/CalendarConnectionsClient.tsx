@@ -54,13 +54,30 @@ export type ConnectionRow = {
   status: "active" | "needs_reconnect" | "disconnected";
   accountEmail: string | null;
   calendarId: string;
+  /** Last sync ATTEMPT (any outcome) — denormalized on the row */
   lastSyncedAt: string | null;
+  /** Last sync that actually completed with status='ok'. Derived
+   *  server-side from calendar_sync_logs (Phase 17B). Stricter
+   *  signal than lastSyncedAt — only counts successful operations. */
+  lastSuccessfulSyncAt: string | null;
   lastError: string | null;
   lastErrorAt: string | null;
   createdAt: string;
   updatedAt: string;
   userName: string | null;
   userEmail: string | null;
+};
+
+/** Honest booking-impact aggregates — Phase 17B refinement #6.
+ *  Counts only, no fabricated narrative. Server computes these
+ *  by joining service_staff with the healthy-connection set. */
+export type BookingImpact = {
+  /** Workforce members without a healthy connection */
+  disconnectedStaffCount: number;
+  /** Services where >=1 assigned staff is uncovered */
+  servicesAtRiskCount: number;
+  /** Services where 100% of assigned staff is uncovered (blocker) */
+  servicesUncoveredCount: number;
 };
 
 export type SyncLogRow = {
@@ -101,6 +118,10 @@ function prettyProvider(p: string): string {
       return "Outlook";
     case "apple":
       return "iCloud";
+    case "teams":
+      return "Microsoft Teams";
+    case "zoom":
+      return "Zoom";
     default:
       return p.charAt(0).toUpperCase() + p.slice(1);
   }
@@ -112,14 +133,134 @@ function providerConferencing(p: string): string {
   return "—";
 }
 
-function providerInitial(p: string): { initial: string; tone: string } {
-  if (p === "google")
-    return { initial: "G", tone: "bg-sky-50 text-sky-700 ring-sky-200/60" };
-  if (p === "outlook" || p === "office365")
-    return { initial: "O", tone: "bg-indigo-50 text-indigo-700 ring-indigo-200/60" };
-  if (p === "apple")
-    return { initial: "A", tone: "bg-rose-50 text-rose-700 ring-rose-200/60" };
-  return { initial: p.charAt(0).toUpperCase(), tone: "bg-surface-inset text-ink-muted ring-border/40" };
+/** Soft chip tone for the provider — independent of the brand SVG.
+ *  Used on the small provider chips inside the distribution strip
+ *  + table row labels where we want a calm wrapper around the icon. */
+function providerTone(p: string): string {
+  if (p === "google") return "bg-sky-50 text-sky-700 ring-sky-200/60";
+  if (p === "outlook" || p === "office365") return "bg-indigo-50 text-indigo-700 ring-indigo-200/60";
+  if (p === "teams") return "bg-violet-50 text-violet-700 ring-violet-200/60";
+  if (p === "zoom") return "bg-sky-50 text-sky-700 ring-sky-200/60";
+  if (p === "apple") return "bg-rose-50 text-rose-700 ring-rose-200/60";
+  return "bg-surface-inset text-ink-muted ring-border/40";
+}
+
+// ─── Provider visual identity (Phase 17B refinement #2) ──────────
+//
+// Inline brand SVGs let us render every supported provider with
+// recognizable visual identity even before connection. Disconnected
+// providers render in monochrome ("we know about it, not yet
+// integrated") while connected providers paint in brand color.
+
+type ProviderId = "google" | "outlook" | "teams" | "zoom";
+type ProviderKind = "calendar" | "conferencing";
+type ProviderTone = "color" | "mono";
+
+const PROVIDER_CATALOG: Array<{
+  id: ProviderId;
+  name: string;
+  kind: ProviderKind;
+  live: boolean;       // true when our backend can OAuth + sync
+  brandColor: string;  // hex used by the icon when rendered "color"
+  rationale: string;   // microcopy for tooltips on inactive providers
+}> = [
+  {
+    id: "google",
+    name: "Google Calendar",
+    kind: "calendar",
+    live: true,
+    brandColor: "#4285F4",
+    rationale: "Two-way sync + Google Meet auto-links.",
+  },
+  {
+    id: "outlook",
+    name: "Outlook Calendar",
+    kind: "calendar",
+    live: false,
+    brandColor: "#0078D4",
+    rationale: "Microsoft Graph adapter on the roadmap.",
+  },
+  {
+    id: "teams",
+    name: "Microsoft Teams",
+    kind: "conferencing",
+    live: false,
+    brandColor: "#6264A7",
+    rationale: "Conferencing channel; lands with the Outlook adapter.",
+  },
+  {
+    id: "zoom",
+    name: "Zoom",
+    kind: "conferencing",
+    live: false,
+    brandColor: "#2D8CFF",
+    rationale: "OAuth + meeting auto-create on the roadmap.",
+  },
+];
+
+function ProviderIcon({
+  id,
+  tone,
+  className,
+}: {
+  id: ProviderId | string;
+  tone: ProviderTone;
+  className?: string;
+}) {
+  // Color resolves from catalog when available; falls back to
+  // ink-subtle for unknown providers we still want to render.
+  const meta = PROVIDER_CATALOG.find((p) => p.id === id);
+  const fill = tone === "color" ? meta?.brandColor ?? "#94a3b8" : "#94a3b8";
+  const common = { className: cn("inline-block", className), fill };
+  switch (id) {
+    case "google":
+      return (
+        <svg viewBox="0 0 24 24" {...common}>
+          <path d={
+            "M21.6 12.227c0-.668-.06-1.31-.172-1.927H12v3.643h5.4a4.62 4.62 0 01-2.004 3.03v2.515h3.24c1.896-1.748 2.964-4.323 2.964-7.261z"
+          } fill={tone === "color" ? "#4285F4" : fill} />
+          <path d={
+            "M12 22c2.7 0 4.964-.895 6.617-2.412l-3.24-2.514c-.9.604-2.05.964-3.377.964-2.595 0-4.79-1.752-5.575-4.108H3.066v2.583A9.997 9.997 0 0012 22z"
+          } fill={tone === "color" ? "#34A853" : fill} />
+          <path d={
+            "M6.425 13.93A6.014 6.014 0 016.108 12c0-.67.115-1.32.317-1.93V7.487H3.066A9.997 9.997 0 002 12c0 1.614.387 3.142 1.066 4.513l3.36-2.583z"
+          } fill={tone === "color" ? "#FBBC05" : fill} />
+          <path d={
+            "M12 5.962c1.467 0 2.787.504 3.823 1.494l2.866-2.866C16.96 2.99 14.694 2 12 2A9.997 9.997 0 003.066 7.487l3.36 2.583C7.21 7.714 9.405 5.962 12 5.962z"
+          } fill={tone === "color" ? "#EA4335" : fill} />
+        </svg>
+      );
+    case "outlook":
+      return (
+        <svg viewBox="0 0 24 24" {...common}>
+          <path d="M13 4h7a1 1 0 011 1v14a1 1 0 01-1 1h-7V4z" fill={tone === "color" ? "#0078D4" : fill} />
+          <path d="M3 5.5l10-1.5v16l-10-1.5v-13z" fill={tone === "color" ? "#106EBE" : fill} />
+          <text x="5" y="14.5" fontSize="6" fontWeight="700" fill="#fff" fontFamily="system-ui">O</text>
+        </svg>
+      );
+    case "teams":
+      return (
+        <svg viewBox="0 0 24 24" {...common}>
+          <path d="M7 6h10v3H7zM7 9h10v9.5A2.5 2.5 0 0114.5 21h-5A2.5 2.5 0 017 18.5V9z" fill={tone === "color" ? "#6264A7" : fill} />
+          <path d="M14 4a3 3 0 11-6 0 3 3 0 016 0z" fill={tone === "color" ? "#6264A7" : fill} opacity="0.85" />
+          <path d="M20 9a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0z" fill={tone === "color" ? "#5054A2" : fill} opacity="0.7" />
+        </svg>
+      );
+    case "zoom":
+      return (
+        <svg viewBox="0 0 24 24" {...common}>
+          <rect x="2.5" y="6" width="13.5" height="12" rx="2" fill={tone === "color" ? "#2D8CFF" : fill} />
+          <path d="M21.5 7.4v9.2a.6.6 0 01-.95.49L17 14.6v-5.2l3.55-2.49a.6.6 0 01.95.49z" fill={tone === "color" ? "#2D8CFF" : fill} />
+        </svg>
+      );
+    default:
+      // Unknown provider — render initial in a soft chip
+      return (
+        <span className={cn("inline-flex items-center justify-center rounded text-[10px] font-bold text-ink-muted", className)}>
+          {String(id).charAt(0).toUpperCase()}
+        </span>
+      );
+  }
 }
 
 // Operational health derivation. Honest combination of the
@@ -203,6 +344,7 @@ export default function CalendarConnectionsClient({
   connections: initialConnections,
   logs: initialLogs,
   kpis,
+  bookingImpact,
   flashConnected,
   flashError,
 }: {
@@ -212,6 +354,7 @@ export default function CalendarConnectionsClient({
   connections: ConnectionRow[];
   logs: SyncLogRow[];
   kpis: CalendarKpis;
+  bookingImpact: BookingImpact;
   flashConnected: string | null;
   flashError: string | null;
 }) {
@@ -271,7 +414,7 @@ export default function CalendarConnectionsClient({
   //   • One row per workforce member
   //   • Pull the latest connection if multiple exist for the same
   //     user (sorted by updatedAt desc on the server)
-  //   • Staff without a connection get an "Awaiting setup" row
+  //   • Staff without a connection get a "Not connected" row
   const tableRows = React.useMemo<TableRow[]>(() => {
     const latestByUser = new Map<string, ConnectionRow>();
     for (const c of connections) {
@@ -312,10 +455,18 @@ export default function CalendarConnectionsClient({
       {/* KPI strip */}
       <KpiStrip kpis={kpis} />
 
-      {/* Provider distribution */}
+      {/* Supported provider catalog (Phase 17B refinement #2) —
+          renders BEFORE distribution so even tenants with zero
+          connections see what infrastructure speaks. */}
+      <ProviderCatalog activeProviders={kpis.providerDistribution.map((d) => d.provider)} />
+
+      {/* Provider distribution — only when we have real data */}
       {kpis.providerDistribution.length > 0 && (
         <ProviderDistribution distribution={kpis.providerDistribution} workforceCount={kpis.workforceCount} />
       )}
+
+      {/* Booking impact intelligence (Phase 17B refinement #6) */}
+      {isAdmin && <BookingImpactSection impact={bookingImpact} kpis={kpis} />}
 
       {/* Workforce sync table */}
       <PremiumCard className="overflow-hidden p-0">
@@ -541,24 +692,211 @@ function ProviderDistribution({
       </div>
       <div className="mt-3 flex flex-wrap items-center gap-2">
         {distribution.map((d) => {
-          const initial = providerInitial(d.provider);
           const pct = workforceCount > 0 ? Math.round((d.count / workforceCount) * 100) : 0;
           return (
             <span
               key={d.provider}
               className={cn(
                 "inline-flex items-center gap-2 rounded-full px-2.5 py-1 text-[11px] font-medium ring-1",
-                initial.tone,
+                providerTone(d.provider),
               )}
             >
-              <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-surface/70 text-[9px] font-bold">
-                {initial.initial}
-              </span>
+              <ProviderIcon id={d.provider} tone="color" className="h-3.5 w-3.5" />
               <span>{prettyProvider(d.provider)}</span>
               <span className="font-semibold tabular-nums">{d.count}</span>
               {pct > 0 && <span className="text-ink-subtle">·</span>}
               {pct > 0 && <span className="tabular-nums text-ink-muted">{pct}%</span>}
             </span>
+          );
+        })}
+      </div>
+    </PremiumCard>
+  );
+}
+
+// ─── Provider catalog (Phase 17B refinement #2) ───────────────────
+//
+// Renders every provider the infrastructure speaks. Active providers
+// (=at least one connection in the tenant) get full color. Inactive
+// or not-yet-shipped providers get a calm monochrome treatment with
+// an honest "Coming soon" pill. This teaches the operator the
+// supported infrastructure surface without fabricating Connect
+// buttons.
+
+function ProviderCatalog({ activeProviders }: { activeProviders: string[] }) {
+  const active = new Set(activeProviders);
+  return (
+    <PremiumCard className="p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-[10px] font-semibold uppercase tracking-[0.10em] text-brand-accent">Supported infrastructure</div>
+          <h2 className="mt-0.5 text-[14px] font-semibold tracking-tight text-ink">Provider catalog</h2>
+          <p className="mt-0.5 text-[11.5px] text-ink-muted">
+            Calendar + conferencing providers the workforce can connect to. Live providers paint in brand color;
+            roadmap providers stay monochrome with a honest &quot;Coming soon&quot; pill.
+          </p>
+        </div>
+      </div>
+      <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+        {PROVIDER_CATALOG.map((p) => {
+          const isActive = p.live && active.has(p.id);
+          const isLive = p.live;
+          return (
+            <div
+              key={p.id}
+              className={cn(
+                "relative overflow-hidden rounded-xl border p-3 transition-all duration-[260ms] ease-[cubic-bezier(0.16,1,0.3,1)]",
+                isActive
+                  ? "border-border bg-surface hover:-translate-y-0.5 hover:shadow-soft"
+                  : "border-dashed border-border bg-surface-inset/30",
+              )}
+              title={isLive ? undefined : p.rationale}
+            >
+              <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/50 to-transparent" />
+              <div className="flex items-start gap-2.5">
+                <span
+                  className={cn(
+                    "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ring-1",
+                    isActive ? providerTone(p.id) : "bg-surface text-ink-subtle ring-border/40",
+                  )}
+                >
+                  <ProviderIcon id={p.id} tone={isActive ? "color" : "mono"} className="h-5 w-5" />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className={cn("text-[12.5px] font-semibold tracking-tight", isActive ? "text-ink" : "text-ink-muted")}>
+                      {p.name}
+                    </span>
+                    {isLive ? (
+                      <span className={cn(
+                        "inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.06em] ring-1",
+                        isActive
+                          ? "bg-emerald-50 text-emerald-700 ring-emerald-200/40"
+                          : "bg-brand-subtle/60 text-brand-accent ring-brand-accent/15",
+                      )}>
+                        {isActive ? "Live" : "Available"}
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center rounded-full bg-surface px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.06em] text-ink-subtle ring-1 ring-border/40">
+                        Coming soon
+                      </span>
+                    )}
+                  </div>
+                  <p className="mt-0.5 text-[10.5px] leading-relaxed text-ink-muted">
+                    {p.kind === "calendar" ? "Calendar provider" : "Conferencing provider"} · {p.rationale}
+                  </p>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </PremiumCard>
+  );
+}
+
+// ─── Booking impact intelligence (Phase 17B refinement #6) ────────
+//
+// Honest aggregates from the server. Renders distinct "all green"
+// vs "degraded" treatments — never fabricates a problem when none
+// exists. Counts only; we don't tell the operator WHICH service
+// is at risk here (that belongs on the Service page).
+
+function BookingImpactSection({
+  impact,
+  kpis,
+}: {
+  impact: BookingImpact;
+  kpis: CalendarKpis;
+}) {
+  const allHealthy =
+    impact.disconnectedStaffCount === 0 &&
+    impact.servicesAtRiskCount === 0 &&
+    impact.servicesUncoveredCount === 0;
+
+  if (allHealthy) {
+    return (
+      <PremiumCard className="p-4">
+        <div className="flex items-start gap-3">
+          <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200/40 shadow-[0_0_18px_rgba(16,185,129,0.20)]">
+            <CheckCircle2 className="h-4 w-4" strokeWidth={1.75} />
+          </span>
+          <div>
+            <div className="text-[10px] font-semibold uppercase tracking-[0.10em] text-brand-accent">Booking impact</div>
+            <h2 className="mt-0.5 text-[14px] font-semibold tracking-tight text-ink">Workforce connectivity is healthy</h2>
+            <p className="mt-0.5 text-[11.5px] text-ink-muted">
+              {kpis.connectedStaffCount > 0
+                ? "Every connected staff member has a healthy sync, and no services are running with degraded calendar coverage."
+                : "No calendar connections to assess yet. As staff link their providers, this section reports any coverage gaps that would affect booking quality."}
+            </p>
+          </div>
+        </div>
+      </PremiumCard>
+    );
+  }
+
+  const tiles: Array<{ icon: LucideIcon; label: string; value: string; tone: string; caption: string }> = [
+    {
+      icon: WifiOff,
+      label: "Disconnected staff",
+      value: String(impact.disconnectedStaffCount),
+      tone: impact.disconnectedStaffCount === 0
+        ? "bg-emerald-50 text-emerald-700 ring-emerald-200/40"
+        : "bg-amber-50 text-amber-700 ring-amber-200/40",
+      caption: impact.disconnectedStaffCount === 0
+        ? "Every workforce member has a healthy connection."
+        : "Bookings still work — calendar sync features (busy-time skew, auto event-create) are inactive for these staff.",
+    },
+    {
+      icon: AlertCircle,
+      label: "Services with partial coverage",
+      value: String(impact.servicesAtRiskCount),
+      tone: impact.servicesAtRiskCount === 0
+        ? "bg-emerald-50 text-emerald-700 ring-emerald-200/40"
+        : "bg-amber-50 text-amber-700 ring-amber-200/40",
+      caption: "At least one assigned staff is uncovered. Routing still works; calendar-aware features degrade.",
+    },
+    {
+      icon: ShieldAlert,
+      label: "Services with zero healthy coverage",
+      value: String(impact.servicesUncoveredCount),
+      tone: impact.servicesUncoveredCount === 0
+        ? "bg-emerald-50 text-emerald-700 ring-emerald-200/40"
+        : "bg-rose-50 text-rose-700 ring-rose-200/40",
+      caption: "No assigned staff has a healthy sync. Worth a manager nudge — these services are flying blind on calendar data.",
+    },
+  ];
+
+  return (
+    <PremiumCard className="p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-[10px] font-semibold uppercase tracking-[0.10em] text-brand-accent">Booking impact</div>
+          <h2 className="mt-0.5 text-[14px] font-semibold tracking-tight text-ink">
+            Connectivity-driven coverage signals
+          </h2>
+          <p className="mt-0.5 text-[11.5px] text-ink-muted">
+            Honest counts only — bookings continue to function without calendar sync, but calendar-aware features
+            (busy-time skew, auto event-create, Meet auto-link) require a healthy connection.
+          </p>
+        </div>
+      </div>
+      <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
+        {tiles.map((t) => {
+          const Icon = t.icon;
+          return (
+            <div key={t.label} className="rounded-xl border border-border bg-surface p-3">
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <div className="text-[9.5px] font-semibold uppercase tracking-[0.10em] text-ink-subtle">{t.label}</div>
+                  <div className="mt-1 text-[20px] font-semibold leading-none tabular-nums tracking-tight text-ink">{t.value}</div>
+                </div>
+                <span className={cn("inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ring-1", t.tone)}>
+                  <Icon className="h-3.5 w-3.5" strokeWidth={1.75} />
+                </span>
+              </div>
+              <p className="mt-1.5 text-[10.5px] leading-relaxed text-ink-muted">{t.caption}</p>
+            </div>
           );
         })}
       </div>
@@ -586,7 +924,8 @@ function SyncTableRow({
   const profileHref = `/dashboard/staff?focus=${staff.id}`;
 
   if (!connection) {
-    // Awaiting setup row — calm, no buttons firing OAuth.
+    // "Not connected" row — calm, no buttons firing OAuth (Phase
+    // 17B language pass: "Awaiting setup" -> "Not connected").
     return (
       <li className="flex flex-wrap items-center gap-3 px-4 py-3.5 sm:px-5">
         <div className="flex min-w-0 flex-1 items-center gap-2.5">
@@ -607,20 +946,20 @@ function SyncTableRow({
           </div>
         </div>
 
-        <span className="inline-flex items-center gap-1 rounded-full bg-surface-inset px-2 py-0.5 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-ink-subtle ring-1 ring-border/40">
+        <span className="inline-flex items-center gap-1 rounded-full bg-slate-100/80 px-2 py-0.5 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-slate-600 ring-1 ring-slate-200/60">
           <WifiOff className="h-3 w-3" strokeWidth={1.75} />
-          Awaiting setup
+          Not connected
         </span>
 
         <div className="hidden text-[10.5px] text-ink-subtle md:block">
-          No provider connected yet
+          No calendar provider linked
         </div>
 
         <Link
           href={profileHref}
           className="ml-auto inline-flex items-center gap-1 rounded-md border border-border bg-surface px-2.5 py-1 text-[11px] font-medium text-ink-muted transition-all duration-[200ms] hover:bg-surface-inset"
         >
-          {isSelf ? "Set up in profile" : "Open profile"}
+          {isSelf ? "Connect on profile" : "Open profile"}
           <ChevronRight className="h-3 w-3" strokeWidth={2} />
         </Link>
       </li>
@@ -629,7 +968,6 @@ function SyncTableRow({
 
   const health = deriveHealth(connection);
   const tokenHealth = deriveTokenHealth(connection);
-  const initial = providerInitial(connection.provider);
   const HealthIcon = health.state === "healthy"
     ? CheckCircle2
     : health.state === "warning"
@@ -660,10 +998,17 @@ function SyncTableRow({
         </div>
       </div>
 
-      {/* Provider */}
+      {/* Provider — brand SVG, color when healthy, mono when degraded */}
       <div className="flex items-center gap-1.5">
-        <span className={cn("inline-flex h-5 w-5 items-center justify-center rounded ring-1 text-[10px] font-bold", initial.tone)}>
-          {initial.initial}
+        <span className={cn(
+          "inline-flex h-6 w-6 items-center justify-center rounded ring-1",
+          providerTone(connection.provider),
+        )}>
+          <ProviderIcon
+            id={connection.provider}
+            tone={health.state === "healthy" ? "color" : "mono"}
+            className="h-4 w-4"
+          />
         </span>
         <div className="flex flex-col">
           <span className="text-[12px] font-medium text-ink">{prettyProvider(connection.provider)}</span>
@@ -675,11 +1020,12 @@ function SyncTableRow({
         </div>
       </div>
 
-      {/* Status */}
+      {/* Status — Phase 17B refined palette + ambient glow on healthy */}
       <span
         className={cn(
           "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10.5px] font-semibold uppercase tracking-[0.06em] ring-1",
           health.tone,
+          health.state === "healthy" && "shadow-[0_0_12px_rgba(16,185,129,0.20)]",
         )}
         title={health.hint}
       >
@@ -687,11 +1033,17 @@ function SyncTableRow({
         {health.label}
       </span>
 
-      {/* Last sync + calendar id */}
+      {/* Last successful sync (Phase 17B refinement #4) —
+          stricter signal than connection.lastSyncedAt; falls back
+          to lastSyncedAt when no successful log exists yet. */}
       <div className="hidden flex-col md:flex">
-        <span className="text-[10.5px] font-semibold uppercase tracking-[0.08em] text-ink-subtle">Last sync</span>
+        <span className="text-[10.5px] font-semibold uppercase tracking-[0.08em] text-ink-subtle">Last successful sync</span>
         <span className="text-[11.5px] font-medium tabular-nums text-ink">
-          {connection.lastSyncedAt ? timeAgo(connection.lastSyncedAt) : "—"}
+          {connection.lastSuccessfulSyncAt
+            ? `Synced ${timeAgo(connection.lastSuccessfulSyncAt)}`
+            : connection.lastSyncedAt
+              ? `Attempted ${timeAgo(connection.lastSyncedAt)}`
+              : "Never synced"}
         </span>
       </div>
 
