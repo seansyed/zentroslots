@@ -68,12 +68,29 @@ export function Avatar({
   const cfg = SIZE[size];
   const [loaded, setLoaded] = React.useState(false);
   const [errored, setErrored] = React.useState(false);
+  const imgRef = React.useRef<HTMLImageElement | null>(null);
   const useImage = Boolean(src) && !errored;
 
   // Reset state when src changes (e.g. after avatar upload).
   React.useEffect(() => {
     setLoaded(false);
     setErrored(false);
+  }, [src]);
+
+  // Browser cache race fix: if the image is already complete by the
+  // time React mounts (because the browser served it from cache),
+  // the <img onLoad> handler never fires — so we'd stay stuck at
+  // opacity-0 forever. Check img.complete after mount and on every
+  // src change, and resolve `loaded` synchronously if it is.
+  React.useEffect(() => {
+    const img = imgRef.current;
+    if (!img) return;
+    if (img.complete && img.naturalWidth > 0) {
+      setLoaded(true);
+    } else if (img.complete && img.naturalWidth === 0 && src) {
+      // Completed but with zero dimensions = load failed.
+      setErrored(true);
+    }
   }, [src]);
 
   if (useImage) {
@@ -95,6 +112,7 @@ export function Avatar({
           />
         )}
         <img
+          ref={imgRef}
           src={src!}
           alt={name}
           className={cn(
