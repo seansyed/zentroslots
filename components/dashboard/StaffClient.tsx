@@ -35,6 +35,9 @@ import {
   MessageSquare,
   CalendarDays,
   StickyNote,
+  Infinity as InfinityIcon,
+  CreditCard,
+  ArrowUpRight,
   type LucideIcon,
 } from "lucide-react";
 
@@ -87,6 +90,25 @@ type Tab = (typeof TABS)[number];
 
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
+// Workforce seats (matches lib/billing/seats.ts → toWorkforceSeatsJson).
+// totalSeats / availableSeats arrive as null when the plan is
+// unlimited — the `unlimited` flag is the authoritative signal.
+type SeatsSnapshot = {
+  plan: string;
+  includedSeats: number;
+  extraSeats: number;
+  totalSeats: number | null;
+  usedSeats: number;
+  availableSeats: number | null;
+  unlimited: boolean;
+  atCapacity: boolean;
+  nearLimit: boolean;
+  percent: number;
+  level: "healthy" | "warning" | "critical" | "unlimited";
+  addOnSupported: boolean;
+  hasSoftDeactivation: boolean;
+};
+
 // Workload derivation — honest signal from real upcoming count.
 type Workload = "available" | "active" | "near-capacity";
 function deriveWorkload(upcoming: number): Workload {
@@ -127,11 +149,28 @@ export default function StaffClient({
   const [rows, setRows] = React.useState<StaffRow[] | null>(null);
   const [openId, setOpenId] = React.useState<string | null>(null);
   const [inviteOpen, setInviteOpen] = React.useState(false);
+  const [capacityOpen, setCapacityOpen] = React.useState(false);
+  const [seats, setSeats] = React.useState<SeatsSnapshot | null>(null);
 
   // Toolbar state
   const [q, setQ] = React.useState("");
   const [roleFilter, setRoleFilter] = React.useState<"all" | "manager" | "staff">("all");
   const [workloadFilter, setWorkloadFilter] = React.useState<"all" | Workload>("all");
+
+  // Refetch seats whenever the directory changes — keeps the
+  // capacity chip in sync after a teammate signs up. Tenant-scoped
+  // by requireUser() on the server.
+  const refetchSeats = React.useCallback(() => {
+    let cancelled = false;
+    fetch("/api/tenant/seats")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: SeatsSnapshot | null) => {
+        if (cancelled) return;
+        if (d) setSeats(d);
+      })
+      .catch(() => { /* leave previous snapshot in place */ });
+    return () => { cancelled = true; };
+  }, []);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -141,6 +180,26 @@ export default function StaffClient({
       .catch(() => !cancelled && setRows([]));
     return () => { cancelled = true; };
   }, []);
+
+  React.useEffect(() => {
+    refetchSeats();
+  }, [refetchSeats, rows]);
+
+  // Centralized "Add staff" trigger — gates seat capacity client-side
+  // (the server still enforces via assertCanAddStaff at signup time).
+  // If seats are unknown yet (initial load), we err on the side of
+  // opening the invite modal so the UX doesn't stall.
+  const handleAddStaffClick = React.useCallback(() => {
+    if (!seats) {
+      setInviteOpen(true);
+      return;
+    }
+    if (seats.unlimited || seats.availableSeats === null || seats.availableSeats > 0) {
+      setInviteOpen(true);
+    } else {
+      setCapacityOpen(true);
+    }
+  }, [seats]);
 
   // ── Derived metrics ────────────────────────────────────────────
   const metrics = React.useMemo(() => {
@@ -182,7 +241,21 @@ export default function StaffClient({
   }, [rows, q, roleFilter, workloadFilter]);
 
   // ── Operational signal ────────────────────────────────────────
-  const signal = React.useMemo(() => deriveSignal(metrics), [metrics]);
+  // The seat-capacity signal takes precedence over workload signals
+  // when present (at-capacity > 80%-warning > everything else),
+  // because seat headroom is the most actionable signal an admin
+  // can see in the strip.
+  const signal = React.useMemo(() => {
+    if (seats && !seats.unlimited) {
+      if (seats.atCapacity) {
+        return `Workforce capacity has been reached — ${seats.usedSeats} of ${seats.totalSeats ?? seats.usedSeats} operational seats in use. Additional staffing requires more seats.`;
+      }
+      if (seats.nearLimit) {
+        return `Workforce capacity nearing limit — ${seats.usedSeats} of ${seats.totalSeats ?? seats.usedSeats} operational seats in use (${seats.percent}%).`;
+      }
+    }
+    return deriveSignal(metrics);
+  }, [metrics, seats]);
 
   return (
     <div className="relative mt-2 space-y-5">
@@ -198,7 +271,7 @@ export default function StaffClient({
 
       {/* ── Hero ──────────────────────────────────────────────── */}
       <FadeIn>
-        <StaffHero isAdmin={isAdmin} onInvite={() => setInviteOpen(true)} />
+        <StaffHero isAdmin={isAdmin} onInvite={handleAddStaffClick} seats={seats} />
       </FadeIn>
 
       {/* ── AI Workforce Intelligence Strip ─────────────────── */}
@@ -245,7 +318,7 @@ export default function StaffClient({
                 ))}
               </div>
             ) : rows.length === 0 ? (
-              <PremiumEmptyState onInvite={() => setInviteOpen(true)} />
+              <PremiumEmptyState onInvite={handleAddStaffClick} />
             ) : (filtered ?? []).length === 0 ? (
               <FilteredEmpty onClear={() => { setQ(""); setRoleFilter("all"); setWorkloadFilter("all"); }} />
             ) : (
@@ -280,13 +353,27 @@ export default function StaffClient({
         tenantSlug={tenantSlug ?? null}
         tenantName={tenantName ?? null}
       />
+
+      <CapacityReachedModal
+        open={capacityOpen}
+        onClose={() => setCapacityOpen(false)}
+        seats={seats}
+      />
     </div>
   );
 }
 
 // ─── Hero ───────────────────────────────────────────────────────────
 
-function StaffHero({ isAdmin, onInvite }: { isAdmin: boolean; onInvite: () => void }) {
+function StaffHero({
+  isAdmin,
+  onInvite,
+  seats,
+}: {
+  isAdmin: boolean;
+  onInvite: () => void;
+  seats: SeatsSnapshot | null;
+}) {
   return (
     <PremiumCard
       compact
@@ -330,6 +417,12 @@ function StaffHero({ isAdmin, onInvite }: { isAdmin: boolean; onInvite: () => vo
           <p className="mt-0.5 max-w-2xl text-[12.5px] leading-relaxed text-ink-muted">
             Monitor staffing health, scheduling balance, responsiveness, and operational coverage across your service organization.
           </p>
+
+          {/* Operational seats chip — always visible to anyone with
+              hero access; the data is calm and informational. */}
+          <div className="mt-3">
+            <SeatCapacityChip seats={seats} />
+          </div>
         </div>
         {isAdmin && (
           <div className="flex flex-wrap items-center gap-1.5">
@@ -1254,6 +1347,221 @@ function ScaffoldModule({
         </div>
       </div>
     </div>
+  );
+}
+
+// ─── Seat Capacity Chip ────────────────────────────────────────────
+//
+// Surfaces the operational seat headroom directly on the hero. Calm
+// glass-style chip with subtle hover halo. Tonal level is driven by
+// the helper (healthy / warning / critical / unlimited). Clicking
+// the chip navigates to /dashboard/billing — the existing billing
+// workspace owns the upgrade flow.
+
+function SeatCapacityChip({ seats }: { seats: SeatsSnapshot | null }) {
+  if (!seats) {
+    // Initial load — render a calm skeleton instead of a "0/0".
+    return (
+      <span className="inline-flex h-7 items-center gap-2 rounded-full border border-border bg-surface/70 px-3 text-[11px] font-medium text-ink-subtle shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
+        <span aria-hidden className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-ink-subtle/40" />
+        Loading seats…
+      </span>
+    );
+  }
+
+  if (seats.unlimited) {
+    return (
+      <Link
+        href="/dashboard/billing"
+        className="group inline-flex h-7 items-center gap-2 rounded-full border border-border bg-surface/80 px-3 text-[11px] font-medium text-ink-muted shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:bg-surface hover:text-ink hover:shadow-soft"
+      >
+        <InfinityIcon className="h-3 w-3 text-brand-accent" strokeWidth={2} />
+        <span className="font-semibold tabular-nums text-ink">{seats.usedSeats}</span>
+        <span className="text-ink-subtle">operational seats</span>
+        <span className="text-[9px] font-semibold uppercase tracking-wider text-brand-accent">unlimited</span>
+      </Link>
+    );
+  }
+
+  // Tonal style mapping
+  const tone =
+    seats.level === "critical" ? {
+      bg: "bg-red-50/80",
+      ring: "ring-red-200/50",
+      text: "text-red-700",
+      dot: "bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.45)]",
+      bar: "bg-red-500",
+      track: "bg-red-200/40",
+    }
+    : seats.level === "warning" ? {
+      bg: "bg-amber-50/80",
+      ring: "ring-amber-200/50",
+      text: "text-amber-800",
+      dot: "bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.40)]",
+      bar: "bg-amber-500",
+      track: "bg-amber-200/40",
+    }
+    : {
+      bg: "bg-emerald-50/70",
+      ring: "ring-emerald-200/40",
+      text: "text-emerald-700",
+      dot: "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.40)]",
+      bar: "bg-emerald-500",
+      track: "bg-emerald-200/40",
+    };
+
+  return (
+    <Link
+      href="/dashboard/billing"
+      className={cn(
+        "group inline-flex h-7 items-center gap-2 rounded-full px-3 text-[11px] font-medium ring-1 shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:shadow-soft",
+        tone.bg,
+        tone.ring,
+        tone.text,
+      )}
+      aria-label={`${seats.usedSeats} of ${seats.totalSeats ?? seats.usedSeats} operational seats used`}
+    >
+      <span aria-hidden className={cn("inline-block h-1.5 w-1.5 rounded-full", tone.dot)} />
+      <span className="font-semibold tabular-nums text-ink">{seats.usedSeats}</span>
+      <span className="text-ink-subtle">/</span>
+      <span className="font-semibold tabular-nums text-ink">{seats.totalSeats ?? seats.usedSeats}</span>
+      <span className="text-ink-subtle">seats</span>
+      {/* Inline mini progress rail */}
+      <span aria-hidden className={cn("relative ml-1 inline-block h-1 w-12 overflow-hidden rounded-full", tone.track)}>
+        <span
+          className={cn("absolute inset-y-0 left-0 rounded-full", tone.bar)}
+          style={{ width: `${seats.percent}%` }}
+        />
+      </span>
+    </Link>
+  );
+}
+
+// ─── Capacity Reached Modal ────────────────────────────────────────
+//
+// Premium operational upgrade modal — NOT a paywall. Surfaces the
+// real numbers (used/total) and routes to the existing billing
+// workspace. Honest about scope: we don't have a per-seat add-on
+// SKU configured yet, so the primary action is "Upgrade plan"
+// (the canonical, working path today). The secondary "Add seats"
+// link explicitly notes that add-on seats are routed through the
+// same upgrade workspace until per-seat billing ships.
+
+function CapacityReachedModal({
+  open,
+  onClose,
+  seats,
+}: {
+  open: boolean;
+  onClose: () => void;
+  seats: SeatsSnapshot | null;
+}) {
+  const used = seats?.usedSeats ?? 0;
+  const total = seats?.totalSeats ?? seats?.usedSeats ?? 0;
+  const planLabel = seats?.plan ? seats.plan.charAt(0).toUpperCase() + seats.plan.slice(1) : "";
+
+  return (
+    <Modal open={open} onClose={onClose} title="Your workforce capacity has been reached">
+      <div className="space-y-4">
+        <p className="text-[13px] leading-relaxed text-ink-muted">
+          To add additional staff members, increase your available operational seats.
+          {planLabel ? (
+            <>
+              {" "}You&rsquo;re currently on the <span className="font-medium text-ink">{planLabel}</span> plan.
+            </>
+          ) : null}
+        </p>
+
+        {/* Operational signal card */}
+        <div className="relative overflow-hidden rounded-2xl border border-amber-200/40 bg-gradient-to-br from-amber-50/40 via-surface to-surface p-4">
+          <span aria-hidden className="pointer-events-none absolute -right-12 -top-12 h-32 w-32 rounded-full bg-amber-300/15 blur-3xl" />
+          <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/60 to-transparent" />
+          <div className="relative flex items-start gap-3">
+            <div className="zm-pulse-glow inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-amber-200/40 bg-gradient-to-br from-amber-50 to-surface text-amber-700 shadow-soft">
+              <Gauge className="h-4 w-4" strokeWidth={1.75} />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="text-[10px] font-semibold uppercase tracking-[0.10em] text-amber-700">
+                Current usage
+              </div>
+              <div className="mt-0.5 flex items-baseline gap-1.5">
+                <span className="text-[24px] font-semibold leading-none tabular-nums tracking-tight text-ink">
+                  {used}
+                </span>
+                <span className="text-[14px] font-medium text-ink-muted tabular-nums">/ {total} seats used</span>
+              </div>
+              <p className="mt-1 text-[12px] leading-relaxed text-ink-muted">
+                Your team utilization is at operational saturation. Additional workforce capacity will improve scheduling flexibility and reduce coverage pressure.
+              </p>
+              {/* Progress rail */}
+              <span aria-hidden className="relative mt-2 inline-block h-1 w-full overflow-hidden rounded-full bg-amber-100/60">
+                <span
+                  className="absolute inset-y-0 left-0 rounded-full bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.40)]"
+                  style={{ width: `${seats?.percent ?? 100}%` }}
+                />
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Smart operational insight */}
+        <div className="rounded-xl border border-border bg-surface-inset/30 p-3">
+          <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-subtle">
+            What to consider
+          </div>
+          <ul className="mt-1.5 space-y-1.5 text-[12px] leading-relaxed text-ink-muted">
+            <li className="flex items-start gap-2">
+              <span aria-hidden className="mt-1.5 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-brand-accent" />
+              Demand growth suggests additional staffing coverage may be beneficial.
+            </li>
+            <li className="flex items-start gap-2">
+              <span aria-hidden className="mt-1.5 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-brand-accent" />
+              Upgrading your plan unlocks a higher operational seat allocation immediately.
+            </li>
+            {seats?.addOnSupported && (
+              <li className="flex items-start gap-2">
+                <span aria-hidden className="mt-1.5 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-brand-accent" />
+                Per-seat add-ons are available for incremental expansion without a full plan change.
+              </li>
+            )}
+          </ul>
+        </div>
+
+        {/* Actions */}
+        <div className="flex flex-wrap items-center gap-2 pt-1">
+          <Link
+            href="/dashboard/billing"
+            onClick={onClose}
+            className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover px-3 text-[12.5px] font-semibold text-white shadow-[0_6px_16px_rgba(53,157,243,0.35)] transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:shadow-[0_10px_24px_rgba(53,157,243,0.45)]"
+          >
+            <ArrowUpRight className="h-3.5 w-3.5" strokeWidth={2} />
+            Upgrade plan
+          </Link>
+          <Link
+            href="/dashboard/billing"
+            onClick={onClose}
+            className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-border bg-surface px-3 text-[12.5px] font-medium text-ink-muted shadow-soft transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:bg-surface-inset hover:text-ink hover:shadow-md"
+            title={seats?.addOnSupported ? "Purchase add-on seats" : "Per-seat add-ons route through the upgrade workspace today"}
+          >
+            <CreditCard className="h-3.5 w-3.5" strokeWidth={1.75} />
+            Add seats
+          </Link>
+          <Link
+            href="/dashboard/billing"
+            onClick={onClose}
+            className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-border bg-surface px-3 text-[12.5px] font-medium text-ink-muted shadow-soft transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:bg-surface-inset hover:text-ink hover:shadow-md"
+          >
+            Manage subscription
+          </Link>
+          <a
+            href="mailto:sales@zentromeet.com?subject=Workforce%20seat%20expansion"
+            className="ml-auto inline-flex h-9 items-center gap-1.5 rounded-lg px-3 text-[12.5px] font-medium text-ink-subtle transition-colors hover:text-ink"
+          >
+            Contact sales
+          </a>
+        </div>
+      </div>
+    </Modal>
   );
 }
 
