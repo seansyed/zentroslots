@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { and, asc, eq } from "drizzle-orm";
 
 import { db } from "@/db/client";
-import { tenants, users } from "@/db/schema";
+import { departments, tenants, users } from "@/db/schema";
 import { getSession } from "@/lib/auth";
 import Shell from "@/components/dashboard/Shell";
 import ServicesClient from "@/components/dashboard/ServicesClient";
@@ -21,6 +21,17 @@ export default async function ServicesPage() {
     .where(and(eq(users.tenantId, user.tenantId), eq(users.role, "staff")))
     .orderBy(asc(users.name));
 
+  // Department catalog (for in-drawer scaffolding + the empty-state
+  // activation checklist that links to /dashboard/departments).
+  // Honest scope: services↔departments is transitive via staff, so
+  // the drawer doesn't pick a department directly — it surfaces the
+  // departments derived from assigned staff.
+  const departmentRows = await db
+    .select({ id: departments.id, name: departments.name, color: departments.color })
+    .from(departments)
+    .where(eq(departments.tenantId, user.tenantId))
+    .orderBy(asc(departments.name));
+
   return (
     <Shell
       user={{ name: user.name, email: user.email, role: user.role }}
@@ -28,16 +39,10 @@ export default async function ServicesPage() {
       title="Services"
       crumbs={[{ label: "Dashboard", href: "/dashboard" }, { label: "Services" }]}
     >
-      <div className="flex flex-wrap items-baseline justify-between gap-3">
-        <div>
-          <h1 className="text-heading font-semibold text-ink">Services</h1>
-          <p className="mt-1 text-sm text-ink-muted">What you offer. Durations, pricing, color, and staff assignments.</p>
-        </div>
-      </div>
-
       <ServicesClient
         isAdmin={user.role === "admin" || user.role === "manager"}
         allStaff={staffRows}
+        allDepartments={departmentRows.map((d) => ({ id: d.id, name: d.name, color: d.color ?? null }))}
       />
     </Shell>
   );
