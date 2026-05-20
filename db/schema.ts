@@ -411,6 +411,20 @@ export const locations = pgTable(
     phone: varchar("phone", { length: 40 }),
     email: varchar("email", { length: 255 }),
     isActive: boolean("is_active").notNull().default(true),
+
+    // Location identity enrichment (migration 0036).
+    //
+    // logoUrl       — content-addressed path served by nginx; reuses
+    //                 the existing /uploads/ alias (avatars phase).
+    // locationType  — 'physical' | 'virtual' | 'hybrid'. Stored as
+    //                 varchar (not DB enum) so adding new types is a
+    //                 one-line Zod change.
+    // notes         — admin-only operational metadata. NEVER selected
+    //                 by public-facing routes.
+    logoUrl: text("logo_url"),
+    locationType: varchar("location_type", { length: 20 }).notNull().default("physical"),
+    notes: text("notes"),
+
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

@@ -33,3 +33,6 @@ public/uploads/*
 !public/uploads/avatars/
 public/uploads/avatars/*
 !public/uploads/avatars/.gitkeep
+!public/uploads/locations/
+public/uploads/locations/*
+!public/uploads/locations/.gitkeep
