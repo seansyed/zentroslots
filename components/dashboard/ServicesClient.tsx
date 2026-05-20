@@ -284,6 +284,7 @@ export default function ServicesClient({
           ) : (
             <ServiceDirectoryGrid
               rows={rows}
+              tenantSlug={tenantSlug ?? null}
               onOpen={(id) => setOpenId(id)}
               onAssignStaff={(id) => setAssignStaffId(id)}
               onShare={(id) => setShareId(id)}
@@ -293,7 +294,9 @@ export default function ServicesClient({
       </FadeIn>
 
       {/* Edit Service drawer — full configuration workflow.
-          Logic preserved byte-identical. */}
+          Logic preserved byte-identical. Tenant slug threaded for the
+          new in-drawer Booking & sharing field (compact preview only;
+          full per-staff + embed surface lives in ShareServicePanel). */}
       <ServiceDrawer
         openId={openId}
         onClose={() => setOpenId(null)}
@@ -302,6 +305,7 @@ export default function ServicesClient({
         allDepartments={allDepartments}
         isAdmin={isAdmin}
         existing={rows ?? []}
+        tenantSlug={tenantSlug ?? null}
       />
 
       {/* Dedicated Assign Staff panel — workforce-only workflow.
@@ -558,11 +562,13 @@ function SectionHead({
 
 function ServiceDirectoryGrid({
   rows,
+  tenantSlug,
   onOpen,
   onAssignStaff,
   onShare,
 }: {
   rows: Svc[];
+  tenantSlug: string | null;
   onOpen: (id: string) => void;
   onAssignStaff: (id: string) => void;
   onShare: (id: string) => void;
@@ -592,6 +598,7 @@ function ServiceDirectoryGrid({
           >
             <ServiceOpCard
               svc={s}
+              tenantSlug={tenantSlug}
               onOpen={() => onOpen(s.id)}
               onAssignStaff={() => onAssignStaff(s.id)}
               onShare={() => onShare(s.id)}
@@ -634,11 +641,16 @@ function ServiceDirectoryGrid({
 
 function ServiceOpCard({
   svc,
+  tenantSlug,
   onOpen,
   onAssignStaff,
   onShare,
 }: {
   svc: Svc;
+  /** Tenant identifier used to compose the public booking URL right
+   *  on the card when the service is publicly bookable. Null when
+   *  the tenant lookup failed server-side. */
+  tenantSlug: string | null;
   onOpen: () => void;
   onAssignStaff: () => void;
   onShare: () => void;
@@ -692,7 +704,11 @@ function ServiceOpCard({
           </div>
           <div className="flex shrink-0 flex-col items-end gap-1">
             <ReadinessChip readiness={readiness} />
-            <BookableChip readiness={readiness} hasStaff={svc.staff.length > 0} />
+            <BookableChip
+              readiness={readiness}
+              hasStaff={svc.staff.length > 0}
+              onShare={(e) => { e.stopPropagation(); onShare(); }}
+            />
           </div>
         </div>
 
@@ -778,6 +794,19 @@ function ServiceOpCard({
         {/* Contextual insight line */}
         <ServiceInsight svc={svc} readiness={readiness} />
       </button>
+
+      {/* Inline booking URL strip — only rendered when the service
+       *  is publicly bookable AND we have the tenant slug. Surfaces
+       *  the URL directly on the card so admins can copy/open without
+       *  diving into the share panel for simple distribution. Sits
+       *  OUTSIDE the click-button so the copy/open buttons don't
+       *  accidentally trigger the open-drawer click. */}
+      {readiness === "ready" && svc.staff.length > 0 && tenantSlug && svc.slug && (
+        <InlineBookingUrl
+          tenantSlug={tenantSlug}
+          serviceSlug={svc.slug}
+        />
+      )}
 
       {/* Action bar — sits OUTSIDE the click-button so we don't nest
        *  buttons. Action bar items have their own handlers and links.
@@ -993,20 +1022,114 @@ function ServiceActionBar({
   );
 }
 
+// ─── Inline booking URL strip ─────────────────────────────────────
+// Surfaces the public booking URL directly on the card when the
+// service is publicly bookable. Sits between the click-body and the
+// action bar so the copy/open controls are independent of the
+// open-drawer click. Stable URL = /u/{tenantSlug}/{serviceSlug} —
+// no new routes.
+
+function InlineBookingUrl({
+  tenantSlug,
+  serviceSlug,
+}: {
+  tenantSlug: string;
+  serviceSlug: string;
+}) {
+  const path = `/u/${tenantSlug}/${serviceSlug}`;
+  const fullUrl =
+    typeof window !== "undefined" ? `${window.location.origin}${path}` : path;
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(fullUrl);
+      toast("Booking link copied.", "success");
+    } catch {
+      toast("Could not copy — please copy manually", "error");
+    }
+  }
+
+  return (
+    <div className="relative flex items-center gap-1 border-t border-emerald-200/30 bg-gradient-to-r from-emerald-50/50 via-surface to-surface px-3 py-1.5">
+      <Globe className="h-3 w-3 shrink-0 text-emerald-600" strokeWidth={2} />
+      <code
+        className="min-w-0 flex-1 truncate font-mono text-[10.5px] text-ink-muted"
+        title={fullUrl}
+      >
+        {path}
+      </code>
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); copy(); }}
+        title="Copy booking link"
+        aria-label="Copy booking link"
+        className="inline-flex h-6 w-6 items-center justify-center rounded-md text-ink-subtle transition-all duration-[160ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:bg-surface hover:text-ink hover:shadow-soft"
+      >
+        <Copy className="h-3 w-3" strokeWidth={1.75} />
+      </button>
+      <a
+        href={fullUrl}
+        target="_blank"
+        rel="noreferrer"
+        onClick={(e) => e.stopPropagation()}
+        title="Open booking page"
+        aria-label="Open booking page in new tab"
+        className="inline-flex h-6 w-6 items-center justify-center rounded-md text-ink-subtle transition-all duration-[160ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:bg-surface hover:text-ink hover:shadow-soft"
+      >
+        <ExternalLink className="h-3 w-3" strokeWidth={1.75} />
+      </a>
+    </div>
+  );
+}
+
 // ─── Bookable status chip — derived honestly from real fields ──────
 // Public bookability is a function of: isActive=1 AND staff.length > 0.
 // We surface this as a calm informational chip beside readiness.
+// When onShare is provided, the chip becomes interactive and opens
+// the share panel (with stopPropagation so it doesn't also trigger
+// the card's open-drawer click).
+//
+// We deliberately render this as a <span role="button"> rather than
+// a real <button> because the chip lives inside the card body which
+// is itself a <button> — nested buttons are invalid HTML. Keyboard
+// users still have a real Share <button> in the action bar.
 
 function BookableChip({
   readiness,
   hasStaff,
+  onShare,
 }: {
   readiness: Readiness;
   hasStaff: boolean;
+  onShare?: (e: React.MouseEvent) => void;
 }) {
+  const interactive = Boolean(onShare);
   if (readiness === "ready" && hasStaff) {
     return (
-      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50/70 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.06em] text-emerald-700 ring-1 ring-emerald-200/40">
+      <span
+        role={interactive ? "button" : undefined}
+        tabIndex={interactive ? 0 : undefined}
+        onClick={onShare}
+        onKeyDown={
+          interactive
+            ? (e) => {
+                if ((e.key === "Enter" || e.key === " ") && onShare) {
+                  e.preventDefault();
+                  // Cast through unknown — keyboard event doesn't carry
+                  // stopPropagation semantics the same way, but the
+                  // handler only reads .stopPropagation in the mouse
+                  // path. Safe to pass a minimal shim.
+                  onShare({ stopPropagation: () => {} } as unknown as React.MouseEvent);
+                }
+              }
+            : undefined
+        }
+        title={interactive ? "Share booking link" : undefined}
+        className={cn(
+          "inline-flex items-center gap-1 rounded-full bg-emerald-50/70 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.06em] text-emerald-700 ring-1 ring-emerald-200/40",
+          interactive && "cursor-pointer transition-all duration-[160ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:shadow-[0_2px_8px_rgba(16,185,129,0.25)] hover:bg-emerald-50",
+        )}
+      >
         <Globe className="h-2.5 w-2.5" strokeWidth={2} />
         Publicly bookable
       </span>
@@ -1389,7 +1512,7 @@ function ActivationStepCard({
 // ─── ServiceDrawer — logic preserved 100%, chrome refreshed ───────
 
 function ServiceDrawer({
-  openId, onClose, onSaved, allStaff, allDepartments, isAdmin, existing,
+  openId, onClose, onSaved, allStaff, allDepartments, isAdmin, existing, tenantSlug,
 }: {
   openId: string | "new" | null;
   onClose: () => void;
@@ -1398,6 +1521,8 @@ function ServiceDrawer({
   allDepartments: { id: string; name: string; color: string | null }[];
   isAdmin: boolean;
   existing: Svc[];
+  /** Threaded for the Booking & sharing field inside the drawer. */
+  tenantSlug: string | null;
 }) {
   const isNew = openId === "new";
   const svc = openId && openId !== "new" ? existing.find((s) => s.id === openId) : null;
@@ -1629,6 +1754,23 @@ function ServiceDrawer({
               </div>
             )}
           </Field>
+
+          {/* Booking & sharing — visible inside the Edit Side Panel
+              for any existing service. Compact surface: public URL
+              with copy + open, plus a calm pointer to the dedicated
+              Share panel on the service card for per-staff URLs and
+              the embed scaffold. Honors honest state: when not
+              publicly bookable, surfaces the operational reason. */}
+          {!isNew && svc && (
+            <Field label="Booking & sharing">
+              <DrawerBookingShare
+                svc={svc}
+                tenantSlug={tenantSlug}
+                isActive={isActive}
+                selectedStaffCount={selectedStaff.size}
+              />
+            </Field>
+          )}
 
           {/* Scaffolded modules — Phase 8 honest placeholders */}
           {!isNew && (
@@ -2459,6 +2601,118 @@ function StaffAssignRow({
         </div>
       </div>
     </label>
+  );
+}
+
+// ─── In-drawer Booking & sharing block ────────────────────────────
+// Compact surface inside the Edit Service drawer. Shows the public
+// service URL with copy + open actions, and a calm pointer to the
+// rich ShareServicePanel on the card for per-staff URLs + embed.
+// Doesn't duplicate the full share panel — keeps the drawer focused
+// on configuration.
+
+function DrawerBookingShare({
+  svc,
+  tenantSlug,
+  isActive,
+  selectedStaffCount,
+}: {
+  svc: Svc;
+  tenantSlug: string | null;
+  /** Local staged "isActive" from the drawer form — preview before save. */
+  isActive: boolean;
+  /** Local staged staff selection count — preview before save. */
+  selectedStaffCount: number;
+}) {
+  const path = tenantSlug && svc.slug ? `/u/${tenantSlug}/${svc.slug}` : "";
+  const fullUrl =
+    path && typeof window !== "undefined" ? `${window.location.origin}${path}` : path;
+  const bookable = isActive && selectedStaffCount > 0;
+
+  async function copy() {
+    if (!fullUrl) return;
+    try {
+      await navigator.clipboard.writeText(fullUrl);
+      toast("Booking link copied.", "success");
+    } catch {
+      toast("Could not copy — please copy manually", "error");
+    }
+  }
+
+  return (
+    <div className="space-y-2">
+      {/* Status row */}
+      <div className={cn(
+        "flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-[11px] ring-1",
+        bookable
+          ? "bg-emerald-50/60 text-emerald-800/90 ring-emerald-200/40"
+          : "bg-amber-50/50 text-amber-900/90 ring-amber-200/40",
+      )}>
+        {bookable
+          ? <Globe className="h-3 w-3 shrink-0 text-emerald-600" strokeWidth={2} />
+          : <Lock className="h-3 w-3 shrink-0 text-amber-600" strokeWidth={2} />
+        }
+        <span className="min-w-0 flex-1 leading-relaxed">
+          {!isActive
+            ? "Activate the service above to make booking links live."
+            : selectedStaffCount === 0
+              ? "Assign at least one staff member to activate public booking."
+              : "Publicly bookable — anyone with the link can book."}
+        </span>
+      </div>
+
+      {/* Public service URL with copy + open */}
+      <div>
+        <div className="mb-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-subtle">
+          Public service URL
+        </div>
+        <div className="flex items-stretch gap-1.5">
+          <code className={cn(
+            "min-w-0 flex-1 truncate rounded-md border bg-surface-inset/60 px-2.5 py-1.5 font-mono text-[11.5px]",
+            fullUrl ? "border-border text-ink" : "border-border/60 text-ink-subtle",
+          )}>
+            {fullUrl || "(workspace slug unavailable)"}
+          </code>
+          <button
+            type="button"
+            onClick={copy}
+            disabled={!fullUrl}
+            title="Copy booking link"
+            aria-label="Copy booking link"
+            className={cn(
+              "inline-flex shrink-0 items-center justify-center rounded-md border border-border bg-surface px-2.5 text-ink-muted transition-all duration-[160ms] ease-[cubic-bezier(0.16,1,0.3,1)]",
+              fullUrl
+                ? "hover:-translate-y-0.5 hover:bg-surface-inset hover:text-ink hover:shadow-soft"
+                : "cursor-not-allowed opacity-50",
+            )}
+          >
+            <Copy className="h-3.5 w-3.5" strokeWidth={1.75} />
+          </button>
+          <a
+            href={fullUrl || undefined}
+            target="_blank"
+            rel="noreferrer"
+            title="Open booking page"
+            aria-label="Open booking page"
+            onClick={(e) => { if (!fullUrl) e.preventDefault(); }}
+            className={cn(
+              "inline-flex shrink-0 items-center justify-center rounded-md border border-border bg-surface px-2.5 text-ink-muted transition-all duration-[160ms] ease-[cubic-bezier(0.16,1,0.3,1)]",
+              fullUrl
+                ? "hover:-translate-y-0.5 hover:bg-surface-inset hover:text-ink hover:shadow-soft"
+                : "cursor-not-allowed opacity-50",
+            )}
+          >
+            <ExternalLink className="h-3.5 w-3.5" strokeWidth={1.75} />
+          </a>
+        </div>
+      </div>
+
+      {/* Pointer to full share panel */}
+      <p className="text-[11px] leading-relaxed text-ink-subtle">
+        For staff-pinned URLs (one link per teammate) and the embed scaffold,
+        open the <Share2 className="inline-block h-3 w-3 align-[-0.15em]" strokeWidth={1.75} /> share panel on the service card.
+      </p>
+    </div>
   );
 }
 
