@@ -6,15 +6,32 @@ import { db } from "@/db/client";
 import { availability, bookings, serviceStaff, services, users } from "@/db/schema";
 import { errorResponse, HttpError, requireRole, requireUser } from "@/lib/auth";
 
+// Accept either a full http(s) URL OR a local upload path served by
+// Next out of /public — see /api/users/[id]/avatar (multipart upload
+// strategy added in migration 0033 phase). z.string().url() would
+// reject local paths like "/uploads/avatars/abc.jpg", which we now
+// produce ourselves.
+const avatarUrlSchema = z
+  .string()
+  .max(500)
+  .refine(
+    (v) => v.startsWith("/uploads/avatars/") || /^https?:\/\//.test(v),
+    { message: "avatarUrl must be an https URL or a /uploads/avatars/ path" },
+  );
+
 const patchSchema = z.object({
   name: z.string().min(1).max(120).optional(),
   bio: z.string().max(2000).nullable().optional(),
   specialties: z.string().max(500).nullable().optional(),
-  avatarUrl: z.string().url().nullable().optional(),
+  avatarUrl: avatarUrlSchema.nullable().optional(),
   timezone: z.string().max(64).optional(),
   primaryLocationId: z.string().uuid().nullable().optional(),
   departmentId: z.string().uuid().nullable().optional(),
   serviceIds: z.array(z.string().uuid()).optional(),
+  // Public-facing identity columns (migration 0033). Both nullable
+  // — render paths fall back to `name` / omit title when null.
+  publicDisplayName: z.string().max(120).nullable().optional(),
+  publicTitle: z.string().max(120).nullable().optional(),
 });
 
 export async function GET(
@@ -100,6 +117,9 @@ export async function GET(
         avatarUrl: staff.avatarUrl,
         bio: staff.bio,
         specialties: staff.specialties,
+        // Public-facing identity (migration 0033)
+        publicDisplayName: staff.publicDisplayName,
+        publicTitle: staff.publicTitle,
         primaryLocationId: staff.primaryLocationId,
         departmentId: staff.departmentId,
         googleConnected: Boolean(staff.googleRefreshToken),

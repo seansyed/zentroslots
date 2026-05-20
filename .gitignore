@@ -23,3 +23,13 @@ Thumbs.db
 # Editor noise
 .vscode/*.log
 .idea
+
+# User-uploaded assets (avatars, future uploads). Lives on EC2 disk;
+# survives `next build` because public/ is preserved across builds.
+# The .gitkeep directory placeholder is committed so the path
+# exists on a fresh clone for the avatar upload route to write into.
+public/uploads/*
+!public/uploads/.gitkeep
+!public/uploads/avatars/
+public/uploads/avatars/*
+!public/uploads/avatars/.gitkeep

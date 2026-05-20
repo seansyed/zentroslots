@@ -38,6 +38,16 @@ import {
   Infinity as InfinityIcon,
   CreditCard,
   ArrowUpRight,
+  Camera,
+  Upload,
+  Trash2,
+  Globe,
+  Languages,
+  Star,
+  Eye,
+  Link2,
+  PlayCircle,
+  Pencil,
   type LucideIcon,
 } from "lucide-react";
 
@@ -54,6 +64,7 @@ import {
 import { PremiumCard, MetricCard } from "@/components/ui/Card";
 import { FadeIn } from "@/components/ui/Motion";
 import { cn } from "@/lib/cn";
+import { resolvePublicProfile } from "@/lib/identity";
 import ActivityTimeline from "@/components/dashboard/ActivityTimeline";
 
 // ─── Types (matching /api/staff) ────────────────────────────────────
@@ -66,6 +77,10 @@ type StaffRow = {
   avatarUrl: string | null;
   bio: string | null;
   specialties: string | null;
+  // Public-facing identity (migration 0033). Both nullable; render
+  // paths fall back to `name` / omit title when null.
+  publicDisplayName?: string | null;
+  publicTitle?: string | null;
   googleConnected: boolean;
   upcomingCount: number;
   completedThisMonth: number;
@@ -81,7 +96,15 @@ type StaffDetail = {
   // change). The role-change UI in the drawer hides itself when
   // the viewed user is an admin so the workspace owner isn't
   // accidentally demoted through the staff toggle.
-  staff: StaffRow & { primaryLocationId: string | null; departmentId: string | null; role: "admin" | "manager" | "staff" };
+  staff: StaffRow & {
+    primaryLocationId: string | null;
+    departmentId: string | null;
+    role: "admin" | "manager" | "staff";
+    // Public-facing identity (migration 0033). Both nullable;
+    // render paths fall back to `name` / omit title when null.
+    publicDisplayName?: string | null;
+    publicTitle?: string | null;
+  };
   assignedServices: { id: string; name: string }[];
   weeklyAvailability: { dayOfWeek: number; startTime: string; endTime: string }[];
   stats: { completed30d: number; cancelled30d: number };
@@ -91,7 +114,8 @@ type StaffDetail = {
   }[];
 };
 
-const TABS = ["overview", "services", "schedule", "activity"] as const;
+// "profile" tab added — editable workforce identity surface.
+const TABS = ["overview", "profile", "services", "schedule", "activity"] as const;
 type Tab = (typeof TABS)[number];
 
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -1675,6 +1699,16 @@ function StaffDrawer({
               </div>
             )}
 
+            {tab === "profile" && (
+              <ProfileTab
+                staff={data.staff}
+                canEdit={isAdmin}
+                onChange={(patch) =>
+                  setData((prev) => (prev ? { ...prev, staff: { ...prev.staff, ...patch } } : prev))
+                }
+              />
+            )}
+
             {tab === "services" && (
               <div>
                 {!isAdmin && (
@@ -1819,6 +1853,400 @@ function ScaffoldModule({
           <p className="mt-0.5 text-[11.5px] leading-relaxed text-ink-muted">{caption}</p>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ─── Profile tab — editable workforce identity ────────────────────
+//
+// Premium identity-editor surface. Every schedulable workforce
+// member can curate the public-facing identity that powers booking
+// pages and service pages (migration 0033 + earlier 0007 fields):
+//
+//   • avatar (uploaded image)            → users.avatar_url
+//   • public display name                → users.public_display_name
+//   • professional title                 → users.public_title
+//   • public bio                         → users.bio
+//   • expertise (comma-separated)        → users.specialties
+//
+// Render rules everywhere customer-facing:
+//   displayName = publicDisplayName ?? name
+//   publicTitle omitted when null
+//
+// Save behavior: dirty fields are PATCH'd to /api/staff/[id]. Avatar
+// upload uses a multipart POST to /api/users/[id]/avatar; on
+// success the returned URL is written into the local form state
+// and shown immediately in the identity preview.
+//
+// The "Coming soon" scaffold tiles document the v2 identity layer
+// without fabricating any data. Fields land when their backends do.
+
+function ProfileTab({
+  staff,
+  canEdit,
+  onChange,
+}: {
+  staff: StaffDetail["staff"];
+  canEdit: boolean;
+  onChange: (patch: Partial<StaffDetail["staff"]>) => void;
+}) {
+  // Local form state — initialized from the staff record, dirty-tracked
+  // independently so we can show a Save bar only when something
+  // actually changed.
+  const [name, setName] = React.useState(staff.name);
+  const [displayName, setDisplayName] = React.useState(staff.publicDisplayName ?? "");
+  const [title, setTitle] = React.useState(staff.publicTitle ?? "");
+  const [bio, setBio] = React.useState(staff.bio ?? "");
+  const [specialties, setSpecialties] = React.useState(staff.specialties ?? "");
+  const [avatarUrl, setAvatarUrl] = React.useState<string | null>(staff.avatarUrl);
+  const [uploading, setUploading] = React.useState(false);
+  const [saving, setSaving] = React.useState(false);
+  const fileRef = React.useRef<HTMLInputElement | null>(null);
+  const [dragOver, setDragOver] = React.useState(false);
+
+  // Re-sync when the underlying staff record changes (e.g. role flip
+  // refresh) — but only when not actively editing dirty fields.
+  React.useEffect(() => {
+    setName(staff.name);
+    setDisplayName(staff.publicDisplayName ?? "");
+    setTitle(staff.publicTitle ?? "");
+    setBio(staff.bio ?? "");
+    setSpecialties(staff.specialties ?? "");
+    setAvatarUrl(staff.avatarUrl);
+    // We intentionally omit dependencies on the local form state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [staff.id, staff.name, staff.publicDisplayName, staff.publicTitle, staff.bio, staff.specialties, staff.avatarUrl]);
+
+  const dirty =
+    name !== staff.name ||
+    (displayName || null) !== (staff.publicDisplayName ?? null) ||
+    (title || null) !== (staff.publicTitle ?? null) ||
+    (bio || null) !== (staff.bio ?? null) ||
+    (specialties || null) !== (staff.specialties ?? null);
+
+  // Resolved preview profile — same shape booking pages see.
+  const preview = resolvePublicProfile({
+    id: staff.id,
+    name,
+    publicDisplayName: displayName || null,
+    publicTitle: title || null,
+    avatarUrl,
+    bio: bio || null,
+    specialties: specialties || null,
+  });
+
+  async function uploadAvatar(file: File) {
+    if (!canEdit) return;
+    if (!/^image\/(jpeg|png|webp)$/.test(file.type)) {
+      toast("Use a JPG, PNG, or WebP image", "error");
+      return;
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      toast("Image too large — max 2 MB", "error");
+      return;
+    }
+    setUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch(`/api/users/${staff.id}/avatar`, { method: "POST", body: fd });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d?.error ?? "Upload failed");
+      setAvatarUrl(d.avatarUrl);
+      onChange({ avatarUrl: d.avatarUrl });
+      toast("Photo updated", "success");
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Upload failed", "error");
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function removeAvatar() {
+    if (!canEdit) return;
+    if (!avatarUrl) return;
+    setUploading(true);
+    try {
+      const res = await fetch(`/api/users/${staff.id}/avatar`, { method: "DELETE" });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d?.error ?? "Failed");
+      setAvatarUrl(null);
+      onChange({ avatarUrl: null });
+      toast("Photo removed", "success");
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed", "error");
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function save() {
+    if (!canEdit || !dirty) return;
+    setSaving(true);
+    try {
+      const payload: Record<string, string | null> = {};
+      if (name !== staff.name) payload.name = name;
+      if ((displayName || null) !== (staff.publicDisplayName ?? null)) payload.publicDisplayName = displayName || null;
+      if ((title || null) !== (staff.publicTitle ?? null)) payload.publicTitle = title || null;
+      if ((bio || null) !== (staff.bio ?? null)) payload.bio = bio || null;
+      if ((specialties || null) !== (staff.specialties ?? null)) payload.specialties = specialties || null;
+      const res = await fetch(`/api/staff/${staff.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d?.error ?? "Save failed");
+      onChange(payload as Partial<StaffDetail["staff"]>);
+      toast("Profile saved", "success");
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Save failed", "error");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function onPickFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0];
+    if (f) uploadAvatar(f);
+    e.target.value = ""; // reset so re-selecting the same file fires onChange
+  }
+
+  function onDrop(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    setDragOver(false);
+    if (!canEdit) return;
+    const f = e.dataTransfer.files?.[0];
+    if (f) uploadAvatar(f);
+  }
+
+  return (
+    <div className="space-y-4 pb-24">
+      {/* Avatar zone */}
+      <PremiumCard className="p-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="text-[10px] font-semibold uppercase tracking-[0.10em] text-brand-accent">Profile photo</div>
+            <h3 className="mt-0.5 text-[14px] font-semibold tracking-tight text-ink">Booking identity image</h3>
+            <p className="mt-0.5 text-[11.5px] text-ink-muted">JPG, PNG, or WebP. Max 2 MB.</p>
+          </div>
+        </div>
+
+        <div
+          onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={onDrop}
+          className={cn(
+            "mt-3 flex flex-col items-center gap-3 rounded-xl border-2 border-dashed p-5 transition-all duration-[220ms] ease-[cubic-bezier(0.16,1,0.3,1)] sm:flex-row sm:items-center sm:gap-5",
+            dragOver
+              ? "border-brand-accent/60 bg-brand-subtle/30"
+              : "border-border bg-surface-inset/30",
+          )}
+        >
+          <div className="relative">
+            <Avatar name={preview.displayName} src={avatarUrl} size="xl" />
+            {uploading && (
+              <span
+                aria-hidden
+                className="absolute inset-0 flex items-center justify-center rounded-full bg-ink/30 backdrop-blur-[1.5px]"
+              >
+                <span className="h-5 w-5 animate-spin rounded-full border-2 border-white/60 border-t-white" />
+              </span>
+            )}
+          </div>
+          <div className="flex flex-1 flex-col gap-2 sm:flex-row sm:items-center">
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              className="hidden"
+              onChange={onPickFile}
+              disabled={!canEdit || uploading}
+            />
+            <Button
+              type="button"
+              variant="primary"
+              size="sm"
+              onClick={() => fileRef.current?.click()}
+              disabled={!canEdit || uploading}
+            >
+              <Upload className="mr-1.5 h-3.5 w-3.5" strokeWidth={2} />
+              {avatarUrl ? "Replace photo" : "Upload photo"}
+            </Button>
+            {avatarUrl && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={removeAvatar}
+                disabled={!canEdit || uploading}
+              >
+                <Trash2 className="mr-1.5 h-3.5 w-3.5" strokeWidth={2} />
+                Remove
+              </Button>
+            )}
+            <p className="text-[11px] text-ink-subtle">
+              Or drop a file here. Shown across booking pages, appointments, and the workforce directory.
+            </p>
+          </div>
+        </div>
+      </PremiumCard>
+
+      {/* Editable identity fields */}
+      <PremiumCard className="p-4">
+        <div className="text-[10px] font-semibold uppercase tracking-[0.10em] text-brand-accent">Public identity</div>
+        <h3 className="mt-0.5 text-[14px] font-semibold tracking-tight text-ink">How customers see this person</h3>
+
+        <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <label className="block">
+            <span className="text-[11px] font-semibold text-ink-muted">Internal name</span>
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              disabled={!canEdit}
+              maxLength={120}
+              className="mt-1 w-full rounded-md border border-border bg-surface px-3 py-2 text-[13px] disabled:bg-surface-inset"
+            />
+            <span className="mt-1 block text-[10.5px] text-ink-subtle">Login + admin record. Not shown publicly.</span>
+          </label>
+
+          <label className="block">
+            <span className="text-[11px] font-semibold text-ink-muted">Public display name</span>
+            <input
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+              disabled={!canEdit}
+              maxLength={120}
+              placeholder={name}
+              className="mt-1 w-full rounded-md border border-border bg-surface px-3 py-2 text-[13px] disabled:bg-surface-inset"
+            />
+            <span className="mt-1 block text-[10.5px] text-ink-subtle">Optional — defaults to internal name when blank.</span>
+          </label>
+
+          <label className="block sm:col-span-2">
+            <span className="text-[11px] font-semibold text-ink-muted">Professional title</span>
+            <input
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              disabled={!canEdit}
+              maxLength={120}
+              placeholder="e.g. Founder & Tax Strategist"
+              className="mt-1 w-full rounded-md border border-border bg-surface px-3 py-2 text-[13px] disabled:bg-surface-inset"
+            />
+            <span className="mt-1 block text-[10.5px] text-ink-subtle">Shown beneath the name on booking pages.</span>
+          </label>
+
+          <label className="block sm:col-span-2">
+            <span className="text-[11px] font-semibold text-ink-muted">Public bio</span>
+            <textarea
+              value={bio}
+              onChange={(e) => setBio(e.target.value)}
+              disabled={!canEdit}
+              maxLength={2000}
+              rows={4}
+              placeholder={`"Helping businesses simplify tax, compliance, and operational workflows."`}
+              className="mt-1 w-full resize-y rounded-md border border-border bg-surface px-3 py-2 text-[13px] leading-relaxed disabled:bg-surface-inset"
+            />
+            <span className="mt-1 block text-[10.5px] text-ink-subtle">Visible to customers on booking pages — keep it short and human.</span>
+          </label>
+
+          <label className="block sm:col-span-2">
+            <span className="text-[11px] font-semibold text-ink-muted">Expertise</span>
+            <input
+              value={specialties}
+              onChange={(e) => setSpecialties(e.target.value)}
+              disabled={!canEdit}
+              maxLength={500}
+              placeholder="Tax strategy, S-corp planning, IRS resolution"
+              className="mt-1 w-full rounded-md border border-border bg-surface px-3 py-2 text-[13px] disabled:bg-surface-inset"
+            />
+            <span className="mt-1 block text-[10.5px] text-ink-subtle">Comma-separated — surfaces as chips on the booking page.</span>
+          </label>
+        </div>
+      </PremiumCard>
+
+      {/* Booking identity preview */}
+      <PremiumCard className="p-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="text-[10px] font-semibold uppercase tracking-[0.10em] text-brand-accent">Live preview</div>
+            <h3 className="mt-0.5 text-[14px] font-semibold tracking-tight text-ink">Booking identity</h3>
+            <p className="mt-0.5 text-[11.5px] text-ink-muted">How this profile appears to customers on the booking page.</p>
+          </div>
+          <Eye className="h-4 w-4 text-ink-subtle" strokeWidth={1.75} />
+        </div>
+        <div className="mt-3 rounded-2xl border border-border bg-surface p-4 shadow-[0_4px_18px_rgba(15,23,42,0.04)]">
+          <div className="flex items-start gap-4">
+            <Avatar name={preview.displayName} src={preview.avatarUrl} size="xl" />
+            <div className="min-w-0 flex-1">
+              <div className="text-[10px] font-semibold uppercase tracking-[0.10em] text-brand-accent">Your host</div>
+              <div className="mt-0.5 text-[18px] font-semibold tracking-tight text-ink">{preview.displayName || "—"}</div>
+              {preview.title && (
+                <div className="mt-0.5 text-[13px] font-medium text-ink-muted">{preview.title}</div>
+              )}
+              {preview.bio && (
+                <p className="mt-2 text-[12.5px] leading-relaxed text-ink-muted">{preview.bio}</p>
+              )}
+              {preview.specialties.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {preview.specialties.slice(0, 4).map((s, i) => (
+                    <span
+                      key={i}
+                      className="inline-flex items-center rounded-full border border-border bg-surface-inset/60 px-2 py-0.5 text-[10.5px] font-medium text-ink-muted"
+                    >
+                      {s}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </PremiumCard>
+
+      {/* Future scaffolds — honest "Coming soon" placeholders. No
+          fabricated fields; these all map to v2 identity layer
+          features that need their own backend before going live. */}
+      <PremiumCard className="p-4">
+        <div className="text-[10px] font-semibold uppercase tracking-[0.10em] text-brand-accent">v2 identity layer</div>
+        <h3 className="mt-0.5 text-[14px] font-semibold tracking-tight text-ink">Coming soon</h3>
+        <p className="mt-0.5 text-[11.5px] text-ink-muted">
+          More ways to humanize and differentiate this booking identity. Each ships when its backend lands.
+        </p>
+        <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <ScaffoldModule icon={Languages} title="Languages" caption="List the languages this host conducts meetings in." />
+          <ScaffoldModule icon={Globe} title="Meeting styles" caption="In-person, virtual, hybrid preferences and norms." />
+          <ScaffoldModule icon={Eye} title="Public visibility" caption="Hide a profile from public booking surfaces without disabling the user." />
+          <ScaffoldModule icon={Link2} title="Social links" caption="LinkedIn, professional site, and other trust signals." />
+          <ScaffoldModule icon={PlayCircle} title="Intro video" caption="Short 30s greeting embedded on the booking page." />
+          <ScaffoldModule icon={Star} title="Reviews" caption="Verified customer reviews surface beneath the bio." />
+        </div>
+      </PremiumCard>
+
+      {/* Dirty-state save bar — premium slide-in. Calm when clean. */}
+      {canEdit && (
+        <div
+          className={cn(
+            "pointer-events-none sticky bottom-0 left-0 right-0 -mx-5 mt-3 flex translate-y-2 items-center justify-between gap-3 border-t border-border bg-surface/95 px-5 py-3 opacity-0 shadow-[0_-10px_24px_rgba(15,23,42,0.06)] backdrop-blur transition-all duration-[260ms] ease-[cubic-bezier(0.16,1,0.3,1)]",
+            dirty && "pointer-events-auto translate-y-0 opacity-100",
+          )}
+          aria-hidden={!dirty}
+        >
+          <span className="text-[12px] text-ink-muted">
+            <Pencil className="mr-1 inline-block h-3 w-3 text-brand-accent" strokeWidth={2} />
+            Unsaved profile changes.
+          </span>
+          <Button onClick={save} disabled={saving || !dirty} size="sm">
+            {saving ? "Saving…" : "Save profile"}
+          </Button>
+        </div>
+      )}
+
+      {!canEdit && (
+        <p className="text-center text-[11.5px] text-ink-subtle">
+          Read-only. Admins and managers can edit workforce profiles.
+        </p>
+      )}
     </div>
   );
 }

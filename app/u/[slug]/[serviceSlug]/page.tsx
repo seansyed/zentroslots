@@ -5,6 +5,7 @@ import { and, eq, isNull, or } from "drizzle-orm";
 import { db } from "@/db/client";
 import { departments, serviceStaff, services, staffAssignmentRules, tenants, users } from "@/db/schema";
 import BookingFlow from "@/components/BookingFlow";
+import { resolvePublicProfile } from "@/lib/identity";
 
 /**
  * Public service booking page — Phase 14A staff identity + service
@@ -52,6 +53,11 @@ export default async function PublicServicePage(props: {
     .select({
       userId: serviceStaff.userId,
       name: users.name,
+      // Public-facing identity (migration 0033). publicDisplayName
+      // overrides `name` on customer surfaces; publicTitle adds a
+      // professional title chip beneath the name.
+      publicDisplayName: users.publicDisplayName,
+      publicTitle: users.publicTitle,
       avatarUrl: users.avatarUrl,
       bio: users.bio,
       specialties: users.specialties,
@@ -100,23 +106,21 @@ export default async function PublicServicePage(props: {
 
   const accent = tenant.primaryColor;
   const showPoweredBy = !tenant.hidePoweredBy;
-  const initials = staff.name
-    .split(/\s+/)
-    .filter(Boolean)
-    .map((s) => s[0])
-    .slice(0, 2)
-    .join("")
-    .toUpperCase();
   const googleConnected = Boolean(staff.googleRefreshToken);
 
-  // Parse specialties — schema stores as free-form text. Honest
-  // approach: split on commas + trim, drop empties. Surface as
-  // small chips (max 4) in the identity block.
-  const specialtyChips = (staff.specialties ?? "")
-    .split(/[,\n]/)
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0)
-    .slice(0, 4);
+  // Canonical public profile (migration 0033). Falls back to `name`
+  // when `publicDisplayName` is null; omits the title when unset.
+  const profile = resolvePublicProfile({
+    id: staff.userId,
+    name: staff.name,
+    publicDisplayName: staff.publicDisplayName,
+    publicTitle: staff.publicTitle,
+    avatarUrl: staff.avatarUrl,
+    bio: staff.bio,
+    specialties: staff.specialties,
+  });
+  const initials = profile.initials;
+  const specialtyChips = profile.specialties.slice(0, 4);
 
   // Meeting platform display, derived from the service's
   // videoProvider column. "none" = in-person; absence = treat as
@@ -223,11 +227,12 @@ export default async function PublicServicePage(props: {
         {/* Staff identity block — premium humanized identity above the
             booking flow. Answers "who am I booking with?" directly. */}
         <StaffIdentityBlock
-          name={staff.name}
+          name={profile.displayName}
+          publicTitle={profile.title}
           initials={initials}
-          avatarUrl={staff.avatarUrl ?? null}
+          avatarUrl={profile.avatarUrl}
           departmentName={staff.departmentName ?? null}
-          bio={staff.bio ?? null}
+          bio={profile.bio}
           specialtyChips={specialtyChips}
           googleConnected={googleConnected}
           accent={accent}
@@ -265,6 +270,7 @@ export default async function PublicServicePage(props: {
  */
 function StaffIdentityBlock({
   name,
+  publicTitle,
   initials,
   avatarUrl,
   departmentName,
@@ -275,6 +281,8 @@ function StaffIdentityBlock({
   isAutoRouted,
 }: {
   name: string;
+  /** Professional title surfaced beneath the name. null when unset. */
+  publicTitle: string | null;
   initials: string;
   avatarUrl: string | null;
   departmentName: string | null;
@@ -351,8 +359,13 @@ function StaffIdentityBlock({
           <h2 className="mt-0.5 text-[19px] font-semibold tracking-tight text-slate-900 sm:text-[20px]">
             {name}
           </h2>
+          {publicTitle && (
+            <div className="mt-0.5 text-[13.5px] font-medium tracking-tight text-slate-700">
+              {publicTitle}
+            </div>
+          )}
           {departmentName && (
-            <div className="mt-0.5 text-[13px] font-medium text-slate-600">
+            <div className={publicTitle ? "mt-0.5 text-[12px] text-slate-500" : "mt-0.5 text-[13px] font-medium text-slate-600"}>
               {departmentName}
             </div>
           )}

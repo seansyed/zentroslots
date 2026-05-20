@@ -105,6 +105,14 @@ export const users = pgTable(
     bio: text("bio"),
     specialties: text("specialties"),
 
+    // ── Public-facing workforce identity (migration 0033) ──
+    // Curated identity used by booking pages + service pages. Both
+    // nullable; render paths fall back to `name` (and omit the
+    // title) when null. See lib/identity.ts for the canonical
+    // public-profile resolver.
+    publicDisplayName: varchar("public_display_name", { length: 120 }),
+    publicTitle: varchar("public_title", { length: 120 }),
+
     // ── Security hardening (additive, 0028) ──
     // Bulk-revoke marker: tokens with iat < session_min_iat are rejected
     // by verifySessionFresh(). Null = no bulk revoke has ever happened.

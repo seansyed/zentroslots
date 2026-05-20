@@ -19,6 +19,12 @@ export async function GET() {
         avatarUrl: users.avatarUrl,
         bio: users.bio,
         specialties: users.specialties,
+        // Public-facing identity (migration 0033). Surfaced here so
+        // every workforce-directory consumer (Staff workspace,
+        // Services drawer, AppointmentCard, etc.) can render the
+        // canonical public identity without a per-row fetch.
+        publicDisplayName: users.publicDisplayName,
+        publicTitle: users.publicTitle,
         googleConnected: sql<boolean>`(${users.googleRefreshToken} IS NOT NULL)`,
         createdAt: users.createdAt,
       })

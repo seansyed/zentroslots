@@ -297,46 +297,14 @@ export function Tabs({
 }
 
 // ─── Avatar + AvatarGroup ───────────────────────────────────────────────
-
-export function Avatar({
-  name,
-  src,
-  size = "md",
-  className = "",
-}: {
-  name: string;
-  src?: string | null;
-  size?: "sm" | "md" | "lg";
-  className?: string;
-}) {
-  const sizes = { sm: "h-6 w-6 text-[10px]", md: "h-8 w-8 text-xs", lg: "h-10 w-10 text-sm" };
-  const initials = name
-    .split(" ")
-    .map((p) => p[0])
-    .filter(Boolean)
-    .slice(0, 2)
-    .join("")
-    .toUpperCase();
-  return (
-    <div
-      className={
-        "inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full bg-brand-accent text-white " +
-        sizes[size] +
-        " " +
-        className
-      }
-      aria-label={name}
-      title={name}
-    >
-      {src ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={src} alt="" className="h-full w-full object-cover" />
-      ) : (
-        <span className="font-medium">{initials || "?"}</span>
-      )}
-    </div>
-  );
-}
+//
+// The Avatar primitive lives in `./Avatar.tsx` so it can be used
+// independently and so its premium states (image fade-in, initials
+// gradient, xs/xl sizes) can evolve without churning this barrel.
+// Re-exported here so existing callers
+// (`import { Avatar } from "@/components/ui/primitives"`) keep working.
+import { Avatar } from "./Avatar";
+export { Avatar };
 
 export function AvatarGroup({
   members,
