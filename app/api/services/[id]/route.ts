@@ -3,7 +3,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "@/db/client";
-import { bookings, serviceStaff, services, users } from "@/db/schema";
+import { bookings, departments, serviceStaff, services, users } from "@/db/schema";
 import { errorResponse, HttpError, requireRole } from "@/lib/auth";
 
 const patchSchema = z.object({
@@ -18,6 +18,10 @@ const patchSchema = z.object({
   isActive: z.union([z.number().int().min(0).max(1), z.boolean()]).optional(),
   videoProvider: z.enum(["google_meet", "zoom", "teams", "none"]).optional(),
   staffUserIds: z.array(z.string().uuid()).optional(),
+  // Direct department ownership (migration 0032). Pass `null` to
+  // clear the assignment, a uuid to assign, or omit to leave the
+  // current value unchanged. Tenant-scoped validation below.
+  departmentId: z.string().uuid().nullable().optional(),
 });
 
 export async function PATCH(
@@ -33,6 +37,18 @@ export async function PATCH(
       where: and(eq(services.id, id), eq(services.tenantId, admin.tenantId)),
     });
     if (!existing) throw new HttpError(404, "Service not found");
+
+    // Validate department assignment (if changing) belongs to this
+    // tenant. `null` clears ownership; `undefined` leaves it alone.
+    if (body.departmentId !== undefined && body.departmentId !== null) {
+      const dept = await db
+        .select({ id: departments.id })
+        .from(departments)
+        .where(and(eq(departments.id, body.departmentId), eq(departments.tenantId, admin.tenantId)));
+      if (dept.length === 0) {
+        throw new HttpError(403, "Department not in this workspace");
+      }
+    }
 
     const { staffUserIds, isActive, ...rest } = body;
     const updates: Record<string, unknown> = { ...rest, updatedAt: new Date() };

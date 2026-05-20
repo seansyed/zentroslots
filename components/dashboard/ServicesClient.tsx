@@ -80,7 +80,16 @@ type Svc = {
   isActive: number;
   videoProvider?: string | null;
   staff: { userId: string; name: string }[];
+  // Direct department ownership (migration 0032). Primary signal.
+  // `null` = explicitly unassigned. `undefined` = legacy row before
+  // GET surfaced the column (treated identically to null in UI).
+  departmentId?: string | null;
   // Additive enrichment from the extended GET
+  // departmentNames + departmentCount are transitive (via staff).
+  // After migration 0032, the direct `departmentId` is the source of
+  // truth for "this service belongs to". Transitive lists are kept
+  // as a secondary signal so we can still surface cross-department
+  // staff coverage on the card.
   departmentCount?: number;
   departmentNames?: string[];
   bookingsLast30d?: number;
@@ -285,6 +294,7 @@ export default function ServicesClient({
             <ServiceDirectoryGrid
               rows={rows}
               tenantSlug={tenantSlug ?? null}
+              allDepartments={allDepartments}
               onOpen={(id) => setOpenId(id)}
               onAssignStaff={(id) => setAssignStaffId(id)}
               onShare={(id) => setShareId(id)}
@@ -563,16 +573,27 @@ function SectionHead({
 function ServiceDirectoryGrid({
   rows,
   tenantSlug,
+  allDepartments,
   onOpen,
   onAssignStaff,
   onShare,
 }: {
   rows: Svc[];
   tenantSlug: string | null;
+  /** Threaded so each card can resolve its direct ownership
+   *  (svc.departmentId → name + color) without a per-card fetch. */
+  allDepartments: { id: string; name: string; color: string | null }[];
   onOpen: (id: string) => void;
   onAssignStaff: (id: string) => void;
   onShare: (id: string) => void;
 }) {
+  // Build the resolver once for the whole grid render so every card
+  // looks up names/colors from the same memoized map.
+  const departmentById = React.useMemo(() => {
+    const m = new Map<string, { name: string; color: string | null }>();
+    for (const d of allDepartments) m.set(d.id, { name: d.name, color: d.color });
+    return m;
+  }, [allDepartments]);
   const count = rows.length;
   const showArchitectureTile = count > 0 && count <= 2;
 
@@ -599,6 +620,7 @@ function ServiceDirectoryGrid({
             <ServiceOpCard
               svc={s}
               tenantSlug={tenantSlug}
+              departmentById={departmentById}
               onOpen={() => onOpen(s.id)}
               onAssignStaff={() => onAssignStaff(s.id)}
               onShare={() => onShare(s.id)}
@@ -642,6 +664,7 @@ function ServiceDirectoryGrid({
 function ServiceOpCard({
   svc,
   tenantSlug,
+  departmentById,
   onOpen,
   onAssignStaff,
   onShare,
@@ -651,6 +674,10 @@ function ServiceOpCard({
    *  on the card when the service is publicly bookable. Null when
    *  the tenant lookup failed server-side. */
   tenantSlug: string | null;
+  /** Department id → (name, color) lookup, threaded from the grid
+   *  parent so every card can resolve its direct ownership without
+   *  per-card fetches. */
+  departmentById: Map<string, { name: string; color: string | null }>;
   onOpen: () => void;
   onAssignStaff: () => void;
   onShare: () => void;
@@ -659,7 +686,21 @@ function ServiceOpCard({
   const readiness = deriveReadiness(svc);
   const inactive = svc.isActive !== 1;
   const meeting = deriveMeetingMode(svc.videoProvider ?? null);
-  const hasDepartment = (svc.departmentNames?.length ?? 0) > 0;
+
+  // Primary ownership: the direct `departmentId` (migration 0032).
+  // If null/undefined, the service is explicitly unassigned — even if
+  // its staff happen to belong to a department, that is now treated
+  // as secondary "delivered by" information, not ownership.
+  const owningDept = svc.departmentId ? departmentById.get(svc.departmentId) ?? null : null;
+  const hasOwningDept = owningDept !== null;
+
+  // Secondary signal: transitive department coverage via staff. Only
+  // surfaced when distinct from the owning department, so we never
+  // double-render the same chip.
+  const transitiveNames = (svc.departmentNames ?? []).filter(
+    (n) => !owningDept || n !== owningDept.name,
+  );
+  const transitiveCount = svc.departmentCount ?? 0;
 
   return (
     <article
@@ -739,23 +780,19 @@ function ServiceOpCard({
           )}
         </div>
 
-        {/* Department ownership — always visible */}
+        {/* Department ownership — always visible.
+            Primary signal = direct `departmentId` (migration 0032).
+            Secondary "delivered by" line surfaces transitive
+            departments (via staff) only when distinct, so operators
+            can still see if delivery crosses department boundaries
+            without confusing it with ownership. */}
         <div className="mt-3">
           <div className="text-[9px] font-semibold uppercase tracking-[0.10em] text-ink-subtle">
             Department ownership
           </div>
           <div className="mt-1 flex flex-wrap items-center gap-1.5">
-            {hasDepartment ? (
-              <>
-                {svc.departmentNames!.map((d) => (
-                  <DepartmentChip key={d} name={d} />
-                ))}
-                {svc.departmentCount !== undefined && svc.departmentCount > svc.departmentNames!.length && (
-                  <span className="text-[10px] text-ink-subtle">
-                    +{svc.departmentCount - svc.departmentNames!.length} more
-                  </span>
-                )}
-              </>
+            {hasOwningDept ? (
+              <DepartmentChip name={owningDept!.name} color={owningDept!.color} primary />
             ) : (
               <span className="inline-flex items-center gap-1 rounded-full bg-amber-50/70 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.06em] text-amber-800 ring-1 ring-amber-200/40">
                 <AlertTriangle className="h-2.5 w-2.5" strokeWidth={2} />
@@ -763,6 +800,21 @@ function ServiceOpCard({
               </span>
             )}
           </div>
+          {transitiveNames.length > 0 && (
+            <div className="mt-1.5 flex flex-wrap items-center gap-1 text-[10px] text-ink-subtle">
+              <span className="font-medium uppercase tracking-[0.06em] text-ink-subtle/80">
+                Also delivered by
+              </span>
+              {transitiveNames.slice(0, 2).map((d) => (
+                <DepartmentChip key={d} name={d} subtle />
+              ))}
+              {transitiveCount > transitiveNames.slice(0, 2).length + (hasOwningDept ? 1 : 0) && (
+                <span>
+                  +{transitiveCount - transitiveNames.slice(0, 2).length - (hasOwningDept ? 1 : 0)} more
+                </span>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Staff + routing row */}
@@ -846,7 +898,48 @@ function ReadinessChip({ readiness }: { readiness: Readiness }) {
   );
 }
 
-function DepartmentChip({ name }: { name: string }) {
+// `primary` — the service's directly-owned department (migration
+//             0032). Rendered with a colored dot and a stronger
+//             border so it visually wins over secondary chips.
+// `subtle`  — used for transitive "also delivered by" chips. Lower
+//             contrast so the eye lands on the owning dept first.
+// `color`   — optional hex from the department row; falls back to
+//             brand accent when unset.
+function DepartmentChip({
+  name,
+  color,
+  primary,
+  subtle,
+}: {
+  name: string;
+  color?: string | null;
+  primary?: boolean;
+  subtle?: boolean;
+}) {
+  const dot = color || "#359df3";
+  if (primary) {
+    return (
+      <span
+        className="inline-flex items-center gap-1.5 rounded-md border border-brand-accent/30 bg-brand-accent/8 px-2 py-0.5 text-[10.5px] font-semibold text-ink"
+        title={`Owned by ${name}`}
+      >
+        <span
+          aria-hidden
+          className="h-1.5 w-1.5 rounded-full"
+          style={{ backgroundColor: dot, boxShadow: `0 0 6px ${dot}66` }}
+        />
+        <span className="truncate max-w-[120px]">{name}</span>
+      </span>
+    );
+  }
+  if (subtle) {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-md border border-border/60 bg-surface px-1.5 py-0.5 text-[9.5px] font-medium text-ink-subtle">
+        <Building2 className="h-2.5 w-2.5 text-ink-subtle" strokeWidth={2} />
+        <span className="truncate max-w-[100px]">{name}</span>
+      </span>
+    );
+  }
   return (
     <span className="inline-flex items-center gap-1 rounded-md border border-border bg-surface px-1.5 py-0.5 text-[10px] font-medium text-ink-muted">
       <Building2 className="h-2.5 w-2.5 text-brand-accent" strokeWidth={2} />
@@ -1537,6 +1630,12 @@ function ServiceDrawer({
   const [isActive, setIsActive] = React.useState(true);
   const [videoProvider, setVideoProvider] = React.useState<string>("google_meet");
   const [selectedStaff, setSelectedStaff] = React.useState<Set<string>>(new Set());
+  // Direct department ownership (migration 0032). `null` = explicit
+  // "no department". The drawer never persists `undefined` — we
+  // always serialize to either a uuid or null so admins can clear
+  // an assignment.
+  const [departmentId, setDepartmentId] = React.useState<string | null>(null);
+  const [deptQuery, setDeptQuery] = React.useState("");
   const [busy, setBusy] = React.useState(false);
 
   React.useEffect(() => {
@@ -1548,14 +1647,30 @@ function ServiceDrawer({
       setIsActive(svc.isActive === 1);
       setVideoProvider(svc.videoProvider ?? "google_meet");
       setSelectedStaff(new Set(svc.staff.map((s) => s.userId)));
+      setDepartmentId(svc.departmentId ?? null);
+      setDeptQuery("");
     } else if (isNew) {
       setName(""); setDescription(""); setDurationMinutes(30);
       setPrice(0); setBufferBefore(0); setBufferAfter(0);
       setColor(DEFAULT_COLORS[0]); setIsActive(true);
       setVideoProvider("google_meet");
       setSelectedStaff(new Set());
+      setDepartmentId(null);
+      setDeptQuery("");
     }
   }, [openId, svc, isNew]);
+
+  // Department picker: filtered alphabetically by query
+  const filteredDepartments = React.useMemo(() => {
+    const q = deptQuery.trim().toLowerCase();
+    const list = q
+      ? allDepartments.filter((d) => d.name.toLowerCase().includes(q))
+      : allDepartments;
+    return [...list].sort((a, b) => a.name.localeCompare(b.name));
+  }, [allDepartments, deptQuery]);
+  const selectedDept = departmentId
+    ? allDepartments.find((d) => d.id === departmentId) ?? null
+    : null;
 
   function toggleStaff(id: string) {
     setSelectedStaff((cur) => {
@@ -1576,6 +1691,9 @@ function ServiceDrawer({
         isActive,
         videoProvider,
         staffUserIds: Array.from(selectedStaff),
+        // Direct department ownership (migration 0032).
+        // `null` clears the assignment server-side; a uuid sets it.
+        departmentId,
       };
       const url = isNew ? "/api/services" : `/api/services/${svc!.id}`;
       const method = isNew ? "POST" : "PATCH";
@@ -1613,7 +1731,6 @@ function ServiceDrawer({
   }
 
   const open = Boolean(openId);
-  void allDepartments; // currently surfaced via the GET response's departmentNames; reserved for the future explicit department assignment drawer surface.
 
   return (
     <Drawer open={open} onClose={onClose} side="right" size="workspace" ariaLabel="Service editor">
@@ -1721,6 +1838,106 @@ function ServiceDrawer({
             </label>
           </Field>
 
+          {/* Department ownership — single primary department per
+              service (migration 0032). Searchable picker over the
+              tenant's departments. Empty state is allowed: a service
+              can be created unassigned and the operator can later
+              route it to a department. Tenant scope is enforced
+              server-side on save. */}
+          <Field label="Department ownership">
+            {selectedDept ? (
+              <div className="flex items-center justify-between gap-2 rounded-md border border-brand-accent/30 bg-brand-accent/8 px-3 py-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span
+                    aria-hidden
+                    className="h-2 w-2 shrink-0 rounded-full"
+                    style={{
+                      backgroundColor: selectedDept.color || "#359df3",
+                      boxShadow: `0 0 6px ${selectedDept.color || "#359df3"}66`,
+                    }}
+                  />
+                  <div className="min-w-0">
+                    <div className="truncate text-[13px] font-semibold text-ink">{selectedDept.name}</div>
+                    <div className="text-[10.5px] text-ink-subtle">Owns this service · drives department routing</div>
+                  </div>
+                </div>
+                {isAdmin && (
+                  <button
+                    type="button"
+                    onClick={() => setDepartmentId(null)}
+                    className="shrink-0 rounded-md border border-border bg-surface px-2 py-1 text-[10.5px] font-medium text-ink-muted hover:bg-surface-inset hover:text-ink"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 rounded-md border border-dashed border-amber-300/50 bg-amber-50/40 px-3 py-2 text-[11.5px] text-amber-900">
+                <AlertTriangle className="h-3.5 w-3.5 shrink-0" strokeWidth={2} />
+                <span>
+                  This service is unassigned. Pick a department below to give it operational ownership.
+                </span>
+              </div>
+            )}
+
+            {isAdmin && (
+              <div className="mt-2 space-y-1.5">
+                {allDepartments.length > 6 && (
+                  <input
+                    type="search"
+                    value={deptQuery}
+                    onChange={(e) => setDeptQuery(e.target.value)}
+                    placeholder="Search departments…"
+                    className="w-full rounded-md border border-border bg-surface px-3 py-1.5 text-[12.5px] placeholder:text-ink-subtle"
+                  />
+                )}
+                {allDepartments.length === 0 ? (
+                  <div className="rounded-md border border-dashed border-border p-3 text-center text-xs text-ink-subtle">
+                    No departments configured yet.
+                  </div>
+                ) : (
+                  <div className="max-h-56 space-y-1 overflow-y-auto rounded-md border border-border bg-surface/50 p-1.5">
+                    {filteredDepartments.map((d) => {
+                      const on = departmentId === d.id;
+                      return (
+                        <button
+                          key={d.id}
+                          type="button"
+                          onClick={() => setDepartmentId(on ? null : d.id)}
+                          className={
+                            "flex w-full items-center justify-between gap-2 rounded-md border px-2.5 py-1.5 text-left text-[12.5px] transition-colors " +
+                            (on
+                              ? "border-brand-accent/30 bg-brand-accent/10 text-ink"
+                              : "border-transparent text-ink-muted hover:border-border hover:bg-surface")
+                          }
+                        >
+                          <span className="flex min-w-0 items-center gap-2">
+                            <span
+                              aria-hidden
+                              className="h-1.5 w-1.5 shrink-0 rounded-full"
+                              style={{ backgroundColor: d.color || "#359df3" }}
+                            />
+                            <span className="truncate">{d.name}</span>
+                          </span>
+                          {on && (
+                            <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wider text-brand-accent">
+                              Owner
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+                    {filteredDepartments.length === 0 && (
+                      <div className="px-2 py-3 text-center text-[11.5px] text-ink-subtle">
+                        No matches.
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </Field>
+
           <Field label="Staff who deliver this service">
             <div className="space-y-1.5">
               {allStaff.length === 0 && (
@@ -1746,11 +1963,11 @@ function ServiceDrawer({
             </div>
             {!isNew && svc && svc.departmentNames && svc.departmentNames.length > 0 && (
               <div className="mt-2 rounded-lg border border-dashed border-border bg-surface-inset/30 px-3 py-2 text-[11px] leading-relaxed text-ink-subtle">
-                <span className="font-semibold uppercase tracking-wider text-ink-muted">Departments &middot; </span>
+                <span className="font-semibold uppercase tracking-wider text-ink-muted">Also delivered by &middot; </span>
                 {svc.departmentNames.join(", ")}
                 {svc.departmentCount !== undefined && svc.departmentCount > svc.departmentNames.length && (
                   <> +{svc.departmentCount - svc.departmentNames.length} more</>
-                )} &nbsp;<span className="text-ink-subtle/80">(derived from assigned staff)</span>
+                )} &nbsp;<span className="text-ink-subtle/80">(derived from assigned staff &mdash; secondary signal)</span>
               </div>
             )}
           </Field>

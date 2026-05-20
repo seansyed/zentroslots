@@ -29,6 +29,11 @@ export const serviceSchema = z.object({
   bufferAfter: z.number().int().min(0).max(240).default(0),
   videoProvider: videoProviderSchema.default("google_meet"),
   staffUserIds: z.array(z.string().uuid()).default([]),
+  // Direct department ownership (migration 0032). Optional — services
+  // can be created unassigned; nullable so the operator can later
+  // clear the assignment. The route validates the department belongs
+  // to the caller's tenant before accepting.
+  departmentId: z.string().uuid().nullable().optional(),
 });
 
 export const availabilityRuleSchema = z.object({

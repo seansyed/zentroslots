@@ -152,6 +152,15 @@ export const services = pgTable(
     maxAdvanceDays: integer("max_advance_days"),
     videoProvider: varchar("video_provider", { length: 20 }).notNull().default("google_meet"),
 
+    // ── Department primary ownership (migration 0032) ──
+    // Nullable so existing services start "unassigned" without a
+    // backfill. ON DELETE SET NULL via the migration's REFERENCES
+    // clause — deleting a department reverts its services to
+    // unassigned rather than cascading. Tenant isolation: the API
+    // validates that the chosen department belongs to the caller's
+    // tenant before accepting the assignment.
+    departmentId: uuid("department_id"),
+
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -159,6 +168,7 @@ export const services = pgTable(
     tenantIdx: index("services_tenant_idx").on(t.tenantId),
     tenantSlugUnique: uniqueIndex("services_tenant_slug_unique").on(t.tenantId, t.slug),
     activeIdx: index("services_active_idx").on(t.isActive),
+    departmentIdx: index("services_department_idx").on(t.departmentId),
   })
 );
 

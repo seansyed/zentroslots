@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, asc, countDistinct, eq, gte, sql } from "drizzle-orm";
+import { and, asc, eq, gte, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "@/db/client";
-import { bookings, departments, serviceStaff, users } from "@/db/schema";
+import { bookings, departments, services, users } from "@/db/schema";
 import { errorResponse, requireRole, requireUser } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 
@@ -16,16 +16,22 @@ const createSchema = z.object({
 /**
  * GET /api/departments — list departments for the calling tenant
  * with per-department operational counts derived honestly from
- * existing tables. No new tables, no schema changes.
+ * existing tables. No new tables, no destructive schema changes.
  *
- *   staffCount       — COUNT(users) WHERE departmentId = dept.id
- *   serviceCount     — DISTINCT COUNT(serviceStaff.serviceId) for
- *                      staff whose departmentId = dept.id
- *                      (services don't have a departmentId column —
- *                      they belong to a department transitively via
- *                      the staff that deliver them)
- *   bookingsLast30d  — COUNT(bookings) WHERE departmentId = dept.id
- *                      AND createdAt >= now() - 30 days
+ *   staffCount             — COUNT(users) WHERE departmentId = dept.id
+ *   serviceCount           — COUNT(services) WHERE departmentId = dept.id
+ *                            (primary signal, migration 0032 column)
+ *   assignedServiceNames   — up to 3 service names owned by this dept
+ *                            (alphabetical) for the department card
+ *                            preview chips
+ *   bookingsLast30d        — COUNT(bookings) WHERE departmentId = dept.id
+ *                            AND createdAt >= now() - 30 days
+ *
+ * Note: previously serviceCount was derived transitively (a service
+ * "belonged to" a department if any of its staff did). After
+ * migration 0032 the service has a direct `departmentId` column and
+ * that is now the source of truth. Services still unassigned simply
+ * don't count toward any department.
  *
  * Tenant-scoped via requireUser() and explicit tenantId predicates
  * on every clause.
@@ -57,18 +63,29 @@ export async function GET() {
       .where(and(eq(users.tenantId, caller.tenantId)))
       .groupBy(users.departmentId);
 
-    // Services per department — service-staff pairs joined to user
-    // department. We DISTINCT-count service ids per dept so a
-    // service with two staff in the same dept still counts as 1.
-    const serviceCounts = await db
+    // Services per department — primary ownership column from
+    // migration 0032. We also pull each service name so the
+    // department card can render assigned-service chips.
+    const ownedServices = await db
       .select({
-        departmentId: users.departmentId,
-        c: countDistinct(serviceStaff.serviceId),
+        departmentId: services.departmentId,
+        name: services.name,
       })
-      .from(serviceStaff)
-      .innerJoin(users, eq(users.id, serviceStaff.userId))
-      .where(eq(serviceStaff.tenantId, caller.tenantId))
-      .groupBy(users.departmentId);
+      .from(services)
+      .where(eq(services.tenantId, caller.tenantId));
+
+    const serviceCountMap = new Map<string, number>();
+    const serviceNameMap = new Map<string, string[]>();
+    for (const s of ownedServices) {
+      if (!s.departmentId) continue;
+      serviceCountMap.set(s.departmentId, (serviceCountMap.get(s.departmentId) ?? 0) + 1);
+      const list = serviceNameMap.get(s.departmentId) ?? [];
+      list.push(s.name);
+      serviceNameMap.set(s.departmentId, list);
+    }
+    for (const [, list] of serviceNameMap) {
+      list.sort((a, b) => a.localeCompare(b));
+    }
 
     // Bookings volume per department (last 30d)
     const bookingCounts = await db
@@ -86,14 +103,14 @@ export async function GET() {
       .groupBy(bookings.departmentId);
 
     const staffMap = new Map(staffCounts.map((r) => [r.departmentId, r.c]));
-    const serviceMap = new Map(serviceCounts.map((r) => [r.departmentId, Number(r.c)]));
     const bookingMap = new Map(bookingCounts.map((r) => [r.departmentId, r.c]));
 
     return NextResponse.json(
       rows.map((r) => ({
         ...r,
         staffCount: Number(staffMap.get(r.id) ?? 0),
-        serviceCount: Number(serviceMap.get(r.id) ?? 0),
+        serviceCount: Number(serviceCountMap.get(r.id) ?? 0),
+        assignedServiceNames: (serviceNameMap.get(r.id) ?? []).slice(0, 3),
         bookingsLast30d: Number(bookingMap.get(r.id) ?? 0),
       })),
     );

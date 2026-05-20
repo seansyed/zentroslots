@@ -46,6 +46,10 @@ type Dept = {
   description: string | null;
   staffCount: number;
   serviceCount: number;
+  /** Up to 3 directly-owned service names (migration 0032), used to
+   *  render assigned-service preview chips on the department card.
+   *  Server returns alphabetical; we keep the order as-is. */
+  assignedServiceNames?: string[];
   bookingsLast30d: number;
 };
 
@@ -466,6 +470,34 @@ function DepartmentCard({ dept }: { dept: Dept }) {
           <DeptStat icon={Layers} label="Services" value={dept.serviceCount} tone="brand" />
           <DeptStat icon={CalendarRange} label="Bookings 30d" value={dept.bookingsLast30d} tone="positive" />
         </dl>
+
+        {/* Assigned services preview — directly-owned services
+            (migration 0032). Surfaces up to 3 names so the operator
+            can see at a glance what this department is responsible
+            for. Hidden when none are assigned. */}
+        {dept.assignedServiceNames && dept.assignedServiceNames.length > 0 && (
+          <div className="mt-3">
+            <div className="text-[9px] font-semibold uppercase tracking-[0.10em] text-ink-subtle">
+              Assigned services
+            </div>
+            <div className="mt-1 flex flex-wrap items-center gap-1">
+              {dept.assignedServiceNames.map((n) => (
+                <span
+                  key={n}
+                  className="inline-flex items-center gap-1 rounded-md border border-border/70 bg-surface px-1.5 py-0.5 text-[10.5px] font-medium text-ink-muted"
+                >
+                  <Layers className="h-2.5 w-2.5 text-brand-accent" strokeWidth={2} />
+                  <span className="truncate max-w-[120px]">{n}</span>
+                </span>
+              ))}
+              {dept.serviceCount > dept.assignedServiceNames.length && (
+                <span className="text-[10px] text-ink-subtle">
+                  +{dept.serviceCount - dept.assignedServiceNames.length} more
+                </span>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Routing readiness line */}
         <div className="mt-3 border-t border-border/50 pt-2 text-[11px] text-ink-muted">

@@ -47,6 +47,9 @@ export async function GET(req: NextRequest) {
         isActive: services.isActive,
         videoProvider: services.videoProvider,
         color: services.color,
+        // Direct department ownership (migration 0032). The primary
+        // signal for "this service belongs to this department."
+        departmentId: services.departmentId,
       })
       .from(services)
       .where(whereClause);
@@ -157,6 +160,20 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // Verify the chosen department (if any) belongs to this tenant.
+    // Migration 0032 added services.department_id with ON DELETE SET
+    // NULL; we still enforce tenant-scoped writes here so a malicious
+    // payload can't cross-tenant.
+    if (body.departmentId) {
+      const dept = await db
+        .select({ id: departments.id })
+        .from(departments)
+        .where(and(eq(departments.id, body.departmentId), eq(departments.tenantId, admin.tenantId)));
+      if (dept.length === 0) {
+        throw new HttpError(403, "Department not in this workspace");
+      }
+    }
+
     const slug =
       body.slug ??
       body.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60);
@@ -173,6 +190,7 @@ export async function POST(req: NextRequest) {
         bufferBefore: body.bufferBefore,
         bufferAfter: body.bufferAfter,
         videoProvider: body.videoProvider,
+        departmentId: body.departmentId ?? null,
       })
       .returning();
 
