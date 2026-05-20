@@ -2152,6 +2152,21 @@ function ProfileTab({
         </div>
       </PremiumCard>
 
+      {/* Calendar connections — REFINEMENT #3 / #5 / #6 / #7 placement.
+          Personal calendars are STAFF-OWNED (calendarConnections,
+          migration 0019). This section is the operator-facing surface
+          for those connections — connect, reconnect, disconnect,
+          inspect sync health, see the connected account email.
+          Workspace-level provider enablement (migration 0035) is
+          honored: when a provider is disabled at the tenant level,
+          Connect is blocked but existing connections remain visible
+          and functional. */}
+      <CalendarConnectionsSection
+        staffUserId={staff.id}
+        isSelf={false /* derived implicitly via canEdit + caller; gate handled by server */}
+        canEdit={canEdit}
+      />
+
       {/* Booking identity preview */}
       <PremiumCard className="p-4">
         <div className="flex items-center justify-between">
@@ -2236,6 +2251,384 @@ function ProfileTab({
       )}
     </div>
   );
+}
+
+// ─── Calendar connections section (Profile tab subsection) ────────
+//
+// Per-staff calendar OAuth surface. Reads from the canonical
+// calendarConnections table (migration 0019) via
+// GET /api/users/[id]/calendar-connections. The booking engine
+// reads from the same source via getExternalBusyForUser() —
+// disconnecting here immediately flips slot generation to "no
+// external busy" for the affected staff.
+//
+// State derivations per REFINEMENT #6 (sync-health):
+//   active + lastSyncedAt < 5m  → "Last synced just now"
+//   active + lastSyncedAt < 1h  → "Last synced N minutes ago"
+//   active                       → "Connected"
+//   needs_reconnect              → "Needs reconnect" (amber)
+//   active + lastError recent    → "Sync issue detected"  (amber)
+//   disconnected                 → "Not connected"
+//
+// REFINEMENT #5: account email shown when present, derived from the
+// OAuth tokeninfo response stored at connect time. REFINEMENT #7:
+// workspace-level disablement gates the Connect button but never
+// hides existing rows.
+
+type CalendarConn = {
+  id: string;
+  provider: string;
+  status: string;
+  calendarId: string;
+  accountEmail: string | null;
+  lastSyncedAt: string | null;
+  lastError: string | null;
+  lastErrorAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type WorkspaceProvider = {
+  id: string;
+  name: string;
+  description: string;
+  wired: boolean;
+  category: "calendar" | "video" | "chat";
+  enabled: boolean;
+};
+
+function CalendarConnectionsSection({
+  staffUserId,
+  canEdit,
+}: {
+  staffUserId: string;
+  isSelf?: boolean;
+  canEdit: boolean;
+}) {
+  const [conns, setConns] = React.useState<CalendarConn[] | null>(null);
+  const [providers, setProviders] = React.useState<WorkspaceProvider[] | null>(null);
+  const [busyId, setBusyId] = React.useState<string | null>(null);
+
+  const load = React.useCallback(() => {
+    Promise.all([
+      fetch(`/api/users/${staffUserId}/calendar-connections`).then((r) => r.json()),
+      fetch("/api/tenant/integrations/providers").then((r) => r.json()),
+    ])
+      .then(([c, p]) => {
+        setConns(c?.connections ?? []);
+        setProviders(p?.providers ?? []);
+      })
+      .catch(() => {
+        setConns([]);
+        setProviders([]);
+      });
+  }, [staffUserId]);
+
+  React.useEffect(() => { load(); }, [load]);
+
+  // Index workspace providers + connections by provider id so each
+  // catalog row knows whether THIS staff has a connection AND
+  // whether the workspace allows new connections.
+  const connByProvider = React.useMemo(() => {
+    const m = new Map<string, CalendarConn>();
+    for (const c of conns ?? []) {
+      // Prefer the most recently-updated row per provider
+      if (!m.has(c.provider) || (m.get(c.provider)!.updatedAt < c.updatedAt)) {
+        m.set(c.provider, c);
+      }
+    }
+    return m;
+  }, [conns]);
+
+  // Catalog: real wired calendar provider(s) first, then video/
+  // chat scaffolds. We filter to category="calendar" + "video"
+  // for this section — Slack lives on the workspace integrations
+  // page only.
+  const catalog = React.useMemo(
+    () => (providers ?? []).filter((p) => p.category === "calendar" || p.category === "video"),
+    [providers],
+  );
+
+  async function disconnect(connectionId: string) {
+    if (!canEdit) return;
+    if (!window.confirm("Disconnect this calendar? Booking sync for this staff will stop until they reconnect.")) {
+      return;
+    }
+    setBusyId(connectionId);
+    try {
+      const r = await fetch("/api/calendar/disconnect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ connectionId }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error ?? "Failed");
+      toast("Calendar disconnected", "success");
+      load();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed", "error");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  return (
+    <PremiumCard className="p-4">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="text-[10px] font-semibold uppercase tracking-[0.10em] text-brand-accent">
+            Calendar connections
+          </div>
+          <h3 className="mt-0.5 text-[14px] font-semibold tracking-tight text-ink">
+            Personal sync + meeting generation
+          </h3>
+          <p className="mt-0.5 text-[11.5px] leading-relaxed text-ink-muted">
+            Each staff member connects their own calendar. The booking engine checks the assigned
+            staff&rsquo;s connected calendar for busy events and creates meetings on confirmed bookings.
+          </p>
+        </div>
+        <CalendarRange className="h-4 w-4 text-ink-subtle" strokeWidth={1.75} />
+      </div>
+
+      <div className="mt-3 space-y-2">
+        {conns === null || providers === null ? (
+          <div className="space-y-2">
+            <div className="h-14 animate-pulse rounded-xl bg-surface-inset/40" />
+            <div className="h-14 animate-pulse rounded-xl bg-surface-inset/40" />
+          </div>
+        ) : catalog.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-border bg-surface-inset/30 px-3 py-3 text-center text-[11.5px] text-ink-subtle">
+            No supported providers yet.
+          </div>
+        ) : (
+          catalog.map((p) => {
+            const conn = connByProvider.get(providerKeyFor(p.id));
+            const busy = conn ? busyId === conn.id : false;
+            return (
+              <ProviderConnectionRow
+                key={p.id}
+                provider={p}
+                connection={conn ?? null}
+                staffUserId={staffUserId}
+                canEdit={canEdit}
+                busy={busy}
+                onDisconnect={() => conn && disconnect(conn.id)}
+              />
+            );
+          })
+        )}
+      </div>
+    </PremiumCard>
+  );
+}
+
+// The calendarConnections table stores "google" as the provider value
+// (legacy nomenclature pre-dating the workspace catalog). The
+// workspace catalog uses "google_calendar". Map between the two so
+// catalog lookups stay accurate even when only one row exists.
+function providerKeyFor(catalogId: string): string {
+  if (catalogId === "google_calendar") return "google";
+  return catalogId;
+}
+
+function ProviderConnectionRow({
+  provider,
+  connection,
+  staffUserId,
+  canEdit,
+  busy,
+  onDisconnect,
+}: {
+  provider: WorkspaceProvider;
+  connection: CalendarConn | null;
+  staffUserId: string;
+  canEdit: boolean;
+  busy: boolean;
+  onDisconnect: () => void;
+}) {
+  const isConnected = Boolean(connection) && connection!.status === "active";
+  const needsReconnect = Boolean(connection) && connection!.status === "needs_reconnect";
+  const stale = Boolean(connection) && connection!.status === "disconnected";
+  const wsDisabled = !provider.enabled;
+  const wired = provider.wired;
+
+  // Sync-health label.
+  let healthLabel = "Not connected";
+  let healthTone: "neutral" | "positive" | "warning" = "neutral";
+  if (needsReconnect) {
+    healthLabel = "Needs reconnect";
+    healthTone = "warning";
+  } else if (isConnected) {
+    const recentError =
+      connection?.lastError &&
+      connection.lastErrorAt &&
+      Date.now() - new Date(connection.lastErrorAt).getTime() < 24 * 60 * 60 * 1000;
+    if (recentError) {
+      healthLabel = "Sync issue detected";
+      healthTone = "warning";
+    } else if (connection?.lastSyncedAt) {
+      healthLabel = `Last synced ${formatRelative(connection.lastSyncedAt)}`;
+      healthTone = "positive";
+    } else {
+      healthLabel = "Connected";
+      healthTone = "positive";
+    }
+  } else if (stale) {
+    healthLabel = "Disconnected";
+    healthTone = "neutral";
+  }
+
+  return (
+    <div
+      className={cn(
+        "flex items-start justify-between gap-3 rounded-xl border bg-surface px-3.5 py-3 transition-all duration-[220ms] ease-[cubic-bezier(0.16,1,0.3,1)]",
+        isConnected
+          ? "border-border hover:border-border-strong"
+          : needsReconnect
+            ? "border-amber-300/40 bg-amber-50/30"
+            : "border-border/60",
+      )}
+    >
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-[13px] font-semibold tracking-tight text-ink">{provider.name}</span>
+          <SyncHealthChip label={healthLabel} tone={healthTone} />
+          {!wired && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-surface-inset px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.06em] text-ink-subtle ring-1 ring-border/40">
+              Coming soon
+            </span>
+          )}
+          {wsDisabled && wired && !isConnected && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-amber-50/80 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.06em] text-amber-800 ring-1 ring-amber-200/40">
+              Workspace disabled
+            </span>
+          )}
+        </div>
+        {/* REFINEMENT #5: surface connected account email when present */}
+        {isConnected && connection?.accountEmail && (
+          <div className="mt-0.5 truncate text-[11.5px] text-ink-muted">
+            Connected as <span className="font-medium text-ink">{connection.accountEmail}</span>
+          </div>
+        )}
+        {needsReconnect && connection?.lastError && (
+          <div className="mt-0.5 line-clamp-1 text-[11px] text-amber-800/90">
+            {connection.lastError}
+          </div>
+        )}
+        {!isConnected && !needsReconnect && (
+          <p className="mt-0.5 text-[11.5px] leading-relaxed text-ink-muted">{provider.description}</p>
+        )}
+      </div>
+
+      <div className="flex shrink-0 items-center gap-1.5">
+        {wired && !isConnected && !needsReconnect && (
+          <ConnectButton
+            disabled={!canEdit || wsDisabled}
+            providerCatalogId={provider.id}
+            staffUserId={staffUserId}
+          />
+        )}
+        {wired && needsReconnect && (
+          <ConnectButton
+            disabled={!canEdit || wsDisabled}
+            providerCatalogId={provider.id}
+            staffUserId={staffUserId}
+            label="Reconnect"
+          />
+        )}
+        {isConnected && canEdit && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={onDisconnect}
+            disabled={busy}
+            title="Disconnect this calendar"
+          >
+            {busy ? "…" : "Disconnect"}
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ConnectButton({
+  providerCatalogId,
+  staffUserId,
+  disabled,
+  label = "Connect",
+}: {
+  providerCatalogId: string;
+  staffUserId: string;
+  disabled?: boolean;
+  label?: string;
+}) {
+  // Only Google Calendar has a working OAuth flow today. The connect
+  // endpoint already maps the signed-in user to the connection
+  // row; cross-user connect is not supported (admins can disconnect
+  // someone else but cannot OAuth on their behalf).
+  if (providerCatalogId !== "google_calendar") {
+    return (
+      <Button type="button" variant="ghost" size="sm" disabled>
+        Connect
+      </Button>
+    );
+  }
+  void staffUserId; // reserved for a future cross-user OAuth-on-behalf flow
+  return (
+    <a
+      href="/api/calendar/google/connect"
+      aria-disabled={disabled}
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-md bg-brand-accent px-3 py-1.5 text-[11.5px] font-semibold text-white shadow-[0_1px_3px_rgba(15,23,42,0.10)] transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:shadow-soft",
+        disabled && "pointer-events-none opacity-50",
+      )}
+    >
+      {label}
+      <ArrowUpRight className="h-3 w-3" strokeWidth={2} />
+    </a>
+  );
+}
+
+function SyncHealthChip({
+  label,
+  tone,
+}: {
+  label: string;
+  tone: "neutral" | "positive" | "warning";
+}) {
+  const cls =
+    tone === "positive" ? "bg-emerald-50/80 text-emerald-700 ring-emerald-300/40" :
+    tone === "warning"  ? "bg-amber-50/80 text-amber-800 ring-amber-200/40" :
+                          "bg-surface-inset text-ink-subtle ring-border/50";
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[9.5px] font-semibold uppercase tracking-[0.06em] ring-1",
+        cls,
+      )}
+    >
+      {tone === "positive" && (
+        <span aria-hidden className="relative inline-flex h-1.5 w-1.5">
+          <span className="absolute inset-0 animate-ping rounded-full bg-emerald-400/60" />
+          <span className="relative h-1.5 w-1.5 rounded-full bg-emerald-500" />
+        </span>
+      )}
+      {label}
+    </span>
+  );
+}
+
+function formatRelative(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const m = Math.floor(diff / 60_000);
+  if (m < 1) return "just now";
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.floor(h / 24);
+  return `${d}d ago`;
 }
 
 // ─── Schedule tab — editable per-staff weekly availability ────────

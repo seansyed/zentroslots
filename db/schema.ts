@@ -82,6 +82,19 @@ export const tenants = pgTable(
     //   • day key with { start, end } = open
     defaultWorkspaceHours: jsonb("default_workspace_hours").notNull().default({}),
 
+    // ── Workspace integration enablement (migration 0035) ──
+    // Tenant-scoped provider matrix that gates which integrations
+    // staff may connect. Per-staff calendar connections still own
+    // tokens + sync; this layer ENABLES the providers globally.
+    //
+    // Shape: Partial<Record<ProviderId, { enabled: boolean; enabledAt?: string }>>
+    //   • Missing key  → IMPLICITLY ENABLED (backward compat)
+    //   • { enabled: true }  → enabled
+    //   • { enabled: false } → disabled (existing connections stay
+    //     visible + honored by engine; reconnect blocked).
+    // See lib/integrations.ts for the typed reader/writer.
+    enabledIntegrations: jsonb("enabled_integrations").notNull().default({}),
+
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

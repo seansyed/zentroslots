@@ -1,0 +1,48 @@
+-- Migration 0035 — Tenant-level integration enablement registry.
+--
+-- Adds a tenant-scoped provider matrix that controls which provider
+-- integrations are enabled for the workspace. Per-staff calendar
+-- connections (calendarConnections table, migration 0019) remain
+-- the source of truth for booking-engine availability — this
+-- registry is the GATING layer above them.
+--
+-- Correct ownership stack (do not violate):
+--   Workspace ─ enables providers (this migration)
+--      ↓
+--   Staff ──── owns connected calendars (calendarConnections)
+--      ↓
+--   Engine ── checks assigned-staff busy events (getExternalBusyForUser)
+--
+-- Schema:
+--   tenants.enabled_integrations jsonb NOT NULL DEFAULT '{}'::jsonb
+--
+-- Shape:
+--   {
+--     "google_calendar": { "enabled": true,  "enabledAt": "<iso>" },
+--     "outlook":         { "enabled": false },
+--     "zoom":            { "enabled": false },
+--     "teams":           { "enabled": false },
+--     "slack":           { "enabled": false }
+--   }
+--
+-- Semantics (REFINEMENT #2):
+--   • Missing key  → implicitly ENABLED (preserves current behavior
+--     for every tenant alive today; nothing breaks at rollout).
+--   • Present + enabled=true   → ENABLED
+--   • Present + enabled=false  → DISABLED. New OAuth connects are
+--                                rejected with 403. Existing
+--                                connections REMAIN visible and the
+--                                booking engine continues to honor
+--                                their busy events (REFINEMENT #7).
+--                                Reconnect is blocked until re-
+--                                enabled at the workspace level.
+--
+-- Safety:
+--   • Purely additive; default '{}' means every tenant behaves
+--     exactly as before migration runs.
+--   • No backfill required.
+--   • Tenant isolation continues to be enforced in the PUT route by
+--     WHERE tenant_id = $session.tenantId.
+
+ALTER TABLE tenants
+  ADD COLUMN IF NOT EXISTS enabled_integrations jsonb NOT NULL DEFAULT '{}'::jsonb;

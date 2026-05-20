@@ -1,6 +1,47 @@
 /**
  * Provider-agnostic calendar sync orchestrator.
  *
+ * ═══════════════════════════════════════════════════════════════════
+ *  OWNERSHIP MODEL — READ THIS BEFORE EDITING
+ * ═══════════════════════════════════════════════════════════════════
+ *
+ * Calendar ownership in ZentroMeet is PER STAFF, not per workspace.
+ * Every function in this module is keyed by `userId` — never by
+ * `tenantId`. There is no such thing as a "workspace calendar."
+ *
+ * The architecture stack:
+ *
+ *   Workspace ─ enables which providers staff MAY connect
+ *               (tenants.enabled_integrations — migration 0035)
+ *      ↓
+ *   Staff ──── owns the actual OAuth tokens, calendar id, busy
+ *               events, and meeting-creation responsibility
+ *               (calendarConnections — migration 0019, keyed by
+ *               (userId, provider))
+ *      ↓
+ *   Engine ── reads ONLY from per-staff calendars when computing
+ *               available slots for a booking. See
+ *               getExternalBusyForUser() below, called from
+ *               lib/availability.ts.
+ *
+ * Consequences:
+ *   • Booking availability NEVER reads from the workspace level.
+ *   • The legacy `users.google_refresh_token` column is preserved
+ *     for backward compatibility ONLY — new reads should derive
+ *     "Google connected" state from calendarConnections, never
+ *     from that legacy column.
+ *   • Workspace-level integration disablement (migration 0035)
+ *     blocks NEW connect attempts but leaves existing connections
+ *     functional. Busy events still flow into slot generation
+ *     until the staff member explicitly disconnects.
+ *
+ * Future routing (round-robin, pooled, collective scheduling, etc.)
+ * will pick A STAFF MEMBER first, then resolve THAT staff member's
+ * calendar through this module. The routing layer never needs to
+ * know which provider the chosen staff happens to use.
+ *
+ * ═══════════════════════════════════════════════════════════════════
+ *
  * Booking-lifecycle entry points:
  *   onBookingCreated(booking, staff)        → create external event
  *   onBookingRescheduled(booking, staff)    → patch start/end

@@ -8,6 +8,13 @@ import Shell from "@/components/dashboard/Shell";
 import { getPlan } from "@/lib/plans";
 import IntegrationsClient from "@/components/dashboard/IntegrationsClient";
 
+// Page repositioned to "Workspace Integrations" (migration 0035
+// phase). This page enables PROVIDERS at the workspace level — it
+// no longer surfaces personal calendar OAuth state. Per-staff
+// calendar connections live in the staff Profile tab and at
+// /dashboard/settings/calendar.
+export const dynamic = "force-dynamic";
+
 export default async function IntegrationsPage() {
   const session = await getSession();
   if (!session) redirect("/dashboard/login");
@@ -23,17 +30,16 @@ export default async function IntegrationsPage() {
     <Shell
       user={{ name: user.name, email: user.email, role: user.role }}
       tenant={{ name: tenant.name, slug: tenant.slug, plan: tenant.currentPlan, logoUrl: tenant.logoUrl }}
-      title="Integrations"
-      crumbs={[{ label: "Dashboard", href: "/dashboard" }, { label: "Settings" }, { label: "Integrations" }]}
+      title="Workspace integrations"
+      crumbs={[{ label: "Dashboard", href: "/dashboard" }, { label: "Settings" }, { label: "Workspace integrations" }]}
     >
-      <h1 className="text-heading font-semibold text-ink">Integrations</h1>
+      <h1 className="text-heading font-semibold text-ink">Workspace integrations</h1>
       <p className="mt-1 text-sm text-ink-muted">
-        Wire your workspace to your inbox, calendar, and chat tools.
+        Enable or disable provider integrations across your workspace.
       </p>
 
       <IntegrationsClient
         initial={{
-          googleConnected: Boolean(user.googleRefreshToken),
           notificationWebhookUrl: tenant.notificationWebhookUrl ?? "",
           hidePoweredBy: tenant.hidePoweredBy,
         }}

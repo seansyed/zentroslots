@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { and, eq, isNull, or } from "drizzle-orm";
 
 import { db } from "@/db/client";
-import { departments, serviceStaff, services, staffAssignmentRules, tenants, users } from "@/db/schema";
+import { calendarConnections, departments, serviceStaff, services, staffAssignmentRules, tenants, users } from "@/db/schema";
 import BookingFlow from "@/components/BookingFlow";
 import { resolvePublicProfile } from "@/lib/identity";
 
@@ -61,7 +61,11 @@ export default async function PublicServicePage(props: {
       avatarUrl: users.avatarUrl,
       bio: users.bio,
       specialties: users.specialties,
-      googleRefreshToken: users.googleRefreshToken,
+      // Note: users.googleRefreshToken is intentionally NOT selected
+      // here. The calendar-connected trust badge is resolved below
+      // from the per-staff calendarConnections table (the canonical
+      // source after migration 0019). The legacy column remains in
+      // the schema for backward compatibility only.
       departmentId: users.departmentId,
       departmentName: departments.name,
     })
@@ -106,7 +110,23 @@ export default async function PublicServicePage(props: {
 
   const accent = tenant.primaryColor;
   const showPoweredBy = !tenant.hidePoweredBy;
-  const googleConnected = Boolean(staff.googleRefreshToken);
+
+  // Calendar-connected trust badge derives from the per-staff
+  // calendarConnections table (the canonical source after migration
+  // 0019), NOT the legacy users.googleRefreshToken column. This
+  // keeps the customer-facing trust signal aligned with what the
+  // booking engine actually checks via getExternalBusyForUser().
+  // REFINEMENT #8.
+  const [activeConn] = await db
+    .select({ id: calendarConnections.id })
+    .from(calendarConnections)
+    .where(and(
+      eq(calendarConnections.userId, staff.userId),
+      eq(calendarConnections.tenantId, tenant.id),
+      eq(calendarConnections.status, "active"),
+    ))
+    .limit(1);
+  const googleConnected = Boolean(activeConn);
 
   // Canonical public profile (migration 0033). Falls back to `name`
   // when `publicDisplayName` is null; omits the title when unset.

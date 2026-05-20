@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { and, eq, gte, inArray, sql } from "drizzle-orm";
 
 import { db } from "@/db/client";
-import { bookings, users } from "@/db/schema";
+import { bookings, calendarConnections, users } from "@/db/schema";
 import { errorResponse, requireUser } from "@/lib/auth";
 
 export async function GET() {
@@ -25,7 +25,20 @@ export async function GET() {
         // canonical public identity without a per-row fetch.
         publicDisplayName: users.publicDisplayName,
         publicTitle: users.publicTitle,
-        googleConnected: sql<boolean>`(${users.googleRefreshToken} IS NOT NULL)`,
+        // googleConnected derives from the per-staff
+        // calendarConnections table (the canonical source after
+        // migration 0019). We previously used users.googleRefreshToken,
+        // which is now legacy/backward-compat only — derive from
+        // calendarConnections so disconnects on the new table flip
+        // the badge correctly. EXISTS-based correlated subquery so
+        // the rest of the row stays a flat SELECT (no group-by).
+        googleConnected: sql<boolean>`EXISTS (
+          SELECT 1 FROM ${calendarConnections}
+          WHERE ${calendarConnections.userId} = ${users.id}
+            AND ${calendarConnections.tenantId} = ${users.tenantId}
+            AND ${calendarConnections.provider} = 'google'
+            AND ${calendarConnections.status} = 'active'
+        )`,
         createdAt: users.createdAt,
       })
       .from(users)
