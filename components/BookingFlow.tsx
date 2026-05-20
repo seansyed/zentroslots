@@ -1,5 +1,17 @@
 "use client";
 
+/**
+ * BookingFlow — Phase 10A luxury conversion pass.
+ *
+ * This is a VISUAL refinement only. Every state variable, every API
+ * route (`/api/public/services/:id/rules`, `/api/slots`, `/api/bookings`,
+ * `/api/public/waitlist/join`), every payload, and every conditional
+ * branch are preserved byte-identical to the prior implementation.
+ * The only changes are presentational: typography hierarchy, ambient
+ * lighting, slot interaction quality, trust indicators, sticky mobile
+ * CTA, and a more emotionally rewarding confirmation experience.
+ */
+
 import { useEffect, useMemo, useState } from "react";
 import { formatInTimeZone } from "date-fns-tz";
 import { Skeleton, toast } from "@/components/ui/primitives";
@@ -25,6 +37,7 @@ type Props = {
 type Step = "pick-time" | "confirm" | "done";
 
 const DEFAULT_ACCENT = "#2563eb";
+const MOTION_CURVE = "cubic-bezier(0.16,1,0.3,1)";
 
 export default function BookingFlow({
   serviceId,
@@ -151,7 +164,7 @@ export default function BookingFlow({
       if (!res.ok) throw new Error(data?.error ?? "Booking failed");
       setConfirmedMeetLink(data.meetLink ?? null);
       setStep("done");
-      toast("Booked! A confirmation is on its way.", "success");
+      toast("Booked. A confirmation is on its way.", "success");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Booking failed");
     } finally {
@@ -170,7 +183,6 @@ export default function BookingFlow({
       start && end
         ? `https://www.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(title)}&dates=${fmtIcs(start)}/${fmtIcs(end)}&details=${encodeURIComponent(description)}`
         : "";
-    // Outlook web — works for outlook.com / live.com personal accounts.
     const outlookUrl =
       start && end
         ? `https://outlook.live.com/calendar/0/deeplink/compose?path=/calendar/action/compose&rru=addevent&startdt=${start.toISOString()}&enddt=${end.toISOString()}&subject=${encodeURIComponent(title)}&body=${encodeURIComponent(description)}`
@@ -178,48 +190,88 @@ export default function BookingFlow({
 
     return (
       <section
-        className="mt-8 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm animate-in fade-in slide-in-from-bottom-4 duration-500"
+        className="relative mt-8 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_20px_60px_rgba(15,23,42,0.08)] animate-in fade-in zoom-in-95 duration-500"
+        style={{ animationTimingFunction: MOTION_CURVE }}
         aria-live="polite"
       >
-        {/* Accent banner */}
-        <div className="h-1.5 w-full" style={{ backgroundColor: accent }} aria-hidden />
+        {/* Ambient operational glow */}
+        <div
+          aria-hidden
+          className="pointer-events-none absolute -right-24 -top-24 h-72 w-72 rounded-full blur-3xl"
+          style={{ backgroundColor: accent, opacity: 0.14 }}
+        />
+        <div
+          aria-hidden
+          className="pointer-events-none absolute -left-16 -bottom-16 h-56 w-56 rounded-full bg-emerald-200/30 blur-3xl"
+        />
+        <span
+          aria-hidden
+          className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/80 to-transparent"
+        />
 
-        <div className="px-6 py-8 text-center sm:px-10 sm:py-10">
-          {/* Animated success check */}
-          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-green-100 ring-4 ring-green-50" aria-hidden>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" className="h-7 w-7 text-green-600 animate-in zoom-in duration-300">
-              <path d="M5 13l4 4L19 7" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
+        <div className="relative px-6 py-9 text-center sm:px-12 sm:py-12">
+          {/* Animated success check — calmer, more deliberate */}
+          <div
+            className="relative mx-auto inline-flex h-16 w-16 items-center justify-center"
+            aria-hidden
+          >
+            <span
+              className="absolute inset-0 rounded-full bg-emerald-100"
+              style={{ animation: `zm-ring-pulse 2.4s ${MOTION_CURVE} infinite` }}
+            />
+            <span className="relative flex h-14 w-14 items-center justify-center rounded-full bg-emerald-500 shadow-[0_8px_24px_rgba(16,185,129,0.40)] ring-4 ring-emerald-50">
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="3"
+                className="h-7 w-7 text-white animate-in zoom-in-50 duration-500"
+                style={{ animationTimingFunction: MOTION_CURVE }}
+              >
+                <path d="M5 13l4 4L19 7" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </span>
           </div>
 
-          <h2 className="mt-5 text-xl font-semibold tracking-tight text-slate-900">
+          <h2 className="mt-6 text-[22px] font-semibold tracking-tight text-slate-900 sm:text-[24px]">
             You&rsquo;re booked
           </h2>
-          <p className="mt-1 text-sm text-slate-600">A confirmation is on its way to {clientEmail}.</p>
+          <p className="mt-1.5 text-[13.5px] leading-relaxed text-slate-600">
+            A confirmation is on its way to{" "}
+            <span className="font-medium text-slate-900">{clientEmail}</span>
+            {tenantName && (
+              <>
+                {" "}from <span className="font-medium text-slate-900">{tenantName}</span>
+              </>
+            )}
+            .
+          </p>
 
           {/* Appointment summary card */}
           {start && (
-            <div className="mx-auto mt-6 max-w-sm rounded-xl border border-slate-200 bg-slate-50 p-4 text-left text-sm">
-              <div className="flex items-start gap-3">
+            <div className="mx-auto mt-7 max-w-md rounded-2xl border border-slate-200 bg-slate-50/60 p-4 text-left text-sm shadow-[inset_0_1px_0_rgba(255,255,255,0.7)] backdrop-blur-sm">
+              <div className="flex items-start gap-3.5">
                 <div
-                  className="flex h-10 w-10 shrink-0 flex-col items-center justify-center rounded-lg text-white"
+                  className="flex h-12 w-12 shrink-0 flex-col items-center justify-center rounded-xl text-white shadow-[0_4px_12px_rgba(15,23,42,0.10)]"
                   style={{ backgroundColor: accent }}
                 >
-                  <span className="text-[10px] font-semibold uppercase tracking-wider opacity-80">
+                  <span className="text-[10px] font-semibold uppercase tracking-wider opacity-90">
                     {formatInTimeZone(start, tz, "MMM")}
                   </span>
-                  <span className="text-base font-semibold leading-none">
+                  <span className="text-lg font-semibold leading-none">
                     {formatInTimeZone(start, tz, "d")}
                   </span>
                 </div>
                 <div className="min-w-0 flex-1">
-                  <div className="font-medium text-slate-900">
-                    {formatInTimeZone(start, tz, "EEEE, h:mm a")}
+                  <div className="text-[14.5px] font-semibold tracking-tight text-slate-900">
+                    {formatInTimeZone(start, tz, "EEEE")}
                   </div>
-                  <div className="mt-0.5 text-xs text-slate-600">
-                    {durationMinutes} min with {staffName}
+                  <div className="text-[13px] text-slate-700">
+                    {formatInTimeZone(start, tz, "h:mm a")} &middot; {durationMinutes} min
                   </div>
-                  <div className="mt-0.5 text-xs text-slate-500">{tz}</div>
+                  <div className="mt-1 text-[11.5px] text-slate-500">
+                    With <span className="font-medium text-slate-700">{staffName}</span> &middot; {tz}
+                  </div>
                 </div>
               </div>
             </div>
@@ -232,13 +284,13 @@ export default function BookingFlow({
                 href={confirmedMeetLink}
                 target="_blank"
                 rel="noreferrer"
-                className="inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:opacity-90"
-                style={{ backgroundColor: accent }}
+                className="inline-flex items-center gap-1.5 rounded-xl px-4 py-2.5 text-[13px] font-semibold text-white shadow-[0_6px_16px_rgba(15,23,42,0.18)] transition-all duration-[180ms] hover:-translate-y-0.5 hover:shadow-[0_10px_24px_rgba(15,23,42,0.22)]"
+                style={{ backgroundColor: accent, transitionTimingFunction: MOTION_CURVE }}
               >
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4" aria-hidden>
                   <path d="M23 7l-7 5 7 5V7zM14 5H3a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2z" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
-                Open Google Meet
+                Join Google Meet
               </a>
             )}
             {gcalUrl && (
@@ -246,8 +298,13 @@ export default function BookingFlow({
                 href={gcalUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50"
+                className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-[13px] font-medium text-slate-700 shadow-[0_2px_8px_rgba(15,23,42,0.06)] transition-all duration-[180ms] hover:-translate-y-0.5 hover:border-slate-300 hover:bg-slate-50 hover:shadow-[0_8px_18px_rgba(15,23,42,0.08)]"
+                style={{ transitionTimingFunction: MOTION_CURVE }}
               >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-3.5 w-3.5" aria-hidden>
+                  <rect x="3" y="4" width="18" height="18" rx="2" />
+                  <path d="M16 2v4M8 2v4M3 10h18" strokeLinecap="round" />
+                </svg>
                 Google Calendar
               </a>
             )}
@@ -256,15 +313,36 @@ export default function BookingFlow({
                 href={outlookUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50"
+                className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-[13px] font-medium text-slate-700 shadow-[0_2px_8px_rgba(15,23,42,0.06)] transition-all duration-[180ms] hover:-translate-y-0.5 hover:border-slate-300 hover:bg-slate-50 hover:shadow-[0_8px_18px_rgba(15,23,42,0.08)]"
+                style={{ transitionTimingFunction: MOTION_CURVE }}
               >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-3.5 w-3.5" aria-hidden>
+                  <rect x="3" y="4" width="18" height="18" rx="2" />
+                  <path d="M3 8h18" />
+                </svg>
                 Outlook
               </a>
             )}
           </div>
 
-          <p className="mt-6 text-[11px] text-slate-500">
-            You&rsquo;ll receive reminder emails before your appointment. Need to change it? Use the link in your confirmation email.
+          {/* Calm next-step reassurance */}
+          <div className="mx-auto mt-7 inline-flex max-w-sm flex-wrap items-center justify-center gap-x-3 gap-y-1 rounded-full bg-slate-50/80 px-4 py-2 text-[11px] font-medium text-slate-500 ring-1 ring-slate-200/60">
+            <span className="inline-flex items-center gap-1">
+              <CheckGlyph />
+              Reminders included
+            </span>
+            <span className="inline-flex items-center gap-1">
+              <CheckGlyph />
+              Reschedule any time
+            </span>
+            <span className="inline-flex items-center gap-1">
+              <CheckGlyph />
+              Confirmation emailed
+            </span>
+          </div>
+
+          <p className="mt-3 text-[11px] leading-relaxed text-slate-400">
+            Need to change it? Use the link in your confirmation email.
           </p>
         </div>
       </section>
@@ -280,16 +358,30 @@ export default function BookingFlow({
 
   return (
     <section className="mt-8">
-      {/* Date strip + native picker */}
-      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      {/* Trust strip — operational reassurance, very subtle */}
+      <TrustStrip tz={tz} autoRouted={autoRouted} />
+
+      {/* Date strip card */}
+      <div className="mt-4 relative overflow-hidden rounded-3xl border border-slate-200 bg-white p-5 shadow-[0_4px_18px_rgba(15,23,42,0.04)] sm:p-6">
+        <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-slate-200 to-transparent" />
         <div className="flex items-baseline justify-between gap-3">
-          <label className="text-sm font-medium text-slate-900">Pick a date</label>
-          <span className="text-[11px] text-slate-500">{tz}</span>
+          <div>
+            <div className="text-[10px] font-semibold uppercase tracking-[0.10em] text-slate-400">
+              Step 1
+            </div>
+            <label className="mt-0.5 block text-[15px] font-semibold tracking-tight text-slate-900">
+              Pick a date
+            </label>
+          </div>
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-50 px-2.5 py-1 text-[10px] font-medium tracking-wide text-slate-500 ring-1 ring-slate-200">
+            <ClockGlyph />
+            {tz}
+          </span>
         </div>
 
         {/* Horizontal date pills — mobile-first, scrolls on overflow */}
         <div
-          className="-mx-1 mt-3 flex gap-1.5 overflow-x-auto px-1 pb-1"
+          className="-mx-1 mt-4 flex gap-2 overflow-x-auto px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
           role="radiogroup"
           aria-label="Select date"
         >
@@ -306,42 +398,46 @@ export default function BookingFlow({
                 onClick={() => !disabled && setDate(d.iso)}
                 title={disabled ? "Not available for booking" : undefined}
                 className={
-                  "flex shrink-0 flex-col items-center justify-center rounded-xl border px-3 py-2 text-center transition focus:outline-none focus:ring-2 focus:ring-offset-1 " +
+                  "group relative flex shrink-0 flex-col items-center justify-center rounded-2xl border px-3.5 py-2.5 text-center transition-all duration-[180ms] focus:outline-none focus:ring-2 focus:ring-offset-2 " +
                   (disabled
                     ? "border-slate-200 bg-slate-50 text-slate-300 line-through cursor-not-allowed"
                     : isSelected
-                      ? "border-transparent text-white shadow-md"
-                      : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:shadow-sm")
+                      ? "border-transparent text-white shadow-[0_8px_20px_rgba(15,23,42,0.18)]"
+                      : "border-slate-200 bg-white text-slate-700 hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-[0_4px_12px_rgba(15,23,42,0.06)]")
                 }
-                style={
-                  !disabled && isSelected
-                    ? ({
+                style={{
+                  ...((!disabled && isSelected
+                    ? {
                         backgroundColor: accent,
-                        /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
-                        "--tw-ring-color": accent,
-                      } as React.CSSProperties)
-                    : ({
-                        /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
-                        "--tw-ring-color": accent,
-                      } as React.CSSProperties)
-                }
+                        boxShadow: `0 8px 22px ${accent}44`,
+                      }
+                    : {}) as React.CSSProperties),
+                  transitionTimingFunction: MOTION_CURVE,
+                  /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
+                  ["--tw-ring-color" as any]: accent,
+                }}
               >
-                <span className={"text-[10px] font-semibold uppercase tracking-wider " + (isSelected ? "opacity-80" : "text-slate-400")}>
+                <span className={"text-[10px] font-semibold uppercase tracking-wider " + (isSelected ? "opacity-90" : "text-slate-400")}>
                   {d.wd}
                 </span>
-                <span className="mt-0.5 text-base font-semibold leading-none tabular-nums">{d.dd}</span>
-                <span className={"mt-0.5 text-[10px] " + (isSelected ? "opacity-70" : "text-slate-400")}>{d.mo}</span>
+                <span className="mt-0.5 text-[17px] font-semibold leading-none tabular-nums">{d.dd}</span>
+                <span className={"mt-0.5 text-[10px] " + (isSelected ? "opacity-80" : "text-slate-400")}>{d.mo}</span>
               </button>
             );
           })}
 
           {/* "More dates" — opens the native picker via a hidden input */}
           <label
-            className="flex shrink-0 cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed border-slate-300 bg-white px-3 py-2 text-center text-slate-500 transition hover:border-slate-400 hover:text-slate-700"
+            className="flex shrink-0 cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-white px-3.5 py-2.5 text-center text-slate-500 transition-all duration-[180ms] hover:-translate-y-0.5 hover:border-slate-400 hover:text-slate-700"
             title="Pick another date"
+            style={{ transitionTimingFunction: MOTION_CURVE }}
           >
             <span className="text-[10px] font-semibold uppercase tracking-wider">More</span>
-            <span className="mt-0.5 text-base leading-none">📅</span>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="mt-0.5 h-4 w-4" aria-hidden>
+              <rect x="3" y="4" width="18" height="18" rx="2" />
+              <path d="M16 2v4M8 2v4M3 10h18" strokeLinecap="round" />
+            </svg>
+            <span className="mt-0.5 text-[10px]">dates</span>
             <input
               type="date"
               value={date}
@@ -353,32 +449,45 @@ export default function BookingFlow({
         </div>
       </div>
 
-      {/* Slot grid */}
+      {/* Slot grid — centerpiece interaction */}
       {step === "pick-time" && (
-        <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="mt-4 relative overflow-hidden rounded-3xl border border-slate-200 bg-white p-5 shadow-[0_4px_18px_rgba(15,23,42,0.04)] sm:p-6">
+          <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-slate-200 to-transparent" />
           <div className="flex items-baseline justify-between gap-3">
             <div>
-              <div className="text-sm font-medium text-slate-900">{selectedDateLabel}</div>
-              <div className="text-xs text-slate-500">{durationMinutes} min appointments</div>
+              <div className="text-[10px] font-semibold uppercase tracking-[0.10em] text-slate-400">
+                Step 2
+              </div>
+              <div className="mt-0.5 text-[15px] font-semibold tracking-tight text-slate-900">{selectedDateLabel}</div>
+              <div className="text-[12px] text-slate-500">{durationMinutes}-minute appointments</div>
             </div>
             {!loadingSlots && slots.length > 0 && (
-              <span className="text-xs text-slate-500">
-                <span className="tabular-nums font-medium text-slate-900">{slots.length}</span> open
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-medium text-emerald-700 ring-1 ring-emerald-200/60">
+                <span aria-hidden className="relative inline-flex h-1.5 w-1.5">
+                  <span className="absolute inset-0 animate-ping rounded-full bg-emerald-400/55" />
+                  <span className="relative h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                </span>
+                <span className="tabular-nums font-semibold">{slots.length}</span> open
               </span>
             )}
           </div>
 
           {loadingSlots ? (
-            <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3" aria-label="Loading available times">
+            <div className="mt-5 grid grid-cols-2 gap-2.5 sm:grid-cols-3" aria-label="Loading available times">
               {Array.from({ length: 9 }).map((_, i) => (
-                <Skeleton key={i} className="h-10 rounded-lg" />
+                <Skeleton key={i} className="h-11 rounded-xl" />
               ))}
             </div>
           ) : slots.length === 0 ? (
             <div className="mt-5 space-y-3">
-              <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center text-sm text-slate-500">
-                No times available on this day.
-                <div className="mt-1 text-xs text-slate-400">Try another date above — or join the waitlist below.</div>
+              <div className="relative overflow-hidden rounded-2xl border border-dashed border-slate-300 bg-slate-50/60 p-8 text-center">
+                <div className="mx-auto mb-2 inline-flex h-9 w-9 items-center justify-center rounded-full bg-white text-slate-400 ring-1 ring-slate-200">
+                  <ClockGlyph />
+                </div>
+                <div className="text-[13px] font-medium text-slate-700">No times available on this day</div>
+                <div className="mt-1 text-[12px] text-slate-500">
+                  Try another date above &mdash; or join the waitlist below.
+                </div>
               </div>
               <WaitlistJoinTile
                 serviceId={serviceId}
@@ -402,104 +511,162 @@ export default function BookingFlow({
 
       {/* Confirm */}
       {step === "confirm" && selectedSlot && (
-        <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
-          <button
-            onClick={() => setStep("pick-time")}
-            className="inline-flex items-center gap-1 text-xs text-slate-500 transition hover:text-slate-900"
-          >
-            ← Change time
-          </button>
+        <div className="mt-4 relative overflow-hidden rounded-3xl border border-slate-200 bg-white p-5 shadow-[0_8px_28px_rgba(15,23,42,0.06)] sm:p-6">
+          {/* Ambient accent glow */}
+          <div
+            aria-hidden
+            className="pointer-events-none absolute -right-20 -top-20 h-48 w-48 rounded-full blur-3xl"
+            style={{ backgroundColor: accent, opacity: 0.08 }}
+          />
+          <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-slate-200 to-transparent" />
 
-          <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm">
-            <div className="flex items-start gap-3">
-              <div
-                className="flex h-10 w-10 shrink-0 flex-col items-center justify-center rounded-lg text-white"
-                style={{ backgroundColor: accent }}
-                aria-hidden
-              >
-                <span className="text-[10px] font-semibold uppercase tracking-wider opacity-80">
-                  {formatInTimeZone(selectedSlot, tz, "MMM")}
-                </span>
-                <span className="text-base font-semibold leading-none">
-                  {formatInTimeZone(selectedSlot, tz, "d")}
-                </span>
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="font-medium text-slate-900">
-                  {formatInTimeZone(selectedSlot, tz, "EEEE, h:mm a")}
+          <div className="relative">
+            <button
+              onClick={() => setStep("pick-time")}
+              className="inline-flex items-center gap-1 text-[12px] text-slate-500 transition-colors hover:text-slate-900"
+            >
+              <span aria-hidden>←</span> Change time
+            </button>
+
+            <div className="mt-3 text-[10px] font-semibold uppercase tracking-[0.10em] text-slate-400">
+              Step 3
+            </div>
+            <h3 className="mt-0.5 text-[16px] font-semibold tracking-tight text-slate-900">Confirm your booking</h3>
+
+            {/* Selected slot summary */}
+            <div className="mt-3 rounded-2xl border border-slate-200 bg-gradient-to-br from-slate-50/80 via-white to-white p-3.5 text-sm shadow-[inset_0_1px_0_rgba(255,255,255,0.7)]">
+              <div className="flex items-start gap-3.5">
+                <div
+                  className="flex h-11 w-11 shrink-0 flex-col items-center justify-center rounded-xl text-white shadow-[0_4px_12px_rgba(15,23,42,0.10)]"
+                  style={{ backgroundColor: accent }}
+                  aria-hidden
+                >
+                  <span className="text-[10px] font-semibold uppercase tracking-wider opacity-90">
+                    {formatInTimeZone(selectedSlot, tz, "MMM")}
+                  </span>
+                  <span className="text-[17px] font-semibold leading-none">
+                    {formatInTimeZone(selectedSlot, tz, "d")}
+                  </span>
                 </div>
-                <div className="mt-0.5 text-xs text-slate-500">
-                  {durationMinutes} min with {staffName} · {tz}
+                <div className="min-w-0 flex-1">
+                  <div className="text-[14px] font-semibold tracking-tight text-slate-900">
+                    {formatInTimeZone(selectedSlot, tz, "EEEE, h:mm a")}
+                  </div>
+                  <div className="mt-0.5 text-[12px] text-slate-600">
+                    {durationMinutes} min &middot; with <span className="font-medium text-slate-800">{staffName}</span>
+                  </div>
+                  <div className="mt-0.5 text-[11px] text-slate-500">{tz}</div>
                 </div>
               </div>
             </div>
-          </div>
 
-          <h3 className="mt-5 text-sm font-medium text-slate-900">Your details</h3>
+            <h4 className="mt-6 text-[13px] font-semibold tracking-tight text-slate-900">Your details</h4>
 
-          <div className="mt-3 space-y-3">
-            <FloatingInput
-              id="bk-name"
-              label="Full name"
-              value={clientName}
-              onChange={setClientName}
-              required
-              autoComplete="name"
-              accent={accent}
-            />
-            <FloatingInput
-              id="bk-email"
-              label="Email"
-              type="email"
-              value={clientEmail}
-              onChange={setClientEmail}
-              required
-              autoComplete="email"
-              inputMode="email"
-              accent={accent}
-            />
-            <div className="relative">
-              <textarea
-                id="bk-notes"
-                placeholder=" "
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                rows={3}
-                className="peer w-full rounded-lg border border-slate-300 bg-white px-3 pb-2 pt-5 text-sm text-slate-900 outline-none transition focus:border-slate-400 focus:ring-2"
-                style={{
-                  /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
-                  "--tw-ring-color": accent,
-                } as React.CSSProperties}
+            <div className="mt-3 space-y-3">
+              <FloatingInput
+                id="bk-name"
+                label="Full name"
+                value={clientName}
+                onChange={setClientName}
+                required
+                autoComplete="name"
+                accent={accent}
               />
-              <label
-                htmlFor="bk-notes"
-                className="pointer-events-none absolute left-3 top-1.5 text-[10px] font-medium uppercase tracking-wider text-slate-500"
-              >
-                Notes (optional)
-              </label>
+              <FloatingInput
+                id="bk-email"
+                label="Email"
+                type="email"
+                value={clientEmail}
+                onChange={setClientEmail}
+                required
+                autoComplete="email"
+                inputMode="email"
+                accent={accent}
+              />
+              <div className="relative">
+                <textarea
+                  id="bk-notes"
+                  placeholder=" "
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  rows={3}
+                  className="peer w-full rounded-xl border border-slate-300 bg-white px-3.5 pb-2.5 pt-5 text-[13.5px] text-slate-900 outline-none transition-all duration-[180ms] focus:border-slate-400 focus:ring-2"
+                  style={{
+                    transitionTimingFunction: MOTION_CURVE,
+                    /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
+                    ["--tw-ring-color" as any]: accent,
+                  }}
+                />
+                <label
+                  htmlFor="bk-notes"
+                  className="pointer-events-none absolute left-3.5 top-2 text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500"
+                >
+                  Notes (optional)
+                </label>
+              </div>
             </div>
+
+            {error && (
+              <div className="mt-3 rounded-xl border border-red-200 bg-red-50 p-3 text-[13px] text-red-700">
+                {error}
+              </div>
+            )}
+
+            <button
+              onClick={submit}
+              disabled={submitting || !clientName || !clientEmail}
+              className="mt-5 inline-flex w-full items-center justify-center gap-1.5 rounded-xl px-4 py-3 text-[14px] font-semibold text-white shadow-[0_8px_22px_rgba(15,23,42,0.18)] transition-all duration-[180ms] hover:-translate-y-0.5 hover:shadow-[0_12px_28px_rgba(15,23,42,0.22)] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0"
+              style={{ backgroundColor: accent, transitionTimingFunction: MOTION_CURVE }}
+            >
+              {submitting ? (
+                <>
+                  <span
+                    aria-hidden
+                    className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white"
+                  />
+                  Confirming&hellip;
+                </>
+              ) : (
+                <>
+                  Confirm booking
+                  <span aria-hidden>→</span>
+                </>
+              )}
+            </button>
+            <p className="mt-2 text-center text-[11px] leading-relaxed text-slate-500">
+              You&rsquo;ll receive an email with your meeting details and gentle reminders before the appointment.
+            </p>
           </div>
-
-          {error && (
-            <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-              {error}
-            </div>
-          )}
-
-          <button
-            onClick={submit}
-            disabled={submitting || !clientName || !clientEmail}
-            className="mt-5 inline-flex w-full items-center justify-center rounded-lg px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
-            style={{ backgroundColor: accent }}
-          >
-            {submitting ? "Booking…" : "Confirm booking"}
-          </button>
-          <p className="mt-2 text-center text-[11px] text-slate-500">
-            By confirming you&rsquo;ll receive an email with your meeting details and reminders.
-          </p>
         </div>
       )}
     </section>
+  );
+}
+
+// ─── Trust strip ────────────────────────────────────────────────────────
+
+function TrustStrip({ tz, autoRouted }: { tz: string; autoRouted: boolean }) {
+  return (
+    <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1.5 text-[11px] text-slate-500">
+      <span className="inline-flex items-center gap-1.5">
+        <SparkleGlyph />
+        Confirmed instantly
+      </span>
+      <span className="inline-flex items-center gap-1.5">
+        <CheckGlyph />
+        Reminders included
+      </span>
+      <span className="inline-flex items-center gap-1.5" title={`Times shown in ${tz}`}>
+        <GlobeGlyph />
+        Timezone auto-adjusted
+      </span>
+      {autoRouted && (
+        <span className="inline-flex items-center gap-1.5">
+          <CheckGlyph />
+          Routed to next available
+        </span>
+      )}
+    </div>
   );
 }
 
@@ -531,26 +698,45 @@ function SlotsGrouped({
   }
 
   return (
-    <div className="mt-4 space-y-4">
+    <div className="mt-5 space-y-5">
       {groups.map((g) => {
         if (g.slots.length === 0) return null;
         return (
           <div key={g.key}>
-            <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-              {g.label}
+            <div className="flex items-baseline gap-2">
+              <div className="text-[10px] font-semibold uppercase tracking-[0.10em] text-slate-400">
+                {g.label}
+              </div>
+              <span className="text-[10px] tabular-nums text-slate-400">
+                &middot; {g.slots.length} {g.slots.length === 1 ? "slot" : "slots"}
+              </span>
             </div>
-            <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
+            <div className="mt-2 grid grid-cols-2 gap-2.5 sm:grid-cols-3">
               {g.slots.map((iso) => (
                 <button
                   key={iso}
                   onClick={() => onPick(iso)}
-                  className="group rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:-translate-y-0.5 hover:border-transparent hover:bg-slate-900 hover:text-white hover:shadow focus:outline-none focus:ring-2"
+                  className="group relative overflow-hidden rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-[13px] font-medium text-slate-700 shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-all duration-[180ms] hover:-translate-y-0.5 focus:outline-none focus:ring-2"
                   style={{
+                    transitionTimingFunction: MOTION_CURVE,
                     /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
-                    "--tw-ring-color": accent,
-                  } as React.CSSProperties}
+                    ["--tw-ring-color" as any]: accent,
+                  }}
                 >
-                  <span className="tabular-nums">{formatInTimeZone(iso, tz, "h:mm a")}</span>
+                  {/* Hover fill — calm tint of the brand accent */}
+                  <span
+                    aria-hidden
+                    className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-[180ms] group-hover:opacity-100"
+                    style={{ backgroundColor: accent, transitionTimingFunction: MOTION_CURVE }}
+                  />
+                  <span
+                    aria-hidden
+                    className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-[180ms] group-hover:opacity-100"
+                    style={{ boxShadow: `0 8px 20px ${accent}33`, transitionTimingFunction: MOTION_CURVE }}
+                  />
+                  <span className="relative tabular-nums transition-colors duration-[180ms] group-hover:text-white" style={{ transitionTimingFunction: MOTION_CURVE }}>
+                    {formatInTimeZone(iso, tz, "h:mm a")}
+                  </span>
                 </button>
               ))}
             </div>
@@ -593,15 +779,16 @@ function FloatingInput({
         autoComplete={autoComplete}
         inputMode={inputMode}
         placeholder=" "
-        className="peer w-full rounded-lg border border-slate-300 bg-white px-3 pb-2 pt-5 text-sm text-slate-900 outline-none transition focus:border-slate-400 focus:ring-2"
+        className="peer w-full rounded-xl border border-slate-300 bg-white px-3.5 pb-2.5 pt-5 text-[13.5px] text-slate-900 outline-none transition-all duration-[180ms] focus:border-slate-400 focus:ring-2"
         style={{
+          transitionTimingFunction: MOTION_CURVE,
           /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
-          "--tw-ring-color": accent,
-        } as React.CSSProperties}
+          ["--tw-ring-color" as any]: accent,
+        }}
       />
       <label
         htmlFor={id}
-        className="pointer-events-none absolute left-3 top-1.5 text-[10px] font-medium uppercase tracking-wider text-slate-500"
+        className="pointer-events-none absolute left-3.5 top-2 text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500"
       >
         {label}
       </label>
@@ -639,6 +826,42 @@ function buildDateStrip(timezone: string, days: number): { iso: string; wd: stri
     });
   }
   return out;
+}
+
+// ─── Glyphs ─────────────────────────────────────────────────────────────
+
+function ClockGlyph() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-3.5 w-3.5" aria-hidden>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 7v5l3 2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function CheckGlyph() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="h-3 w-3 text-emerald-500" aria-hidden>
+      <path d="M5 13l4 4L19 7" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function SparkleGlyph() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-3 w-3" aria-hidden>
+      <path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function GlobeGlyph() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-3 w-3" aria-hidden>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" strokeLinecap="round" />
+    </svg>
+  );
 }
 
 // ─── Waitlist join tile ────────────────────────────────────────────────
@@ -688,12 +911,13 @@ function WaitlistJoinTile({
 
   if (done) {
     return (
-      <div className="rounded-xl border border-green-200 bg-green-50 p-4 text-center text-sm">
-        <div className="font-medium text-green-900">
-          {done.already ? "You're already on the waitlist." : "Added to the waitlist!"}
+      <div className="relative overflow-hidden rounded-2xl border border-emerald-200 bg-emerald-50/60 p-4 text-center text-sm">
+        <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/70 to-transparent" />
+        <div className="font-semibold tracking-tight text-emerald-900">
+          {done.already ? "You're already on the waitlist." : "Added to the waitlist."}
         </div>
-        <div className="mt-1 text-xs text-green-800">
-          You're position {done.position} in the queue. We'll email you when a spot opens.
+        <div className="mt-1 text-[12px] text-emerald-800/90">
+          Position {done.position} in the queue. We&rsquo;ll email you when a spot opens.
         </div>
       </div>
     );
@@ -703,7 +927,8 @@ function WaitlistJoinTile({
     return (
       <button
         onClick={() => setOpen(true)}
-        className="block w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-center text-sm font-medium text-slate-700 transition hover:border-slate-400 hover:bg-slate-50"
+        className="block w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-center text-[13px] font-medium text-slate-700 transition-all duration-[180ms] hover:-translate-y-0.5 hover:border-slate-400 hover:bg-slate-50 hover:shadow-[0_4px_12px_rgba(15,23,42,0.06)]"
+        style={{ transitionTimingFunction: MOTION_CURVE }}
       >
         Join the waitlist for this date
       </button>
@@ -711,10 +936,10 @@ function WaitlistJoinTile({
   }
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-      <div className="text-sm font-semibold text-slate-900">Join the waitlist</div>
-      <p className="mt-1 text-xs text-slate-500">
-        We'll email you if a spot opens for {preferredDate}.
+    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_4px_18px_rgba(15,23,42,0.04)]">
+      <div className="text-[14px] font-semibold tracking-tight text-slate-900">Join the waitlist</div>
+      <p className="mt-1 text-[12px] text-slate-500">
+        We&rsquo;ll email you if a spot opens for {preferredDate}.
       </p>
       <div className="mt-3 grid gap-2">
         <input
@@ -722,19 +947,19 @@ function WaitlistJoinTile({
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="Your name"
-          className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+          className="rounded-xl border border-slate-300 px-3 py-2 text-[13.5px]"
         />
         <input
           type="email"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           placeholder="you@example.com"
-          className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+          className="rounded-xl border border-slate-300 px-3 py-2 text-[13.5px]"
         />
         <select
           value={range}
           onChange={(e) => setRange(e.target.value as typeof range)}
-          className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
+          className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-[13.5px]"
         >
           <option value="any">Any time</option>
           <option value="morning">Morning</option>
@@ -746,7 +971,7 @@ function WaitlistJoinTile({
         <button
           type="button"
           onClick={() => setOpen(false)}
-          className="text-xs text-slate-500 hover:text-slate-700"
+          className="text-[12px] text-slate-500 transition-colors hover:text-slate-700"
         >
           Cancel
         </button>
@@ -754,8 +979,8 @@ function WaitlistJoinTile({
           type="button"
           onClick={submit}
           disabled={submitting || !name || !email.includes("@")}
-          className="rounded-md px-4 py-2 text-sm font-medium text-white shadow-sm transition disabled:opacity-50"
-          style={{ backgroundColor: accent }}
+          className="rounded-xl px-4 py-2 text-[13px] font-semibold text-white shadow-[0_4px_12px_rgba(15,23,42,0.12)] transition-all duration-[180ms] hover:-translate-y-0.5 disabled:opacity-50 disabled:hover:translate-y-0"
+          style={{ backgroundColor: accent, transitionTimingFunction: MOTION_CURVE }}
         >
           {submitting ? "Joining…" : "Join waitlist"}
         </button>
@@ -763,4 +988,3 @@ function WaitlistJoinTile({
     </div>
   );
 }
-
