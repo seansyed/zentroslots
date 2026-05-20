@@ -145,46 +145,73 @@ export default function LocationsManager({
 
   return (
     <div className="mt-4 space-y-5">
-      {/* Hero */}
-      <PremiumCard className="relative overflow-hidden p-5">
-        <span aria-hidden className="pointer-events-none absolute -right-12 -top-12 h-40 w-40 rounded-full bg-brand-accent/12 blur-3xl" />
-        <span aria-hidden className="pointer-events-none absolute -left-16 -bottom-16 h-44 w-44 rounded-full bg-violet-200/20 blur-3xl" />
+      {/* Hero — refinement #1 (Phase 15C).
+          Layered depth: ultra-soft operational gradient wash + a
+          faint topology dot pattern + radial glow halo behind the
+          chips. Richer vertical breathing (p-6 vs p-5). Every layer
+          is pointer-events-none so the interactive surface remains
+          unaffected. */}
+      <PremiumCard className="relative overflow-hidden p-6">
+        {/* Ultra-soft operational gradient wash */}
+        <span
+          aria-hidden
+          className="pointer-events-none absolute inset-0 bg-[linear-gradient(135deg,rgba(53,157,243,0.04)_0%,rgba(255,255,255,0)_55%,rgba(124,58,237,0.04)_100%)]"
+        />
+        {/* Subtle topology — dotted background, extremely low opacity */}
+        <span
+          aria-hidden
+          className="pointer-events-none absolute inset-0 opacity-[0.045]"
+          style={{
+            backgroundImage:
+              "radial-gradient(circle, currentColor 1px, transparent 1px)",
+            backgroundSize: "18px 18px",
+            color: "rgb(15 23 42)",
+          }}
+        />
+        {/* Ambient glows */}
+        <span aria-hidden className="pointer-events-none absolute -right-12 -top-12 h-44 w-44 rounded-full bg-brand-accent/12 blur-3xl" />
+        <span aria-hidden className="pointer-events-none absolute -left-16 -bottom-16 h-48 w-48 rounded-full bg-violet-200/20 blur-3xl" />
         <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/60 to-transparent" />
-        <div className="relative flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+
+        <div className="relative flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <div className="text-[10px] font-semibold uppercase tracking-[0.10em] text-brand-accent">
+            <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-brand-accent">
               Operational delivery hubs
             </div>
-            <h1 className="mt-0.5 text-[20px] font-semibold tracking-tight text-ink sm:text-[22px]">
+            <h1 className="mt-1 text-[22px] font-semibold tracking-tight text-ink sm:text-[24px]">
               Locations
             </h1>
-            <p className="mt-1 max-w-xl text-[12.5px] leading-relaxed text-ink-muted">
+            <p className="mt-1.5 max-w-xl text-[12.5px] leading-relaxed text-ink-muted">
               Offices, virtual delivery hubs, and operational service regions. Each location can hold
               staff, services, and customer bookings.
             </p>
           </div>
-          <div className="flex max-w-full flex-wrap items-center gap-1.5">
-            {/* Honest operational chips — every metric derives from a
-                real column. Hidden when the count is zero to avoid
-                noisy "0 of N" badges. */}
-            <CountChip icon={Building2} label={`${counts.active} ${counts.active === 1 ? "active hub" : "active hubs"}`} tone="brand" />
-            {counts.staffed > 0 && (
-              <CountChip icon={Users} label={`${counts.staffed} staffed`} tone="emerald" />
-            )}
-            {counts.totalCoverage > 0 && (
-              <CountChip icon={Layers} label={`${counts.totalCoverage} ${counts.totalCoverage === 1 ? "team member" : "team members"}`} tone="neutral" />
-            )}
-            <RoutingStatusChip active={counts.routingActive} bookings30d={counts.bookings30d} />
-            {counts.physical > 0 && <CountChip icon={MapPin} label={`${counts.physical} physical`} tone="neutral" />}
-            {counts.virtual > 0 && <CountChip icon={Video} label={`${counts.virtual} virtual`} tone="violet" />}
-            {counts.hybrid > 0 && <CountChip icon={Globe} label={`${counts.hybrid} hybrid`} tone="emerald" />}
-            {counts.inactive > 0 && <CountChip icon={X} label={`${counts.inactive} archived`} tone="muted" />}
-            <PlanChip plan={plan} activeCount={activeCount} />
+          {/* Chip cluster sits over a faint radial glow halo — gives
+              the metrics card-like presence without a hard border. */}
+          <div className="relative">
+            <span
+              aria-hidden
+              className="pointer-events-none absolute -inset-3 rounded-2xl bg-[radial-gradient(circle_at_50%_50%,rgba(53,157,243,0.06)_0%,rgba(53,157,243,0)_70%)]"
+            />
+            <div className="relative flex max-w-full flex-wrap items-center gap-1.5">
+              <CountChip icon={Building2} label={`${counts.active} ${counts.active === 1 ? "active hub" : "active hubs"}`} tone="brand" />
+              {counts.staffed > 0 && (
+                <CountChip icon={Users} label={`${counts.staffed} staffed`} tone="emerald" />
+              )}
+              {counts.totalCoverage > 0 && (
+                <CountChip icon={Layers} label={`${counts.totalCoverage} ${counts.totalCoverage === 1 ? "team member" : "team members"}`} tone="neutral" />
+              )}
+              <RoutingStatusChip active={counts.routingActive} bookings30d={counts.bookings30d} />
+              {counts.physical > 0 && <CountChip icon={MapPin} label={`${counts.physical} physical`} tone="neutral" />}
+              {counts.virtual > 0 && <CountChip icon={Video} label={`${counts.virtual} virtual`} tone="violet" />}
+              {counts.hybrid > 0 && <CountChip icon={Globe} label={`${counts.hybrid} hybrid`} tone="emerald" />}
+              {counts.inactive > 0 && <CountChip icon={X} label={`${counts.inactive} archived`} tone="muted" />}
+              <PlanChip plan={plan} activeCount={activeCount} />
+            </div>
           </div>
         </div>
-        {/* Operational tagline — refinement #5. Calm, sits below the
-            chips, communicates the strategic role without selling. */}
-        <p className="relative mt-3 border-t border-border/40 pt-3 text-[11.5px] italic text-ink-subtle">
+        {/* Operational tagline */}
+        <p className="relative mt-4 border-t border-border/30 pt-3 text-[11.5px] italic text-ink-subtle">
           Locations route bookings, anchor staff coverage, and shape regional scheduling intelligence.
         </p>
       </PremiumCard>
@@ -276,28 +303,38 @@ export default function LocationsManager({
         </FadeIn>
       )}
 
-      {/* v2 routing foundations — refinement #4.
-          Softer grid separation (gap-3), hover elevation per tile,
-          dampened "SOON" chips, blueprint feel via dotted top edge
-          + ambient violet glow in the corner. */}
-      <PremiumCard className="relative overflow-hidden p-5">
-        <span aria-hidden className="pointer-events-none absolute -right-16 -top-16 h-44 w-44 rounded-full bg-violet-200/15 blur-3xl" />
-        <span aria-hidden className="pointer-events-none absolute -left-12 -bottom-12 h-36 w-36 rounded-full bg-brand-accent/8 blur-3xl" />
+      {/* Architectural roadmap — refinements #4 + #5 + #7.
+          Softer surface gradient, ambient corner glows, dotted
+          divider above the grid for blueprint feel. */}
+      <PremiumCard className="relative overflow-hidden bg-[linear-gradient(180deg,rgba(255,255,255,1)_0%,rgba(248,250,252,0.6)_100%)] p-6">
+        <span aria-hidden className="pointer-events-none absolute -right-16 -top-16 h-48 w-48 rounded-full bg-violet-200/15 blur-3xl" />
+        <span aria-hidden className="pointer-events-none absolute -left-12 -bottom-12 h-40 w-40 rounded-full bg-brand-accent/8 blur-3xl" />
+        <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/65 to-transparent" />
+
         <div className="relative flex items-end justify-between gap-3">
           <div>
-            <div className="text-[10px] font-semibold uppercase tracking-[0.10em] text-brand-accent">
+            <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-brand-accent">
               Architectural roadmap
             </div>
-            <h3 className="mt-0.5 text-[14.5px] font-semibold tracking-tight text-ink">
+            <h3 className="mt-1 text-[15px] font-semibold tracking-tight text-ink">
               Routing intelligence on top of locations
             </h3>
-            <p className="mt-0.5 max-w-xl text-[11.5px] leading-relaxed text-ink-muted">
+            <p className="mt-1 max-w-xl text-[11.5px] leading-relaxed text-ink-muted">
               Each capability layers cleanly on the existing per-location foundation — no engine
               rewrites, no schema churn. Order reflects the natural delivery sequence.
             </p>
           </div>
         </div>
-        <div className="relative mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+
+        {/* Dotted section divider — visual grouping refinement */}
+        <div className="relative mt-5">
+          <span
+            aria-hidden
+            className="pointer-events-none absolute inset-x-0 top-0 h-px bg-[radial-gradient(circle,theme(colors.border)_1px,transparent_1px)] bg-[length:8px_1px] bg-repeat-x opacity-60"
+          />
+        </div>
+
+        <div className="relative mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
           <ScaffoldTile icon={MapPinned} title="Nearest-location booking" caption="Route customers to their closest physical hub." />
           <ScaffoldTile icon={Workflow} title="Regional routing" caption="Service-area + ZIP / country mapping rules." />
           <ScaffoldTile icon={Globe} title="Timezone-aware hubs" caption="Match customers to the hub in their local hours." />
@@ -387,8 +424,12 @@ function PlanChip({ plan, activeCount }: { plan: Plan; activeCount: number }) {
     );
   }
   if (isZero) {
+    // Refinement #2: this is upgrade CONTEXT, not a warning state.
+    // Softer amber, smaller weight, less saturation. Lowercase
+    // "upgrade required" rather than uppercase shout.
     return (
-      <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-50/80 px-2 py-0.5 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-amber-800 ring-1 ring-amber-200/40">
+      <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-50/40 px-2 py-0.5 text-[10px] font-medium text-amber-700/85 ring-1 ring-amber-200/30">
+        <span aria-hidden className="inline-block h-1 w-1 rounded-full bg-amber-400/70" />
         {plan.name} · upgrade required
       </span>
     );
@@ -399,7 +440,7 @@ function PlanChip({ plan, activeCount }: { plan: Plan; activeCount: number }) {
       className={cn(
         "inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10.5px] font-semibold uppercase tracking-[0.06em] ring-1",
         atCap
-          ? "bg-amber-50/80 text-amber-800 ring-amber-200/40"
+          ? "bg-amber-50/60 text-amber-700/90 ring-amber-200/35"
           : "bg-brand-subtle/60 text-brand-accent ring-brand-accent/15",
       )}
     >
@@ -420,14 +461,29 @@ function EmptyState({
   onCreate: () => void;
 }) {
   return (
-    <PremiumCard className="relative overflow-hidden p-6">
+    <PremiumCard className="relative overflow-hidden p-8">
+      {/* Ambient corner glows — refinement #3 */}
       <span aria-hidden className="pointer-events-none absolute -right-16 -top-16 h-48 w-48 rounded-full bg-brand-accent/12 blur-3xl" />
       <span aria-hidden className="pointer-events-none absolute -left-16 bottom-0 h-40 w-40 rounded-full bg-violet-200/30 blur-3xl" />
       <div className="relative mx-auto max-w-xl text-center">
-        <div className="mx-auto inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-brand-subtle/70 text-brand-accent shadow-soft ring-1 ring-brand-accent/15">
-          <Building2 className="h-5 w-5" strokeWidth={1.75} />
+        {/* Center icon — refinement #3.
+            Soft radial halo behind the medallion gives it operational
+            warmth. Slightly larger (h-14 vs h-12) and ringed in
+            brand-accent for stronger presence. */}
+        <div className="relative mx-auto inline-flex h-14 w-14 items-center justify-center">
+          <span
+            aria-hidden
+            className="pointer-events-none absolute inset-0 -m-3 rounded-full bg-[radial-gradient(circle_at_50%_50%,rgba(53,157,243,0.18)_0%,rgba(53,157,243,0)_70%)]"
+          />
+          <span
+            aria-hidden
+            className="pointer-events-none absolute inset-0 animate-pulse rounded-2xl bg-brand-accent/8 blur-md"
+          />
+          <span className="relative inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-brand-subtle to-brand-subtle/50 text-brand-accent shadow-[0_4px_18px_rgba(53,157,243,0.18)] ring-1 ring-brand-accent/25">
+            <Building2 className="h-6 w-6" strokeWidth={1.75} />
+          </span>
         </div>
-        <h2 className="mt-3 text-[18px] font-semibold tracking-tight text-ink">
+        <h2 className="mt-4 text-[18px] font-semibold tracking-tight text-ink">
           Create your first operational location
         </h2>
         <p className="mt-1.5 text-[13px] leading-relaxed text-ink-muted">
@@ -472,12 +528,13 @@ function EmptyState({
   );
 }
 
-// EmptyTile — refinement #3.
-// Each onboarding tile now carries a distinct color identity so the
-// three location modes feel visually differentiated, not text-heavy.
-// A colored glow behind the icon + a subtle border tint per tone +
-// hover elevation give them operational presence without losing the
-// calm enterprise atmosphere.
+// EmptyTile — refinement #4 (Phase 15C).
+// Each onboarding tile feels like an intelligent operational module:
+//   • Richer icon container — gradient + softer tone backdrop +
+//     larger iconography (h-10 medallion, h-5 icon)
+//   • Tonal background wash visible at rest, deepens on hover
+//   • Soft operational shadow at rest, lifts on hover
+//   • Full-card hover lift + tone-tinted border
 function EmptyTile({
   icon: Icon,
   title,
@@ -493,43 +550,73 @@ function EmptyTile({
     tone === "violet"
       ? {
           glow: "bg-violet-300/35",
-          icon: "bg-violet-50 text-violet-700 ring-violet-200/50",
+          iconBg: "bg-gradient-to-br from-violet-50 to-violet-100/70",
+          iconRing: "ring-violet-200/60",
+          iconText: "text-violet-700",
+          wash: "from-violet-50/40",
           border: "hover:border-violet-300/50",
+          shadow: "shadow-[0_2px_8px_rgba(124,58,237,0.06)]",
         }
       : tone === "emerald"
         ? {
             glow: "bg-emerald-300/35",
-            icon: "bg-emerald-50 text-emerald-700 ring-emerald-200/50",
+            iconBg: "bg-gradient-to-br from-emerald-50 to-emerald-100/70",
+            iconRing: "ring-emerald-200/60",
+            iconText: "text-emerald-700",
+            wash: "from-emerald-50/40",
             border: "hover:border-emerald-300/50",
+            shadow: "shadow-[0_2px_8px_rgba(16,185,129,0.06)]",
           }
         : {
             glow: "bg-brand-accent/30",
-            icon: "bg-brand-subtle text-brand-accent ring-brand-accent/20",
+            iconBg: "bg-gradient-to-br from-brand-subtle to-brand-subtle/50",
+            iconRing: "ring-brand-accent/25",
+            iconText: "text-brand-accent",
+            wash: "from-brand-subtle/30",
             border: "hover:border-brand-accent/40",
+            shadow: "shadow-[0_2px_8px_rgba(53,157,243,0.07)]",
           };
   return (
     <div
       className={cn(
-        "group relative overflow-hidden rounded-xl border border-border bg-surface p-3 shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-all duration-[260ms] ease-[cubic-bezier(0.16,1,0.3,1)]",
+        "group relative overflow-hidden rounded-xl border border-border bg-surface p-4 transition-all duration-[260ms] ease-[cubic-bezier(0.16,1,0.3,1)]",
         "hover:-translate-y-0.5 hover:shadow-lift",
         cfg.border,
+        cfg.shadow,
       )}
     >
+      {/* Tonal wash at rest — extremely soft */}
       <span
         aria-hidden
         className={cn(
-          "pointer-events-none absolute -right-6 -top-6 h-16 w-16 rounded-full opacity-0 blur-2xl transition-opacity duration-[420ms] ease-[cubic-bezier(0.16,1,0.3,1)] group-hover:opacity-100",
+          "pointer-events-none absolute inset-0 opacity-50 transition-opacity duration-[420ms] ease-[cubic-bezier(0.16,1,0.3,1)] group-hover:opacity-100",
+          "bg-gradient-to-br to-transparent",
+          cfg.wash,
+        )}
+      />
+      {/* Hover glow */}
+      <span
+        aria-hidden
+        className={cn(
+          "pointer-events-none absolute -right-8 -top-8 h-20 w-20 rounded-full opacity-0 blur-2xl transition-opacity duration-[420ms] ease-[cubic-bezier(0.16,1,0.3,1)] group-hover:opacity-100",
           cfg.glow,
         )}
       />
-      <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/55 to-transparent" />
-      <div className="relative flex items-start gap-2.5">
-        <div className={cn("inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ring-1", cfg.icon)}>
-          <Icon className="h-4 w-4" strokeWidth={1.75} />
+      <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/65 to-transparent" />
+      <div className="relative flex items-start gap-3">
+        <div
+          className={cn(
+            "inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ring-1 transition-transform duration-[260ms] ease-[cubic-bezier(0.16,1,0.3,1)] group-hover:scale-[1.04]",
+            cfg.iconBg,
+            cfg.iconRing,
+            cfg.iconText,
+          )}
+        >
+          <Icon className="h-5 w-5" strokeWidth={1.75} />
         </div>
         <div className="min-w-0">
-          <div className="text-[12px] font-semibold tracking-tight text-ink">{title}</div>
-          <p className="mt-0.5 text-[10.5px] leading-relaxed text-ink-muted">{caption}</p>
+          <div className="text-[12.5px] font-semibold tracking-tight text-ink">{title}</div>
+          <p className="mt-1 text-[11px] leading-relaxed text-ink-muted">{caption}</p>
         </div>
       </div>
     </div>
@@ -693,6 +780,12 @@ function StateChip({
   );
 }
 
+// ScaffoldTile — refinements #5 + #6 (Phase 15C).
+// "Future operational blueprint" feel. Softer border at rest
+// (border/30), nearly invisible until hover. Background contrast
+// comes from a subtle ambient gradient rather than a hard border.
+// "Planned" microcopy demoted to a smaller, lighter sentence-case
+// modifier so the title always dominates the row.
 function ScaffoldTile({
   icon: Icon,
   title,
@@ -703,22 +796,23 @@ function ScaffoldTile({
   caption: string;
 }) {
   return (
-    <div className="group relative overflow-hidden rounded-xl border border-border/60 bg-surface/70 p-3 backdrop-blur-[1px] transition-all duration-[260ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:border-border-strong hover:bg-surface hover:shadow-soft">
-      {/* Dotted top edge — gives the blueprint / draft feel without
-          the dashed-border placeholder energy of before. */}
-      <span aria-hidden className="pointer-events-none absolute inset-x-3 top-0 h-px bg-[radial-gradient(circle,theme(colors.border)_1px,transparent_1px)] bg-[length:6px_1px] bg-repeat-x opacity-70" />
-      <span aria-hidden className="pointer-events-none absolute -right-8 -top-8 h-16 w-16 rounded-full bg-brand-accent/0 blur-2xl transition-colors duration-[420ms] ease-[cubic-bezier(0.16,1,0.3,1)] group-hover:bg-brand-accent/10" />
+    <div className="group relative overflow-hidden rounded-xl border border-border/30 bg-[linear-gradient(135deg,rgba(255,255,255,0.6)_0%,rgba(241,245,249,0.4)_100%)] p-3.5 backdrop-blur-[1px] transition-all duration-[300ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-[2px] hover:border-border/70 hover:shadow-[0_8px_24px_rgba(15,23,42,0.06)]">
+      {/* Dotted top edge — blueprint texture, calmer than dashed. */}
+      <span aria-hidden className="pointer-events-none absolute inset-x-3 top-0 h-px bg-[radial-gradient(circle,theme(colors.border)_1px,transparent_1px)] bg-[length:6px_1px] bg-repeat-x opacity-50 transition-opacity duration-[300ms] ease-[cubic-bezier(0.16,1,0.3,1)] group-hover:opacity-90" />
+      {/* Hover ambient — warmer brand tint */}
+      <span aria-hidden className="pointer-events-none absolute -right-10 -top-10 h-20 w-20 rounded-full bg-brand-accent/0 blur-2xl transition-colors duration-[420ms] ease-[cubic-bezier(0.16,1,0.3,1)] group-hover:bg-brand-accent/12" />
       <div className="relative flex items-start gap-2.5">
-        <div className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-surface-inset text-ink-subtle ring-1 ring-border/50 transition-colors duration-[260ms] ease-[cubic-bezier(0.16,1,0.3,1)] group-hover:bg-brand-subtle/60 group-hover:text-brand-accent group-hover:ring-brand-accent/20">
+        <div className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/70 text-ink-subtle ring-1 ring-border/40 transition-all duration-[280ms] ease-[cubic-bezier(0.16,1,0.3,1)] group-hover:bg-brand-subtle/60 group-hover:text-brand-accent group-hover:ring-brand-accent/20 group-hover:shadow-[0_1px_3px_rgba(53,157,243,0.10)]">
           <Icon className="h-4 w-4" strokeWidth={1.75} />
         </div>
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-baseline gap-1.5">
             <h4 className="text-[12.5px] font-semibold tracking-tight text-ink">{title}</h4>
-            {/* Softer SOON pill — borderless, almost invisible until
-                hover. Communicates state without dominating the row. */}
-            <span className="text-[9px] font-medium uppercase tracking-[0.10em] text-ink-subtle/70">
-              · Planned
+            {/* Demoted "Planned" microcopy — refinement #6.
+                Smaller, lighter, lowercase-ish weight so the title
+                always reads first. */}
+            <span className="text-[9px] font-medium tracking-wide text-ink-subtle/55">
+              planned
             </span>
           </div>
           <p className="mt-0.5 text-[10.5px] leading-relaxed text-ink-muted">{caption}</p>
