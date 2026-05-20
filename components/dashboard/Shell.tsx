@@ -8,6 +8,7 @@ import Sidebar, {
   useSidebarCollapsed,
 } from "./Sidebar";
 import Topbar from "./Topbar";
+import GlobalCopilot from "./GlobalCopilot";
 import { Drawer } from "@/components/ui/primitives";
 import { cn } from "@/lib/cn";
 
@@ -72,6 +73,14 @@ export default function Shell({
           </div>
         </main>
       </div>
+
+      {/* Phase 9A — persistent operational copilot. Mounted at the Shell
+       *  level so it appears across every dashboard workspace (calendar,
+       *  appointments, customers, communications, tasks, analytics).
+       *  See components/dashboard/GlobalCopilot.tsx for the surface and
+       *  app/api/tenant/copilot/brief/route.ts for the cross-module
+       *  signal synthesis. */}
+      <GlobalCopilot />
     </div>
   );
 }
