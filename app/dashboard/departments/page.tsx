@@ -1,11 +1,21 @@
 import { redirect } from "next/navigation";
-import { asc, eq } from "drizzle-orm";
+import { and, asc, countDistinct, eq, gte, sql } from "drizzle-orm";
+
 import { db } from "@/db/client";
-import { departments, tenants, users } from "@/db/schema";
+import { bookings, departments, serviceStaff, tenants, users } from "@/db/schema";
 import { getSession } from "@/lib/auth";
 import Shell from "@/components/dashboard/Shell";
-import DepartmentsManager from "@/components/dashboard/DepartmentsManager";
+import DepartmentsClient from "@/components/dashboard/DepartmentsClient";
 
+/**
+ * Departments — operational architecture center.
+ *
+ * Renders the same per-department counts as /api/departments GET
+ * so the page hydrates with real data on first paint. The client
+ * re-fetches on mutate to keep the architecture view fresh.
+ *
+ * All queries tenant-scoped via the session's user record.
+ */
 export default async function DepartmentsPage() {
   const session = await getSession();
   if (!session) redirect("/dashboard/login");
@@ -19,6 +29,49 @@ export default async function DepartmentsPage() {
     .where(eq(departments.tenantId, user.tenantId))
     .orderBy(asc(departments.name));
 
+  // Per-department counts (same shape as /api/departments). Honest
+  // signals only — services↔departments is transitive via staff.
+  const now = new Date();
+  const last30dStart = new Date(now.getTime() - 30 * 24 * 60 * 60_000);
+
+  const [staffCounts, serviceCounts, bookingCounts] = await Promise.all([
+    db
+      .select({ departmentId: users.departmentId, c: sql<number>`count(*)::int` })
+      .from(users)
+      .where(eq(users.tenantId, user.tenantId))
+      .groupBy(users.departmentId),
+    db
+      .select({ departmentId: users.departmentId, c: countDistinct(serviceStaff.serviceId) })
+      .from(serviceStaff)
+      .innerJoin(users, eq(users.id, serviceStaff.userId))
+      .where(eq(serviceStaff.tenantId, user.tenantId))
+      .groupBy(users.departmentId),
+    db
+      .select({ departmentId: bookings.departmentId, c: sql<number>`count(*)::int` })
+      .from(bookings)
+      .where(
+        and(
+          eq(bookings.tenantId, user.tenantId),
+          gte(bookings.createdAt, last30dStart),
+        ),
+      )
+      .groupBy(bookings.departmentId),
+  ]);
+
+  const staffMap = new Map(staffCounts.map((r) => [r.departmentId, Number(r.c)]));
+  const serviceMap = new Map(serviceCounts.map((r) => [r.departmentId, Number(r.c)]));
+  const bookingMap = new Map(bookingCounts.map((r) => [r.departmentId, Number(r.c)]));
+
+  const initial = rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    color: r.color ?? null,
+    description: r.description ?? null,
+    staffCount: Number(staffMap.get(r.id) ?? 0),
+    serviceCount: Number(serviceMap.get(r.id) ?? 0),
+    bookingsLast30d: Number(bookingMap.get(r.id) ?? 0),
+  }));
+
   return (
     <Shell
       user={{ name: user.name, email: user.email, role: user.role }}
@@ -26,17 +79,9 @@ export default async function DepartmentsPage() {
       title="Departments"
       crumbs={[{ label: "Dashboard", href: "/dashboard" }, { label: "Departments" }]}
     >
-      <h1 className="text-heading font-semibold text-ink">Departments</h1>
-      <p className="mt-1 text-sm text-ink-muted">Group services and staff by business unit — Sales, Consultation, Hair Styling, etc.</p>
-
-      <DepartmentsManager
+      <DepartmentsClient
         isAdmin={user.role === "admin" || user.role === "manager"}
-        initial={rows.map((r) => ({
-          id: r.id,
-          name: r.name,
-          color: r.color ?? null,
-          description: r.description ?? null,
-        }))}
+        initial={initial}
       />
     </Shell>
   );
