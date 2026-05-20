@@ -26,7 +26,11 @@ export async function GET(
     const { id } = await context.params;
 
     const staff = await db.query.users.findFirst({
-      where: and(eq(users.id, id), eq(users.tenantId, caller.tenantId), inArray(users.role, ["staff", "manager"])),
+      // Workforce = admin + manager + staff. Admins are first-class
+      // workforce members (see /api/staff GET, lib/billing/seats,
+      // lib/quotas). Only `client` rows are excluded from this
+      // workforce lookup.
+      where: and(eq(users.id, id), eq(users.tenantId, caller.tenantId), inArray(users.role, ["admin", "manager", "staff"])),
     });
     if (!staff) throw new HttpError(404, "Staff not found");
 
@@ -123,7 +127,8 @@ export async function PATCH(
     const body = patchSchema.parse(await req.json());
 
     const staff = await db.query.users.findFirst({
-      where: and(eq(users.id, id), eq(users.tenantId, admin.tenantId), inArray(users.role, ["staff", "manager"])),
+      // Workforce = admin + manager + staff (matches GET above).
+      where: and(eq(users.id, id), eq(users.tenantId, admin.tenantId), inArray(users.role, ["admin", "manager", "staff"])),
     });
     if (!staff) throw new HttpError(404, "Staff not found");
 
