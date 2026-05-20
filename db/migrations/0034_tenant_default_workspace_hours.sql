@@ -1,0 +1,41 @@
+-- Migration 0034 — Tenant default workspace hours.
+--
+-- Adds a tenant-level fallback weekly schedule that staff inherit
+-- when they have no per-staff availability rows of their own.
+-- Strictly additive — slot generation continues to prefer per-staff
+-- rules; the workspace fallback only fires when those don't exist.
+--
+-- Column name: `default_workspace_hours` (not `workspace_hours`).
+-- The "default_" prefix future-proofs the namespace for later layers
+-- (department defaults, seasonal overrides, holiday schedules, etc.)
+-- without overloading a single semantic slot.
+--
+-- Storage shape (jsonb):
+--   {
+--     "0": null,                                    -- Sun closed
+--     "1": { "start": "09:00", "end": "17:00" },    -- Mon
+--     "2": { "start": "09:00", "end": "17:00" },    -- Tue
+--     ...
+--     "6": null                                     -- Sat closed
+--   }
+--
+-- Semantics:
+--   • `{}` (default for existing tenants) → fallback inactive
+--   • day key absent or null → closed that day
+--   • day key present with { start, end } → open that window
+--
+-- Resolution order (lib/availability.ts, unchanged below position 4):
+--   1. Per-date override unavailable → closed
+--   2. Per-date override hours → use those
+--   3. Per-staff weekly rules → use those
+--   4. NEW: tenants.default_workspace_hours[day] → fallback
+--   5. Else → []
+--
+-- Tenant isolation: every API path that touches this column reads
+-- the caller's tenant id from the session and updates WHERE
+-- tenant_id = $session.tenantId. Default '{}' means the column is
+-- safe to roll out before any UI ships — slot generation behavior
+-- is byte-identical until an admin explicitly configures it.
+
+ALTER TABLE tenants
+  ADD COLUMN IF NOT EXISTS default_workspace_hours jsonb NOT NULL DEFAULT '{}'::jsonb;

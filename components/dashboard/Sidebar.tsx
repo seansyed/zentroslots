@@ -172,6 +172,7 @@ function buildNav(
   const advanced: Item[] = [
     ...(role === "admin"
       ? [
+          { label: "Workspace hours",        href: "/dashboard/settings/workspace-hours", icon: Clock },
           { label: "Feature controls",       href: "/dashboard/settings/features",        icon: Settings2 },
           { label: "Staff routing",          href: "/dashboard/settings/routing",         icon: GitBranch },
           { label: "Booking rules",          href: "/dashboard/settings/booking-rules",   icon: Clock },

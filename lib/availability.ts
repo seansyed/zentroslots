@@ -8,9 +8,14 @@ import {
   availabilityOverrides,
   bookings,
   services,
+  tenants,
   users,
 } from "@/db/schema";
 import { getExternalBusyForUser } from "@/lib/calendar/sync";
+import {
+  readDefaultWorkspaceHours,
+  getDefaultForDay,
+} from "@/lib/workspace-hours";
 
 const SLOT_INTERVAL_MINUTES = 15;
 
@@ -39,8 +44,16 @@ export async function getAvailableSlots(params: {
 
   const viewerDay = getDayWindowUtc(date, timezone);
 
-  // NEW: returns an array of intervals (split-day support, override aware).
-  const workingWindows = await getStaffWorkingWindows(staffUserId, date, staff.timezone);
+  // Pass staff.tenantId so getStaffWorkingWindows can resolve the
+  // tenant-level default workspace hours fallback (migration 0034).
+  // Engine layer above this point doesn't know which layer produced
+  // the windows — it only consumes resolved intervals.
+  const workingWindows = await getStaffWorkingWindows(
+    staffUserId,
+    date,
+    staff.timezone,
+    staff.tenantId,
+  );
   if (workingWindows.length === 0) return [];
 
   // Intersect each working window with the viewer's day window; drop empties.
@@ -94,11 +107,25 @@ function getDayWindowUtc(date: string, timezone: string): Interval {
  *   2. Otherwise, if there are override rows with hours, those REPLACE
  *      the weekly recurring rule (supports split-day, e.g. 9–12 + 1–5)
  *   3. Otherwise, fall back to the single weekly availability row.
+ *   4. NEW (migration 0034): If no per-staff weekly rule exists,
+ *      fall back to the tenant's default_workspace_hours for that
+ *      day-of-week. This layer is fallback-only — it NEVER fires
+ *      when a per-staff rule exists, so any staff who has ever
+ *      configured custom hours sees byte-identical slot output to
+ *      before this layer existed.
+ *   5. Else → [].
+ *
+ * The booking engine does not know which layer produced the
+ * returned windows — it only consumes resolved windows. That
+ * separation is intentional: workspace inheritance + future
+ * department defaults / seasonal schedules / etc. all extend this
+ * function, never the engine.
  */
 async function getStaffWorkingWindows(
   staffUserId: string,
   date: string,
-  staffTimezone: string
+  staffTimezone: string,
+  tenantId: string
 ): Promise<Interval[]> {
   const overrides = await db
     .select({
@@ -130,22 +157,44 @@ async function getStaffWorkingWindows(
     return windows;
   }
 
-  // Rule 3: fall back to weekly rule (single window).
   const dayOfWeek = getDayOfWeekInTimezone(date, staffTimezone);
+
+  // Rule 3: per-staff weekly rule.
   const rule = await db.query.availability.findFirst({
     where: and(
       eq(availability.userId, staffUserId),
       eq(availability.dayOfWeek, dayOfWeek)
     ),
   });
-  if (!rule) return [];
+  if (rule) {
+    return [
+      {
+        start: fromZonedTime(`${date}T${rule.startTime}`, staffTimezone),
+        end: fromZonedTime(`${date}T${rule.endTime}`, staffTimezone),
+      },
+    ];
+  }
 
-  return [
-    {
-      start: fromZonedTime(`${date}T${rule.startTime}`, staffTimezone),
-      end: fromZonedTime(`${date}T${rule.endTime}`, staffTimezone),
-    },
-  ];
+  // Rule 4 (migration 0034): tenant default workspace hours fallback.
+  // Only reached when per-staff rules don't exist — so any staff
+  // configured before this layer shipped is unaffected.
+  const tenant = await db.query.tenants.findFirst({
+    where: eq(tenants.id, tenantId),
+    columns: { defaultWorkspaceHours: true },
+  });
+  const workspaceHours = readDefaultWorkspaceHours(tenant?.defaultWorkspaceHours);
+  const defaultDay = getDefaultForDay(workspaceHours, dayOfWeek);
+  if (defaultDay) {
+    return [
+      {
+        start: fromZonedTime(`${date}T${defaultDay.start}`, staffTimezone),
+        end: fromZonedTime(`${date}T${defaultDay.end}`, staffTimezone),
+      },
+    ];
+  }
+
+  // Rule 5: nothing configured anywhere.
+  return [];
 }
 
 function getDayOfWeekInTimezone(date: string, timezone: string): number {

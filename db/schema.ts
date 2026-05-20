@@ -68,6 +68,20 @@ export const tenants = pgTable(
     // Plan-gated: when true and plan allows, embed footer hides "Powered by"
     hidePoweredBy: boolean("hide_powered_by").notNull().default(false),
 
+    // ── Default workspace hours (migration 0034) ──
+    // Tenant-level fallback weekly schedule. Staff with no rows in
+    // the `availability` table inherit this. Staff WITH per-user
+    // rules continue to use their own rules — workspace defaults
+    // never overwrite custom schedules. See lib/workspace-hours.ts
+    // for the typed reader/writer + lib/availability.ts for the
+    // resolution chain (position 4).
+    //
+    // Shape: Partial<Record<"0".."6", { start: "HH:MM", end: "HH:MM" } | null>>
+    //   • `{}` = fallback inactive (default)
+    //   • day key absent or null = closed that day
+    //   • day key with { start, end } = open
+    defaultWorkspaceHours: jsonb("default_workspace_hours").notNull().default({}),
+
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

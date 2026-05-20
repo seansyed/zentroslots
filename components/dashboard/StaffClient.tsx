@@ -118,7 +118,10 @@ type StaffDetail = {
 const TABS = ["overview", "profile", "services", "schedule", "activity"] as const;
 type Tab = (typeof TABS)[number];
 
-const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+// `DAYS` short-name array — kept reserved for any future compact
+// schedule renders. The Schedule tab uses SCHEDULE_DAYS (full names)
+// for the editable surface.
+void ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 // Workforce seats (matches lib/billing/seats.ts → toWorkforceSeatsJson).
 // totalSeats / availableSeats arrive as null when the plan is
@@ -1534,7 +1537,6 @@ function StaffDrawer({
   }
 
   const open = Boolean(id);
-  const weekly = new Map((data?.weeklyAvailability ?? []).map((r) => [r.dayOfWeek, r]));
   const workload = data ? deriveWorkload(data.upcoming.length) : "available";
 
   return (
@@ -1761,31 +1763,16 @@ function StaffDrawer({
             )}
 
             {tab === "schedule" && (
-              <div>
-                <div className="mb-3 text-[12px] text-ink-muted">
-                  Weekly availability (read-only here — edit on the working hours page).
-                </div>
-                <div className="space-y-1.5">
-                  {DAYS.map((label, d) => {
-                    const rule = weekly.get(d);
-                    return (
-                      <div
-                        key={d}
-                        className="flex items-center justify-between rounded-xl border border-border bg-surface px-3 py-2.5 text-[13px]"
-                      >
-                        <span className="w-12 font-medium text-ink">{label}</span>
-                        {rule ? (
-                          <span className="tabular-nums text-ink-muted">
-                            {rule.startTime.slice(0,5)} – {rule.endTime.slice(0,5)}
-                          </span>
-                        ) : (
-                          <span className="text-[11.5px] uppercase tracking-wider text-ink-subtle">Off</span>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
+              <ScheduleTab
+                staffUserId={data.staff.id}
+                weeklyAvailability={data.weeklyAvailability}
+                canEdit={isAdmin}
+                onSaved={(rules) =>
+                  setData((prev) =>
+                    prev ? { ...prev, weeklyAvailability: rules } : prev,
+                  )
+                }
+              />
             )}
 
             {tab === "activity" && (
@@ -2248,6 +2235,575 @@ function ProfileTab({
         </p>
       )}
     </div>
+  );
+}
+
+// ─── Schedule tab — editable per-staff weekly availability ────────
+//
+// Two-mode editor:
+//   • "Use workspace default hours" toggle ON  → no per-staff rows
+//     in `availability` for this user. Slot generator falls back
+//     to tenants.default_workspace_hours (migration 0034).
+//     UI renders a calm read-only preview of the inherited schedule.
+//   • Toggle OFF → custom per-staff rules editable as 7 day rows.
+//     Saving writes via PUT /api/availability?userId=<id>.
+//
+// When the operator flips ON→OFF and no custom rules exist yet, we
+// pre-fill the editor from the workspace default hours instead of
+// starting blank. That's the user's approved refinement #3.
+//
+// Operational state chips beneath the toggle are pure derivations
+// from real data — no fabricated signals. See lib/workspace-hours.
+//
+// Booking engine remains separated: it only consumes resolved
+// windows from getStaffWorkingWindows(). This tab edits the SOURCE
+// of those windows; the engine never branches on inheritance.
+
+type WeeklyRule = { dayOfWeek: number; startTime: string; endTime: string };
+type DraftDay = { open: boolean; start: string; end: string };
+type WorkspaceHoursMap = Partial<Record<"0"|"1"|"2"|"3"|"4"|"5"|"6", { start: string; end: string } | null>>;
+
+const SCHEDULE_DAYS: { idx: number; label: string }[] = [
+  { idx: 1, label: "Monday" },
+  { idx: 2, label: "Tuesday" },
+  { idx: 3, label: "Wednesday" },
+  { idx: 4, label: "Thursday" },
+  { idx: 5, label: "Friday" },
+  { idx: 6, label: "Saturday" },
+  { idx: 0, label: "Sunday" },
+];
+
+function rulesToDraft(rules: WeeklyRule[]): Record<number, DraftDay> {
+  const draft: Record<number, DraftDay> = {};
+  for (const { idx } of SCHEDULE_DAYS) {
+    draft[idx] = { open: false, start: "09:00", end: "17:00" };
+  }
+  for (const r of rules) {
+    draft[r.dayOfWeek] = {
+      open: true,
+      start: r.startTime.slice(0, 5),
+      end: r.endTime.slice(0, 5),
+    };
+  }
+  return draft;
+}
+
+function workspaceHoursToDraft(hours: WorkspaceHoursMap): Record<number, DraftDay> {
+  const draft: Record<number, DraftDay> = {};
+  for (const { idx } of SCHEDULE_DAYS) {
+    const v = hours[String(idx) as keyof WorkspaceHoursMap];
+    if (v && typeof v === "object") {
+      draft[idx] = { open: true, start: v.start, end: v.end };
+    } else {
+      draft[idx] = { open: false, start: "09:00", end: "17:00" };
+    }
+  }
+  return draft;
+}
+
+function draftToRules(draft: Record<number, DraftDay>): WeeklyRule[] {
+  const out: WeeklyRule[] = [];
+  for (const { idx } of SCHEDULE_DAYS) {
+    const day = draft[idx];
+    if (day && day.open) {
+      out.push({
+        dayOfWeek: idx,
+        startTime: `${day.start}:00`,
+        endTime: `${day.end}:00`,
+      });
+    }
+  }
+  return out;
+}
+
+function ScheduleTab({
+  staffUserId,
+  weeklyAvailability,
+  canEdit,
+  onSaved,
+}: {
+  staffUserId: string;
+  weeklyAvailability: WeeklyRule[];
+  canEdit: boolean;
+  onSaved: (rules: WeeklyRule[]) => void;
+}) {
+  // Workspace fallback (lazy fetch — only once when this tab opens).
+  const [workspaceHours, setWorkspaceHours] = React.useState<WorkspaceHoursMap | null>(null);
+  const [workspaceLoaded, setWorkspaceLoaded] = React.useState(false);
+
+  React.useEffect(() => {
+    let cancel = false;
+    fetch("/api/tenant/workspace-hours")
+      .then((r) => r.json())
+      .then((d) => {
+        if (cancel) return;
+        setWorkspaceHours((d?.hours as WorkspaceHoursMap) ?? {});
+        setWorkspaceLoaded(true);
+      })
+      .catch(() => {
+        if (!cancel) {
+          setWorkspaceHours({});
+          setWorkspaceLoaded(true);
+        }
+      });
+    return () => { cancel = true; };
+  }, []);
+
+  // Toggle state — derived initially from data: if the user has any
+  // rules, they're on custom; else they're inheriting.
+  const hasRules = weeklyAvailability.length > 0;
+  const [useWorkspace, setUseWorkspace] = React.useState(!hasRules);
+  // Custom draft — initialized from existing rules.
+  const [draft, setDraft] = React.useState<Record<number, DraftDay>>(() =>
+    rulesToDraft(weeklyAvailability),
+  );
+  const [baseline, setBaseline] = React.useState<Record<number, DraftDay>>(() =>
+    rulesToDraft(weeklyAvailability),
+  );
+  const [savedUseWorkspace, setSavedUseWorkspace] = React.useState(!hasRules);
+  const [saving, setSaving] = React.useState(false);
+
+  // Re-sync when the underlying staff record changes.
+  React.useEffect(() => {
+    setDraft(rulesToDraft(weeklyAvailability));
+    setBaseline(rulesToDraft(weeklyAvailability));
+    setUseWorkspace(weeklyAvailability.length === 0);
+    setSavedUseWorkspace(weeklyAvailability.length === 0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [staffUserId, weeklyAvailability.length]);
+
+  // Refinement #3: when the operator disables "Use workspace default
+  // hours" AND no custom rules exist yet, pre-fill the editor from
+  // workspace defaults so they don't start from a blank slate.
+  function flipToCustom() {
+    if (!canEdit) return;
+    setUseWorkspace(false);
+    const hasAnyDraftOpen = SCHEDULE_DAYS.some((d) => draft[d.idx]?.open);
+    if (!hasAnyDraftOpen && workspaceHours) {
+      const prefilled = workspaceHoursToDraft(workspaceHours);
+      // Only pre-fill if workspace actually has any open days.
+      const wsHasAny = SCHEDULE_DAYS.some((d) => prefilled[d.idx]?.open);
+      if (wsHasAny) setDraft(prefilled);
+    }
+  }
+
+  function flipToWorkspace() {
+    if (!canEdit) return;
+    setUseWorkspace(true);
+  }
+
+  function setDayOpen(idx: number, on: boolean) {
+    setDraft((d) => ({ ...d, [idx]: { ...d[idx], open: on } }));
+  }
+  function setDayTime(idx: number, field: "start" | "end", v: string) {
+    setDraft((d) => ({ ...d, [idx]: { ...d[idx], [field]: v } }));
+  }
+
+  // Dirty detection — either the toggle changed, OR the custom draft
+  // changed while in custom mode.
+  const draftChanged = React.useMemo(() => {
+    for (const { idx } of SCHEDULE_DAYS) {
+      const a = draft[idx];
+      const b = baseline[idx];
+      if (a.open !== b.open) return true;
+      if (a.open) {
+        if (a.start !== b.start) return true;
+        if (a.end !== b.end) return true;
+      }
+    }
+    return false;
+  }, [draft, baseline]);
+
+  const dirty =
+    useWorkspace !== savedUseWorkspace ||
+    (!useWorkspace && draftChanged);
+
+  async function save() {
+    if (!canEdit || !dirty) return;
+    setSaving(true);
+    try {
+      let rulesPayload: WeeklyRule[] = [];
+      if (!useWorkspace) {
+        // Validate start < end on open days.
+        for (const { idx, label } of SCHEDULE_DAYS) {
+          const day = draft[idx];
+          if (day.open && !(day.start < day.end)) {
+            toast(`${label}: start must be before end`, "error");
+            setSaving(false);
+            return;
+          }
+        }
+        rulesPayload = draftToRules(draft);
+      }
+      const res = await fetch(`/api/availability?userId=${staffUserId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rules: rulesPayload }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d?.error ?? "Save failed");
+      setBaseline(useWorkspace ? rulesToDraft([]) : { ...draft });
+      setSavedUseWorkspace(useWorkspace);
+      onSaved(rulesPayload);
+      toast(useWorkspace ? "Now using workspace hours" : "Custom schedule saved", "success");
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Save failed", "error");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  // ── Derived state chips ────────────────────────────────────────
+  const wsHasAny = workspaceHours
+    ? SCHEDULE_DAYS.some((d) => {
+        const v = workspaceHours[String(d.idx) as keyof WorkspaceHoursMap];
+        return v && typeof v === "object";
+      })
+    : false;
+
+  const effective = useWorkspace
+    ? workspaceHours
+      ? workspaceHoursToDraft(workspaceHours)
+      : null
+    : draft;
+  const openDays = effective
+    ? SCHEDULE_DAYS.filter((d) => effective[d.idx]?.open).length
+    : 0;
+  const hasWeekend = effective
+    ? Boolean(effective[0]?.open || effective[6]?.open)
+    : false;
+  const limited = openDays > 0 && openDays < 5;
+
+  return (
+    <div className="space-y-4 pb-24">
+      {/* Mode card — workspace-vs-custom toggle */}
+      <PremiumCard className="p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-[10px] font-semibold uppercase tracking-[0.10em] text-brand-accent">
+              Schedule source
+            </div>
+            <h3 className="mt-0.5 text-[14px] font-semibold tracking-tight text-ink">
+              {useWorkspace ? "Using workspace default hours" : "Custom availability"}
+            </h3>
+            <p className="mt-0.5 text-[11.5px] leading-relaxed text-ink-muted">
+              {useWorkspace
+                ? "Inherits the tenant-wide weekly schedule. Per-date overrides (vacations, custom days) still apply on top."
+                : "Editable per-day rules. Per-date overrides still apply on top."}
+            </p>
+          </div>
+          <ScheduleSourceToggle
+            on={useWorkspace}
+            onWorkspace={flipToWorkspace}
+            onCustom={flipToCustom}
+            disabled={!canEdit || saving}
+          />
+        </div>
+
+        {/* Intelligence chips */}
+        <div className="mt-3 flex flex-wrap items-center gap-1.5">
+          <ScheduleStateChip
+            label={useWorkspace ? "Using workspace hours" : "Custom availability"}
+            tone={useWorkspace ? "neutral" : "brand"}
+          />
+          {openDays > 0 && (
+            <ScheduleStateChip
+              label={`${openDays} day${openDays === 1 ? "" : "s"} open`}
+              tone="positive"
+            />
+          )}
+          {limited && (
+            <ScheduleStateChip label="Limited weekly coverage" tone="warning" />
+          )}
+          {hasWeekend && (
+            <ScheduleStateChip label="Weekend availability" tone="violet" />
+          )}
+          {useWorkspace && !wsHasAny && workspaceLoaded && (
+            <ScheduleStateChip label="Workspace hours not configured" tone="warning" />
+          )}
+        </div>
+      </PremiumCard>
+
+      {/* When inheriting — show the resolved preview */}
+      {useWorkspace && workspaceLoaded && workspaceHours && (
+        <PremiumCard className="p-4">
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <div className="text-[10px] font-semibold uppercase tracking-[0.10em] text-brand-accent">
+                Inherited from workspace
+              </div>
+              <h4 className="mt-0.5 text-[13px] font-semibold tracking-tight text-ink">
+                What this staff currently sees
+              </h4>
+            </div>
+            {canEdit && wsHasAny && (
+              <Link
+                href="/dashboard/settings/workspace-hours"
+                className="inline-flex items-center gap-1 text-[11.5px] font-medium text-brand-accent hover:underline"
+              >
+                Edit workspace hours
+                <ArrowUpRight className="h-3 w-3" strokeWidth={2} />
+              </Link>
+            )}
+          </div>
+          <InheritedPreview hours={workspaceHours} />
+          {!wsHasAny && (
+            <div className="mt-2 rounded-lg border border-dashed border-amber-300/50 bg-amber-50/40 px-3 py-2 text-[11.5px] text-amber-900">
+              No workspace hours configured. Staff inheriting will produce zero
+              bookable slots until either workspace defaults are set or this staff
+              switches to a custom schedule.
+            </div>
+          )}
+        </PremiumCard>
+      )}
+
+      {/* When custom — editable per-day */}
+      {!useWorkspace && (
+        <PremiumCard className="p-4">
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <div className="text-[10px] font-semibold uppercase tracking-[0.10em] text-brand-accent">
+                Custom weekly schedule
+              </div>
+              <h4 className="mt-0.5 text-[13px] font-semibold tracking-tight text-ink">
+                This staff&rsquo;s availability
+              </h4>
+            </div>
+          </div>
+          <div className="mt-3 space-y-2">
+            {SCHEDULE_DAYS.map(({ idx, label }) => {
+              const day = draft[idx];
+              return (
+                <div
+                  key={idx}
+                  className={cn(
+                    "group flex items-center gap-3 rounded-xl border bg-surface px-3.5 py-2.5 transition-all duration-[220ms] ease-[cubic-bezier(0.16,1,0.3,1)]",
+                    day.open
+                      ? "border-border hover:border-border-strong"
+                      : "border-border/60 bg-surface-inset/30",
+                  )}
+                >
+                  <DayPillToggle
+                    on={day.open}
+                    onChange={(on) => setDayOpen(idx, on)}
+                    disabled={!canEdit || saving}
+                  />
+                  <div className="w-24 shrink-0 text-[13px] font-medium text-ink">
+                    {label}
+                  </div>
+                  {day.open ? (
+                    <div className="flex flex-1 flex-wrap items-center gap-2">
+                      <DayTimeInput
+                        value={day.start}
+                        onChange={(v) => setDayTime(idx, "start", v)}
+                        disabled={!canEdit || saving}
+                      />
+                      <span className="text-[12px] text-ink-subtle">–</span>
+                      <DayTimeInput
+                        value={day.end}
+                        onChange={(v) => setDayTime(idx, "end", v)}
+                        disabled={!canEdit || saving}
+                      />
+                    </div>
+                  ) : (
+                    <div className="flex-1 text-[11.5px] uppercase tracking-[0.10em] text-ink-subtle">
+                      Off
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </PremiumCard>
+      )}
+
+      {/* Future scaffolds — calm placeholders for v2 layers */}
+      <PremiumCard className="p-4">
+        <div className="text-[10px] font-semibold uppercase tracking-[0.10em] text-brand-accent">
+          v2 scheduling layer
+        </div>
+        <h3 className="mt-0.5 text-[14px] font-semibold tracking-tight text-ink">Coming soon</h3>
+        <p className="mt-0.5 text-[11.5px] text-ink-muted">
+          Deeper scheduling primitives layer in cleanly on top of this hierarchy.
+        </p>
+        <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <ScaffoldModule icon={Workflow} title="Department defaults" caption="Department-level fallback between workspace and staff." />
+          <ScaffoldModule icon={Layers} title="Service-specific hours" caption="Different availability per service for the same staff." />
+          <ScaffoldModule icon={CalendarRange} title="Split shifts" caption="Multiple windows per day, e.g. 9–12 + 1–5." />
+          <ScaffoldModule icon={Activity} title="Rotating schedules" caption="Bi-weekly or n-week rotation patterns." />
+          <ScaffoldModule icon={CalendarDays} title="Seasonal schedules" caption="Switch hours by date range — summer, holiday season." />
+          <ScaffoldModule icon={Clock} title="Timezone-based routing" caption="Route to staff whose timezone matches the customer." />
+        </div>
+      </PremiumCard>
+
+      {/* Save bar */}
+      {canEdit && (
+        <div
+          className={cn(
+            "pointer-events-none sticky bottom-0 left-0 right-0 -mx-5 mt-3 flex translate-y-2 items-center justify-between gap-3 border-t border-border bg-surface/95 px-5 py-3 opacity-0 shadow-[0_-10px_24px_rgba(15,23,42,0.06)] backdrop-blur transition-all duration-[260ms] ease-[cubic-bezier(0.16,1,0.3,1)]",
+            dirty && "pointer-events-auto translate-y-0 opacity-100",
+          )}
+          aria-hidden={!dirty}
+        >
+          <span className="text-[12px] text-ink-muted">
+            <Pencil className="mr-1 inline-block h-3 w-3 text-brand-accent" strokeWidth={2} />
+            {useWorkspace ? "Switching to workspace hours" : "Unsaved custom schedule"}
+          </span>
+          <Button onClick={save} size="sm" disabled={saving || !dirty}>
+            {saving ? "Saving…" : "Save schedule"}
+          </Button>
+        </div>
+      )}
+
+      {!canEdit && (
+        <p className="text-center text-[11.5px] text-ink-subtle">
+          Read-only. Admins and managers can edit workforce schedules.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function ScheduleSourceToggle({
+  on,
+  onWorkspace,
+  onCustom,
+  disabled,
+}: {
+  on: boolean;
+  onWorkspace: () => void;
+  onCustom: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <span className="inline-flex shrink-0 rounded-full bg-surface-inset p-0.5 ring-1 ring-border/40">
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={onWorkspace}
+        className={cn(
+          "rounded-full px-3 py-1 text-[11px] font-semibold transition-all duration-[220ms] ease-[cubic-bezier(0.16,1,0.3,1)]",
+          on ? "bg-surface text-ink shadow-[0_1px_3px_rgba(15,23,42,0.08)]" : "text-ink-subtle hover:text-ink",
+          disabled && "opacity-50",
+        )}
+      >
+        Workspace
+      </button>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={onCustom}
+        className={cn(
+          "rounded-full px-3 py-1 text-[11px] font-semibold transition-all duration-[220ms] ease-[cubic-bezier(0.16,1,0.3,1)]",
+          !on ? "bg-surface text-ink shadow-[0_1px_3px_rgba(15,23,42,0.08)]" : "text-ink-subtle hover:text-ink",
+          disabled && "opacity-50",
+        )}
+      >
+        Custom
+      </button>
+    </span>
+  );
+}
+
+function ScheduleStateChip({
+  label,
+  tone,
+}: {
+  label: string;
+  tone: "neutral" | "brand" | "positive" | "warning" | "violet";
+}) {
+  const cls =
+    tone === "brand" ? "bg-brand-subtle/70 text-brand-accent ring-brand-accent/15" :
+    tone === "positive" ? "bg-emerald-50/80 text-emerald-700 ring-emerald-300/40" :
+    tone === "warning" ? "bg-amber-50/80 text-amber-800 ring-amber-200/40" :
+    tone === "violet" ? "bg-violet-50/80 text-violet-700 ring-violet-300/40" :
+    "bg-surface-inset text-ink-muted ring-border/50";
+  return (
+    <span className={cn("inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10.5px] font-semibold uppercase tracking-[0.06em] ring-1", cls)}>
+      {label}
+    </span>
+  );
+}
+
+function InheritedPreview({ hours }: { hours: WorkspaceHoursMap }) {
+  return (
+    <div className="mt-3 space-y-1.5">
+      {SCHEDULE_DAYS.map(({ idx, label }) => {
+        const v = hours[String(idx) as keyof WorkspaceHoursMap];
+        const open = v && typeof v === "object";
+        return (
+          <div
+            key={idx}
+            className="flex items-center justify-between rounded-lg border border-border/60 bg-surface px-3 py-2 text-[12.5px]"
+          >
+            <span className="w-24 font-medium text-ink">{label}</span>
+            {open ? (
+              <span className="tabular-nums text-ink-muted">
+                {v.start} – {v.end}
+              </span>
+            ) : (
+              <span className="text-[10.5px] uppercase tracking-[0.10em] text-ink-subtle">Closed</span>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function DayPillToggle({
+  on,
+  onChange,
+  disabled,
+}: {
+  on: boolean;
+  onChange: (on: boolean) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={on}
+      disabled={disabled}
+      onClick={() => onChange(!on)}
+      className={cn(
+        "relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors duration-[220ms] ease-[cubic-bezier(0.16,1,0.3,1)] focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-accent/40",
+        on ? "bg-brand-accent" : "bg-surface-inset ring-1 ring-border",
+        disabled && "opacity-50",
+      )}
+    >
+      <span
+        aria-hidden
+        className={cn(
+          "inline-block h-4 w-4 transform rounded-full bg-white shadow-[0_1px_3px_rgba(15,23,42,0.20)] transition-transform duration-[220ms] ease-[cubic-bezier(0.16,1,0.3,1)]",
+          on ? "translate-x-[18px]" : "translate-x-0.5",
+        )}
+      />
+    </button>
+  );
+}
+
+function DayTimeInput({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-2 py-1.5">
+      <Clock className="h-3 w-3 text-ink-subtle" strokeWidth={2} />
+      <input
+        type="time"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        disabled={disabled}
+        className="border-0 bg-transparent p-0 text-[12.5px] tabular-nums text-ink outline-none disabled:opacity-50"
+      />
+    </span>
   );
 }
 
