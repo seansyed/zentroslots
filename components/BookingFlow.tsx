@@ -32,6 +32,10 @@ type Props = {
    *  staff member; the per-staff slot view limits the surface area of
    *  that mismatch. */
   autoRouted?: boolean;
+  /** Whether the pinned staff member has a connected Google calendar.
+   *  When true the trust strip surfaces a "Real-time calendar sync"
+   *  line — honest signal, only shown when the data backs it. */
+  googleConnected?: boolean;
 };
 
 type Step = "pick-time" | "confirm" | "done";
@@ -47,6 +51,7 @@ export default function BookingFlow({
   accentColor,
   tenantName,
   autoRouted = false,
+  googleConnected = false,
 }: Props) {
   const accent = accentColor || DEFAULT_ACCENT;
 
@@ -59,6 +64,12 @@ export default function BookingFlow({
   const [slots, setSlots] = useState<string[]>([]);
   const [loadingSlots, setLoadingSlots] = useState(false);
   const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
+  // Phase 14A — empty-availability recovery. When the selected day
+  // returns no slots, a background scan iterates the next 7 days
+  // through the existing /api/slots endpoint and surfaces the next
+  // available date + first slot so the customer doesn't bounce.
+  const [nextAvailable, setNextAvailable] = useState<{ date: string; slotIso: string } | null>(null);
+  const [scanningNext, setScanningNext] = useState(false);
 
   const [step, setStep] = useState<Step>("pick-time");
   const [clientName, setClientName] = useState("");
@@ -121,6 +132,7 @@ export default function BookingFlow({
     let cancelled = false;
     setLoadingSlots(true);
     setSelectedSlot(null);
+    setNextAvailable(null); // reset recovery state when date changes
 
     const url = new URL("/api/slots", window.location.origin);
     url.searchParams.set("serviceId", serviceId);
@@ -139,6 +151,62 @@ export default function BookingFlow({
 
     return () => { cancelled = true; };
   }, [serviceId, staffId, date, tz]);
+
+  // Empty-availability recovery scan. Runs only when the current day
+  // came back with 0 slots; iterates the next 7 days serially and
+  // stops at the first non-empty result. Honors the same date-disable
+  // rules so we don't suggest a blackout date.
+  useEffect(() => {
+    if (loadingSlots) return;
+    if (slots.length > 0) return;
+    if (scanningNext) return;
+    if (nextAvailable) return;
+
+    let cancelled = false;
+    setScanningNext(true);
+
+    (async () => {
+      const isoFmt = new Intl.DateTimeFormat("en-CA", {
+        timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit",
+      });
+      const baseDate = new Date(date + "T12:00:00");
+      for (let i = 1; i <= 7; i++) {
+        if (cancelled) return;
+        const probe = new Date(baseDate);
+        probe.setDate(probe.getDate() + i);
+        const iso = isoFmt.format(probe);
+        if (isDateDisabled(iso)) continue;
+
+        try {
+          const u = new URL("/api/slots", window.location.origin);
+          u.searchParams.set("serviceId", serviceId);
+          u.searchParams.set("staffUserId", staffId);
+          u.searchParams.set("date", iso);
+          u.searchParams.set("timezone", tz);
+          const res = await fetch(u);
+          if (!res.ok) continue;
+          const data = await res.json();
+          const next: string[] = Array.isArray(data.slots) ? data.slots : [];
+          if (next.length > 0) {
+            if (!cancelled) {
+              setNextAvailable({ date: iso, slotIso: next[0] });
+            }
+            return;
+          }
+        } catch {
+          /* swallow — continue probing */
+        }
+      }
+      if (!cancelled) setNextAvailable(null);
+    })().finally(() => { if (!cancelled) setScanningNext(false); });
+
+    return () => { cancelled = true; };
+    // We intentionally exclude isDateDisabled from deps — it's stable
+    // across renders within a date's slot fetch window. Including it
+    // would cause rescans when rules state mutates after the initial
+    // fetch settles.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadingSlots, slots.length, serviceId, staffId, date, tz, scanningNext, nextAvailable]);
 
   async function submit() {
     if (!selectedSlot) return;
@@ -359,7 +427,7 @@ export default function BookingFlow({
   return (
     <section className="mt-8">
       {/* Trust strip — operational reassurance, very subtle */}
-      <TrustStrip tz={tz} autoRouted={autoRouted} />
+      <TrustStrip tz={tz} autoRouted={autoRouted} googleConnected={googleConnected} />
 
       {/* Date strip card */}
       <div className="mt-4 relative overflow-hidden rounded-3xl border border-slate-200 bg-white p-5 shadow-[0_4px_18px_rgba(15,23,42,0.04)] sm:p-6">
@@ -486,9 +554,22 @@ export default function BookingFlow({
                 </div>
                 <div className="text-[13px] font-medium text-slate-700">No times available on this day</div>
                 <div className="mt-1 text-[12px] text-slate-500">
-                  Try another date above &mdash; or join the waitlist below.
+                  Try another date above &mdash; or jump to the next opening below.
                 </div>
               </div>
+
+              {/* Next available recovery — surfaces the next non-empty
+                  day discovered by the background scan. Click jumps the
+                  date strip to that day; the slot grid then refreshes
+                  naturally through the existing fetch effect. */}
+              <NextAvailableTile
+                scanning={scanningNext}
+                next={nextAvailable}
+                tz={tz}
+                accent={accent}
+                onJump={(iso) => setDate(iso)}
+              />
+
               <WaitlistJoinTile
                 serviceId={serviceId}
                 preferredDate={date}
@@ -645,7 +726,15 @@ export default function BookingFlow({
 
 // ─── Trust strip ────────────────────────────────────────────────────────
 
-function TrustStrip({ tz, autoRouted }: { tz: string; autoRouted: boolean }) {
+function TrustStrip({
+  tz,
+  autoRouted,
+  googleConnected,
+}: {
+  tz: string;
+  autoRouted: boolean;
+  googleConnected: boolean;
+}) {
   return (
     <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1.5 text-[11px] text-slate-500">
       <span className="inline-flex items-center gap-1.5">
@@ -660,12 +749,108 @@ function TrustStrip({ tz, autoRouted }: { tz: string; autoRouted: boolean }) {
         <GlobeGlyph />
         Timezone auto-adjusted
       </span>
+      {googleConnected && (
+        <span className="inline-flex items-center gap-1.5 text-emerald-700">
+          <span aria-hidden className="relative inline-flex h-1.5 w-1.5">
+            <span className="absolute inset-0 animate-ping rounded-full bg-emerald-400/55" />
+            <span className="relative h-1.5 w-1.5 rounded-full bg-emerald-500" />
+          </span>
+          Real-time calendar sync
+        </span>
+      )}
       {autoRouted && (
         <span className="inline-flex items-center gap-1.5">
           <CheckGlyph />
           Routed to next available
         </span>
       )}
+    </div>
+  );
+}
+
+// ─── Next available recovery tile ──────────────────────────────────
+// Surfaced inside the empty-slot state. Shows the next non-empty
+// date+time found by the background scan, with a one-click jump.
+// Calm tone — no pressure, no marketing. If the scan is still
+// running we show a soft skeleton; if no opening was found within
+// the 7-day window we hide entirely (the waitlist tile below is the
+// next-best path in that case).
+
+function NextAvailableTile({
+  scanning,
+  next,
+  tz,
+  accent,
+  onJump,
+}: {
+  scanning: boolean;
+  next: { date: string; slotIso: string } | null;
+  tz: string;
+  accent: string;
+  onJump: (iso: string) => void;
+}) {
+  if (scanning && !next) {
+    return (
+      <div className="relative overflow-hidden rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_1px_3px_rgba(15,23,42,0.04)]">
+        <div className="flex items-center gap-3">
+          <div className="h-9 w-9 shrink-0 animate-pulse rounded-xl bg-slate-100" />
+          <div className="min-w-0 flex-1 space-y-1.5">
+            <div className="h-3 w-1/3 animate-pulse rounded bg-slate-100" />
+            <div className="h-3 w-2/3 animate-pulse rounded bg-slate-100" />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!next) return null;
+
+  const dateLabel = formatInTimeZone(
+    new Date(next.date + "T12:00:00"),
+    tz,
+    "EEEE, MMMM d"
+  );
+  const timeLabel = formatInTimeZone(next.slotIso, tz, "h:mm a");
+
+  return (
+    <div
+      className="relative overflow-hidden rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_4px_18px_rgba(15,23,42,0.04)] transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:shadow-[0_10px_28px_rgba(15,23,42,0.08)]"
+    >
+      <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-emerald-200/80 to-transparent" />
+      <div className="flex items-center gap-3">
+        <div
+          className="flex h-10 w-10 shrink-0 flex-col items-center justify-center rounded-xl text-white shadow-[0_4px_12px_rgba(16,185,129,0.30)]"
+          style={{ backgroundColor: "#10b981" }}
+          aria-hidden
+        >
+          <span className="text-[10px] font-semibold uppercase tracking-wider opacity-90">
+            {formatInTimeZone(new Date(next.date + "T12:00:00"), tz, "MMM")}
+          </span>
+          <span className="text-[15px] font-semibold leading-none">
+            {formatInTimeZone(new Date(next.date + "T12:00:00"), tz, "d")}
+          </span>
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="text-[10px] font-semibold uppercase tracking-[0.10em] text-emerald-700">
+            Next available
+          </div>
+          <div className="mt-0.5 text-[13.5px] font-semibold tracking-tight text-slate-900">
+            {dateLabel}
+          </div>
+          <div className="text-[12px] text-slate-600">
+            <span className="tabular-nums font-medium text-slate-800">{timeLabel}</span> and later
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => onJump(next.date)}
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-xl px-3 py-2 text-[12.5px] font-semibold text-white shadow-[0_4px_12px_rgba(15,23,42,0.15)] transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:shadow-[0_8px_20px_rgba(15,23,42,0.20)]"
+          style={{ backgroundColor: accent }}
+        >
+          See times
+          <span aria-hidden>→</span>
+        </button>
+      </div>
     </div>
   );
 }
