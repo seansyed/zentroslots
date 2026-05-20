@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/primitives";
 import { AdminShell } from "../_shell";
 
 export const metadata = { title: "Tenants — Super admin" };
+export const dynamic = "force-dynamic";
 
 const PLAN_TONES: Record<string, "green" | "blue" | "amber" | "neutral"> = {
   free: "neutral",

@@ -6,6 +6,10 @@ import { AdminShell } from "../_shell";
 import PlansClient from "./PlansClient";
 
 export const metadata = { title: "Plans — Super admin" };
+// Force dynamic — admin pages read live DB on every request and
+// must not be prerendered at build time. Avoids coupling builds to
+// DB reachability + matches the page's actual SSR semantics.
+export const dynamic = "force-dynamic";
 
 export default async function AdminPlansPage() {
   const rows = await db

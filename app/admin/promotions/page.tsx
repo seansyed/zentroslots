@@ -6,6 +6,9 @@ import { AdminShell } from "../_shell";
 import PromotionsClient from "./PromotionsClient";
 
 export const metadata = { title: "Promotions — Super admin" };
+// Force dynamic — admin pages read live DB on every request and
+// must not be prerendered at build time.
+export const dynamic = "force-dynamic";
 
 export default async function AdminPromotionsPage() {
   const rows = await db.select().from(promotions).orderBy(desc(promotions.createdAt));

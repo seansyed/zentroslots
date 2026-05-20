@@ -8,6 +8,7 @@ import Shell from "@/components/dashboard/Shell";
 import { Badge } from "@/components/ui/primitives";
 
 export const metadata = { title: "Internal admin" };
+export const dynamic = "force-dynamic";
 
 export default async function AdminPage() {
   const session = await getSession();

@@ -9,6 +9,7 @@ import { AdminShell } from "../../_shell";
 import TenantActions from "./TenantActions";
 
 export const metadata = { title: "Tenant — Super admin" };
+export const dynamic = "force-dynamic";
 
 const TABS = [
   { slug: "overview", label: "Overview" },

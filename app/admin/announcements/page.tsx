@@ -6,6 +6,7 @@ import { AdminShell } from "../_shell";
 import AnnouncementsClient from "./AnnouncementsClient";
 
 export const metadata = { title: "Announcements — Super admin" };
+export const dynamic = "force-dynamic";
 
 export default async function AdminAnnouncementsPage() {
   const rows = await db.select().from(announcements).orderBy(desc(announcements.publishedAt));

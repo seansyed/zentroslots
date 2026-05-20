@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/primitives";
 import { AdminShell } from "../_shell";
 
 export const metadata = { title: "Subscriptions — Super admin" };
+export const dynamic = "force-dynamic";
 
 // Subscription "buckets" — small set of operationally useful filters.
 const FILTERS = [
