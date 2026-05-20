@@ -147,7 +147,7 @@ function buildNav(
       : []),
     { label: "Working hours", href: "/dashboard/availability",            icon: Clock },
     { label: "Overrides",     href: "/dashboard/availability/overrides",  icon: Flag },
-    { label: "Calendar sync", href: "/dashboard/settings/calendar",       icon: CalendarSync },
+    { label: "Calendar infrastructure", href: "/dashboard/settings/calendar", icon: CalendarSync },
   ];
 
   const workspace: Item[] = [
