@@ -153,6 +153,7 @@ export default function StaffClient({
   const [rows, setRows] = React.useState<StaffRow[] | null>(null);
   const [openId, setOpenId] = React.useState<string | null>(null);
   const [inviteOpen, setInviteOpen] = React.useState(false);
+  const [addStaffOpen, setAddStaffOpen] = React.useState(false);
   const [capacityOpen, setCapacityOpen] = React.useState(false);
   const [overviewOpen, setOverviewOpen] = React.useState(false);
   const [seats, setSeats] = React.useState<SeatsSnapshot | null>(null);
@@ -190,21 +191,31 @@ export default function StaffClient({
     refetchSeats();
   }, [refetchSeats, rows]);
 
-  // Centralized "Add staff" trigger — gates seat capacity client-side
-  // (the server still enforces via assertCanAddStaff at signup time).
+  // Seat-aware modal openers. Both check availability the same way
+  // (the server still enforces via assertCanAddStaff at signup time)
+  // but route to genuinely different surfaces:
+  //
+  //   handleAddStaffClick    → AddStaffModal (operational provisioning)
+  //   handleInviteClick      → InviteTeammateModal (collaborative)
+  //
   // If seats are unknown yet (initial load), we err on the side of
-  // opening the invite modal so the UX doesn't stall.
-  const handleAddStaffClick = React.useCallback(() => {
-    if (!seats) {
-      setInviteOpen(true);
-      return;
-    }
-    if (seats.unlimited || seats.availableSeats === null || seats.availableSeats > 0) {
-      setInviteOpen(true);
-    } else {
-      setCapacityOpen(true);
-    }
+  // opening the requested flow so the UX doesn't stall.
+  const hasAvailableSeats = React.useCallback((): boolean => {
+    if (!seats) return true;
+    if (seats.unlimited) return true;
+    if (seats.availableSeats === null) return true;
+    return seats.availableSeats > 0;
   }, [seats]);
+
+  const handleAddStaffClick = React.useCallback(() => {
+    if (hasAvailableSeats()) setAddStaffOpen(true);
+    else setCapacityOpen(true);
+  }, [hasAvailableSeats]);
+
+  const handleInviteClick = React.useCallback(() => {
+    if (hasAvailableSeats()) setInviteOpen(true);
+    else setCapacityOpen(true);
+  }, [hasAvailableSeats]);
 
   // ── Derived metrics ────────────────────────────────────────────
   const metrics = React.useMemo(() => {
@@ -278,7 +289,8 @@ export default function StaffClient({
       <FadeIn>
         <StaffHero
           isAdmin={isAdmin}
-          onInvite={handleAddStaffClick}
+          onAddStaff={handleAddStaffClick}
+          onInvite={handleInviteClick}
           seats={seats}
           onOpenCapacityOverview={() => setOverviewOpen(true)}
         />
@@ -328,7 +340,7 @@ export default function StaffClient({
                 ))}
               </div>
             ) : rows.length === 0 ? (
-              <PremiumEmptyState onInvite={handleAddStaffClick} />
+              <PremiumEmptyState onAddStaff={handleAddStaffClick} onInvite={handleInviteClick} />
             ) : (filtered ?? []).length === 0 ? (
               <FilteredEmpty onClear={() => { setQ(""); setRoleFilter("all"); setWorkloadFilter("all"); }} />
             ) : (
@@ -357,11 +369,21 @@ export default function StaffClient({
         canChangeRoles={canChangeRoles}
       />
 
-      <InviteStaffModal
+      <AddStaffModal
+        open={addStaffOpen}
+        onClose={() => setAddStaffOpen(false)}
+        tenantSlug={tenantSlug ?? null}
+        tenantName={tenantName ?? null}
+        allServices={allServices}
+        canChangeRoles={canChangeRoles}
+      />
+
+      <InviteTeammateModal
         open={inviteOpen}
         onClose={() => setInviteOpen(false)}
         tenantSlug={tenantSlug ?? null}
         tenantName={tenantName ?? null}
+        canChangeRoles={canChangeRoles}
       />
 
       <CapacityReachedModal
@@ -387,11 +409,13 @@ export default function StaffClient({
 
 function StaffHero({
   isAdmin,
+  onAddStaff,
   onInvite,
   seats,
   onOpenCapacityOverview,
 }: {
   isAdmin: boolean;
+  onAddStaff: () => void;
   onInvite: () => void;
   seats: SeatsSnapshot | null;
   onOpenCapacityOverview: () => void;
@@ -453,7 +477,7 @@ function StaffHero({
           <div className="flex flex-wrap items-center gap-1.5">
             <HeroAction href="/dashboard/services" icon={Layers} label="Assign services" tone="ghost" />
             <HeroAction onClick={onInvite} icon={Mail} label="Invite teammate" tone="ghost" />
-            <HeroAction onClick={onInvite} icon={UserPlus} label="Add staff" tone="primary" />
+            <HeroAction onClick={onAddStaff} icon={UserPlus} label="Add staff" tone="primary" />
           </div>
         )}
       </div>
@@ -919,7 +943,13 @@ function SectionHead({
 
 // ─── Premium empty state ───────────────────────────────────────────
 
-function PremiumEmptyState({ onInvite }: { onInvite: () => void }) {
+function PremiumEmptyState({
+  onAddStaff,
+  onInvite,
+}: {
+  onAddStaff: () => void;
+  onInvite: () => void;
+}) {
   return (
     <PremiumCard
       interactive={false}
@@ -953,7 +983,7 @@ function PremiumEmptyState({ onInvite }: { onInvite: () => void }) {
         <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
           <button
             type="button"
-            onClick={onInvite}
+            onClick={onAddStaff}
             className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover px-3 text-[12.5px] font-semibold text-white shadow-[0_6px_16px_rgba(53,157,243,0.35)] transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:shadow-[0_10px_24px_rgba(53,157,243,0.45)]"
           >
             <UserPlus className="h-3.5 w-3.5" strokeWidth={2} />
@@ -1922,178 +1952,573 @@ function CapacityRow({
   );
 }
 
-// ─── Invite Staff Modal ────────────────────────────────────────────
+// ─── Honest scope on these two flows ───────────────────────────────
 //
-// There is no in-app create-staff flow today. Staff are added by
-// having them sign up at /dashboard/login (signup mode) under the
-// tenant's workspace slug — see app/dashboard/login/page.tsx. This
-// modal explains that calmly and surfaces the share-able sign-up
-// URL + a copy-to-clipboard helper so admins can hand it off in
-// any messaging channel they prefer.
+// There is no admin-callable "create staff" backend endpoint today.
+// `/api/auth/signup` exists but sets a session cookie on the caller's
+// browser — calling it from an admin's session would log the admin
+// OUT and log them IN as the new staff. Until a true admin-provisioning
+// endpoint lands, BOTH flows ultimately route through the public
+// sign-up at /dashboard/login.
 //
-// This is the safe placeholder behavior called for by the routing
-// fix: we don't route to a dead URL, we don't promise a workflow
-// that doesn't exist, and we give the admin an actionable next step.
+// What is genuinely different between the two surfaces is the
+// INFORMATION the admin collects, the SHAPE of the outgoing
+// communication, and the TONE of the workflow. AddStaff = operational
+// provisioning checklist (role, services, notes) handed off as a
+// detailed onboarding email. InviteTeammate = lightweight invitation
+// with optional welcome message.
 
-function InviteStaffModal({
+// ─── helpers reused across both modals ─────────────────────────────
+
+function useSignupShareUrl(): string {
+  return React.useMemo(() => {
+    if (typeof window === "undefined") return "";
+    return `${window.location.origin}/dashboard/login`;
+  }, []);
+}
+
+async function copyToClipboard(value: string, label = "Copied to clipboard"): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(value);
+    toast(label, "success");
+    return true;
+  } catch {
+    toast("Could not copy — please copy manually", "error");
+    return false;
+  }
+}
+
+function initialsFromName(name: string): string {
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((s) => s[0]!)
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
+}
+
+// ─── Add Staff Modal — operational provisioning ────────────────────
+//
+// Dense workforce-provisioning form. Admin captures the teammate's
+// full profile (name, email, role, service assignments, internal
+// notes), then composes a detailed onboarding email + clipboard
+// handoff bundle. Pre-existing service assignments are recorded
+// locally so the admin can confirm them on the staff profile once
+// the teammate signs up.
+
+function AddStaffModal({
   open,
   onClose,
   tenantSlug,
   tenantName,
+  allServices,
+  canChangeRoles,
 }: {
   open: boolean;
   onClose: () => void;
   tenantSlug: string | null;
   tenantName: string | null;
+  allServices: ServiceItem[];
+  canChangeRoles: boolean;
 }) {
-  const [copied, setCopied] = React.useState<"link" | "slug" | null>(null);
+  const shareUrl = useSignupShareUrl();
+  const [name, setName] = React.useState("");
+  const [email, setEmail] = React.useState("");
+  const [role, setRole] = React.useState<"staff" | "manager">("staff");
+  const [selectedServices, setSelectedServices] = React.useState<Set<string>>(new Set());
+  const [notes, setNotes] = React.useState("");
 
-  const shareUrl = React.useMemo(() => {
-    if (typeof window === "undefined") return "";
-    const origin = window.location.origin;
-    return `${origin}/dashboard/login`;
-  }, []);
-
-  async function copy(value: string, which: "link" | "slug") {
-    try {
-      await navigator.clipboard.writeText(value);
-      setCopied(which);
-      toast("Copied to clipboard", "success");
-      setTimeout(() => setCopied((c) => (c === which ? null : c)), 1800);
-    } catch {
-      toast("Could not copy — please copy manually", "error");
+  // Reset form when modal closes
+  React.useEffect(() => {
+    if (!open) {
+      // small timeout so the closing animation doesn't show the reset
+      const t = setTimeout(() => {
+        setName(""); setEmail(""); setRole("staff");
+        setSelectedServices(new Set()); setNotes("");
+      }, 200);
+      return () => clearTimeout(t);
     }
+  }, [open]);
+
+  const canSubmit = name.trim().length > 0 && /\S+@\S+\.\S+/.test(email);
+
+  function toggleService(sid: string) {
+    setSelectedServices((cur) => {
+      const next = new Set(cur);
+      if (next.has(sid)) next.delete(sid);
+      else next.add(sid);
+      return next;
+    });
+  }
+
+  const assignedServiceNames = React.useMemo(
+    () => allServices.filter((s) => selectedServices.has(s.id)).map((s) => s.name),
+    [allServices, selectedServices],
+  );
+
+  // Compose the operational onboarding email body. Plain-text, calm,
+  // includes a checklist the recipient can follow end-to-end.
+  function buildMailto(): string {
+    const subject = `Operational onboarding${tenantName ? ` — ${tenantName}` : ""}`;
+    const lines: string[] = [
+      `Hi ${name.split(" ")[0] || "there"},`,
+      "",
+      `You've been added to ${tenantName ?? "our workspace"} as a ${role === "manager" ? "manager" : "staff member"}.`,
+      "",
+      `Complete your sign-up here:`,
+      shareUrl,
+      "",
+      `On that page, choose "Create an account", select the "${role === "manager" ? "Staff" : "Staff"}" role,`,
+      `and enter the workspace slug: ${tenantSlug ?? "(your workspace slug)"}`,
+      "",
+    ];
+    if (assignedServiceNames.length > 0) {
+      lines.push("Services you'll be delivering:");
+      assignedServiceNames.forEach((n) => lines.push(`  · ${n}`));
+      lines.push("");
+    }
+    if (notes.trim()) {
+      lines.push("A few notes from your admin:");
+      lines.push(notes.trim());
+      lines.push("");
+    }
+    lines.push("See you in the workspace.");
+
+    return `mailto:${encodeURIComponent(email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(lines.join("\n"))}`;
+  }
+
+  function buildClipboardBundle(): string {
+    const lines: string[] = [
+      `Operational onboarding bundle${tenantName ? ` — ${tenantName}` : ""}`,
+      "",
+      `Name:       ${name.trim() || "(set)"}`,
+      `Email:      ${email.trim() || "(set)"}`,
+      `Role:       ${role === "manager" ? "Manager" : "Staff"}`,
+      `Workspace:  ${tenantSlug ?? "(slug)"}`,
+      `Sign-up:    ${shareUrl}`,
+    ];
+    if (assignedServiceNames.length > 0) {
+      lines.push("");
+      lines.push("Service assignments to confirm after signup:");
+      assignedServiceNames.forEach((n) => lines.push(`  · ${n}`));
+    }
+    if (notes.trim()) {
+      lines.push("");
+      lines.push("Internal notes:");
+      lines.push(notes.trim());
+    }
+    return lines.join("\n");
+  }
+
+  return (
+    <Modal open={open} onClose={onClose} title="Add a staff member">
+      <div className="space-y-4">
+        {/* Eyebrow — operational provisioning */}
+        <div className="flex items-center gap-2">
+          <div className="zm-pulse-glow inline-flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover text-white shadow-[0_4px_10px_rgba(53,157,243,0.30)]">
+            <UserPlus className="h-3.5 w-3.5" strokeWidth={2} />
+          </div>
+          <div>
+            <div className="text-[10px] font-semibold uppercase tracking-[0.10em] text-brand-accent">
+              Operational provisioning
+            </div>
+            <p className="text-[12px] leading-relaxed text-ink-muted">
+              Capture this teammate&rsquo;s profile, assigned services, and any handoff notes — then send their onboarding email.
+            </p>
+          </div>
+        </div>
+
+        {/* Identity row — avatar preview + name + email */}
+        <div className="rounded-2xl border border-border bg-surface p-3.5">
+          <div className="flex items-start gap-3.5">
+            <div className="relative shrink-0">
+              <div
+                className="flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-brand-accent to-brand-hover text-[14px] font-semibold text-white shadow-[0_4px_12px_rgba(53,157,243,0.25)]"
+                aria-hidden
+              >
+                {name.trim() ? initialsFromName(name) : "•"}
+              </div>
+              <span
+                aria-hidden
+                className="absolute -bottom-0.5 -right-0.5 inline-block h-2.5 w-2.5 rounded-full bg-emerald-500 ring-2 ring-surface"
+              />
+            </div>
+            <div className="min-w-0 flex-1 space-y-2.5">
+              <div>
+                <label htmlFor="add-staff-name" className="text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-subtle">
+                  Full name
+                </label>
+                <input
+                  id="add-staff-name"
+                  type="text"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="Riya Anand"
+                  autoComplete="off"
+                  className="mt-1 w-full rounded-lg border border-border bg-surface-inset/30 px-3 py-2 text-[13px] text-ink outline-none transition-all duration-[180ms] focus:border-brand-accent/30 focus:bg-surface focus:ring-2 focus:ring-brand-accent/20"
+                />
+              </div>
+              <div>
+                <label htmlFor="add-staff-email" className="text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-subtle">
+                  Work email
+                </label>
+                <input
+                  id="add-staff-email"
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="riya@example.com"
+                  autoComplete="off"
+                  className="mt-1 w-full rounded-lg border border-border bg-surface-inset/30 px-3 py-2 text-[13px] text-ink outline-none transition-all duration-[180ms] focus:border-brand-accent/30 focus:bg-surface focus:ring-2 focus:ring-brand-accent/20"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Role */}
+        <div>
+          <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-subtle">
+            Role
+          </div>
+          <div className="mt-1.5 inline-flex items-center rounded-lg bg-surface-inset/60 p-0.5">
+            {(canChangeRoles ? (["staff", "manager"] as const) : (["staff"] as const)).map((r) => {
+              const active = r === role;
+              return (
+                <button
+                  key={r}
+                  type="button"
+                  onClick={() => setRole(r)}
+                  className={cn(
+                    "inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[12px] font-medium transition-all duration-[160ms]",
+                    active
+                      ? "bg-surface text-ink shadow-soft ring-1 ring-border"
+                      : "text-ink-muted hover:bg-surface/60 hover:text-ink",
+                  )}
+                >
+                  {r === "manager" ? <Crown className="h-3 w-3" strokeWidth={2} /> : <Users className="h-3 w-3" strokeWidth={2} />}
+                  {r === "manager" ? "Manager" : "Staff"}
+                </button>
+              );
+            })}
+          </div>
+          <p className="mt-1 text-[11px] leading-relaxed text-ink-subtle">
+            {role === "manager"
+              ? "Sees all bookings &amp; manages workspace operations. Consumes a manager seat."
+              : "Delivers services and manages their own schedule. Consumes one operational seat."}
+          </p>
+        </div>
+
+        {/* Services assignment */}
+        {allServices.length > 0 && (
+          <div>
+            <div className="flex items-baseline justify-between">
+              <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-subtle">
+                Service assignments
+              </div>
+              <span className="text-[10px] tabular-nums text-ink-subtle">
+                {selectedServices.size} selected
+              </span>
+            </div>
+            <div className="mt-1.5 max-h-[180px] space-y-1.5 overflow-y-auto rounded-xl border border-border bg-surface-inset/20 p-2">
+              {allServices.map((svc) => {
+                const on = selectedServices.has(svc.id);
+                return (
+                  <label
+                    key={svc.id}
+                    className={cn(
+                      "flex cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[12.5px] transition-all duration-[140ms]",
+                      on ? "bg-surface ring-1 ring-brand-accent/25 shadow-[0_1px_2px_rgba(53,157,243,0.10)]" : "hover:bg-surface/60",
+                    )}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={on}
+                      onChange={() => toggleService(svc.id)}
+                      className="h-3.5 w-3.5 accent-brand-accent"
+                    />
+                    <span
+                      className="inline-block h-2 w-2 rounded-full"
+                      style={{ backgroundColor: svc.color ?? "#94a3b8" }}
+                      aria-hidden
+                    />
+                    <span className="flex-1 text-ink">{svc.name}</span>
+                    <span className="text-[10.5px] text-ink-subtle tabular-nums">{svc.durationMinutes}m</span>
+                  </label>
+                );
+              })}
+            </div>
+            <p className="mt-1 text-[11px] leading-relaxed text-ink-subtle">
+              You&rsquo;ll confirm these assignments on their staff profile once they complete sign-up.
+            </p>
+          </div>
+        )}
+
+        {/* Internal notes */}
+        <div>
+          <label htmlFor="add-staff-notes" className="text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-subtle">
+            Internal notes <span className="text-ink-subtle/70">(optional)</span>
+          </label>
+          <textarea
+            id="add-staff-notes"
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            rows={2}
+            placeholder="Working hours, specialties, anything the teammate should know"
+            className="mt-1 w-full rounded-lg border border-border bg-surface-inset/30 px-3 py-2 text-[12.5px] text-ink outline-none transition-all duration-[180ms] focus:border-brand-accent/30 focus:bg-surface focus:ring-2 focus:ring-brand-accent/20"
+          />
+        </div>
+
+        {/* Scaffold note — honest about backend boundary */}
+        <div className="rounded-xl border border-dashed border-border bg-surface-inset/30 px-3 py-2 text-[11px] leading-relaxed text-ink-subtle">
+          <span className="font-semibold uppercase tracking-wider text-ink-muted">Coming soon &middot; </span>
+          Native one-click provisioning is on the roadmap. Today the onboarding email below is the safe, production-ready handoff.
+        </div>
+
+        {/* Actions */}
+        <div className="flex flex-wrap items-center gap-2 pt-1">
+          <a
+            href={canSubmit ? buildMailto() : undefined}
+            onClick={(e) => {
+              if (!canSubmit) { e.preventDefault(); return; }
+              // small delay so the mailto: handler fires before close
+              setTimeout(onClose, 150);
+            }}
+            aria-disabled={!canSubmit}
+            className={cn(
+              "inline-flex h-9 items-center gap-1.5 rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover px-3 text-[12.5px] font-semibold text-white shadow-[0_6px_16px_rgba(53,157,243,0.35)] transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)]",
+              canSubmit ? "hover:-translate-y-0.5 hover:shadow-[0_10px_24px_rgba(53,157,243,0.45)]" : "cursor-not-allowed opacity-50"
+            )}
+          >
+            <UserPlus className="h-3.5 w-3.5" strokeWidth={2} />
+            Create staff member
+          </a>
+          <button
+            type="button"
+            disabled={!canSubmit}
+            onClick={async () => {
+              const ok = await copyToClipboard(buildClipboardBundle(), "Onboarding bundle copied");
+              if (ok) onClose();
+            }}
+            className={cn(
+              "inline-flex h-9 items-center gap-1.5 rounded-lg border border-border bg-surface px-3 text-[12.5px] font-medium text-ink-muted shadow-soft transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)]",
+              canSubmit ? "hover:-translate-y-0.5 hover:bg-surface-inset hover:text-ink hover:shadow-md" : "cursor-not-allowed opacity-50",
+            )}
+          >
+            <CheckCircle2 className="h-3.5 w-3.5" strokeWidth={1.75} />
+            Copy handoff bundle
+          </button>
+          <button
+            type="button"
+            onClick={onClose}
+            className="ml-auto inline-flex h-9 items-center gap-1.5 rounded-lg px-3 text-[12.5px] font-medium text-ink-subtle transition-colors hover:text-ink"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// ─── Invite Teammate Modal — collaborative onboarding ──────────────
+//
+// Lightweight collaborative invitation. Email + role + optional
+// welcome message. Composes a warm personal email rather than an
+// operational onboarding bundle. Visibly distinct from AddStaffModal
+// in tone, density, and copy.
+
+function InviteTeammateModal({
+  open,
+  onClose,
+  tenantSlug,
+  tenantName,
+  canChangeRoles,
+}: {
+  open: boolean;
+  onClose: () => void;
+  tenantSlug: string | null;
+  tenantName: string | null;
+  canChangeRoles: boolean;
+}) {
+  const shareUrl = useSignupShareUrl();
+  const [email, setEmail] = React.useState("");
+  const [role, setRole] = React.useState<"staff" | "manager">("staff");
+  const [welcome, setWelcome] = React.useState("");
+
+  React.useEffect(() => {
+    if (!open) {
+      const t = setTimeout(() => {
+        setEmail(""); setRole("staff"); setWelcome("");
+      }, 200);
+      return () => clearTimeout(t);
+    }
+  }, [open]);
+
+  const canSend = /\S+@\S+\.\S+/.test(email);
+
+  function buildMailto(): string {
+    const subject = `You're invited to join ${tenantName ?? "our workspace"} on ZentroMeet`;
+    const lines: string[] = [
+      `Hi there,`,
+      "",
+      `I'd love for you to join ${tenantName ?? "our workspace"} on ZentroMeet.`,
+    ];
+    if (welcome.trim()) {
+      lines.push("");
+      lines.push(welcome.trim());
+    }
+    lines.push("");
+    lines.push(`When you're ready, set up your account here:`);
+    lines.push(shareUrl);
+    lines.push("");
+    lines.push(`Choose "Create an account", select the "${role === "manager" ? "Staff" : "Staff"}" role, and enter the workspace slug: ${tenantSlug ?? "(your workspace slug)"}.`);
+    lines.push("");
+    lines.push(`Looking forward to having you on the team.`);
+    return `mailto:${encodeURIComponent(email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(lines.join("\n"))}`;
   }
 
   return (
     <Modal open={open} onClose={onClose} title="Invite a teammate">
       <div className="space-y-4">
-        <p className="text-[13px] leading-relaxed text-ink-muted">
-          Share the sign-up link below with the person you want to invite
-          {tenantName ? (
-            <>
-              {" "}to <span className="font-medium text-ink">{tenantName}</span>
-            </>
-          ) : null}
-          . They&rsquo;ll create their account against your workspace and appear in this directory automatically.
-        </p>
-
-        {/* Operational signal */}
-        <div className="relative overflow-hidden rounded-xl border border-brand-accent/15 bg-brand-subtle/30 p-3">
-          <span
-            aria-hidden
-            className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/55 to-transparent"
-          />
-          <div className="flex items-start gap-2.5">
-            <div className="zm-pulse-glow inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover text-white shadow-[0_4px_10px_rgba(53,157,243,0.30)]">
-              <Sparkles className="h-3.5 w-3.5" strokeWidth={2} />
+        {/* Workspace branding badge */}
+        <div className="relative overflow-hidden rounded-2xl border border-border bg-gradient-to-br from-brand-subtle/40 via-surface to-surface p-3.5">
+          <span aria-hidden className="pointer-events-none absolute -right-12 -top-12 h-32 w-32 rounded-full bg-brand-accent/12 blur-3xl" />
+          <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/60 to-transparent" />
+          <div className="relative flex items-center gap-3">
+            <div className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-brand-accent to-brand-hover text-white shadow-[0_4px_12px_rgba(53,157,243,0.25)]">
+              <Mail className="h-4 w-4" strokeWidth={1.75} />
             </div>
             <div className="min-w-0">
               <div className="text-[10px] font-semibold uppercase tracking-[0.10em] text-brand-accent">
-                Operational invite
+                Collaborative invitation
               </div>
-              <p className="mt-0.5 text-[12px] leading-relaxed text-ink-muted">
-                Native in-app invitations are being prepared. Until then, the shareable sign-up link is the safe, production-ready path.
-              </p>
+              <div className="mt-0.5 truncate text-[13px] font-semibold tracking-tight text-ink">
+                {tenantName ?? "Your workspace"}
+                {tenantSlug ? <span className="ml-1.5 text-[11px] font-normal text-ink-subtle">/ {tenantSlug}</span> : null}
+              </div>
             </div>
           </div>
         </div>
 
-        {/* Sign-up link */}
+        {/* Email */}
+        <div>
+          <label htmlFor="invite-email" className="text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-subtle">
+            Their email
+          </label>
+          <input
+            id="invite-email"
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="teammate@example.com"
+            autoComplete="off"
+            autoFocus
+            className="mt-1 w-full rounded-lg border border-border bg-surface px-3 py-2 text-[13.5px] text-ink outline-none transition-all duration-[180ms] focus:border-brand-accent/30 focus:ring-2 focus:ring-brand-accent/20"
+          />
+        </div>
+
+        {/* Role chip selector */}
         <div>
           <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-subtle">
-            Sign-up link
+            Invite as
           </div>
-          <div className="mt-1.5 flex items-stretch gap-2">
-            <code className="flex-1 truncate rounded-lg border border-border bg-surface-inset/60 px-3 py-2 font-mono text-[12px] text-ink">
-              {shareUrl || "(loading…)"}
-            </code>
-            <button
-              type="button"
-              onClick={() => copy(shareUrl, "link")}
-              disabled={!shareUrl}
-              className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-border bg-surface px-3 text-[12px] font-semibold text-ink-muted transition-colors hover:bg-surface-inset hover:text-ink disabled:opacity-50"
-            >
-              {copied === "link" ? (
-                <>
-                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" strokeWidth={2} />
-                  Copied
-                </>
-              ) : (
-                "Copy link"
-              )}
-            </button>
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
+            {(canChangeRoles ? (["staff", "manager"] as const) : (["staff"] as const)).map((r) => {
+              const active = r === role;
+              return (
+                <button
+                  key={r}
+                  type="button"
+                  onClick={() => setRole(r)}
+                  className={cn(
+                    "inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12px] font-semibold uppercase tracking-[0.06em] ring-1 transition-all duration-[160ms]",
+                    active
+                      ? r === "manager"
+                        ? "bg-violet-50/80 text-violet-700 ring-violet-200/40 shadow-soft"
+                        : "bg-brand-subtle/70 text-brand-accent ring-brand-accent/15 shadow-soft"
+                      : "bg-surface text-ink-muted ring-border/50 hover:text-ink",
+                  )}
+                >
+                  {r === "manager" ? <Crown className="h-3 w-3" strokeWidth={2} /> : <Users className="h-3 w-3" strokeWidth={2} />}
+                  {r === "manager" ? "Manager" : "Staff"}
+                </button>
+              );
+            })}
           </div>
-          <p className="mt-1.5 text-[11px] leading-relaxed text-ink-subtle">
-            On this page, the invitee selects <span className="font-medium text-ink-muted">Create an account</span>, chooses the <span className="font-medium text-ink-muted">Staff</span> role, and enters your workspace slug below.
-          </p>
         </div>
 
-        {/* Workspace slug */}
-        {tenantSlug && (
-          <div>
+        {/* Optional welcome message */}
+        <div>
+          <label htmlFor="invite-welcome" className="text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-subtle">
+            Welcome message <span className="text-ink-subtle/70">(optional)</span>
+          </label>
+          <textarea
+            id="invite-welcome"
+            value={welcome}
+            onChange={(e) => setWelcome(e.target.value)}
+            rows={3}
+            placeholder="Excited to have you join the team — looking forward to working together."
+            className="mt-1 w-full rounded-lg border border-border bg-surface px-3 py-2 text-[13px] text-ink outline-none transition-all duration-[180ms] focus:border-brand-accent/30 focus:ring-2 focus:ring-brand-accent/20"
+          />
+        </div>
+
+        {/* Invitation preview */}
+        {canSend && (
+          <div className="rounded-xl border border-border bg-surface-inset/30 p-3">
             <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-subtle">
-              Your workspace slug
+              Invitation preview
             </div>
-            <div className="mt-1.5 flex items-stretch gap-2">
-              <code className="flex-1 truncate rounded-lg border border-border bg-surface-inset/60 px-3 py-2 font-mono text-[12px] text-ink">
-                {tenantSlug}
-              </code>
-              <button
-                type="button"
-                onClick={() => copy(tenantSlug, "slug")}
-                className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-border bg-surface px-3 text-[12px] font-semibold text-ink-muted transition-colors hover:bg-surface-inset hover:text-ink"
-              >
-                {copied === "slug" ? (
-                  <>
-                    <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" strokeWidth={2} />
-                    Copied
-                  </>
-                ) : (
-                  "Copy slug"
-                )}
-              </button>
+            <div className="mt-1.5 text-[11.5px] leading-relaxed text-ink-muted">
+              <span className="font-medium text-ink">To:</span> {email}
+              <br />
+              <span className="font-medium text-ink">Subject:</span> You&rsquo;re invited to join {tenantName ?? "our workspace"} on ZentroMeet
+              <br />
+              <span className="font-medium text-ink">Role:</span> {role === "manager" ? "Manager" : "Staff"}
             </div>
           </div>
         )}
 
-        {/* What happens next */}
-        <div className="rounded-xl border border-border bg-surface-inset/30 p-3">
-          <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-subtle">
-            What happens next
-          </div>
-          <ul className="mt-1.5 space-y-1.5 text-[12px] leading-relaxed text-ink-muted">
-            <li className="flex items-start gap-2">
-              <span aria-hidden className="mt-1.5 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-brand-accent" />
-              They sign up using the link, choosing the <span className="font-medium text-ink">Staff</span> role.
-            </li>
-            <li className="flex items-start gap-2">
-              <span aria-hidden className="mt-1.5 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-brand-accent" />
-              They appear in this directory automatically — no manual approval step.
-            </li>
-            <li className="flex items-start gap-2">
-              <span aria-hidden className="mt-1.5 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-brand-accent" />
-              Open their row to assign services and review schedule coverage.
-            </li>
-          </ul>
+        {/* Scaffold note */}
+        <div className="rounded-xl border border-dashed border-border bg-surface-inset/30 px-3 py-2 text-[11px] leading-relaxed text-ink-subtle">
+          <span className="font-semibold uppercase tracking-wider text-ink-muted">Coming soon &middot; </span>
+          Tracked invitation links with expiration and acceptance status are on the roadmap. Today the invitation email below is the safe, production-ready path.
         </div>
 
-        <div className="flex items-center justify-end gap-2 pt-1">
+        {/* Actions */}
+        <div className="flex flex-wrap items-center gap-2 pt-1">
+          <a
+            href={canSend ? buildMailto() : undefined}
+            onClick={(e) => {
+              if (!canSend) { e.preventDefault(); return; }
+              setTimeout(onClose, 150);
+            }}
+            aria-disabled={!canSend}
+            className={cn(
+              "inline-flex h-9 items-center gap-1.5 rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover px-3 text-[12.5px] font-semibold text-white shadow-[0_6px_16px_rgba(53,157,243,0.35)] transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)]",
+              canSend ? "hover:-translate-y-0.5 hover:shadow-[0_10px_24px_rgba(53,157,243,0.45)]" : "cursor-not-allowed opacity-50",
+            )}
+          >
+            <Mail className="h-3.5 w-3.5" strokeWidth={2} />
+            Send invitation
+          </a>
+          <button
+            type="button"
+            onClick={() => copyToClipboard(shareUrl, "Invite link copied")}
+            disabled={!shareUrl}
+            className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-border bg-surface px-3 text-[12.5px] font-medium text-ink-muted shadow-soft transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:bg-surface-inset hover:text-ink hover:shadow-md disabled:opacity-50"
+          >
+            <CheckCircle2 className="h-3.5 w-3.5" strokeWidth={1.75} />
+            Copy invite link
+          </button>
           <button
             type="button"
             onClick={onClose}
-            className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-border bg-surface px-3 text-[12.5px] font-medium text-ink-muted transition-colors hover:bg-surface-inset hover:text-ink"
+            className="ml-auto inline-flex h-9 items-center gap-1.5 rounded-lg px-3 text-[12.5px] font-medium text-ink-subtle transition-colors hover:text-ink"
           >
-            Close
+            Cancel
           </button>
-          <Link
-            href="/dashboard/services"
-            onClick={onClose}
-            className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover px-3 text-[12.5px] font-semibold text-white shadow-[0_6px_16px_rgba(53,157,243,0.35)] transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:shadow-[0_10px_24px_rgba(53,157,243,0.45)]"
-          >
-            <Layers className="h-3.5 w-3.5" strokeWidth={2} />
-            Open services
-          </Link>
         </div>
       </div>
     </Modal>
