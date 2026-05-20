@@ -108,17 +108,28 @@ const READINESS_LABEL: Record<Readiness, string> = {
 
 // ─── Main client ───────────────────────────────────────────────────
 
+type StaffOption = {
+  id: string;
+  name: string;
+  avatarUrl: string | null;
+  departmentId: string | null;
+  departmentName: string | null;
+};
+
 export default function ServicesClient({
   isAdmin,
   allStaff,
   allDepartments,
 }: {
   isAdmin: boolean;
-  allStaff: { id: string; name: string }[];
+  allStaff: StaffOption[];
   allDepartments: { id: string; name: string; color: string | null }[];
 }) {
   const [rows, setRows] = React.useState<Svc[] | null>(null);
+  // Edit-service drawer: existing "new" + service-id state
   const [openId, setOpenId] = React.useState<string | "new" | null>(null);
+  // Dedicated Assign-Staff panel: separate state, separate workflow
+  const [assignStaffId, setAssignStaffId] = React.useState<string | null>(null);
 
   async function reload() {
     // Use ?include=all so the admin services page surfaces inactive
@@ -258,14 +269,14 @@ export default function ServicesClient({
             <ServiceDirectoryGrid
               rows={rows}
               onOpen={(id) => setOpenId(id)}
+              onAssignStaff={(id) => setAssignStaffId(id)}
             />
           )}
         </div>
       </FadeIn>
 
-      {/* Drawer — logic preserved byte-identical, just receives extra
-          allDepartments prop for future drawer surfaces (currently used
-          for the scaffolded "linked departments" indicator). */}
+      {/* Edit Service drawer — full configuration workflow.
+          Logic preserved byte-identical. */}
       <ServiceDrawer
         openId={openId}
         onClose={() => setOpenId(null)}
@@ -274,6 +285,17 @@ export default function ServicesClient({
         allDepartments={allDepartments}
         isAdmin={isAdmin}
         existing={rows ?? []}
+      />
+
+      {/* Dedicated Assign Staff panel — workforce-only workflow.
+          Separate state, separate operational surface, separate PATCH
+          payload that only touches staffUserIds. */}
+      <AssignStaffPanel
+        svc={assignStaffId ? (rows ?? []).find((r) => r.id === assignStaffId) ?? null : null}
+        onClose={() => setAssignStaffId(null)}
+        onSaved={() => { setAssignStaffId(null); reload(); }}
+        allStaff={allStaff}
+        isAdmin={isAdmin}
       />
     </div>
   );
@@ -510,9 +532,11 @@ function SectionHead({
 function ServiceDirectoryGrid({
   rows,
   onOpen,
+  onAssignStaff,
 }: {
   rows: Svc[];
   onOpen: (id: string) => void;
+  onAssignStaff: (id: string) => void;
 }) {
   const count = rows.length;
   const showArchitectureTile = count > 0 && count <= 2;
@@ -537,7 +561,11 @@ function ServiceDirectoryGrid({
               animation: `zm-row-in 0.42s cubic-bezier(0.16,1,0.3,1) ${Math.min(idx, 8) * 50}ms both`,
             }}
           >
-            <ServiceOpCard svc={s} onOpen={() => onOpen(s.id)} />
+            <ServiceOpCard
+              svc={s}
+              onOpen={() => onOpen(s.id)}
+              onAssignStaff={() => onAssignStaff(s.id)}
+            />
           </li>
         ))}
       </ul>
@@ -574,7 +602,15 @@ function ServiceDirectoryGrid({
 // buttons. e.stopPropagation guards keep them functioning even when
 // the card's surface receives a click.
 
-function ServiceOpCard({ svc, onOpen }: { svc: Svc; onOpen: () => void }) {
+function ServiceOpCard({
+  svc,
+  onOpen,
+  onAssignStaff,
+}: {
+  svc: Svc;
+  onOpen: () => void;
+  onAssignStaff: () => void;
+}) {
   const accent = serviceColor(svc.id, svc.color);
   const readiness = deriveReadiness(svc);
   const inactive = svc.isActive !== 1;
@@ -709,8 +745,10 @@ function ServiceOpCard({ svc, onOpen }: { svc: Svc; onOpen: () => void }) {
       </button>
 
       {/* Action bar — sits OUTSIDE the click-button so we don't nest
-       *  buttons. Action bar items have their own handlers and links. */}
-      <ServiceActionBar svc={svc} onEdit={onOpen} />
+       *  buttons. Action bar items have their own handlers and links.
+       *  Assign Staff and Edit Service now have separate handlers
+       *  that open separate operational workflows. */}
+      <ServiceActionBar svc={svc} onAssignStaff={onAssignStaff} onEdit={onOpen} />
     </article>
   );
 }
@@ -865,9 +903,13 @@ function ServiceInsight({
 
 function ServiceActionBar({
   svc,
+  onAssignStaff,
   onEdit,
 }: {
   svc: Svc;
+  /** Opens the dedicated Assign Staff panel (workforce-only flow). */
+  onAssignStaff: () => void;
+  /** Opens the full service-edit drawer (configuration flow). */
   onEdit: () => void;
 }) {
   // Encourage the next operational step based on current state.
@@ -879,7 +921,7 @@ function ServiceActionBar({
       <ActionButton
         icon={UserPlus}
         label="Assign staff"
-        onClick={onEdit}
+        onClick={onAssignStaff}
         highlight={needsStaff}
       />
       <ActionLink
@@ -1277,7 +1319,7 @@ function ServiceDrawer({
   openId: string | "new" | null;
   onClose: () => void;
   onSaved: () => void;
-  allStaff: { id: string; name: string }[];
+  allStaff: StaffOption[];
   allDepartments: { id: string; name: string; color: string | null }[];
   isAdmin: boolean;
   existing: Svc[];
@@ -1549,6 +1591,426 @@ function ServiceDrawer({
         )}
       </div>
     </Drawer>
+  );
+}
+
+// ─── Assign Staff panel — dedicated workforce assignment workflow ──
+//
+// Distinct from the ServiceDrawer's full edit flow: this panel
+// touches ONLY the staff assignments. PATCHes /api/services/[id]
+// with { staffUserIds: [...] } — every other service field (name,
+// duration, price, color, isActive, videoProvider) is preserved by
+// the server's partial-body handling.
+//
+// Surfaces:
+//   - Workforce context (current assignment count)
+//   - Department-aware filter (when departments exist)
+//   - Staff list with check toggles, department chips, current-assigned
+//     state preserved across re-opens
+//   - Live "after-save readiness preview" so admins see the projected
+//     readiness state before they save
+//   - Operational copy clarifying the booking implication
+//
+// All other service edits remain in ServiceDrawer behind the Pencil.
+
+function AssignStaffPanel({
+  svc,
+  onClose,
+  onSaved,
+  allStaff,
+  isAdmin,
+}: {
+  svc: Svc | null;
+  onClose: () => void;
+  onSaved: () => void;
+  allStaff: StaffOption[];
+  isAdmin: boolean;
+}) {
+  const open = svc !== null;
+
+  const [selected, setSelected] = React.useState<Set<string>>(new Set());
+  const [busy, setBusy] = React.useState(false);
+  const [deptFilter, setDeptFilter] = React.useState<string | "all">("all");
+
+  // Re-hydrate the selection set whenever the panel opens for a
+  // (possibly different) service. The Drawer remounts so we use a
+  // serviceId-keyed effect for safety.
+  React.useEffect(() => {
+    if (svc) {
+      setSelected(new Set(svc.staff.map((s) => s.userId)));
+      setDeptFilter("all");
+    }
+  }, [svc?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function toggle(id: string) {
+    setSelected((cur) => {
+      const next = new Set(cur);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  async function save() {
+    if (!svc) return;
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/services/${svc.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ staffUserIds: Array.from(selected) }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d?.error ?? "Failed");
+      toast("Staff assignment saved", "success");
+      onSaved();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed", "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Derived projected readiness — honest signal computed from the
+  // staged selection rather than what's persisted.
+  const projectedReady = svc?.isActive === 1 && selected.size > 0;
+  const projectedPartial = svc?.isActive === 1 && selected.size === 0;
+  const projectedInactive = svc?.isActive !== 1;
+
+  // Department options derived from the staff catalog (only depts
+  // that actually contain at least one assignable staff member).
+  const deptOptions = React.useMemo(() => {
+    const map = new Map<string, string>();
+    for (const u of allStaff) {
+      if (u.departmentId && u.departmentName) {
+        map.set(u.departmentId, u.departmentName);
+      }
+    }
+    return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
+  }, [allStaff]);
+
+  const filteredStaff = React.useMemo(() => {
+    if (deptFilter === "all") return allStaff;
+    if (deptFilter === "none") return allStaff.filter((u) => !u.departmentId);
+    return allStaff.filter((u) => u.departmentId === deptFilter);
+  }, [allStaff, deptFilter]);
+
+  // Splits for the panel layout
+  const assigned = filteredStaff.filter((u) => selected.has(u.id));
+  const available = filteredStaff.filter((u) => !selected.has(u.id));
+
+  return (
+    <Drawer open={open} onClose={onClose} side="right" ariaLabel="Assign staff to service">
+      {!svc ? null : (
+        <div className="flex h-full flex-col">
+          {/* Header */}
+          <div className="relative overflow-hidden border-b border-border bg-gradient-to-br from-brand-subtle/35 via-surface to-surface p-5">
+            <div aria-hidden className="pointer-events-none absolute -right-10 -top-10 h-32 w-32 rounded-full bg-brand-accent/12 blur-3xl" />
+            <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/60 to-transparent" />
+            <div className="relative flex items-start justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div
+                  className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-white shadow-[0_2px_8px_rgba(53,157,243,0.30)]"
+                  style={{ backgroundColor: serviceColor(svc.id, svc.color) }}
+                  aria-hidden
+                >
+                  <UserPlus className="h-5 w-5" strokeWidth={1.75} />
+                </div>
+                <div className="min-w-0">
+                  <div className="text-[10px] font-semibold uppercase tracking-[0.10em] text-brand-accent">
+                    Assign staff
+                  </div>
+                  <h2 className="mt-0.5 truncate text-[17px] font-semibold tracking-tight text-ink">
+                    {svc.name}
+                  </h2>
+                  <p className="mt-0.5 text-[11.5px] text-ink-muted">
+                    Activate workforce routing for this service. Only assignment changes are saved — other settings stay untouched.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={onClose}
+                aria-label="Close"
+                className="inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-muted hover:bg-surface-inset hover:text-ink"
+              >
+                <X className="h-4 w-4" strokeWidth={1.75} />
+              </button>
+            </div>
+          </div>
+
+          {/* Body */}
+          <div className="flex-1 space-y-4 overflow-y-auto p-5">
+            {/* Operational summary */}
+            <div className="relative overflow-hidden rounded-2xl border border-brand-accent/15 bg-brand-subtle/30 p-3">
+              <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/55 to-transparent" />
+              <div className="flex items-start gap-2.5">
+                <div className="zm-pulse-glow inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover text-white shadow-[0_4px_10px_rgba(53,157,243,0.30)]">
+                  <Workflow className="h-3.5 w-3.5" strokeWidth={2} />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="text-[10px] font-semibold uppercase tracking-[0.10em] text-brand-accent">
+                    Routing readiness preview
+                  </div>
+                  <p className="mt-0.5 text-[12px] leading-relaxed text-ink-muted">
+                    {projectedInactive
+                      ? "This service is inactive — assignments are saved but the service won't be publicly bookable until it's reactivated in Edit service."
+                      : projectedReady
+                        ? `After save: Ready — ${selected.size} ${selected.size === 1 ? "staff member" : "staff members"} can deliver this service.`
+                        : "Services without assigned staff are not publicly bookable. Add at least one staff member to activate routing."}
+                  </p>
+                </div>
+                <span className={cn(
+                  "inline-flex shrink-0 items-center gap-1 rounded-full px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.06em] ring-1",
+                  projectedReady
+                    ? "bg-emerald-50/80 text-emerald-700 ring-emerald-200/40"
+                    : projectedPartial
+                      ? "bg-amber-50/80 text-amber-800 ring-amber-200/40"
+                      : "bg-surface-inset text-ink-muted ring-border/50",
+                )}>
+                  {projectedReady ? "Ready" : projectedPartial ? "Partial" : "Inactive"}
+                </span>
+              </div>
+            </div>
+
+            {/* Department filter */}
+            {deptOptions.length > 0 && (
+              <div>
+                <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-subtle">
+                  Filter by department
+                </div>
+                <div className="mt-1.5 flex flex-wrap gap-1.5">
+                  <DeptFilterChip
+                    label="All"
+                    active={deptFilter === "all"}
+                    onClick={() => setDeptFilter("all")}
+                  />
+                  {deptOptions.map((d) => (
+                    <DeptFilterChip
+                      key={d.id}
+                      label={d.name}
+                      icon={Building2}
+                      active={deptFilter === d.id}
+                      onClick={() => setDeptFilter(d.id)}
+                    />
+                  ))}
+                  {allStaff.some((u) => !u.departmentId) && (
+                    <DeptFilterChip
+                      label="No department"
+                      active={deptFilter === "none"}
+                      onClick={() => setDeptFilter("none")}
+                    />
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Currently assigned */}
+            {assigned.length > 0 && (
+              <div>
+                <div className="flex items-baseline justify-between">
+                  <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-subtle">
+                    Currently assigned
+                  </div>
+                  <span className="text-[10.5px] tabular-nums text-ink-subtle">
+                    {assigned.length} {assigned.length === 1 ? "member" : "members"}
+                  </span>
+                </div>
+                <ul className="mt-1.5 space-y-1.5">
+                  {assigned.map((u) => (
+                    <li key={u.id}>
+                      <StaffAssignRow
+                        staff={u}
+                        on
+                        disabled={!isAdmin}
+                        onToggle={() => toggle(u.id)}
+                      />
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {/* Available */}
+            <div>
+              <div className="flex items-baseline justify-between">
+                <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-subtle">
+                  {assigned.length > 0 ? "Available" : "Workforce"}
+                </div>
+                <span className="text-[10.5px] tabular-nums text-ink-subtle">
+                  {available.length} {available.length === 1 ? "member" : "members"}
+                </span>
+              </div>
+              {available.length === 0 && allStaff.length === 0 ? (
+                <div className="mt-1.5 rounded-xl border border-dashed border-border bg-surface-inset/30 p-4 text-center text-[12px] text-ink-muted">
+                  <Users className="mx-auto mb-2 h-5 w-5 text-ink-subtle" strokeWidth={1.5} />
+                  No staff in workspace yet.
+                  <div className="mt-2">
+                    <Link
+                      href="/dashboard/staff"
+                      className="inline-flex items-center gap-1 text-[11.5px] font-semibold text-brand-accent hover:underline"
+                    >
+                      Open staff workspace
+                      <ArrowUpRight className="h-3 w-3" strokeWidth={2} />
+                    </Link>
+                  </div>
+                </div>
+              ) : available.length === 0 ? (
+                <div className="mt-1.5 rounded-xl border border-dashed border-border bg-surface-inset/30 p-3 text-center text-[11.5px] text-ink-muted">
+                  No additional staff match this filter.
+                </div>
+              ) : (
+                <ul className="mt-1.5 space-y-1.5">
+                  {available.map((u) => (
+                    <li key={u.id}>
+                      <StaffAssignRow
+                        staff={u}
+                        on={false}
+                        disabled={!isAdmin}
+                        onToggle={() => toggle(u.id)}
+                      />
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+
+          {/* Footer */}
+          {isAdmin && (
+            <div className="flex items-center justify-between border-t border-border p-4">
+              <button
+                type="button"
+                onClick={onClose}
+                className="inline-flex h-9 items-center gap-1.5 rounded-lg px-3 text-[12.5px] font-medium text-ink-subtle transition-colors hover:text-ink"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={save}
+                disabled={busy}
+                className={cn(
+                  "inline-flex h-9 items-center gap-1.5 rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover px-3 text-[12.5px] font-semibold text-white shadow-[0_6px_16px_rgba(53,157,243,0.35)] transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)]",
+                  busy ? "cursor-not-allowed opacity-50" : "hover:-translate-y-0.5 hover:shadow-[0_10px_24px_rgba(53,157,243,0.45)]"
+                )}
+              >
+                {busy ? (
+                  <>
+                    <span aria-hidden className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+                    Saving…
+                  </>
+                ) : (
+                  <>
+                    <UserPlus className="h-3.5 w-3.5" strokeWidth={2} />
+                    Save assignments
+                  </>
+                )}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </Drawer>
+  );
+}
+
+function DeptFilterChip({
+  label,
+  icon: Icon,
+  active,
+  onClick,
+}: {
+  label: string;
+  icon?: LucideIcon;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-medium ring-1 transition-all duration-[160ms] ease-[cubic-bezier(0.16,1,0.3,1)]",
+        active
+          ? "bg-brand-subtle/70 text-brand-accent ring-brand-accent/30 shadow-[0_2px_6px_rgba(53,157,243,0.15)]"
+          : "bg-surface text-ink-muted ring-border/50 hover:bg-surface-inset hover:text-ink",
+      )}
+    >
+      {Icon && <Icon className={cn("h-3 w-3", active ? "text-brand-accent" : "text-ink-subtle")} strokeWidth={2} />}
+      {label}
+    </button>
+  );
+}
+
+function StaffAssignRow({
+  staff,
+  on,
+  disabled,
+  onToggle,
+}: {
+  staff: StaffOption;
+  on: boolean;
+  disabled: boolean;
+  onToggle: () => void;
+}) {
+  const initials = staff.name
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((s) => s[0]!)
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
+  return (
+    <label
+      className={cn(
+        "flex cursor-pointer items-center gap-3 rounded-xl border border-border bg-surface px-3 py-2 transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)]",
+        on
+          ? "ring-1 ring-brand-accent/30 shadow-[0_2px_6px_rgba(53,157,243,0.10)]"
+          : "hover:-translate-y-0.5 hover:border-border-strong hover:shadow-soft",
+        disabled && "cursor-not-allowed opacity-60",
+      )}
+    >
+      <input
+        type="checkbox"
+        checked={on}
+        disabled={disabled}
+        onChange={onToggle}
+        className="h-4 w-4 accent-brand-accent"
+      />
+      {/* Avatar */}
+      <div className="relative shrink-0">
+        {staff.avatarUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={staff.avatarUrl}
+            alt=""
+            className="h-8 w-8 rounded-full object-cover ring-1 ring-border/40"
+          />
+        ) : (
+          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-brand-accent to-brand-hover text-[10px] font-semibold text-white shadow-[0_2px_6px_rgba(53,157,243,0.20)]">
+            {initials || "?"}
+          </div>
+        )}
+        {on && (
+          <span aria-hidden className="absolute -bottom-0.5 -right-0.5 inline-flex h-3 w-3 items-center justify-center rounded-full bg-emerald-500 text-white ring-2 ring-surface">
+            <CheckCircle2 className="h-2.5 w-2.5" strokeWidth={3} />
+          </span>
+        )}
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-[13px] font-semibold tracking-tight text-ink">{staff.name}</div>
+        <div className="mt-0.5 truncate text-[10.5px] text-ink-subtle">
+          {staff.departmentName ? (
+            <span className="inline-flex items-center gap-1">
+              <Building2 className="h-2.5 w-2.5 text-brand-accent" strokeWidth={2} />
+              {staff.departmentName}
+            </span>
+          ) : (
+            <span className="italic">No department</span>
+          )}
+        </div>
+      </div>
+    </label>
   );
 }
 

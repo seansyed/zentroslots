@@ -14,18 +14,26 @@ export default async function ServicesPage() {
   if (!user) redirect("/dashboard/login");
   const tenant = await db.query.tenants.findFirst({ where: eq(tenants.id, user.tenantId) });
 
-  // Staff catalog (for the assignment editor inside the service drawer).
+  // Staff catalog (for the assignment editor inside the service drawer
+  // AND the dedicated Assign Staff panel). Enriched with department
+  // info so the panel can offer department-aware filtering. Same
+  // role gating as before (staff only — managers are not assignable
+  // to services here).
   const staffRows = await db
-    .select({ id: users.id, name: users.name })
+    .select({
+      id: users.id,
+      name: users.name,
+      avatarUrl: users.avatarUrl,
+      departmentId: users.departmentId,
+      departmentName: departments.name,
+    })
     .from(users)
+    .leftJoin(departments, eq(departments.id, users.departmentId))
     .where(and(eq(users.tenantId, user.tenantId), eq(users.role, "staff")))
     .orderBy(asc(users.name));
 
   // Department catalog (for in-drawer scaffolding + the empty-state
   // activation checklist that links to /dashboard/departments).
-  // Honest scope: services↔departments is transitive via staff, so
-  // the drawer doesn't pick a department directly — it surfaces the
-  // departments derived from assigned staff.
   const departmentRows = await db
     .select({ id: departments.id, name: departments.name, color: departments.color })
     .from(departments)
@@ -41,7 +49,13 @@ export default async function ServicesPage() {
     >
       <ServicesClient
         isAdmin={user.role === "admin" || user.role === "manager"}
-        allStaff={staffRows}
+        allStaff={staffRows.map((s) => ({
+          id: s.id,
+          name: s.name,
+          avatarUrl: s.avatarUrl ?? null,
+          departmentId: s.departmentId ?? null,
+          departmentName: s.departmentName ?? null,
+        }))}
         allDepartments={departmentRows.map((d) => ({ id: d.id, name: d.name, color: d.color ?? null }))}
       />
     </Shell>
