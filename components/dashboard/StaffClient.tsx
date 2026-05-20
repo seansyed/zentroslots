@@ -71,6 +71,11 @@ import { FadeIn } from "@/components/ui/Motion";
 import { cn } from "@/lib/cn";
 import { resolvePublicProfile } from "@/lib/identity";
 import ActivityTimeline from "@/components/dashboard/ActivityTimeline";
+import {
+  locationSwatch,
+  locationTypeChipTone,
+  locationTypeIcon,
+} from "@/lib/location-visual";
 
 // ─── Types (matching /api/staff) ────────────────────────────────────
 
@@ -1960,80 +1965,10 @@ type LocationListItem = {
   timezone: string | null;
 };
 
-function locationTypeIcon(t: "physical" | "virtual" | "hybrid"): LucideIcon {
-  if (t === "virtual") return Video;
-  if (t === "hybrid") return Globe;
-  return Building2;
-}
-
-function locationTypeChipTone(t: "physical" | "virtual" | "hybrid"): string {
-  if (t === "virtual") return "bg-violet-50 text-violet-700 ring-violet-200/60";
-  if (t === "hybrid") return "bg-sky-50 text-sky-700 ring-sky-200/60";
-  return "bg-emerald-50 text-emerald-700 ring-emerald-200/60";
-}
-
-// ─── Per-location stable color palette ────────────────────────────
-//
-// The Weekly Presence Map needs each location to read as a distinct
-// operational surface — the eye should be able to trace
-// "Mon = blue, Tue = violet, Wed = amber" without reading labels.
-// We derive a stable index from the locationId so the same location
-// always paints the same color across reloads.
-//
-// Virtual locations bypass the palette and get a dedicated violet
-// "digital" treatment with a soft halo glow (see locationVisual).
-
-type LocationSwatch = {
-  /** Soft tinted surface for backgrounds */
-  surface: string;
-  /** Ring tint for outlines */
-  ring: string;
-  /** Solid dot for chips */
-  dot: string;
-  /** Text accent matching the swatch */
-  text: string;
-  /** Hover-prefixed shadow halo applied on element hover */
-  haloHover: string;
-};
-
-// Tailwind needs literal class names at build time — runtime
-// concatenation like `"hover:" + swatch.halo` is invisible to the
-// extractor. So we pre-bake each swatch's hover-prefixed variant
-// here as a single literal string. Same idea would apply for any
-// group-hover variants if/when we need them.
-const LOCATION_PALETTE: readonly LocationSwatch[] = [
-  { surface: "bg-sky-50/80",     ring: "ring-sky-300/40",     dot: "bg-sky-500",     text: "text-sky-700",     haloHover: "hover:shadow-[0_0_22px_rgba(14,165,233,0.22)]" },
-  { surface: "bg-emerald-50/80", ring: "ring-emerald-300/40", dot: "bg-emerald-500", text: "text-emerald-700", haloHover: "hover:shadow-[0_0_22px_rgba(16,185,129,0.22)]" },
-  { surface: "bg-amber-50/80",   ring: "ring-amber-300/40",   dot: "bg-amber-500",   text: "text-amber-700",   haloHover: "hover:shadow-[0_0_22px_rgba(245,158,11,0.22)]" },
-  { surface: "bg-rose-50/80",    ring: "ring-rose-300/40",    dot: "bg-rose-500",    text: "text-rose-700",    haloHover: "hover:shadow-[0_0_22px_rgba(244,63,94,0.22)]" },
-  { surface: "bg-indigo-50/80",  ring: "ring-indigo-300/40",  dot: "bg-indigo-500",  text: "text-indigo-700",  haloHover: "hover:shadow-[0_0_22px_rgba(99,102,241,0.22)]" },
-  { surface: "bg-teal-50/80",    ring: "ring-teal-300/40",    dot: "bg-teal-500",    text: "text-teal-700",    haloHover: "hover:shadow-[0_0_22px_rgba(20,184,166,0.22)]" },
-  { surface: "bg-orange-50/80",  ring: "ring-orange-300/40",  dot: "bg-orange-500",  text: "text-orange-700",  haloHover: "hover:shadow-[0_0_22px_rgba(249,115,22,0.22)]" },
-  { surface: "bg-fuchsia-50/80", ring: "ring-fuchsia-300/40", dot: "bg-fuchsia-500", text: "text-fuchsia-700", haloHover: "hover:shadow-[0_0_22px_rgba(217,70,239,0.22)]" },
-];
-
-const VIRTUAL_SWATCH: LocationSwatch = {
-  surface: "bg-violet-50/80",
-  ring: "ring-violet-300/40",
-  dot: "bg-violet-500",
-  text: "text-violet-700",
-  haloHover: "hover:shadow-[0_0_28px_rgba(139,92,246,0.32)]",
-};
-
-function stableLocationIndex(id: string): number {
-  let h = 0;
-  for (let i = 0; i < id.length; i++) {
-    h = (h * 31 + id.charCodeAt(i)) | 0;
-  }
-  return Math.abs(h) % LOCATION_PALETTE.length;
-}
-
-function locationSwatch(locationId: string, locationType: "physical" | "virtual" | "hybrid"): LocationSwatch {
-  // Virtual locations always get the violet "digital" treatment so
-  // the operator can instantly tell which day is online.
-  if (locationType === "virtual") return VIRTUAL_SWATCH;
-  return LOCATION_PALETTE[stableLocationIndex(locationId)];
-}
+// Per-location color palette + type-icon helpers live in
+// `lib/location-visual.ts` so the Workforce Availability page (and
+// any future workforce surface) paints with the same swatches.
+// Imported at the top of this file.
 
 // Resolution mirror of lib/workforce-location.getStaffPresenceForDay.
 // Pure UI mirror — never used by the booking engine; rendered here
