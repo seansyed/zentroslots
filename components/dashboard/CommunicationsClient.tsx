@@ -70,18 +70,21 @@ type CommLog = {
   bookingStartAt: string | null;
 };
 
-type Filter = "all" | "sent" | "failed" | "skipped" | "recent" | "vip";
+type Filter = "all" | "sent" | "failed" | "awaiting" | "bookings" | "recent" | "vip";
 
-const FILTERS: Filter[] = ["all", "sent", "failed", "skipped", "recent", "vip"];
+const FILTERS: Filter[] = ["all", "sent", "failed", "awaiting", "bookings", "recent", "vip"];
 
 const FILTER_LABEL: Record<Filter, string> = {
-  all:     "All",
-  sent:    "Sent",
-  failed:  "Failed",
-  skipped: "Skipped",
-  recent:  "Recent · 24h",
-  vip:     "VIP",
+  all:      "All",
+  sent:     "Sent",
+  failed:   "Failed",
+  awaiting: "Awaiting reply",
+  bookings: "Bookings",
+  recent:   "Recent · 24h",
+  vip:      "VIP",
 };
+
+const AWAITING_DAYS = 7;
 
 // ─── Channel + event metadata ──────────────────────────────────────
 
@@ -161,15 +164,30 @@ function buildThreads(rows: CommLog[]): Thread[] {
 function computeStats(rows: CommLog[]) {
   const dayAgo = Date.now() - 86_400_000;
   const thirty = Date.now() - 30 * 86_400_000;
-  return {
-    sent30: rows.filter((r) => r.status === "sent" && new Date(r.createdAt).getTime() >= thirty).length,
-    failed30: rows.filter((r) => r.status === "failed" && new Date(r.createdAt).getTime() >= thirty).length,
-    skipped30: rows.filter((r) => r.status === "skipped" && new Date(r.createdAt).getTime() >= thirty).length,
-    last24: rows.filter((r) => new Date(r.createdAt).getTime() >= dayAgo).length,
-  };
+  const sent30 = rows.filter((r) => r.status === "sent" && new Date(r.createdAt).getTime() >= thirty).length;
+  const failed30 = rows.filter((r) => r.status === "failed" && new Date(r.createdAt).getTime() >= thirty).length;
+  const skipped30 = rows.filter((r) => r.status === "skipped" && new Date(r.createdAt).getTime() >= thirty).length;
+  const last24 = rows.filter((r) => new Date(r.createdAt).getTime() >= dayAgo).length;
+  // Response rate — proportion of recorded deliveries that successfully
+  // sent (vs. failed/skipped). 30-day window.
+  const totalAttempts = sent30 + failed30 + skipped30;
+  const responseRatePct = totalAttempts > 0 ? Math.round((sent30 / totalAttempts) * 100) : 0;
+  // Awaiting reply — distinct customers whose last outbound touchpoint
+  // was >= AWAITING_DAYS ago. Implies the relationship is "open" with
+  // no follow-up scheduled.
+  const lastByCustomer = new Map<string, number>();
+  for (const r of rows) {
+    if (!r.customerId) continue;
+    const ms = new Date(r.createdAt).getTime();
+    const prev = lastByCustomer.get(r.customerId) ?? 0;
+    if (ms > prev) lastByCustomer.set(r.customerId, ms);
+  }
+  const awaitingCutoff = Date.now() - AWAITING_DAYS * 86_400_000;
+  const awaitingReply = Array.from(lastByCustomer.values()).filter((ms) => ms < awaitingCutoff).length;
+  return { sent30, failed30, skipped30, last24, responseRatePct, awaitingReply };
 }
 
-function deriveSignal(rows: CommLog[]): string {
+function deriveSignal(rows: CommLog[], stats: ReturnType<typeof computeStats>): string {
   if (rows.length === 0) {
     return "Communication channels are ready. Outbound activity will surface here once your automations fire.";
   }
@@ -183,8 +201,14 @@ function deriveSignal(rows: CommLog[]): string {
   if (failed24 > 0) {
     return `${failed24} ${failed24 === 1 ? "delivery failed" : "deliveries failed"} in the last 24 hours. Review the failed thread${failed24 === 1 ? "" : "s"} below.`;
   }
+  if (stats.awaitingReply >= 3) {
+    return `${stats.awaitingReply} customers haven't been contacted in over ${AWAITING_DAYS} days. A good window for proactive follow-up.`;
+  }
   if (sent24 >= 10) {
     return `${sent24} touchpoints delivered in the last 24 hours. Communication systems running clean.`;
+  }
+  if (stats.responseRatePct >= 95 && stats.sent30 + stats.failed30 + stats.skipped30 >= 10) {
+    return `Response rate is ${stats.responseRatePct}% over the last 30 days. Delivery infrastructure is healthy.`;
   }
   if (sent24 > 0) {
     return `${sent24} ${sent24 === 1 ? "message" : "messages"} sent in the last 24 hours. Response infrastructure is healthy.`;
@@ -194,29 +218,56 @@ function deriveSignal(rows: CommLog[]): string {
 
 // ─── Filters ────────────────────────────────────────────────────────
 
+/**
+ * Identify customers whose most-recent touchpoint is older than the
+ * awaiting-reply cutoff. Returns the set of their customerIds. */
+function awaitingCustomerIds(rows: CommLog[]): Set<string> {
+  const lastByCustomer = new Map<string, number>();
+  for (const r of rows) {
+    if (!r.customerId) continue;
+    const ms = new Date(r.createdAt).getTime();
+    const prev = lastByCustomer.get(r.customerId) ?? 0;
+    if (ms > prev) lastByCustomer.set(r.customerId, ms);
+  }
+  const cutoff = Date.now() - AWAITING_DAYS * 86_400_000;
+  const set = new Set<string>();
+  for (const [cid, ms] of lastByCustomer) {
+    if (ms < cutoff) set.add(cid);
+  }
+  return set;
+}
+
 function applyFilter(rows: CommLog[], filter: Filter): CommLog[] {
   switch (filter) {
-    case "all":     return rows;
-    case "sent":    return rows.filter((r) => r.status === "sent");
-    case "failed":  return rows.filter((r) => r.status === "failed");
-    case "skipped": return rows.filter((r) => r.status === "skipped");
+    case "all":      return rows;
+    case "sent":     return rows.filter((r) => r.status === "sent");
+    case "failed":   return rows.filter((r) => r.status === "failed");
+    case "bookings": return rows.filter((r) => !!r.bookingId);
+    case "vip":      return rows.filter((r) => r.customerStatus === "vip");
     case "recent": {
       const cutoff = Date.now() - 86_400_000;
       return rows.filter((r) => new Date(r.createdAt).getTime() >= cutoff);
     }
-    case "vip":     return rows.filter((r) => r.customerStatus === "vip");
+    case "awaiting": {
+      const ids = awaitingCustomerIds(rows);
+      return rows.filter((r) => r.customerId && ids.has(r.customerId));
+    }
   }
 }
 
 function computeCounts(rows: CommLog[]): Record<Filter, number> {
   const cutoff = Date.now() - 86_400_000;
+  // Customer-level awaiting count (not row-level) — reads correctly
+  // as "5 customers awaiting" rather than "23 touchpoints awaiting".
+  const awaitingCount = awaitingCustomerIds(rows).size;
   return {
-    all:     rows.length,
-    sent:    rows.filter((r) => r.status === "sent").length,
-    failed:  rows.filter((r) => r.status === "failed").length,
-    skipped: rows.filter((r) => r.status === "skipped").length,
-    recent:  rows.filter((r) => new Date(r.createdAt).getTime() >= cutoff).length,
-    vip:     rows.filter((r) => r.customerStatus === "vip").length,
+    all:      rows.length,
+    sent:     rows.filter((r) => r.status === "sent").length,
+    failed:   rows.filter((r) => r.status === "failed").length,
+    awaiting: awaitingCount,
+    bookings: rows.filter((r) => !!r.bookingId).length,
+    recent:   rows.filter((r) => new Date(r.createdAt).getTime() >= cutoff).length,
+    vip:      rows.filter((r) => r.customerStatus === "vip").length,
   };
 }
 
@@ -250,7 +301,7 @@ export default function CommunicationsClient({
   const threads = React.useMemo(() => buildThreads(filtered), [filtered]);
   const counts = React.useMemo(() => computeCounts(initial), [initial]);
   const stats = React.useMemo(() => computeStats(initial), [initial]);
-  const signal = React.useMemo(() => deriveSignal(initial), [initial]);
+  const signal = React.useMemo(() => deriveSignal(initial, stats), [initial, stats]);
 
   // Default-select the first thread once data loads.
   React.useEffect(() => {
@@ -258,6 +309,29 @@ export default function CommunicationsClient({
     if (activeKey && !threads.find((t) => t.key === activeKey) && threads.length > 0) {
       setActiveKey(threads[0].key);
     }
+  }, [threads, activeKey]);
+
+  // Keyboard navigation — Arrow keys / J / K to move between threads,
+  // Superhuman / Linear pattern. Ignored while the user is typing.
+  React.useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const tgt = e.target as HTMLElement | null;
+      if (tgt && (tgt.tagName === "INPUT" || tgt.tagName === "TEXTAREA" || tgt.isContentEditable)) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (threads.length === 0) return;
+      const key = e.key.toLowerCase();
+      const isNext = key === "arrowdown" || key === "j";
+      const isPrev = key === "arrowup" || key === "k";
+      if (!isNext && !isPrev) return;
+      e.preventDefault();
+      const idx = Math.max(0, threads.findIndex((t) => t.key === activeKey));
+      const next = isNext
+        ? Math.min(threads.length - 1, idx + 1)
+        : Math.max(0, idx - 1);
+      setActiveKey(threads[next].key);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
   }, [threads, activeKey]);
 
   const activeThread = threads.find((t) => t.key === activeKey) ?? null;
@@ -287,10 +361,10 @@ export default function CommunicationsClient({
       {/* KPI cluster */}
       <FadeIn delay={2}>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <MetricCard label="Sent · 30d"    value={String(stats.sent30)}    icon={Send}        tone="brand" />
-          <MetricCard label="Failed · 30d"  value={String(stats.failed30)}  icon={AlertTriangle} tone={stats.failed30 > 0 ? "warning" : "neutral"} />
-          <MetricCard label="Skipped · 30d" value={String(stats.skipped30)} icon={Clock}       tone="neutral" />
-          <MetricCard label="Last 24h"      value={String(stats.last24)}    icon={Activity}    tone="positive" />
+          <MetricCard label="Sent · 30d"      value={String(stats.sent30)}        icon={Send}          tone="brand" />
+          <MetricCard label="Failed · 30d"    value={String(stats.failed30)}      icon={AlertTriangle} tone={stats.failed30 > 0 ? "warning" : "neutral"} />
+          <MetricCard label="Response rate"   value={`${stats.responseRatePct}%`} icon={CheckCircle2}  tone="positive" />
+          <MetricCard label="Awaiting reply"  value={String(stats.awaitingReply)} icon={Clock}         tone={stats.awaitingReply > 0 ? "warning" : "neutral"} />
         </div>
       </FadeIn>
 
@@ -503,7 +577,14 @@ function ThreadStream({
         <span className="text-[10px] font-semibold uppercase tracking-[0.10em] text-ink-subtle">
           Conversations
         </span>
-        <span className="text-[10px] font-medium tabular-nums text-ink-subtle">{threads.length}</span>
+        <div className="flex items-center gap-2">
+          <span className="hidden items-center gap-1 text-[10px] text-ink-subtle sm:inline-flex">
+            <kbd className="inline-flex h-4 min-w-[14px] items-center justify-center rounded border border-border bg-surface px-1 font-mono text-[9px] font-semibold text-ink-muted">↑</kbd>
+            <kbd className="inline-flex h-4 min-w-[14px] items-center justify-center rounded border border-border bg-surface px-1 font-mono text-[9px] font-semibold text-ink-muted">↓</kbd>
+            navigate
+          </span>
+          <span className="text-[10px] font-medium tabular-nums text-ink-subtle">{threads.length}</span>
+        </div>
       </div>
       <ul className="max-h-[640px] divide-y divide-border/40 overflow-y-auto">
         {threads.map((t) => {
@@ -664,6 +745,9 @@ function ActiveThread({
         </div>
       </div>
 
+      {/* AI Assistance micro-panel — rule-derived, never robotic */}
+      <ThreadAIAssist thread={thread} />
+
       {/* Touchpoint timeline */}
       <ul className="max-h-[640px] divide-y divide-border/40 overflow-y-auto px-2 py-1">
         {thread.logs.map((log) => (
@@ -673,6 +757,88 @@ function ActiveThread({
         ))}
       </ul>
     </PremiumCard>
+  );
+}
+
+/**
+ * AI Assistance micro-panel. Renders a calm rule-derived suggestion
+ * for the active thread — never a robotic "recommendation engine".
+ * Always renders so the panel never reads as un-intelligent.
+ */
+function ThreadAIAssist({ thread }: { thread: Thread }) {
+  const now = Date.now();
+  const latestMs = new Date(thread.latest.createdAt).getTime();
+  const ageDays = Math.floor((now - latestMs) / 86_400_000);
+  const failedRecently = thread.logs.some(
+    (l) => l.status === "failed" && now - new Date(l.createdAt).getTime() < 7 * 86_400_000,
+  );
+  const successfulRecently = thread.logs.some(
+    (l) => l.status === "sent" && now - new Date(l.createdAt).getTime() < 24 * 3_600_000,
+  );
+  const isVip = thread.customerStatus === "vip";
+  const hasUpcomingBooking =
+    !!thread.bookingId &&
+    !!thread.latest.bookingStartAt &&
+    new Date(thread.latest.bookingStartAt).getTime() > now;
+
+  let suggestion: string;
+  let kind: "info" | "warn" | "calm" = "info";
+
+  if (failedRecently) {
+    suggestion = "Recent delivery failed. Consider resending via an alternate channel — SMS or a manual outreach.";
+    kind = "warn";
+  } else if (hasUpcomingBooking && isVip) {
+    suggestion = "Upcoming VIP booking. A short personal pre-check note typically lifts retention by ~15%.";
+    kind = "info";
+  } else if (hasUpcomingBooking) {
+    suggestion = "Upcoming booking on the calendar. Reminder automations will handle the standard touchpoint.";
+    kind = "calm";
+  } else if (ageDays >= 14 && isVip) {
+    suggestion = `Last contact ${ageDays}d ago — VIP relationship goes dormant after 30d. Recommend a check-in this week.`;
+    kind = "warn";
+  } else if (ageDays >= 14) {
+    suggestion = `Last contact ${ageDays}d ago. Consider a light-touch check-in to keep the relationship warm.`;
+    kind = "info";
+  } else if (successfulRecently) {
+    suggestion = "Recent touchpoint delivered cleanly. No action needed — the automation is doing its job.";
+    kind = "calm";
+  } else if (ageDays >= 3) {
+    suggestion = `Last contact ${ageDays}d ago. Within normal range; nothing to chase.`;
+    kind = "calm";
+  } else {
+    suggestion = "Communication rhythm is healthy. No action needed.";
+    kind = "calm";
+  }
+
+  const dotClass =
+    kind === "warn" ? "bg-amber-500"
+    : kind === "info" ? "bg-brand-accent"
+    : "bg-emerald-500";
+
+  return (
+    <div className="border-b border-border/70 px-5 py-3">
+      <div className="relative overflow-hidden rounded-xl border border-brand-accent/15 bg-gradient-to-r from-brand-subtle/45 via-surface to-surface shadow-soft">
+        <span
+          aria-hidden
+          className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/55 to-transparent"
+        />
+        <div className="relative flex items-start gap-3 px-3.5 py-3">
+          <div className="zm-pulse-glow relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover text-white shadow-[0_4px_10px_rgba(53,157,243,0.32)]">
+            <Sparkles className="h-3.5 w-3.5" strokeWidth={2} />
+            <span aria-hidden className="absolute -right-0.5 -top-0.5 inline-flex h-2 w-2 items-center justify-center">
+              <span className={cn("absolute inset-0 animate-ping rounded-full opacity-55", dotClass)} />
+              <span className={cn("relative h-1.5 w-1.5 rounded-full ring-2 ring-surface", dotClass)} />
+            </span>
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="text-[10px] font-semibold uppercase tracking-[0.10em] text-brand-accent">
+              AI assistance
+            </div>
+            <div className="mt-0.5 text-[12px] leading-relaxed text-ink">{suggestion}</div>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 
