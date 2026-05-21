@@ -700,11 +700,39 @@ function LockedAnalyticsPreview({ currentPlanName }: { currentPlanName: string }
             href="/dashboard/billing"
             className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-brand-accent px-4 py-2.5 text-[12.5px] font-semibold text-white shadow-[0_4px_18px_rgba(53,157,243,0.30)] transition-all duration-[260ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:shadow-[0_8px_24px_rgba(53,157,243,0.40)]"
           >
-            <Sparkles className="h-3.5 w-3.5" strokeWidth={2} />
+            {/* Live pulse dot — subtle "system is alive" indicator
+                per Phase 11B Part 2 (without inventing fake live
+                business metrics). Pure CSS, no JS. */}
+            <span aria-hidden className="relative inline-flex h-2 w-2">
+              <span className="absolute inset-0 inline-flex h-full w-full animate-ping rounded-full bg-white/60" />
+              <span className="relative inline-block h-2 w-2 rounded-full bg-white" />
+            </span>
             Upgrade to {proPlan.name}
           </Link>
         </div>
       </PremiumCard>
+
+      {/* Value props row — three honest cards describing what the
+          engine actually does (each maps to a real lib/analytics
+          module: forecasting.ts, staffingInsights.ts, insights.ts).
+          No fabricated stats — operational framing only. */}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <ValuePropCard
+          icon={TrendingUp}
+          title="Conversion intelligence"
+          body="See your highest-converting hours and replicate them across the calendar."
+        />
+        <ValuePropCard
+          icon={DollarSign}
+          title="Revenue forecasting"
+          body="Project monthly revenue with confidence bands tuned to your real booking history."
+        />
+        <ValuePropCard
+          icon={Users}
+          title="Staff orchestration"
+          body="Surface above-average converters and route more leads their way automatically."
+        />
+      </div>
 
       {/* KPI preview grid — labels real, values skeleton (no fake numbers) */}
       <div>
@@ -728,10 +756,11 @@ function LockedAnalyticsPreview({ currentPlanName }: { currentPlanName: string }
                       {k.label}
                     </div>
                     {/* Skeleton bars where the metric would render —
-                        honest about what's locked, no fabricated data. */}
+                        honest about what's locked, no fabricated data.
+                        Soft pulse animation = premium loader vibe. */}
                     <div className="mt-2 space-y-1.5" aria-hidden>
-                      <div className="h-5 w-3/4 rounded-md bg-gradient-to-r from-ink/10 via-ink/[0.06] to-transparent" />
-                      <div className="h-2 w-1/2 rounded-md bg-ink/[0.06]" />
+                      <div className="h-5 w-3/4 animate-pulse rounded-md bg-gradient-to-r from-ink/10 via-ink/[0.06] to-transparent" />
+                      <div className="h-2 w-1/2 animate-pulse rounded-md bg-ink/[0.06]" style={{ animationDelay: "200ms" }} />
                     </div>
                   </div>
                   <span className={cn("inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg", k.tone)}>
@@ -798,6 +827,39 @@ function LockedAnalyticsPreview({ currentPlanName }: { currentPlanName: string }
           })}
         </div>
       </div>
+
+      {/* How analytics works — educational mini-section per
+          Phase 11B Part 9. Three-step operational loop:
+          Track -> Surface -> Optimize. Helps tenants understand
+          the value before they upgrade. No fake numbers, just
+          system explanation. */}
+      <PremiumCard className="p-5">
+        <SectionLabel
+          eyebrow="How it works"
+          title="From booking data to operational decisions"
+          hint="The same loop your operations team would run manually — automated."
+        />
+        <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <HowItWorksStep
+            step={1}
+            icon={Activity}
+            title="Track"
+            body="Every booking, cancel, no-show, and confirm rolls into a daily snapshot — tenant-scoped."
+          />
+          <HowItWorksStep
+            step={2}
+            icon={Sparkles}
+            title="Surface"
+            body="The engine spots trends, anomalies, and drift in real time and turns them into plain-language insights."
+          />
+          <HowItWorksStep
+            step={3}
+            icon={Zap}
+            title="Optimize"
+            body="Recommendations tell you what to do next — adjust hours, route bookings, fix friction points."
+          />
+        </div>
+      </PremiumCard>
 
       {/* Plan comparison card */}
       <PremiumCard className="relative overflow-hidden p-5">
@@ -990,5 +1052,66 @@ function BarSilhouette() {
         />
       ))}
     </svg>
+  );
+}
+
+// Value prop card used in the post-hero strip (Phase 11B Part 10).
+// Three of these surface what the Pro plan actually unlocks. Each
+// maps to a real lib/analytics module — no fabricated capabilities.
+function ValuePropCard({
+  icon: Icon,
+  title,
+  body,
+}: {
+  icon: LucideIcon;
+  title: string;
+  body: string;
+}) {
+  return (
+    <div className="group relative overflow-hidden rounded-2xl border border-border/60 bg-surface p-4 transition-all duration-[260ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:shadow-soft hover:border-brand-accent/30">
+      <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/55 to-transparent" />
+      <span aria-hidden className="pointer-events-none absolute -right-8 -top-8 h-24 w-24 rounded-full bg-brand-accent/[0.06] blur-2xl transition-opacity duration-[260ms] group-hover:opacity-100" />
+      <div className="relative flex items-start gap-3">
+        <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-subtle/60 text-brand-accent ring-1 ring-brand-accent/15">
+          <Icon className="h-4 w-4" strokeWidth={1.75} />
+        </span>
+        <div className="min-w-0">
+          <div className="text-[13px] font-semibold tracking-tight text-ink">{title}</div>
+          <p className="mt-1 text-[11.5px] leading-relaxed text-ink-muted">{body}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// "How it works" step tile used in the educational mini-section
+// (Phase 11B Part 9). Numbered ribbon + icon + concise copy
+// describing the operational loop (Track -> Surface -> Optimize).
+function HowItWorksStep({
+  step,
+  icon: Icon,
+  title,
+  body,
+}: {
+  step: number;
+  icon: LucideIcon;
+  title: string;
+  body: string;
+}) {
+  return (
+    <div className="relative rounded-xl border border-border bg-surface p-3.5 transition-all duration-[260ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:shadow-soft">
+      <span className="absolute -top-2 left-3 inline-flex h-4 items-center rounded-full bg-brand-accent px-1.5 text-[9px] font-semibold uppercase tracking-[0.10em] text-white shadow-[0_2px_8px_rgba(53,157,243,0.20)]">
+        Step {step}
+      </span>
+      <div className="flex items-start gap-2.5 pt-1">
+        <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-brand-subtle/70 text-brand-accent ring-1 ring-brand-accent/15">
+          <Icon className="h-3.5 w-3.5" strokeWidth={1.75} />
+        </span>
+        <div className="min-w-0">
+          <div className="text-[12.5px] font-semibold tracking-tight text-ink">{title}</div>
+          <p className="mt-0.5 text-[11px] leading-relaxed text-ink-muted">{body}</p>
+        </div>
+      </div>
+    </div>
   );
 }
