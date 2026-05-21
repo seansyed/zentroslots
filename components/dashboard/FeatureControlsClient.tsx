@@ -3,27 +3,41 @@
 import * as React from "react";
 import Link from "next/link";
 import {
+  Activity,
+  AlertTriangle,
   ArrowUpRight,
+  Bell,
   CalendarClock,
+  CalendarDays,
+  CalendarRange,
   CheckCircle2,
   CircleAlert,
+  Clock,
+  ExternalLink,
+  Globe,
+  History,
+  Info,
+  Lock,
   Mail,
+  MailWarning,
   Palette,
+  RotateCcw,
+  Server,
+  Shield,
+  ShieldCheck,
   Sparkles,
+  Video,
+  Webhook,
   XCircle,
+  Zap,
 } from "lucide-react";
 
-import { Button, Card, toast } from "@/components/ui/primitives";
+import { Button, Card, Modal, toast } from "@/components/ui/primitives";
 
 // ─── Public contract ──────────────────────────────────────────────────
-//
-// The page builds `sections` server-side so a section can never list a
-// feature key that doesn't live in `FEATURE_FLAGS`. Read-only refs use
-// a separate type so the toggle UI can't accidentally render a switch
-// for an externally-managed policy.
 
 export type FeatureSectionDef = {
-  id: "booking" | "automation" | "calendar" | "branding";
+  id: "booking" | "automation" | "scheduling" | "branding";
   title: string;
   summary: string;
   /** Subset of FEATURE_FLAGS rendered as live toggles in this section. */
@@ -33,10 +47,12 @@ export type FeatureSectionDef = {
 export type SystemHealthSnapshot = {
   smtpReady: boolean;
   googleCalendarConnections: number;
+  googleCalendarErrors: number;
   googleProviderEnabled: boolean;
   customDomainsCount: number;
   webhookConfigured: boolean;
   hidePoweredBy: boolean;
+  workspaceActive: boolean;
 };
 
 export type ExternalPolicyRef = {
@@ -48,8 +64,34 @@ export type ExternalPolicyRef = {
    * available  — capability exists on plan/setup but not engaged
    * disabled   — capability is configured off (or missing prerequisite)
    * plan_gated — capability requires plan upgrade
+   * always_on  — core safety/platform guarantee, not toggleable
    */
-  status: "active" | "available" | "disabled" | "plan_gated";
+  status: "active" | "available" | "disabled" | "plan_gated" | "always_on";
+  planLocked: boolean;
+  manageHref: string;
+  manageLabel: string;
+};
+
+export type FlagAuditEntry = {
+  actorName: string | null;
+  actorEmail: string | null;
+  /** ISO timestamp of the most recent change. */
+  at: string;
+  /** Audit source identifier — useful for debugging "where did this come from". */
+  source: string;
+};
+
+export type OperationalHealthItem = {
+  id: string;
+  label: string;
+  status: "ok" | "degraded" | "down" | "muted";
+  detail: string;
+};
+
+export type DependencyWarning = {
+  flag: string;
+  tone: "warning" | "info";
+  message: string;
   manageHref: string;
   manageLabel: string;
 };
@@ -71,6 +113,9 @@ export default function FeatureControlsClient({
   sections,
   externalRefs,
   systemHealth,
+  operationalHealth,
+  dependencyWarnings,
+  flagAudit,
   plan,
 }: {
   initialFlags: Record<string, boolean>;
@@ -80,10 +125,14 @@ export default function FeatureControlsClient({
   sections: FeatureSectionDef[];
   externalRefs: ExternalPolicyRef[];
   systemHealth: SystemHealthSnapshot;
+  operationalHealth: OperationalHealthItem[];
+  dependencyWarnings: DependencyWarning[];
+  flagAudit: Record<string, FlagAuditEntry>;
   plan: PlanInfo;
 }) {
   const [flags, setFlags] = React.useState<Record<string, boolean>>(initialFlags);
   const [busy, setBusy] = React.useState(false);
+  const [resetModalOpen, setResetModalOpen] = React.useState(false);
 
   const dirty = React.useMemo(
     () => keys.some((k) => flags[k] !== initialFlags[k]),
@@ -91,6 +140,10 @@ export default function FeatureControlsClient({
   );
   const changedCount = React.useMemo(
     () => keys.reduce((n, k) => (flags[k] !== initialFlags[k] ? n + 1 : n), 0),
+    [flags, initialFlags, keys],
+  );
+  const changedKeys = React.useMemo(
+    () => keys.filter((k) => flags[k] !== initialFlags[k]),
     [flags, initialFlags, keys],
   );
 
@@ -109,9 +162,6 @@ export default function FeatureControlsClient({
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error ?? "Save failed");
       toast("Feature controls updated", "success");
-      // Refresh from server's sanitised response — protects against
-      // any drift between what the client thought it sent and what
-      // the server kept.
       if (data?.flags) setFlags(data.flags);
     } catch (e) {
       toast(e instanceof Error ? e.message : "Save failed", "error");
@@ -120,14 +170,17 @@ export default function FeatureControlsClient({
     }
   }
 
-  function resetToDefaults() {
+  function applyReset() {
     setFlags({ ...defaults });
+    setResetModalOpen(false);
   }
 
   // Total live counts for the hero
   const totalLiveFlags = keys.length;
   const flagsOn = keys.reduce((n, k) => (flags[k] ? n + 1 : n), 0);
-  const externalActive = externalRefs.filter((r) => r.status === "active").length;
+  const externalActive = externalRefs.filter(
+    (r) => r.status === "active" || r.status === "always_on",
+  ).length;
 
   const refsBySection = React.useMemo(() => {
     const out: Record<string, ExternalPolicyRef[]> = {};
@@ -137,8 +190,16 @@ export default function FeatureControlsClient({
     return out;
   }, [externalRefs]);
 
+  const warningsByFlag = React.useMemo(() => {
+    const out: Record<string, DependencyWarning[]> = {};
+    for (const w of dependencyWarnings) {
+      (out[w.flag] ??= []).push(w);
+    }
+    return out;
+  }, [dependencyWarnings]);
+
   return (
-    <div className="mt-6 space-y-6 pb-24">
+    <div className="mt-6 space-y-6 pb-28">
       {/* ── Hero / command-center header ────────────────────────── */}
       <Card className="overflow-hidden p-0">
         <div className="bg-gradient-to-br from-brand-accent/8 via-surface to-surface px-6 py-7">
@@ -163,10 +224,7 @@ export default function FeatureControlsClient({
               </p>
             </div>
             <div className="grid grid-cols-3 gap-3 text-center">
-              <HeroStat
-                value={`${flagsOn}/${totalLiveFlags}`}
-                label="Live toggles on"
-              />
+              <HeroStat value={`${flagsOn}/${totalLiveFlags}`} label="Live toggles on" />
               <HeroStat
                 value={String(externalActive)}
                 label="External policies active"
@@ -177,6 +235,18 @@ export default function FeatureControlsClient({
                 accent={changedCount > 0 ? "amber" : "muted"}
               />
             </div>
+          </div>
+        </div>
+
+        {/* ── Live operational health strip ──────────────────────── */}
+        <div className="border-t border-border bg-surface-muted/40 px-6 py-3">
+          <div className="flex flex-wrap items-center gap-3 text-[11px]">
+            <span className="inline-flex items-center gap-1.5 font-semibold uppercase tracking-wide text-ink-subtle">
+              <Activity className="h-3 w-3" /> System
+            </span>
+            {operationalHealth.map((item) => (
+              <OperationalChip key={item.id} item={item} />
+            ))}
           </div>
         </div>
       </Card>
@@ -204,51 +274,21 @@ export default function FeatureControlsClient({
                   const m = meta[k]!;
                   const on = flags[k] ?? defaults[k] ?? true;
                   const changed = initialFlags[k] !== on;
-                  const healthLine = healthHintFor(k, systemHealth);
+                  const audit = flagAudit[k];
+                  const warnings = warningsByFlag[k] ?? [];
                   return (
-                    <Card key={k} className="p-5">
-                      <div className="flex items-start justify-between gap-4">
-                        <div className="min-w-0">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <h3 className="text-sm font-semibold text-ink">{m.label}</h3>
-                            <StatusPill
-                              tone={on ? "on" : "off"}
-                              label={on ? "Enabled" : "Disabled"}
-                            />
-                            {changed && (
-                              <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-800">
-                                Unsaved
-                              </span>
-                            )}
-                          </div>
-                          <p className="mt-1 text-sm text-ink-muted">{m.description}</p>
-                          <p className="mt-2 text-xs text-ink-subtle">
-                            <span className="font-medium text-ink-muted">When off:</span> {m.impact}
-                          </p>
-                          {healthLine && (
-                            <p className="mt-2 inline-flex items-center gap-1.5 rounded-md bg-surface-muted/60 px-2 py-1 text-[11px] text-ink-muted">
-                              <span
-                                className={
-                                  "h-1.5 w-1.5 rounded-full " +
-                                  (healthLine.tone === "ok"
-                                    ? "bg-emerald-500"
-                                    : healthLine.tone === "warn"
-                                      ? "bg-amber-500"
-                                      : "bg-slate-400")
-                                }
-                              />
-                              {healthLine.text}
-                            </p>
-                          )}
-                        </div>
-                        <Toggle
-                          checked={on}
-                          disabled={busy}
-                          onChange={(v) => setFlag(k, v)}
-                          ariaLabel={`Toggle ${m.label}`}
-                        />
-                      </div>
-                    </Card>
+                    <PolicyCard
+                      key={k}
+                      flagKey={k}
+                      meta={m}
+                      checked={on}
+                      changed={changed}
+                      busy={busy}
+                      onChange={(v) => setFlag(k, v)}
+                      audit={audit}
+                      warnings={warnings}
+                      healthHint={healthHintFor(k, systemHealth)}
+                    />
                   );
                 })}
               </div>
@@ -256,6 +296,13 @@ export default function FeatureControlsClient({
 
             {sectionRefs.length > 0 && (
               <div className="space-y-2">
+                {sectionFlags.length > 0 && (
+                  <div className="flex items-center gap-2 px-1 pt-1 text-[11px] font-semibold uppercase tracking-wide text-ink-subtle">
+                    <span className="h-px flex-1 bg-border" />
+                    Managed elsewhere
+                    <span className="h-px flex-1 bg-border" />
+                  </div>
+                )}
                 {sectionRefs.map((r) => (
                   <ExternalRefRow key={`${r.sectionId}:${r.label}`} ref_={r} />
                 ))}
@@ -271,40 +318,319 @@ export default function FeatureControlsClient({
         );
       })}
 
-      {/* ── Save bar ────────────────────────────────────────────── */}
-      <div className="sticky bottom-4 z-10 flex items-center justify-between gap-2 rounded-2xl border border-border bg-surface/95 px-4 py-3 shadow-md backdrop-blur">
-        <div className="flex items-center gap-2 text-xs text-ink-muted">
+      {/* ── Save bar — desktop + mobile ─────────────────────────── */}
+      <div className="sticky bottom-4 z-10 flex items-center justify-between gap-2 rounded-2xl border border-border bg-surface/95 px-4 py-3 shadow-md backdrop-blur sm:bottom-6">
+        <div className="flex min-w-0 items-center gap-2 text-xs text-ink-muted">
           {dirty ? (
             <>
               <span className="h-2 w-2 animate-pulse rounded-full bg-amber-500" />
-              {changedCount} unsaved {changedCount === 1 ? "change" : "changes"}
+              <span className="truncate">
+                {changedCount} unsaved {changedCount === 1 ? "change" : "changes"}
+              </span>
             </>
           ) : (
             <>
               <span className="h-2 w-2 rounded-full bg-emerald-500" />
-              All changes saved
+              <span className="truncate">All changes saved</span>
             </>
           )}
         </div>
         <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={resetToDefaults}
+            onClick={() => setResetModalOpen(true)}
             disabled={busy}
-            className="text-xs text-ink-muted hover:text-ink disabled:opacity-50"
+            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-ink-muted hover:bg-surface-muted hover:text-ink disabled:opacity-50"
           >
-            Reset to defaults
+            <RotateCcw className="h-3 w-3" /> Reset
           </button>
           <Button onClick={save} disabled={!dirty || busy}>
             {busy ? "Saving…" : "Save changes"}
           </Button>
         </div>
       </div>
+
+      {/* ── Reset confirmation modal ────────────────────────────── */}
+      <Modal
+        open={resetModalOpen}
+        onClose={() => setResetModalOpen(false)}
+        title="Restore plan defaults?"
+      >
+        <p className="text-sm text-ink-muted">
+          This will reset every workspace toggle on this page to its default value
+          — preserving the pre-flag behavior every tenant starts with. The change is
+          staged locally; nothing is written until you click <strong>Save changes</strong>.
+        </p>
+        <div className="mt-4 max-h-56 overflow-auto rounded-lg border border-border bg-surface-muted/40 p-3">
+          <div className="space-y-1.5 text-xs">
+            {keys.map((k) => {
+              const m = meta[k];
+              if (!m) return null;
+              const current = flags[k] ?? defaults[k];
+              const target = defaults[k];
+              const willChange = current !== target;
+              return (
+                <div
+                  key={k}
+                  className={
+                    "flex items-center justify-between gap-2 " +
+                    (willChange ? "text-ink" : "text-ink-subtle")
+                  }
+                >
+                  <span className="truncate font-medium">{m.label}</span>
+                  <span className="shrink-0 tabular-nums">
+                    {willChange ? (
+                      <>
+                        <span className={current ? "text-emerald-600" : "text-slate-500"}>
+                          {current ? "on" : "off"}
+                        </span>
+                        <span className="mx-1 text-ink-subtle">→</span>
+                        <span className={target ? "text-emerald-600" : "text-slate-500"}>
+                          {target ? "on" : "off"}
+                        </span>
+                      </>
+                    ) : (
+                      <span className="text-ink-subtle">no change</span>
+                    )}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+        <p className="mt-3 text-[11px] text-ink-subtle">
+          Read-only references (custom domains, branding, integrations, public booking
+          page) are <em>not</em> affected — they live on their own settings pages.
+        </p>
+        <div className="mt-5 flex items-center justify-end gap-2">
+          <button
+            type="button"
+            onClick={() => setResetModalOpen(false)}
+            className="rounded-md px-3 py-1.5 text-sm text-ink-muted hover:bg-surface-muted hover:text-ink"
+          >
+            Cancel
+          </button>
+          <Button onClick={applyReset}>Stage defaults</Button>
+        </div>
+      </Modal>
     </div>
   );
 }
 
-// ─── Sub-components ───────────────────────────────────────────────────
+// ─── Policy card ──────────────────────────────────────────────────────
+
+function PolicyCard({
+  flagKey,
+  meta,
+  checked,
+  changed,
+  busy,
+  onChange,
+  audit,
+  warnings,
+  healthHint,
+}: {
+  flagKey: string;
+  meta: FlagMeta;
+  checked: boolean;
+  changed: boolean;
+  busy: boolean;
+  onChange: (v: boolean) => void;
+  audit?: FlagAuditEntry;
+  warnings: DependencyWarning[];
+  healthHint: { tone: "ok" | "warn" | "muted"; text: string } | null;
+}) {
+  const Icon = flagIcon(flagKey);
+  return (
+    <Card
+      className={
+        "group relative overflow-hidden p-0 transition-all duration-200 " +
+        (checked
+          ? "border-brand-accent/30 shadow-[0_0_0_1px_rgba(53,157,243,0.08),0_1px_2px_rgba(15,23,42,0.04)] hover:shadow-[0_0_0_1px_rgba(53,157,243,0.18),0_8px_24px_-8px_rgba(53,157,243,0.18)]"
+          : "hover:border-border/80 hover:shadow-md")
+      }
+    >
+      {/* Active glow stripe */}
+      {checked && (
+        <div className="absolute inset-y-0 left-0 w-1 bg-gradient-to-b from-brand-accent/60 via-brand-accent/30 to-transparent" />
+      )}
+      <div className="flex items-start gap-4 p-5">
+        {/* Icon lane */}
+        <div
+          className={
+            "mt-0.5 grid h-10 w-10 shrink-0 place-items-center rounded-xl transition-colors " +
+            (checked
+              ? "bg-brand-accent/10 text-brand-accent"
+              : "bg-surface-muted/70 text-ink-subtle")
+          }
+        >
+          <Icon className="h-5 w-5" />
+        </div>
+
+        {/* Body */}
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <h3
+              className={
+                "text-sm font-semibold " + (checked ? "text-ink" : "text-ink-muted")
+              }
+            >
+              {meta.label}
+            </h3>
+            <RuntimeBadge enabled={checked} />
+            {changed && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-800">
+                <Clock className="h-3 w-3" /> Unsaved
+              </span>
+            )}
+          </div>
+          <p
+            className={
+              "mt-1 text-sm " + (checked ? "text-ink-muted" : "text-ink-subtle")
+            }
+          >
+            {meta.description}
+          </p>
+
+          {/* Separator + impact + health hint */}
+          <div className="mt-3 space-y-2 border-t border-border/60 pt-3 text-xs">
+            <p className="text-ink-subtle">
+              <span className="font-medium text-ink-muted">When off:</span>{" "}
+              {meta.impact}
+            </p>
+            {healthHint && (
+              <p className="inline-flex items-center gap-1.5 rounded-md bg-surface-muted/60 px-2 py-1 text-[11px] text-ink-muted">
+                <span
+                  className={
+                    "h-1.5 w-1.5 rounded-full " +
+                    (healthHint.tone === "ok"
+                      ? "bg-emerald-500"
+                      : healthHint.tone === "warn"
+                        ? "bg-amber-500"
+                        : "bg-slate-400")
+                  }
+                />
+                {healthHint.text}
+              </p>
+            )}
+          </div>
+
+          {/* Dependency warnings */}
+          {warnings.length > 0 && (
+            <div className="mt-3 space-y-2">
+              {warnings.map((w, idx) => (
+                <DependencyWarningRow key={`${w.flag}-${idx}`} warning={w} />
+              ))}
+            </div>
+          )}
+
+          {/* Audit footer */}
+          {audit && (
+            <div className="mt-3 flex items-center gap-1.5 border-t border-border/60 pt-3 text-[11px] text-ink-subtle">
+              <History className="h-3 w-3" />
+              <span>
+                Last changed by{" "}
+                <span className="font-medium text-ink-muted">
+                  {audit.actorName ?? audit.actorEmail ?? "—"}
+                </span>{" "}
+                <RelativeTime iso={audit.at} />
+              </span>
+              <span className="ml-auto inline-flex items-center gap-1 rounded-full bg-surface-muted px-2 py-0.5 font-mono text-[10px] tracking-tight text-ink-subtle">
+                {audit.source}
+              </span>
+            </div>
+          )}
+        </div>
+
+        {/* Toggle */}
+        <Toggle
+          checked={checked}
+          disabled={busy}
+          onChange={onChange}
+          ariaLabel={`Toggle ${meta.label}`}
+        />
+      </div>
+    </Card>
+  );
+}
+
+function RuntimeBadge({ enabled }: { enabled: boolean }) {
+  if (enabled) {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-700">
+        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+        Live
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600">
+      <span className="h-1.5 w-1.5 rounded-full bg-slate-400" />
+      Disabled
+    </span>
+  );
+}
+
+function DependencyWarningRow({ warning }: { warning: DependencyWarning }) {
+  const isWarn = warning.tone === "warning";
+  const Icon = isWarn ? AlertTriangle : Info;
+  return (
+    <div
+      className={
+        "flex items-start gap-2 rounded-lg border px-3 py-2 text-[12px] " +
+        (isWarn
+          ? "border-amber-200 bg-amber-50 text-amber-900"
+          : "border-sky-200 bg-sky-50 text-sky-900")
+      }
+    >
+      <Icon className={"mt-0.5 h-3.5 w-3.5 shrink-0 " + (isWarn ? "text-amber-600" : "text-sky-600")} />
+      <div className="min-w-0 flex-1">
+        <span>{warning.message}</span>
+      </div>
+      <Link
+        href={warning.manageHref}
+        className={
+          "inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium hover:underline " +
+          (isWarn ? "text-amber-800" : "text-sky-800")
+        }
+      >
+        {warning.manageLabel}
+        <ExternalLink className="h-3 w-3" />
+      </Link>
+    </div>
+  );
+}
+
+function RelativeTime({ iso }: { iso: string }) {
+  const [text, setText] = React.useState(() => formatRelative(iso));
+  React.useEffect(() => {
+    const id = setInterval(() => setText(formatRelative(iso)), 60_000);
+    return () => clearInterval(id);
+  }, [iso]);
+  return (
+    <time dateTime={iso} title={new Date(iso).toLocaleString()}>
+      {text}
+    </time>
+  );
+}
+
+function formatRelative(iso: string): string {
+  const then = new Date(iso).getTime();
+  const now = Date.now();
+  const seconds = Math.max(1, Math.floor((now - then) / 1000));
+  if (seconds < 60) return "just now";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days}d ago`;
+  const months = Math.floor(days / 30);
+  if (months < 12) return `${months}mo ago`;
+  return `${Math.floor(months / 12)}y ago`;
+}
+
+// ─── Hero stat + system chip ──────────────────────────────────────────
 
 function HeroStat({
   value,
@@ -334,33 +660,72 @@ function HeroStat({
   );
 }
 
-function StatusPill({
-  tone,
-  label,
-}: {
-  tone: "on" | "off";
-  label: string;
-}) {
-  if (tone === "on") {
-    return (
-      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-700">
-        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-        {label}
-      </span>
-    );
-  }
+function OperationalChip({ item }: { item: OperationalHealthItem }) {
+  const meta = chipVisual(item.status);
+  const Icon = healthIcon(item.id);
   return (
-    <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600">
-      <span className="h-1.5 w-1.5 rounded-full bg-slate-400" />
-      {label}
+    <span
+      className={
+        "inline-flex items-center gap-1.5 rounded-full border px-2 py-1 font-medium " +
+        meta.classes
+      }
+      title={item.detail}
+    >
+      <Icon className="h-3 w-3" />
+      <span>{item.label}</span>
+      <span className={"h-1.5 w-1.5 rounded-full " + meta.dot} />
     </span>
   );
 }
 
+function chipVisual(status: OperationalHealthItem["status"]) {
+  switch (status) {
+    case "ok":
+      return {
+        classes: "border-emerald-200 bg-emerald-50 text-emerald-800",
+        dot: "bg-emerald-500",
+      };
+    case "degraded":
+      return {
+        classes: "border-amber-200 bg-amber-50 text-amber-900",
+        dot: "bg-amber-500",
+      };
+    case "down":
+      return {
+        classes: "border-rose-200 bg-rose-50 text-rose-800",
+        dot: "bg-rose-500",
+      };
+    case "muted":
+      return {
+        classes: "border-border bg-surface-muted text-ink-subtle",
+        dot: "bg-slate-400",
+      };
+  }
+}
+
+function healthIcon(id: string) {
+  switch (id) {
+    case "booking-engine":
+      return Zap;
+    case "reminder-engine":
+      return Bell;
+    case "smtp":
+      return Mail;
+    case "calendar-oauth":
+      return CalendarRange;
+    case "webhook-delivery":
+      return Webhook;
+    default:
+      return Server;
+  }
+}
+
+// ─── External ref row ─────────────────────────────────────────────────
+
 function ExternalRefRow({ ref_ }: { ref_: ExternalPolicyRef }) {
   const meta = externalRefVisual(ref_.status);
   return (
-    <Card className="flex items-start gap-3 p-4">
+    <Card className="flex items-start gap-3 p-4 transition-colors hover:bg-surface-muted/30">
       <div
         className={
           "mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg " + meta.iconWrap
@@ -378,6 +743,11 @@ function ExternalRefRow({ ref_ }: { ref_: ExternalPolicyRef }) {
           >
             {meta.statusLabel}
           </span>
+          {ref_.planLocked && (
+            <span className="inline-flex items-center gap-1 rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-[10px] font-medium text-violet-700">
+              <Lock className="h-3 w-3" /> Plan locked
+            </span>
+          )}
           <span className="rounded-full border border-dashed border-border px-2 py-0.5 text-[10px] font-medium text-ink-subtle">
             Managed elsewhere
           </span>
@@ -386,7 +756,12 @@ function ExternalRefRow({ ref_ }: { ref_: ExternalPolicyRef }) {
       </div>
       <Link
         href={ref_.manageHref}
-        className="ml-2 inline-flex shrink-0 items-center gap-1 self-center rounded-lg border border-border bg-surface px-2.5 py-1.5 text-xs font-medium text-ink hover:bg-surface-muted"
+        className={
+          "ml-2 inline-flex shrink-0 items-center gap-1 self-center rounded-lg border px-2.5 py-1.5 text-xs font-medium hover:bg-surface-muted " +
+          (ref_.planLocked
+            ? "border-violet-200 bg-violet-50 text-violet-800"
+            : "border-border bg-surface text-ink")
+        }
       >
         {ref_.manageLabel}
         <ArrowUpRight className="h-3 w-3" />
@@ -423,14 +798,24 @@ function externalRefVisual(status: ExternalPolicyRef["status"]) {
       };
     case "plan_gated":
       return {
-        Icon: Sparkles,
+        Icon: Lock,
         iconWrap: "bg-violet-50",
         iconColor: "text-violet-600",
         pill: "bg-violet-50 text-violet-700",
-        statusLabel: "Plan upgrade required",
+        statusLabel: "Upgrade required",
+      };
+    case "always_on":
+      return {
+        Icon: ShieldCheck,
+        iconWrap: "bg-sky-50",
+        iconColor: "text-sky-600",
+        pill: "bg-sky-50 text-sky-700",
+        statusLabel: "Always on",
       };
   }
 }
+
+// ─── Icon mapping ─────────────────────────────────────────────────────
 
 function sectionIcon(id: FeatureSectionDef["id"]) {
   switch (id) {
@@ -438,16 +823,38 @@ function sectionIcon(id: FeatureSectionDef["id"]) {
       return CheckCircle2;
     case "automation":
       return Mail;
-    case "calendar":
+    case "scheduling":
       return CalendarClock;
     case "branding":
       return Palette;
   }
 }
 
-// Per-toggle health hint. Renders nothing for flags that don't have a
-// natural live signal. Honesty rule: every line MUST reflect actual
-// backend state — never a hard-coded "All systems normal" string.
+function flagIcon(key: string) {
+  switch (key) {
+    case "reminders":
+      return Bell;
+    case "rescheduling":
+      return CalendarDays;
+    case "cancellations":
+      return XCircle;
+    case "intakeForms":
+      return Shield;
+    case "googleMeet":
+      return Video;
+    case "emailNotifications":
+      return MailWarning;
+    case "bookingBuffers":
+      return Clock;
+    case "webhookDelivery":
+      return Webhook;
+    default:
+      return Globe;
+  }
+}
+
+// Per-toggle health hint. Every line MUST reflect actual backend state —
+// never a hard-coded "All systems normal" string.
 function healthHintFor(
   key: string,
   h: SystemHealthSnapshot,
@@ -504,14 +911,14 @@ function Toggle({
       disabled={disabled}
       onClick={() => onChange(!checked)}
       className={
-        "relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full transition " +
+        "relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full transition-colors " +
         (checked ? "bg-brand-accent" : "bg-slate-300") +
         (disabled ? " opacity-50" : "")
       }
     >
       <span
         className={
-          "inline-block h-5 w-5 transform rounded-full bg-white shadow transition " +
+          "inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform " +
           (checked ? "translate-x-5" : "translate-x-0.5")
         }
       />
