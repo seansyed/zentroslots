@@ -21,6 +21,37 @@ const nextConfig: NextConfig = {
     // shipped feature flag, so we cast through `unknown`.
     nodeMiddleware: true,
   } as NextConfig["experimental"] & { nodeMiddleware: boolean },
+
+  // Phase 16: per-route response headers.
+  async headers() {
+    return [
+      {
+        // Allow third-party sites to iframe the booking flow. Without
+        // these headers some browsers / proxies inject X-Frame-Options:
+        // DENY by default and the embed renders blank. CSP frame-
+        // ancestors is the modern equivalent and is honored by all
+        // current browsers.
+        source: "/embed/:path*",
+        headers: [
+          { key: "Content-Security-Policy", value: "frame-ancestors *;" },
+          { key: "X-Frame-Options", value: "ALLOWALL" },
+          // Embed iframes shouldn't be referrer-leaked beyond the host.
+          { key: "Referrer-Policy", value: "no-referrer-when-downgrade" },
+        ],
+      },
+      {
+        // Embed runtime is meant to be cached aggressively at the edge.
+        // Versioned via the /v1/ path segment — bumping to /v2/ when
+        // we ship breaking changes preserves backward compatibility.
+        source: "/embed/v1.js",
+        headers: [
+          { key: "Cache-Control", value: "public, max-age=300, s-maxage=86400, stale-while-revalidate=604800" },
+          { key: "Content-Type", value: "application/javascript; charset=utf-8" },
+          { key: "Access-Control-Allow-Origin", value: "*" },
+        ],
+      },
+    ];
+  },
 };
 
 export default nextConfig;

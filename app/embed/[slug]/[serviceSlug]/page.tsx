@@ -3,17 +3,45 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@/db/client";
 import { serviceStaff, services, tenants, users } from "@/db/schema";
 import BookingFlow from "@/components/BookingFlow";
+import EmbedAutoResize from "@/components/EmbedAutoResize";
 import EmbedPixel from "@/components/EmbedPixel";
 
 // Iframe-safe embed page. Strips chrome so the host site can size it
 // inside an iframe with its own layout. Tenant accent color comes from
 // branding so the widget visually matches the parent site.
+//
+// Phase 16: query-param theming surface for the embed runtime
+// (public/embed/v1.js):
+//   color       — override accent (must be #rrggbb)
+//   theme       — "light" | "dark"   (placeholder for future dark mode)
+//   radius      — outer radius in px
+//   compact     — "1" → tighter spacing
+//   hideHeader  — "1" → strip tenant header (for popup mode)
+//   staff       — userId to preselect
 export default async function EmbedPage(props: {
   params: Promise<{ slug: string; serviceSlug: string }>;
-  searchParams: Promise<{ staff?: string }>;
+  searchParams: Promise<{
+    staff?: string;
+    color?: string;
+    theme?: string;
+    radius?: string;
+    compact?: string;
+    hideHeader?: string;
+  }>;
 }) {
   const { slug, serviceSlug } = await props.params;
   const sp = await props.searchParams;
+
+  // Sanitize color override — only accept #rrggbb so we can't be
+  // tricked into emitting arbitrary CSS values from the URL.
+  const colorOverride = sp.color && /^#?[0-9a-fA-F]{6}$/.test(sp.color)
+    ? sp.color.startsWith("#") ? sp.color : `#${sp.color}`
+    : null;
+  const radiusOverride = sp.radius && /^\d{1,3}$/.test(sp.radius)
+    ? Math.min(36, Math.max(0, parseInt(sp.radius, 10)))
+    : null;
+  const compact = sp.compact === "1";
+  const hideHeader = sp.hideHeader === "1";
 
   const tenant = await db.query.tenants.findFirst({ where: eq(tenants.slug, slug) });
   if (!tenant || !tenant.active) notFound();
@@ -46,7 +74,7 @@ export default async function EmbedPage(props: {
               No staff member is currently assigned to deliver this service. Please contact {tenant.name} directly.
             </p>
             {!tenant.hidePoweredBy && (
-              <div className="mt-8 text-[10px] text-ink-subtle">Powered by Scheduling SaaS</div>
+              <div className="mt-8 text-[10px] text-ink-subtle">Powered by ZentroMeet</div>
             )}
           </div>
         </div>
@@ -58,35 +86,48 @@ export default async function EmbedPage(props: {
     ? assignments.find((a) => a.userId === sp.staff) ?? assignments[0]
     : assignments[0];
 
+  // Effective theme values — overrides only apply when sanitized.
+  const accentColor = colorOverride ?? tenant.primaryColor;
+  const outerRadius = radiusOverride ?? 0;
+
   return (
     <div
       className="min-h-screen bg-surface"
-      style={{ "--color-accent": tenant.primaryColor } as React.CSSProperties}
+      style={{
+        "--color-accent": accentColor,
+        ...(outerRadius > 0 ? { borderRadius: `${outerRadius}px`, overflow: "hidden" } : {}),
+      } as React.CSSProperties}
     >
-      <div className="border-t-4 border-brand-accent">
-        <div className="mx-auto max-w-2xl px-4 py-6">
-          <div className="flex items-center gap-3">
-            {tenant.logoUrl && (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={tenant.logoUrl} alt="" className="h-10 w-10 rounded object-contain" />
-            )}
-            <div>
-              <div className="text-sm font-semibold text-ink">{tenant.name}</div>
-              <div className="text-xs text-ink-muted">{service.name} · {service.durationMinutes} min</div>
+      <div
+        className="border-t-4"
+        style={{ borderTopColor: accentColor }}
+      >
+        <div className={`mx-auto max-w-2xl px-4 ${compact ? "py-4" : "py-6"}`}>
+          {!hideHeader && (
+            <div className="flex items-center gap-3">
+              {tenant.logoUrl && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={tenant.logoUrl} alt="" className="h-10 w-10 rounded object-contain" />
+              )}
+              <div>
+                <div className="text-sm font-semibold text-ink">{tenant.name}</div>
+                <div className="text-xs text-ink-muted">{service.name} · {service.durationMinutes} min</div>
+              </div>
             </div>
-          </div>
+          )}
           <EmbedPixel slug={slug} serviceSlug={serviceSlug} />
+          <EmbedAutoResize slug={slug} serviceSlug={serviceSlug} />
           <BookingFlow
             serviceId={service.id}
             staffId={staff.userId}
             staffName={staff.name}
             durationMinutes={service.durationMinutes}
-            accentColor={tenant.primaryColor}
+            accentColor={accentColor}
             tenantName={tenant.name}
           />
           {!tenant.hidePoweredBy && (
             <div className="mt-6 border-t border-border pt-3 text-center text-[10px] text-ink-subtle">
-              Powered by Scheduling SaaS
+              Powered by ZentroMeet
             </div>
           )}
         </div>

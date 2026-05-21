@@ -4,10 +4,13 @@ import { and, asc, eq, sql } from "drizzle-orm";
 import { db } from "@/db/client";
 import { services, tenants, users } from "@/db/schema";
 import { getSession } from "@/lib/auth";
+import { getPlan } from "@/lib/plans";
 import Shell from "@/components/dashboard/Shell";
 import EmbedSnippetsClient from "@/components/dashboard/EmbedSnippetsClient";
 
 const APP_BASE_URL = (process.env.APP_BASE_URL ?? "http://localhost:3001").replace(/\/+$/, "");
+
+export const dynamic = "force-dynamic";
 
 export default async function EmbedSettingsPage() {
   const session = await getSession();
@@ -16,6 +19,9 @@ export default async function EmbedSettingsPage() {
   if (!user || user.role !== "admin") redirect("/dashboard");
   const tenant = await db.query.tenants.findFirst({ where: eq(tenants.id, user.tenantId) });
   if (!tenant) redirect("/dashboard");
+
+  const plan = getPlan(tenant.currentPlan);
+  const canHideBranding = plan.limits.customBranding;
 
   // Per-service staff count powers a "not bookable" warning in the
   // snippet UI. Embed page hard-blocks rendering when staffCount=0, so
@@ -36,16 +42,26 @@ export default async function EmbedSettingsPage() {
     <Shell
       user={{ name: user.name, email: user.email, role: user.role }}
       tenant={{ name: tenant.name, slug: tenant.slug, plan: tenant.currentPlan, logoUrl: tenant.logoUrl }}
-      title="Embed widgets"
-      crumbs={[{ label: "Dashboard", href: "/dashboard" }, { label: "Settings" }, { label: "Embed" }]}
+      title="Embed Widget Studio"
+      crumbs={[
+        { label: "Dashboard", href: "/dashboard" },
+        { label: "Settings" },
+        { label: "Embed" },
+      ]}
     >
-      <h1 className="text-heading font-semibold text-ink">Embed your booking widget</h1>
-      <p className="mt-1 text-sm text-ink-muted">Drop one of these snippets into any website to take bookings inline.</p>
-
+      {/* Hero + studio live inside EmbedSnippetsClient — see StudioHero. */}
       <EmbedSnippetsClient
         baseUrl={APP_BASE_URL}
         tenantSlug={tenant.slug}
-        services={serviceList.map((s) => ({ id: s.id, name: s.name, slug: s.slug, hasStaff: Number(s.staffCount) > 0 }))}
+        tenantPrimaryColor={tenant.primaryColor}
+        services={serviceList.map((s) => ({
+          id: s.id,
+          name: s.name,
+          slug: s.slug,
+          hasStaff: Number(s.staffCount) > 0,
+        }))}
+        canHideBranding={canHideBranding}
+        planName={plan.name}
       />
     </Shell>
   );
