@@ -30,14 +30,10 @@ export default async function IntegrationsPage() {
     <Shell
       user={{ name: user.name, email: user.email, role: user.role }}
       tenant={{ name: tenant.name, slug: tenant.slug, plan: tenant.currentPlan, logoUrl: tenant.logoUrl }}
-      title="Workspace integrations"
-      crumbs={[{ label: "Dashboard", href: "/dashboard" }, { label: "Settings" }, { label: "Workspace integrations" }]}
+      title="Integrations Command Center"
+      crumbs={[{ label: "Dashboard", href: "/dashboard" }, { label: "Settings" }, { label: "Integrations" }]}
     >
-      <h1 className="text-heading font-semibold text-ink">Workspace integrations</h1>
-      <p className="mt-1 text-sm text-ink-muted">
-        Enable or disable provider integrations across your workspace.
-      </p>
-
+      {/* Hero lives inside IntegrationsClient — see CommandCenterHero. */}
       <IntegrationsClient
         initial={{
           notificationWebhookUrl: tenant.notificationWebhookUrl ?? "",
