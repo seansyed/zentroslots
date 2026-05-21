@@ -584,6 +584,42 @@ export async function GET() {
     }
   }
 
+  // ─── Cloudflare Custom Hostnames (Phase 15D) ─────────────────
+  // Verifies token + zone + Custom Hostnames feature in one call.
+  // Soft-failure: when CF isn't configured this returns ok=true with
+  // a "not configured" detail so health stays green pre-activation.
+  {
+    const start = Date.now();
+    try {
+      const { cloudflareHealthcheck } = await import("@/lib/cloudflare-hostnames");
+      const cf = await cloudflareHealthcheck();
+      if (!cf.configured) {
+        checks.cloudflare_edge = {
+          ok: true,
+          ms: Date.now() - start,
+          detail: "not configured (custom domains disabled)",
+        };
+      } else {
+        const ok = cf.tokenOk && cf.zoneOk && cf.customHostnamesOk;
+        checks.cloudflare_edge = {
+          ok,
+          ms: Date.now() - start,
+          detail: ok
+            ? `zone=${cf.zoneName ?? "unknown"} token+zone+saas ok`
+            : cf.errors.join("; "),
+        };
+        if (!ok) allOk = false;
+      }
+    } catch (e) {
+      checks.cloudflare_edge = {
+        ok: false,
+        ms: Date.now() - start,
+        detail: (e as Error).message,
+      };
+      allOk = false;
+    }
+  }
+
   return NextResponse.json(
     {
       ok: allOk,

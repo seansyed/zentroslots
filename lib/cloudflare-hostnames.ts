@@ -36,6 +36,14 @@
 const CF_API_BASE = "https://api.cloudflare.com/client/v4";
 const CF_TIMEOUT_MS = 15_000;
 
+// Retry policy for transient failures. Cloudflare's API occasionally
+// 429/502/504s under load — retry with exponential backoff on safe
+// methods only (GET/DELETE — POST/PUT carry mutation risk).
+const CF_RETRY_ATTEMPTS = 3;
+const CF_RETRY_BACKOFF_MS = [250, 750]; // 250ms, 750ms (1st + 2nd retry)
+const CF_RETRY_STATUS = new Set([408, 425, 429, 502, 503, 504]);
+const CF_RETRY_METHODS = new Set(["GET", "DELETE", undefined]);
+
 export function cloudflareConfigured(): boolean {
   return !!(
     process.env.CLOUDFLARE_API_TOKEN &&
@@ -113,41 +121,129 @@ async function cfFetch<T>(path: string, init?: RequestInit): Promise<CfResponse<
   }
   const { apiToken } = cloudflareConfig();
   const url = `${CF_API_BASE}${path}`;
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), CF_TIMEOUT_MS);
-  try {
-    const res = await fetch(url, {
-      ...init,
-      headers: {
-        Authorization: `Bearer ${apiToken}`,
-        "Content-Type": "application/json",
-        ...(init?.headers as Record<string, string> | undefined),
-      },
-      signal: controller.signal,
-    });
-    let data: { success?: boolean; result?: unknown; errors?: { message: string }[] };
+  const method = init?.method as string | undefined;
+  const retriable = CF_RETRY_METHODS.has(method);
+  const maxAttempts = retriable ? CF_RETRY_ATTEMPTS : 1;
+
+  let lastErr: CfErr = { ok: false, status: 0, message: "Cloudflare API call failed" };
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), CF_TIMEOUT_MS);
     try {
-      data = (await res.json()) as typeof data;
-    } catch {
-      return { ok: false, status: res.status, message: `Cloudflare returned non-JSON (HTTP ${res.status})` };
+      const res = await fetch(url, {
+        ...init,
+        headers: {
+          Authorization: `Bearer ${apiToken}`,
+          "Content-Type": "application/json",
+          ...(init?.headers as Record<string, string> | undefined),
+        },
+        signal: controller.signal,
+      });
+      let data: { success?: boolean; result?: unknown; errors?: { message: string; code?: number }[] } = {};
+      try {
+        data = (await res.json()) as typeof data;
+      } catch {
+        // Non-JSON response — treat as failure but allow retry if eligible
+        lastErr = { ok: false, status: res.status, message: `Cloudflare returned non-JSON (HTTP ${res.status})` };
+        if (!CF_RETRY_STATUS.has(res.status) || attempt === maxAttempts - 1) {
+          return lastErr;
+        }
+        const wait = CF_RETRY_BACKOFF_MS[attempt] ?? 1500;
+        await new Promise((r) => setTimeout(r, wait));
+        continue;
+      }
+      if (res.ok && (data.success ?? true)) {
+        return { ok: true, result: (data.result ?? null) as T };
+      }
+      const msg = data.errors?.[0]?.message ?? `Cloudflare API error (HTTP ${res.status})`;
+      lastErr = { ok: false, status: res.status, message: msg };
+
+      // Don't retry permanent failures (4xx auth/permission/validation).
+      if (!CF_RETRY_STATUS.has(res.status) || attempt === maxAttempts - 1) {
+        return lastErr;
+      }
+    } catch (err) {
+      if (err instanceof Error && err.name === "AbortError") {
+        lastErr = { ok: false, status: 504, message: "Cloudflare API timeout" };
+      } else {
+        lastErr = {
+          ok: false,
+          status: 0,
+          message: err instanceof Error ? err.message : "Cloudflare API call failed",
+        };
+      }
+      if (attempt === maxAttempts - 1) return lastErr;
+    } finally {
+      clearTimeout(timeout);
     }
-    if (!res.ok || data?.success === false) {
-      const msg = data?.errors?.[0]?.message ?? `Cloudflare API error (HTTP ${res.status})`;
-      return { ok: false, status: res.status, message: msg };
-    }
-    return { ok: true, result: data.result as T };
-  } catch (err) {
-    if (err instanceof Error && err.name === "AbortError") {
-      return { ok: false, status: 504, message: "Cloudflare API timeout" };
-    }
-    return {
-      ok: false,
-      status: 0,
-      message: err instanceof Error ? err.message : "Cloudflare API call failed",
-    };
-  } finally {
-    clearTimeout(timeout);
+    // Exponential backoff before next attempt
+    const wait = CF_RETRY_BACKOFF_MS[attempt] ?? 1500;
+    await new Promise((r) => setTimeout(r, wait));
   }
+  return lastErr;
+}
+
+// ─── Token / zone health verification (Phase 15D Part 3) ─────────
+
+export type CfHealthcheck = {
+  configured: boolean;
+  tokenOk: boolean;
+  zoneOk: boolean;
+  customHostnamesOk: boolean;
+  zoneName?: string;
+  errors: string[];
+};
+
+/**
+ * Cheap server-side check that the configured Cloudflare credentials
+ * actually work. Hits three endpoints in sequence so a partial
+ * permission grant surfaces the exact missing scope:
+ *
+ *   1. /user/tokens/verify  — token alive + not revoked
+ *   2. /zones/{zoneId}      — zone access + correct id
+ *   3. /zones/{zoneId}/custom_hostnames?per_page=1 — SaaS feature enabled
+ *
+ * Used by the /api/health endpoint and by ops scripts. Never throws.
+ */
+export async function cloudflareHealthcheck(): Promise<CfHealthcheck> {
+  const out: CfHealthcheck = {
+    configured: cloudflareConfigured(),
+    tokenOk: false,
+    zoneOk: false,
+    customHostnamesOk: false,
+    errors: [],
+  };
+  if (!out.configured) {
+    out.errors.push("CLOUDFLARE_API_TOKEN and/or CLOUDFLARE_ZONE_ID not set");
+    return out;
+  }
+
+  const verify = await cfFetch<{ status?: string }>("/user/tokens/verify");
+  if (verify.ok) {
+    out.tokenOk = true;
+  } else {
+    out.errors.push(`token verify failed: ${verify.message}`);
+    return out;
+  }
+
+  const { zoneId } = cloudflareConfig();
+  const zone = await cfFetch<{ name?: string }>(`/zones/${zoneId}`);
+  if (zone.ok) {
+    out.zoneOk = true;
+    out.zoneName = zone.result?.name;
+  } else {
+    out.errors.push(`zone access failed: ${zone.message}`);
+    return out;
+  }
+
+  const ch = await cfFetch<unknown[]>(`/zones/${zoneId}/custom_hostnames?per_page=1`);
+  if (ch.ok) {
+    out.customHostnamesOk = true;
+  } else {
+    out.errors.push(`custom_hostnames access failed: ${ch.message}`);
+  }
+  return out;
 }
 
 // ─── Custom Hostname operations ──────────────────────────────────
@@ -164,22 +260,24 @@ export async function createCustomHostname(
   hostname: string,
 ): Promise<CfResponse<CfHostname>> {
   const { zoneId } = cloudflareConfig();
+  // Minimal body — works on Free / Pro / Business / Enterprise.
+  // Enterprise-only fields removed (Phase 15D validation):
+  //   - certificate_authority    → CF picks "google" by default
+  //   - ssl.settings.ciphers     → Enterprise-tier feature
+  //   - ssl.settings.http2/tls   → Enterprise-tier feature (controlled
+  //                                at the zone level instead, which we
+  //                                already configured in §3 of the
+  //                                operator runbook)
+  //   - ssl.bundle_method        → Enterprise-tier feature
+  // Cloudflare's defaults give us TLS 1.2/1.3 + HTTP/2 + HTTP/3 + the
+  // ubiquitous bundle method, so removing these doesn't reduce
+  // posture — it just removes the API-level overrides our plan
+  // doesn't grant.
   const body = {
     hostname,
     ssl: {
-      method: "http",
-      type: "dv",
-      settings: {
-        http2: "on",
-        min_tls_version: "1.2",
-        tls_1_3: "on",
-        // Modern ciphers — Cloudflare default list is fine; we set
-        // these explicitly so future audits can grep the source.
-        ciphers: ["ECDHE-ECDSA-AES128-GCM-SHA256", "ECDHE-RSA-AES128-GCM-SHA256"],
-      },
-      bundle_method: "ubiquitous",
-      wildcard: false,
-      certificate_authority: "google",
+      method: "http", // HTTP DCV — simplest path, works once CNAME lands
+      type: "dv",     // domain-validated (the default cert type)
     },
   };
   return cfFetch<CfHostname>(`/zones/${zoneId}/custom_hostnames`, {
