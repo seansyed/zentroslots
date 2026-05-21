@@ -9,6 +9,7 @@ import {
   CalendarCheck2,
   CalendarX2,
   CheckCircle2,
+  Clock,
   ExternalLink,
   GitBranch,
   History,
@@ -149,17 +150,18 @@ type FairnessRow = {
   weekCount: number;
   totalAssignments: number;
   lastAssignedAt: string | null;
-  actualSharePct: number;
-  expectedSharePct: number;
-  driftPct: number;
+  actualSharePct: number | null;
+  expectedSharePct: number | null;
+  driftPct: number | null;
   overloaded: boolean;
-  expectedSource: "weighted_rule" | "equal_share";
+  expectedSource: "weighted_rule" | "equal_share" | "none";
 };
 type FairnessSummary = {
   rows: FairnessRow[];
-  maxAbsoluteDriftPct: number;
+  maxAbsoluteDriftPct: number | null;
   weeklyTotal: number;
   activeAssignees: number;
+  hasHistory: boolean;
 };
 
 type DecisionRow = {
@@ -198,20 +200,24 @@ type EligWarnings = {
   };
 };
 
+type EligibilityReasonCode =
+  | "in_service_pool"
+  | "not_in_rule_pool"
+  | "pto_override"
+  | "outside_working_hours"
+  | "no_schedule"
+  | "internal_conflict"
+  | "calendar_conflict"
+  | "picked"
+  | "not_picked";
+
 type SimulationCandidate = {
   staffId: string;
   staffName: string;
   staffEmail: string;
   status: "eligible" | "skipped" | "picked";
   reason: string;
-  step:
-    | "in_pool"
-    | "service_pool"
-    | "rule_pool"
-    | "working_hours"
-    | "internal_conflict"
-    | "external_busy"
-    | "picker";
+  reasonCode: EligibilityReasonCode;
 };
 type SimulationResp = {
   requested: { serviceId: string; serviceName: string; startAt: string; endAt: string; durationMinutes: number };
@@ -223,11 +229,33 @@ type SimulationResp = {
   counts: {
     inPool: number;
     eligible: number;
+    skippedByPto: number;
     skippedByWorkingHours: number;
     skippedByInternalConflict: number;
     skippedByExternalBusy: number;
     skippedByRulePool: number;
   };
+};
+
+type CapacityRow = {
+  staffId: string;
+  staffName: string;
+  staffEmail: string;
+  scheduledHours: number;
+  bookedHours: number;
+  remainingHours: number | null;
+  utilization: number | null;
+  overloaded: boolean;
+  windowStart: string | null;
+  windowEnd: string | null;
+};
+type CapacitySummary = {
+  rows: CapacityRow[];
+  totalRemainingHours: number;
+  overloadedCount: number;
+  closedCount: number;
+  earliestWindowStart: string | null;
+  latestWindowEnd: string | null;
 };
 
 // ─── Root component ───────────────────────────────────────────────────
@@ -242,17 +270,19 @@ export default function RoutingClient({ bootstrap }: { bootstrap: RoutingPageBoo
   const [fairness, setFairness] = React.useState<FairnessSummary | null>(null);
   const [decisions, setDecisions] = React.useState<DecisionsResp | null>(null);
   const [warnings, setWarnings] = React.useState<EligWarnings | null>(null);
+  const [capacity, setCapacity] = React.useState<CapacitySummary | null>(null);
   const [activeScope, setActiveScope] = React.useState<string | null>(null);
 
   const refresh = React.useCallback(async () => {
     setLoading(true);
     try {
-      const [rulesRes, statsRes, fairRes, decRes, warnRes] = await Promise.all([
+      const [rulesRes, statsRes, fairRes, decRes, warnRes, capRes] = await Promise.all([
         fetch("/api/tenant/routing-rules", { cache: "no-store" }),
         fetch("/api/tenant/routing-stats", { cache: "no-store" }),
         fetch("/api/tenant/routing/fairness", { cache: "no-store" }),
         fetch("/api/tenant/routing/decisions", { cache: "no-store" }),
         fetch("/api/tenant/routing/eligibility-warnings", { cache: "no-store" }),
+        fetch("/api/tenant/routing/capacity", { cache: "no-store" }),
       ]);
       if (rulesRes.ok) {
         const data = await rulesRes.json();
@@ -265,6 +295,7 @@ export default function RoutingClient({ bootstrap }: { bootstrap: RoutingPageBoo
       if (fairRes.ok) setFairness(await fairRes.json());
       if (decRes.ok) setDecisions(await decRes.json());
       if (warnRes.ok) setWarnings(await warnRes.json());
+      if (capRes.ok) setCapacity(await capRes.json());
     } catch (e) {
       toast(e instanceof Error ? e.message : "Failed to load", "error");
     } finally {
@@ -287,6 +318,7 @@ export default function RoutingClient({ bootstrap }: { bootstrap: RoutingPageBoo
         warnings={warnings}
         fairness={fairness}
         decisions={decisions}
+        capacity={capacity}
       />
 
       <RoutingModesOverview bootstrap={bootstrap} />
@@ -297,7 +329,14 @@ export default function RoutingClient({ bootstrap }: { bootstrap: RoutingPageBoo
 
       <DecisionsSection decisions={decisions} loading={loading} />
 
+      <CapacityForecastSection capacity={capacity} loading={loading} />
+
       <EligibilityWarningsSection warnings={warnings} loading={loading} />
+
+      <FallbackPolicySection
+        tenantDefault={tenantDefault}
+        activeMode={bootstrap.hero.activeMode}
+      />
 
       <ServiceOverridesSection
         services={services}
@@ -330,15 +369,20 @@ function Hero({
   warnings,
   fairness,
   decisions,
+  capacity,
 }: {
   bootstrap: RoutingPageBootstrap;
   warnings: EligWarnings | null;
   fairness: FairnessSummary | null;
   decisions: DecisionsResp | null;
+  capacity: CapacitySummary | null;
 }) {
   const h = bootstrap.hero;
-  const fairnessHealth = fairnessHealthStatus(fairness?.maxAbsoluteDriftPct ?? 0);
+  const fairnessHealth = fairnessHealthStatus(fairness?.maxAbsoluteDriftPct ?? null);
   const queueBalancing = h.activeMode === "weighted" || h.activeMode === "round_robin";
+  const allCalendarsConnected =
+    h.eligibleStaffCount > 0 && h.calendarConnectedStaff >= h.eligibleStaffCount;
+  const disconnectedCalendarCount = Math.max(0, h.eligibleStaffCount - h.calendarConnectedStaff);
 
   return (
     <Card className="overflow-hidden p-0">
@@ -451,6 +495,53 @@ function Hero({
             icon={History}
             detail="Bookings auto-assigned by the routing engine in the last 24 hours."
           />
+          {/* Phase 15G health chips — real-state derived */}
+          <OperationalChip
+            label={
+              allCalendarsConnected
+                ? "All calendars connected"
+                : disconnectedCalendarCount === 0
+                  ? "No staff configured"
+                  : `${disconnectedCalendarCount} calendar${disconnectedCalendarCount === 1 ? "" : "s"} disconnected`
+            }
+            status={
+              allCalendarsConnected
+                ? "ok"
+                : disconnectedCalendarCount === 0
+                  ? "muted"
+                  : "degraded"
+            }
+            icon={CalendarCheck2}
+            detail={
+              allCalendarsConnected
+                ? "Every active staff member has a calendar connection. External busy time is fully visible to the engine."
+                : `${disconnectedCalendarCount} of ${h.eligibleStaffCount} staff don't have a calendar connection. External busy time is invisible to routing for those staff.`
+            }
+          />
+          {(warnings?.counts.staffOnPtoToday ?? 0) > 0 && (
+            <OperationalChip
+              label={`${warnings!.counts.staffOnPtoToday} PTO override${warnings!.counts.staffOnPtoToday === 1 ? "" : "s"} today`}
+              status="degraded"
+              icon={CalendarX2}
+              detail="Staff with unavailable overrides for today. Engine will skip them for any window."
+            />
+          )}
+          {fairness && fairness.hasHistory && fairness.maxAbsoluteDriftPct !== null && fairness.maxAbsoluteDriftPct > 25 && (
+            <OperationalChip
+              label={`Fairness drift ${fairness.maxAbsoluteDriftPct.toFixed(0)}%`}
+              status="degraded"
+              icon={Scale}
+              detail="At least one staff is significantly over or under their target share. Consider rebalancing weighted distribution."
+            />
+          )}
+          {(capacity?.overloadedCount ?? 0) > 0 && (
+            <OperationalChip
+              label={`${capacity!.overloadedCount} staff overloaded`}
+              status="down"
+              icon={AlertTriangle}
+              detail="Staff at ≥90% utilization for today. Engine eligibility may shrink as more bookings land."
+            />
+          )}
         </div>
       </div>
     </Card>
@@ -520,7 +611,12 @@ function OperationalChip({
   );
 }
 
-function fairnessHealthStatus(drift: number): { label: string; accent: "emerald" | "amber" | "rose" | "muted" } {
+function fairnessHealthStatus(
+  drift: number | null,
+): { label: string; accent: "emerald" | "amber" | "rose" | "muted" } {
+  // Null = no engine-driven history yet. Show neutral "—" not a false
+  // "Healthy" badge.
+  if (drift === null) return { label: "—", accent: "muted" };
   if (drift <= 0) return { label: "—", accent: "muted" };
   if (drift <= 10) return { label: "Healthy", accent: "emerald" };
   if (drift <= 25) return { label: "Balanced", accent: "amber" };
@@ -623,11 +719,25 @@ function SimulationSection({
     if (!serviceId && services.length > 0) setServiceId(services[0].id);
   }, [services, serviceId]);
 
+  // Phase 15G — cancel any in-flight simulation when the user clicks
+  // again, so the last click wins and we don't paint stale results
+  // from an earlier slower request.
+  const inFlight = React.useRef<AbortController | null>(null);
+  React.useEffect(() => {
+    return () => {
+      inFlight.current?.abort();
+    };
+  }, []);
+
   async function run() {
     if (!serviceId) {
       setError("Pick a service first.");
       return;
     }
+    // Cancel any earlier request.
+    inFlight.current?.abort();
+    const ac = new AbortController();
+    inFlight.current = ac;
     setRunning(true);
     setError(null);
     try {
@@ -636,15 +746,21 @@ function SimulationSection({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ serviceId, startAt }),
+        signal: ac.signal,
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error ?? "Simulation failed");
-      setResult(data);
+      // Only paint if THIS request is still the in-flight one.
+      if (inFlight.current === ac) setResult(data);
     } catch (e) {
+      if ((e as Error)?.name === "AbortError") return; // superseded
       setError(e instanceof Error ? e.message : "Simulation failed");
       setResult(null);
     } finally {
-      setRunning(false);
+      if (inFlight.current === ac) {
+        setRunning(false);
+        inFlight.current = null;
+      }
     }
   }
 
@@ -709,64 +825,33 @@ function SimulationSection({
 function SimulationResultPane({ result }: { result: SimulationResp }) {
   const decision = result.decision;
   const isOk = decision.ok;
+  const isManual = decision.mode === "manual" || decision.mode === "no_rule";
   const winner = decision.ok
     ? result.candidates.find((c) => c.staffId === decision.staffId) ?? null
     : null;
   return (
     <div className="mt-5 space-y-3">
       {/* Decision banner */}
-      <div
-        className={
-          "flex items-start gap-3 rounded-xl border p-4 " +
-          (isOk
-            ? "border-emerald-200 bg-emerald-50"
-            : "border-amber-200 bg-amber-50")
-        }
-      >
-        <div className="mt-0.5">
-          {isOk ? (
-            <CheckCircle2 className="h-5 w-5 text-emerald-600" />
-          ) : (
-            <AlertTriangle className="h-5 w-5 text-amber-600" />
-          )}
-        </div>
-        <div className="min-w-0 flex-1 text-sm">
-          {isOk && winner ? (
-            <>
-              <p className="font-semibold text-emerald-900">
-                Would assign to {winner.staffName}
-              </p>
-              <p className="mt-0.5 text-xs text-emerald-800">
-                via {decision.mode} — {decision.reason}
-              </p>
-            </>
-          ) : (
-            <>
-              <p className="font-semibold text-amber-900">No assignment would be made</p>
-              <p className="mt-0.5 text-xs text-amber-800">
-                {decision.mode === "no_rule"
-                  ? "No active routing rule applies. The booking POST would fall back to the legacy round-robin path."
-                  : `${decision.mode} → ${decision.reason}`}
-              </p>
-            </>
-          )}
-        </div>
-        <div className="hidden text-right text-[10px] font-medium uppercase tracking-wide text-ink-subtle sm:block">
-          {result.rule.scope === "service" ? "service-specific rule" : result.rule.scope === "tenant_default" ? "tenant default rule" : "no rule"}
-        </div>
-      </div>
+      <DecisionBanner
+        isOk={isOk}
+        isManual={isManual}
+        decision={decision}
+        winner={winner}
+        ruleScope={result.rule.scope}
+      />
 
-      {/* Counts strip */}
+      {/* Counts strip — explicit per-reason categories */}
       <div className="flex flex-wrap gap-2 text-[11px]">
         <CountChip label="In pool" value={result.counts.inPool} />
         <CountChip label="Eligible" value={result.counts.eligible} tone="emerald" />
-        <CountChip label="Skipped: PTO/hours" value={result.counts.skippedByWorkingHours} tone="muted" />
-        <CountChip label="Skipped: internal" value={result.counts.skippedByInternalConflict} tone="muted" />
-        <CountChip label="Skipped: external" value={result.counts.skippedByExternalBusy} tone="muted" />
-        <CountChip label="Skipped: not in pool" value={result.counts.skippedByRulePool} tone="muted" />
+        <CountChip label="PTO override" value={result.counts.skippedByPto} tone="violet" />
+        <CountChip label="Outside working hours" value={result.counts.skippedByWorkingHours} tone="muted" />
+        <CountChip label="Internal conflict" value={result.counts.skippedByInternalConflict} tone="muted" />
+        <CountChip label="Calendar conflict" value={result.counts.skippedByExternalBusy} tone="muted" />
+        <CountChip label="Not in rule pool" value={result.counts.skippedByRulePool} tone="muted" />
       </div>
 
-      {/* Candidate list */}
+      {/* Candidate list with rich reason badges */}
       <div className="overflow-hidden rounded-xl border border-border">
         <table className="w-full text-sm">
           <thead className="bg-surface-muted text-left text-[10px] font-semibold uppercase tracking-wide text-ink-subtle">
@@ -791,21 +876,14 @@ function SimulationResultPane({ result }: { result: SimulationResp }) {
                   <div className="text-[11px] text-ink-subtle">{c.staffEmail}</div>
                 </td>
                 <td className="px-3 py-2">
-                  {c.status === "picked" ? (
-                    <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-700">
-                      <CheckCircle2 className="h-3 w-3" /> Picked
-                    </span>
-                  ) : c.status === "eligible" ? (
-                    <span className="inline-flex items-center gap-1 rounded-full bg-sky-50 px-2 py-0.5 text-[10px] font-medium text-sky-700">
-                      <ShieldCheck className="h-3 w-3" /> Eligible
-                    </span>
-                  ) : (
-                    <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600">
-                      <XCircle className="h-3 w-3" /> Skipped
-                    </span>
-                  )}
+                  <CandidateStatusPill status={c.status} />
                 </td>
-                <td className="px-3 py-2 text-xs text-ink-muted">{c.reason}</td>
+                <td className="px-3 py-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <ReasonBadge code={c.reasonCode} />
+                    <span className="text-xs text-ink-muted">{c.reason}</span>
+                  </div>
+                </td>
               </tr>
             ))}
           </tbody>
@@ -815,6 +893,198 @@ function SimulationResultPane({ result }: { result: SimulationResp }) {
   );
 }
 
+function DecisionBanner({
+  isOk,
+  isManual,
+  decision,
+  winner,
+  ruleScope,
+}: {
+  isOk: boolean;
+  isManual: boolean;
+  decision: SimulationResp["decision"];
+  winner: SimulationCandidate | null;
+  ruleScope: "service" | "tenant_default" | "none";
+}) {
+  // Phase 15G fix: Manual mode is INTENTIONAL, not a failure. Render
+  // a neutral informational banner — not the amber "no assignment"
+  // warning that previously surfaced as a bug.
+  if (isManual && !isOk) {
+    return (
+      <div className="flex items-start gap-3 rounded-xl border border-sky-200 bg-sky-50/70 p-4">
+        <div className="mt-0.5">
+          <Info className="h-5 w-5 text-sky-600" />
+        </div>
+        <div className="min-w-0 flex-1 text-sm">
+          <p className="font-semibold text-sky-900">
+            Customer chooses the staff member manually
+          </p>
+          <p className="mt-0.5 text-xs text-sky-800">
+            No automatic assignment occurs in Manual mode. The booking page renders a
+            staff picker and the engine intentionally returns no decision here.
+          </p>
+        </div>
+        <div className="hidden text-right text-[10px] font-medium uppercase tracking-wide text-ink-subtle sm:block">
+          {ruleScope === "service"
+            ? "service-specific rule"
+            : ruleScope === "tenant_default"
+              ? "tenant default rule"
+              : "no rule"}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className={
+        "flex items-start gap-3 rounded-xl border p-4 " +
+        (isOk ? "border-emerald-200 bg-emerald-50" : "border-amber-200 bg-amber-50")
+      }
+    >
+      <div className="mt-0.5">
+        {isOk ? (
+          <CheckCircle2 className="h-5 w-5 text-emerald-600" />
+        ) : (
+          <AlertTriangle className="h-5 w-5 text-amber-600" />
+        )}
+      </div>
+      <div className="min-w-0 flex-1 text-sm">
+        {isOk && winner ? (
+          <>
+            <p className="font-semibold text-emerald-900">
+              Would assign to {winner.staffName}
+            </p>
+            <p className="mt-0.5 text-xs text-emerald-800">
+              via {decision.mode} — {decision.reason}
+            </p>
+          </>
+        ) : (
+          <>
+            <p className="font-semibold text-amber-900">
+              No assignment would be made
+            </p>
+            <p className="mt-0.5 text-xs text-amber-800">
+              {decision.mode} → {decision.reason}
+            </p>
+          </>
+        )}
+      </div>
+      <div className="hidden text-right text-[10px] font-medium uppercase tracking-wide text-ink-subtle sm:block">
+        {ruleScope === "service"
+          ? "service-specific rule"
+          : ruleScope === "tenant_default"
+            ? "tenant default rule"
+            : "no rule"}
+      </div>
+    </div>
+  );
+}
+
+function CandidateStatusPill({ status }: { status: SimulationCandidate["status"] }) {
+  if (status === "picked") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-700">
+        <CheckCircle2 className="h-3 w-3" /> Picked
+      </span>
+    );
+  }
+  if (status === "eligible") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-sky-50 px-2 py-0.5 text-[10px] font-medium text-sky-700">
+        <ShieldCheck className="h-3 w-3" /> Eligible
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600">
+      <XCircle className="h-3 w-3" /> Skipped
+    </span>
+  );
+}
+
+function ReasonBadge({ code }: { code: EligibilityReasonCode }) {
+  const meta = REASON_META[code];
+  const Icon = meta.icon;
+  return (
+    <span
+      className={
+        "inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-medium " +
+        meta.classes
+      }
+      title={meta.tooltip}
+    >
+      <Icon className="h-2.5 w-2.5" />
+      {meta.label}
+    </span>
+  );
+}
+
+const REASON_META: Record<
+  EligibilityReasonCode,
+  {
+    label: string;
+    tooltip: string;
+    icon: React.ComponentType<{ className?: string }>;
+    classes: string;
+  }
+> = {
+  in_service_pool: {
+    label: "in pool",
+    tooltip: "Listed in this service's staff pool.",
+    icon: Users,
+    classes: "border-sky-200 bg-sky-50 text-sky-700",
+  },
+  not_in_rule_pool: {
+    label: "not in rule pool",
+    tooltip: "This staff member is not listed in the priority / weighted rule pool.",
+    icon: ListChecks,
+    classes: "border-slate-200 bg-slate-100 text-slate-600",
+  },
+  pto_override: {
+    label: "PTO override",
+    tooltip: "Staff has an unavailable=true override for this date in availability_overrides.",
+    icon: CalendarX2,
+    classes: "border-violet-200 bg-violet-50 text-violet-700",
+  },
+  outside_working_hours: {
+    label: "outside hours",
+    tooltip: "Working schedule exists but doesn't cover the requested window.",
+    icon: Clock,
+    classes: "border-slate-200 bg-slate-100 text-slate-600",
+  },
+  no_schedule: {
+    label: "no schedule",
+    tooltip: "No weekly availability row configured for this day of the week.",
+    icon: CalendarX2,
+    classes: "border-slate-200 bg-slate-100 text-slate-600",
+  },
+  internal_conflict: {
+    label: "internal conflict",
+    tooltip: "Already has a confirmed booking that overlaps this window.",
+    icon: XCircle,
+    classes: "border-rose-200 bg-rose-50 text-rose-700",
+  },
+  calendar_conflict: {
+    label: "calendar conflict",
+    tooltip: "Connected external calendar has a busy event in this window.",
+    icon: CalendarX2,
+    classes: "border-amber-200 bg-amber-50 text-amber-800",
+  },
+  picked: {
+    label: "picked",
+    tooltip: "The picker chose this staff member.",
+    icon: CheckCircle2,
+    classes: "border-emerald-200 bg-emerald-50 text-emerald-700",
+  },
+  not_picked: {
+    label: "not picked",
+    tooltip: "Eligible — but the picker selected a different staff member this round.",
+    icon: ShieldCheck,
+    classes: "border-sky-200 bg-sky-50 text-sky-700",
+  },
+};
+
 function CountChip({
   label,
   value,
@@ -822,14 +1092,16 @@ function CountChip({
 }: {
   label: string;
   value: number;
-  tone?: "default" | "emerald" | "muted";
+  tone?: "default" | "emerald" | "muted" | "violet";
 }) {
   const styles =
     tone === "emerald"
       ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-      : tone === "muted"
-        ? "border-border bg-surface-muted text-ink-subtle"
-        : "border-border bg-surface text-ink";
+      : tone === "violet"
+        ? "border-violet-200 bg-violet-50 text-violet-700"
+        : tone === "muted"
+          ? "border-border bg-surface-muted text-ink-subtle"
+          : "border-border bg-surface text-ink";
   return (
     <span className={"inline-flex items-center gap-1.5 rounded-full border px-2 py-1 font-medium " + styles}>
       <span className="tabular-nums">{value}</span>
@@ -847,18 +1119,54 @@ function FairnessSection({
   fairness: FairnessSummary | null;
   loading: boolean;
 }) {
+  // Phase 15G: when there's no engine-driven history, render an
+  // explicit empty state instead of a table of fabricated -100% drift
+  // values. Customer-picked bookings are NOT counted toward fairness
+  // — see lib/routing/fairness.ts.
+  const showEmpty = !loading && fairness && !fairness.hasHistory;
+
   return (
     <section className="space-y-3">
       <SectionHeader
         icon={Scale}
         title="Fairness + workload analytics"
-        subtitle="Per-staff weekly load with drift vs. target share. Targets come from the tenant's weighted rule when set; otherwise equal-share across active staff."
+        subtitle="Per-staff weekly load with drift vs. target share. Only engine-driven assignments count — customer-picked and manual-mode bookings are excluded."
       />
       <Card className="overflow-hidden p-0">
         {loading ? (
           <div className="p-5"><Skeleton className="h-32 w-full rounded-md" /></div>
         ) : !fairness || fairness.rows.length === 0 ? (
           <div className="p-6 text-center text-sm text-ink-muted">No staff to analyze yet.</div>
+        ) : showEmpty ? (
+          <div className="flex flex-col items-center gap-2 p-8 text-center">
+            <div className="grid h-10 w-10 place-items-center rounded-full bg-surface-muted text-ink-subtle">
+              <Scale className="h-5 w-5" />
+            </div>
+            <p className="text-sm font-medium text-ink">No routing history yet</p>
+            <p className="max-w-md text-xs text-ink-muted">
+              Fairness metrics appear after the engine has assigned at least one
+              booking. Customer-picked and manual-mode bookings are intentionally
+              excluded — they have no engine decision to evaluate.
+            </p>
+            <div className="mt-2 w-full max-w-md overflow-hidden rounded-lg border border-border">
+              <table className="w-full text-xs">
+                <thead className="bg-surface-muted text-left font-semibold uppercase tracking-wide text-ink-subtle">
+                  <tr>
+                    <th className="px-3 py-2">Staff</th>
+                    <th className="px-3 py-2 text-right">Total lifetime</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {fairness.rows.map((r) => (
+                    <tr key={r.staffId} className="border-t border-border/60">
+                      <td className="px-3 py-2 text-left text-ink">{r.staffName}</td>
+                      <td className="px-3 py-2 text-right tabular-nums text-ink-subtle">{r.totalAssignments}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
         ) : (
           <table className="w-full text-sm">
             <thead className="bg-surface-muted text-left text-[10px] font-semibold uppercase tracking-wide text-ink-subtle">
@@ -875,11 +1183,14 @@ function FairnessSection({
             </thead>
             <tbody>
               {fairness.rows.map((r) => {
-                const driftTone = Math.abs(r.driftPct) <= 10
-                  ? "emerald"
-                  : Math.abs(r.driftPct) <= 25
-                    ? "amber"
-                    : "rose";
+                const drift = r.driftPct;
+                const driftTone = drift === null
+                  ? "muted"
+                  : Math.abs(drift) <= 10
+                    ? "emerald"
+                    : Math.abs(drift) <= 25
+                      ? "amber"
+                      : "rose";
                 return (
                   <tr key={r.staffId} className="border-t border-border/60">
                     <td className="px-3 py-2">
@@ -888,25 +1199,39 @@ function FairnessSection({
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums">{r.todayCount}</td>
                     <td className="px-3 py-2 text-right tabular-nums">{r.weekCount}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{r.actualSharePct.toFixed(1)}%</td>
-                    <td className="px-3 py-2 text-right tabular-nums text-ink-subtle">{r.expectedSharePct.toFixed(1)}%</td>
+                    <td className="px-3 py-2 text-right tabular-nums">
+                      {r.actualSharePct === null ? "—" : `${r.actualSharePct.toFixed(1)}%`}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums text-ink-subtle">
+                      {r.expectedSharePct === null ? "—" : `${r.expectedSharePct.toFixed(1)}%`}
+                    </td>
                     <td className="px-3 py-2 text-right">
-                      <span
-                        className={
-                          "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium " +
-                          (driftTone === "emerald"
-                            ? "bg-emerald-50 text-emerald-700"
-                            : driftTone === "amber"
-                              ? "bg-amber-50 text-amber-800"
-                              : "bg-rose-50 text-rose-700")
-                        }
-                      >
-                        {r.driftPct > 0 ? "+" : ""}
-                        {r.driftPct.toFixed(1)}%
-                      </span>
+                      {drift === null ? (
+                        <span className="text-[11px] text-ink-subtle">—</span>
+                      ) : (
+                        <span
+                          className={
+                            "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium " +
+                            (driftTone === "emerald"
+                              ? "bg-emerald-50 text-emerald-700"
+                              : driftTone === "amber"
+                                ? "bg-amber-50 text-amber-800"
+                                : driftTone === "rose"
+                                  ? "bg-rose-50 text-rose-700"
+                                  : "bg-slate-100 text-slate-600")
+                          }
+                        >
+                          {drift > 0 ? "+" : ""}
+                          {drift.toFixed(1)}%
+                        </span>
+                      )}
                     </td>
                     <td className="px-3 py-2">
-                      <DriftBar actual={r.actualSharePct} target={r.expectedSharePct} />
+                      {r.actualSharePct !== null && r.expectedSharePct !== null ? (
+                        <DriftBar actual={r.actualSharePct} target={r.expectedSharePct} />
+                      ) : (
+                        <span className="text-[11px] text-ink-subtle">—</span>
+                      )}
                     </td>
                     <td className="px-3 py-2">
                       <div className="flex flex-wrap gap-1">
@@ -920,6 +1245,11 @@ function FairnessSection({
                             equal share
                           </span>
                         )}
+                        {r.expectedSource === "weighted_rule" && (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-violet-50 px-1.5 py-0.5 text-[10px] font-medium text-violet-700">
+                            weighted target
+                          </span>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -929,7 +1259,7 @@ function FairnessSection({
           </table>
         )}
       </Card>
-      {fairness && fairness.weeklyTotal > 0 && (
+      {fairness && fairness.hasHistory && fairness.maxAbsoluteDriftPct !== null && (
         <p className="text-xs text-ink-subtle">
           {fairness.weeklyTotal} engine assignment{fairness.weeklyTotal === 1 ? "" : "s"} in the rolling weekly window
           {" · "}
@@ -1312,6 +1642,16 @@ function RuleEditor({
       : [];
 
   async function save() {
+    // Phase 15G: weighted mode requires sum === 100 before saving.
+    // The engine normalizes anyway, but enforcing 100 keeps the
+    // displayed weights honest with what the engine sees.
+    if (mode === "weighted") {
+      const sum = Object.values(weights).reduce((a, b) => a + b, 0);
+      if (sum !== 100) {
+        toast(`Weighted distribution must total 100% (currently ${sum}%). Use "Normalize to 100%" to balance.`, "error");
+        return;
+      }
+    }
     setSaving(true);
     try {
       const res = await fetch("/api/tenant/routing-rules", {
@@ -1328,6 +1668,32 @@ function RuleEditor({
     } finally {
       setSaving(false);
     }
+  }
+
+  function normalizeWeightsTo100() {
+    setWeights((cur) => {
+      const ids = Object.keys(cur);
+      if (ids.length === 0) return cur;
+      const sum = Object.values(cur).reduce((a, b) => a + b, 0);
+      if (sum === 0) {
+        // Equal split across all listed staff.
+        const each = Math.floor(100 / ids.length);
+        const next: Record<string, number> = {};
+        ids.forEach((id, i) => { next[id] = i === 0 ? 100 - each * (ids.length - 1) : each; });
+        return next;
+      }
+      // Scale + round; assign rounding residual to the largest weight.
+      const scaled = ids.map((id) => ({ id, raw: (cur[id] / sum) * 100 }));
+      const rounded = scaled.map((s) => ({ id: s.id, val: Math.round(s.raw) }));
+      const drift = 100 - rounded.reduce((a, b) => a + b.val, 0);
+      if (drift !== 0) {
+        const biggest = rounded.slice().sort((a, b) => b.val - a.val)[0];
+        biggest.val += drift;
+      }
+      const next: Record<string, number> = {};
+      for (const r of rounded) next[r.id] = Math.max(0, r.val);
+      return next;
+    });
   }
 
   async function remove() {
@@ -1430,6 +1796,19 @@ function RuleEditor({
             setWeight={setWeight}
             weightSum={weightSum}
             normalized={normalizedWeights}
+            onNormalize={normalizeWeightsTo100}
+          />
+        )}
+
+        {/* Phase 15G — inline plan-lock CTA when the selected mode
+            isn't included on the current plan. The PUT endpoint
+            still accepts any mode (preserving existing behavior),
+            but the UI surfaces the upgrade pathway clearly. */}
+        {!bootstrap.canUseMode[mode] && (
+          <PlanLockedNotice
+            mode={mode}
+            requiredPlan={bootstrap.planByMode[mode]}
+            planName={bootstrap.plan.name}
           />
         )}
 
@@ -1511,12 +1890,14 @@ function WeightedEditor({
   setWeight,
   weightSum,
   normalized,
+  onNormalize,
 }: {
   eligibleStaff: Staff[];
   weights: Record<string, number>;
   setWeight: (id: string, v: number) => void;
   weightSum: number;
   normalized: Array<{ staffId: string; pct: number; name: string }>;
+  onNormalize: () => void;
 }) {
   return (
     <div className="mt-5 space-y-4">
@@ -1556,17 +1937,28 @@ function WeightedEditor({
         })}
       </ul>
       <div className="rounded-lg border border-border bg-surface-muted/40 p-3 text-xs">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <span className="font-semibold text-ink">
-            Sum: <span className="tabular-nums">{weightSum}%</span>
+            Sum: <span className={"tabular-nums " + (weightSum === 100 ? "text-emerald-700" : weightSum === 0 ? "text-ink-subtle" : "text-amber-700")}>{weightSum}%</span>
           </span>
-          <span className="text-ink-subtle">
-            {weightSum === 0
-              ? "Set at least one weight"
-              : weightSum === 100
-                ? "Exact 100% — no normalization needed"
-                : "Engine will normalize to 100%"}
-          </span>
+          <div className="flex items-center gap-2">
+            <span className={"text-[11px] " + (weightSum === 100 ? "text-emerald-700" : weightSum === 0 ? "text-ink-subtle" : "text-amber-700")}>
+              {weightSum === 0
+                ? "Set at least one weight"
+                : weightSum === 100
+                  ? "Ready to save"
+                  : "Must total 100% to save"}
+            </span>
+            {weightSum !== 100 && weightSum !== 0 && (
+              <button
+                type="button"
+                onClick={onNormalize}
+                className="rounded-md border border-border bg-surface px-2 py-1 text-[11px] font-medium text-ink hover:bg-surface-muted"
+              >
+                Normalize to 100%
+              </button>
+            )}
+          </div>
         </div>
         {normalized.length > 0 && (
           <div className="mt-3 space-y-1.5">
@@ -1665,6 +2057,296 @@ function SectionHeader({
         <p className="mt-0.5 text-sm text-ink-muted">{subtitle}</p>
       </div>
     </header>
+  );
+}
+
+// ─── Capacity forecasting ────────────────────────────────────────────
+
+function CapacityForecastSection({
+  capacity,
+  loading,
+}: {
+  capacity: CapacitySummary | null;
+  loading: boolean;
+}) {
+  return (
+    <section className="space-y-3">
+      <SectionHeader
+        icon={Target}
+        title="Capacity forecast (rest of today)"
+        subtitle="Per-staff remaining working time today, derived from working hours + confirmed bookings. External calendar busy time isn't subtracted here — connected calendars still gate routing decisions."
+      />
+      {loading ? (
+        <Card className="p-5"><Skeleton className="h-32 w-full rounded-md" /></Card>
+      ) : !capacity || capacity.rows.length === 0 ? (
+        <Card className="p-6 text-center text-sm text-ink-muted">
+          No staff configured yet.
+        </Card>
+      ) : (
+        <>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <CapacityStat
+              icon={Clock}
+              label="Total remaining hours"
+              value={`${capacity.totalRemainingHours.toFixed(1)}h`}
+              tone={capacity.totalRemainingHours > 0 ? "default" : "muted"}
+            />
+            <CapacityStat
+              icon={AlertTriangle}
+              label="Overloaded staff"
+              value={String(capacity.overloadedCount)}
+              tone={capacity.overloadedCount > 0 ? "rose" : "muted"}
+            />
+            <CapacityStat
+              icon={CalendarX2}
+              label="Closed today"
+              value={String(capacity.closedCount)}
+              tone="muted"
+            />
+          </div>
+          <Card className="overflow-hidden p-0">
+            <table className="w-full text-sm">
+              <thead className="bg-surface-muted text-left text-[10px] font-semibold uppercase tracking-wide text-ink-subtle">
+                <tr>
+                  <th className="px-3 py-2">Staff</th>
+                  <th className="px-3 py-2 text-right">Scheduled</th>
+                  <th className="px-3 py-2 text-right">Booked</th>
+                  <th className="px-3 py-2 text-right">Remaining</th>
+                  <th className="px-3 py-2 text-right">Utilization</th>
+                  <th className="px-3 py-2">Window</th>
+                </tr>
+              </thead>
+              <tbody>
+                {capacity.rows.map((r) => {
+                  const utilPct = r.utilization === null ? null : Math.round(r.utilization * 100);
+                  const utilTone =
+                    utilPct === null
+                      ? "muted"
+                      : utilPct >= 90
+                        ? "rose"
+                        : utilPct >= 70
+                          ? "amber"
+                          : "emerald";
+                  const utilClasses =
+                    utilTone === "rose"
+                      ? "bg-rose-50 text-rose-700"
+                      : utilTone === "amber"
+                        ? "bg-amber-50 text-amber-800"
+                        : utilTone === "emerald"
+                          ? "bg-emerald-50 text-emerald-700"
+                          : "bg-slate-100 text-slate-600";
+                  return (
+                    <tr key={r.staffId} className="border-t border-border/60">
+                      <td className="px-3 py-2">
+                        <div className="text-ink">{r.staffName}</div>
+                        <div className="text-[11px] text-ink-subtle">{r.staffEmail}</div>
+                      </td>
+                      <td className="px-3 py-2 text-right tabular-nums">
+                        {r.scheduledHours > 0 ? `${r.scheduledHours.toFixed(1)}h` : "—"}
+                      </td>
+                      <td className="px-3 py-2 text-right tabular-nums">
+                        {r.bookedHours > 0 ? `${r.bookedHours.toFixed(1)}h` : "—"}
+                      </td>
+                      <td className="px-3 py-2 text-right tabular-nums">
+                        {r.remainingHours === null ? (
+                          <span className="text-ink-subtle">closed</span>
+                        ) : (
+                          `${r.remainingHours.toFixed(1)}h`
+                        )}
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        {utilPct === null ? (
+                          <span className="text-[11px] text-ink-subtle">—</span>
+                        ) : (
+                          <span
+                            className={
+                              "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium " +
+                              utilClasses
+                            }
+                          >
+                            {utilPct}%
+                            {r.overloaded && <AlertTriangle className="h-2.5 w-2.5" />}
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 text-xs text-ink-muted">
+                        {r.windowStart && r.windowEnd
+                          ? `${formatTime(r.windowStart)} – ${formatTime(r.windowEnd)}`
+                          : "—"}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </Card>
+        </>
+      )}
+    </section>
+  );
+}
+
+function CapacityStat({
+  icon: Icon,
+  label,
+  value,
+  tone,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  value: string;
+  tone: "default" | "rose" | "amber" | "muted";
+}) {
+  const valueClass =
+    tone === "rose" ? "text-rose-700" : tone === "amber" ? "text-amber-700" : tone === "muted" ? "text-ink-subtle" : "text-ink";
+  return (
+    <Card className="flex items-start gap-3 p-4">
+      <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-brand-accent/10 text-brand-accent">
+        <Icon className="h-4 w-4" />
+      </div>
+      <div className="min-w-0">
+        <div className={"text-lg font-semibold tabular-nums " + valueClass}>{value}</div>
+        <div className="text-[11px] text-ink-muted">{label}</div>
+      </div>
+    </Card>
+  );
+}
+
+function formatTime(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}
+
+// ─── Fallback policy (read-only) ─────────────────────────────────────
+
+function FallbackPolicySection({
+  tenantDefault,
+  activeMode,
+}: {
+  tenantDefault: Rule | null;
+  activeMode: string;
+}) {
+  // The engine's fallback chain is hardcoded today (no per-tenant
+  // configuration). This section surfaces exactly what /api/bookings
+  // does today so admins can see the contract without us shipping a
+  // toggle that the engine wouldn't honor.
+  const lines: Array<{ when: string; then: string; tone: "default" | "amber" | "rose" }> = [];
+  if (activeMode === "manual") {
+    lines.push({
+      when: "Manual mode is active",
+      then: "Customer picks staff on the booking page. Engine does not auto-assign.",
+      tone: "default",
+    });
+  } else if (tenantDefault && !tenantDefault.enabled) {
+    lines.push({
+      when: "Tenant default rule is disabled",
+      then: "Engine falls back to the legacy round-robin path used before routing rules shipped.",
+      tone: "amber",
+    });
+  } else if (!tenantDefault) {
+    lines.push({
+      when: "No tenant default rule configured",
+      then: "Engine falls back to the legacy round-robin path used before routing rules shipped.",
+      tone: "amber",
+    });
+  }
+  lines.push({
+    when: "No eligible staff for the requested window",
+    then: "Booking fails with no_available_staff. The public booking page surfaces this as 'no availability'.",
+    tone: "rose",
+  });
+  lines.push({
+    when: "Picker returns no choice (priority/weighted with all unavailable)",
+    then: "Booking fails with no_pick_in_pool. Same UI treatment as no_available_staff.",
+    tone: "rose",
+  });
+  lines.push({
+    when: "Engine throws an unexpected error",
+    then: "Falls back to legacy round-robin so the booking still completes (defense in depth).",
+    tone: "default",
+  });
+
+  return (
+    <section className="space-y-3">
+      <SectionHeader
+        icon={GitBranch}
+        title="Fallback policy (current engine behavior)"
+        subtitle="What happens when the primary routing decision can't be made. Hardcoded in the engine — read-only on this page."
+      />
+      <Card className="overflow-hidden p-0">
+        <ul className="divide-y divide-border/60">
+          {lines.map((line, idx) => (
+            <li key={idx} className="flex items-start gap-3 p-4 text-sm">
+              <div
+                className={
+                  "mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg " +
+                  (line.tone === "rose"
+                    ? "bg-rose-50 text-rose-700"
+                    : line.tone === "amber"
+                      ? "bg-amber-50 text-amber-700"
+                      : "bg-surface-muted text-ink-subtle")
+                }
+              >
+                <ArrowRight className="h-4 w-4" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="font-medium text-ink">{line.when}</p>
+                <p className="mt-0.5 text-xs text-ink-muted">{line.then}</p>
+              </div>
+            </li>
+          ))}
+        </ul>
+      </Card>
+    </section>
+  );
+}
+
+// ─── Plan-locked inline notice ───────────────────────────────────────
+
+function PlanLockedNotice({
+  mode,
+  requiredPlan,
+  planName,
+}: {
+  mode: string;
+  requiredPlan: string;
+  planName: string;
+}) {
+  const meta = MODE_META[mode as Mode];
+  const modeLabel = meta?.label ?? mode;
+  const tierLabel = requiredPlan.charAt(0).toUpperCase() + requiredPlan.slice(1);
+  return (
+    <div className="mt-5 flex flex-wrap items-start gap-3 rounded-xl border border-violet-200 bg-violet-50/70 p-4">
+      <div className="mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-violet-100 text-violet-700">
+        <Lock className="h-4 w-4" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-semibold text-violet-900">
+          {modeLabel} routing requires the {tierLabel} plan
+        </p>
+        <p className="mt-0.5 text-xs text-violet-800">
+          You&apos;re currently on the <span className="font-medium">{planName}</span> plan.
+          Existing rules using this mode continue to work — the platform never
+          retroactively breaks routing — but new tenants on lower tiers are
+          steered toward {tierLabel}+ for this capability.
+        </p>
+      </div>
+      <div className="flex shrink-0 items-center gap-2">
+        <Link
+          href="/pricing"
+          className="inline-flex items-center gap-1 rounded-lg border border-violet-200 bg-surface px-2.5 py-1.5 text-xs font-medium text-violet-800 hover:bg-violet-100"
+        >
+          Compare plans <ExternalLink className="h-3 w-3" />
+        </Link>
+        <Link
+          href="/dashboard/billing"
+          className="inline-flex items-center gap-1 rounded-lg bg-violet-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-violet-700"
+        >
+          Upgrade
+        </Link>
+      </div>
+    </div>
   );
 }
 

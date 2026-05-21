@@ -25,27 +25,36 @@ export type FairnessRow = {
   weekCount: number;
   totalAssignments: number;
   lastAssignedAt: string | null;
-  /** Actual share of this week's assignments (0..100). */
-  actualSharePct: number;
-  /** Target share from weighted rule, or equal share fallback (0..100). */
-  expectedSharePct: number;
-  /** actual - expected. Positive = over-served. */
-  driftPct: number;
-  /** True when this staff has ≥2× the equal-share weekly load. */
+  /** Actual share of this week's assignments (0..100). Null when
+   *  weeklyTotal === 0 — no engine-driven history to derive from. */
+  actualSharePct: number | null;
+  /** Target share from weighted rule, or equal share fallback
+   *  (0..100). Null when there is no history to compare against — UI
+   *  should hide the target column in that case rather than display a
+   *  meaningless 100% for a single-staff tenant. */
+  expectedSharePct: number | null;
+  /** actual - expected. Positive = over-served. Null when fairness
+   *  cannot be computed (no history). */
+  driftPct: number | null;
+  /** True when this staff has ≥2× the equal-share weekly load.
+   *  False when there is no history. */
   overloaded: boolean;
   /** Where the target came from. */
-  expectedSource: "weighted_rule" | "equal_share";
+  expectedSource: "weighted_rule" | "equal_share" | "none";
 };
 
 export type FairnessSummary = {
   rows: FairnessRow[];
-  /** Highest |driftPct| across all staff. UI uses this for a hero
-   *  health indicator (≤10 = good, ≤25 = balanced, > 25 = drift). */
-  maxAbsoluteDriftPct: number;
+  /** Highest |driftPct| across all staff. Null when no history. */
+  maxAbsoluteDriftPct: number | null;
   /** Total assignments captured in the rolling weekly window. */
   weeklyTotal: number;
   /** Distinct staff that took at least one assignment this week. */
   activeAssignees: number;
+  /** True when at least one engine-driven assignment exists in the
+   *  rolling weekly window. When false, the UI should render a "no
+   *  history yet" empty state rather than a table full of nulls. */
+  hasHistory: boolean;
 };
 
 export async function computeFairness(tenantId: string): Promise<FairnessSummary> {
@@ -61,7 +70,13 @@ export async function computeFairness(tenantId: string): Promise<FairnessSummary
     .where(eq(users.tenantId, tenantId));
   const staff = staffRows.filter((s) => s.role !== "client");
   if (staff.length === 0) {
-    return { rows: [], maxAbsoluteDriftPct: 0, weeklyTotal: 0, activeAssignees: 0 };
+    return {
+      rows: [],
+      maxAbsoluteDriftPct: null,
+      weeklyTotal: 0,
+      activeAssignees: 0,
+      hasHistory: false,
+    };
   }
 
   // ── 2. Load assignment stats for these staff.
@@ -111,6 +126,7 @@ export async function computeFairness(tenantId: string): Promise<FairnessSummary
 
   const weeklyTotal = perStaff.reduce((sum, p) => sum + p.week, 0);
   const activeAssignees = perStaff.filter((p) => p.week > 0).length;
+  const hasHistory = weeklyTotal > 0;
 
   // ── 5. Determine expected shares.
   let totalWeight = 0;
@@ -122,8 +138,31 @@ export async function computeFairness(tenantId: string): Promise<FairnessSummary
   const equalShare = staff.length > 0 ? 100 / staff.length : 0;
 
   // ── 6. Build rows with drift.
+  //
+  // CRITICAL: when weeklyTotal === 0 there is NO engine-driven history
+  // to derive drift from. A 100% / 0% / -100% trio for a single-staff
+  // tenant who has never had an engine assignment is mathematically
+  // meaningless and shipped as a bug in Phase 17. We now return null
+  // for share/target/drift in that case and let the UI render an
+  // empty-state card rather than fabricate numbers.
   const rows: FairnessRow[] = perStaff.map((p) => {
-    const actualSharePct = weeklyTotal > 0 ? (p.week / weeklyTotal) * 100 : 0;
+    if (!hasHistory) {
+      return {
+        staffId: p.staffId,
+        staffName: p.staffName,
+        staffEmail: p.staffEmail,
+        todayCount: p.today,
+        weekCount: p.week,
+        totalAssignments: p.total,
+        lastAssignedAt: p.lastAssignedAt,
+        actualSharePct: null,
+        expectedSharePct: null,
+        driftPct: null,
+        overloaded: false,
+        expectedSource: "none",
+      };
+    }
+    const actualSharePct = (p.week / weeklyTotal) * 100;
     let expectedSharePct = equalShare;
     let expectedSource: FairnessRow["expectedSource"] = "equal_share";
     if (weightedDist && totalWeight > 0) {
@@ -132,6 +171,10 @@ export async function computeFairness(tenantId: string): Promise<FairnessSummary
       expectedSource = "weighted_rule";
     }
     const driftPct = round1(actualSharePct - expectedSharePct);
+    // Overload definition: this staff has ≥ 2× the equal-share weekly
+    // load. Only meaningful once there's history AND more than one staff.
+    const equalShareWeeklyCount =
+      staff.length > 0 ? weeklyTotal / staff.length : 0;
     return {
       staffId: p.staffId,
       staffName: p.staffName,
@@ -143,24 +186,32 @@ export async function computeFairness(tenantId: string): Promise<FairnessSummary
       actualSharePct: round1(actualSharePct),
       expectedSharePct: round1(expectedSharePct),
       driftPct,
-      overloaded: equalShare > 0 && p.week >= 2 * Math.ceil((weeklyTotal / staff.length) || 0),
+      overloaded:
+        staff.length > 1 &&
+        equalShareWeeklyCount > 0 &&
+        p.week >= 2 * Math.ceil(equalShareWeeklyCount),
       expectedSource,
     };
   });
 
-  // Stable sort: largest drift first so the operator sees imbalance up top.
-  rows.sort((a, b) => Math.abs(b.driftPct) - Math.abs(a.driftPct));
+  if (hasHistory) {
+    // Stable sort: largest drift first so the operator sees imbalance up top.
+    rows.sort((a, b) => Math.abs(b.driftPct ?? 0) - Math.abs(a.driftPct ?? 0));
+  } else {
+    // No history: alphabetical for stable rendering.
+    rows.sort((a, b) => a.staffName.localeCompare(b.staffName));
+  }
 
-  const maxAbsoluteDriftPct = rows.reduce(
-    (m, r) => Math.max(m, Math.abs(r.driftPct)),
-    0,
-  );
+  const maxAbsoluteDriftPct = hasHistory
+    ? round1(rows.reduce((m, r) => Math.max(m, Math.abs(r.driftPct ?? 0)), 0))
+    : null;
 
   return {
     rows,
-    maxAbsoluteDriftPct: round1(maxAbsoluteDriftPct),
+    maxAbsoluteDriftPct,
     weeklyTotal,
     activeAssignees,
+    hasHistory,
   };
 }
 

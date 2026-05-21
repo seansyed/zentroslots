@@ -31,12 +31,30 @@ import {
 } from "@/db/schema";
 import { getExternalBusyForUser } from "@/lib/calendar/sync";
 
-import { isStaffWorkingForRouting } from "./eligibility";
+import { checkStaffWorkingForRouting } from "./eligibility";
 import { loadBusyStats, pickLeastBusyPure } from "./leastBusy";
 import { pickPriority } from "./priority";
 import { pickRoundRobin } from "./roundRobin";
 import { type RoutingMode, type RoutingRule } from "./types";
 import { pickWeighted } from "./weighted";
+
+/**
+ * Phase 15G — explicit reason taxonomy. Every code below maps to an
+ * observable backend state. We intentionally do NOT include taxonomy
+ * entries for engine behaviors that don't exist yet (max daily
+ * bookings, capacity caps, hidden-from-booking) — those would be
+ * fake categories under the "no fake analytics" rule.
+ */
+export type EligibilityReasonCode =
+  | "in_service_pool"        // passed every filter so far
+  | "not_in_rule_pool"        // priority/weighted mode pool restriction
+  | "pto_override"            // availability_overrides.unavailable = true today
+  | "outside_working_hours"   // weekly schedule exists but doesn't cover the window
+  | "no_schedule"             // no weekly availability row + no override hours
+  | "internal_conflict"       // overlapping confirmed booking on the staff
+  | "calendar_conflict"       // overlapping busy event from connected calendar
+  | "picked"                  // the winner returned by the picker
+  | "not_picked";             // eligible but the picker chose someone else
 
 export type SimulationCandidate = {
   staffId: string;
@@ -44,21 +62,14 @@ export type SimulationCandidate = {
   staffEmail: string;
   /**
    * eligible — passed every filter; was in the picker pool
-   * skipped   — eliminated by an eligibility check (see `reason`)
+   * skipped   — eliminated by an eligibility check (see `reasonCode`)
    * picked    — the winner returned by the picker
    */
   status: "eligible" | "skipped" | "picked";
-  /** Human-readable elimination reason or "available". */
+  /** Machine-readable elimination code. UI maps to label + tooltip. */
+  reasonCode: EligibilityReasonCode;
+  /** Human-readable elimination reason. Safe to render directly. */
   reason: string;
-  /** Which step eliminated this candidate. */
-  step:
-    | "in_pool"
-    | "service_pool"
-    | "rule_pool"
-    | "working_hours"
-    | "internal_conflict"
-    | "external_busy"
-    | "picker";
 };
 
 export type SimulationResult = {
@@ -79,6 +90,7 @@ export type SimulationResult = {
   counts: {
     inPool: number;
     eligible: number;
+    skippedByPto: number;
     skippedByWorkingHours: number;
     skippedByInternalConflict: number;
     skippedByExternalBusy: number;
@@ -155,8 +167,8 @@ export async function simulateAssignment(
       staffEmail: p.email,
       tz: p.timezone ?? "UTC",
       status: "eligible" as const,
+      reasonCode: "in_service_pool" as EligibilityReasonCode,
       reason: "in service pool",
-      step: "in_pool" as SimulationCandidate["step"],
     }))
     .sort((a, b) => a.staffName.localeCompare(b.staffName));
 
@@ -169,6 +181,7 @@ export async function simulateAssignment(
       counts: {
         inPool: 0,
         eligible: 0,
+        skippedByPto: 0,
         skippedByWorkingHours: 0,
         skippedByInternalConflict: 0,
         skippedByExternalBusy: 0,
@@ -189,27 +202,40 @@ export async function simulateAssignment(
     for (const c of candidates) {
       if (c.status === "eligible" && !restrictTo.has(c.staffId)) {
         c.status = "skipped";
-        c.step = "rule_pool";
+        c.reasonCode = "not_in_rule_pool";
         c.reason = `not in ${rule!.mode} pool`;
       }
     }
   }
 
   // ── (4) Working-hours check — per-user because each staff has their
-  // own timezone. We reuse the same helper the production engine uses.
+  // own timezone. We use the richer checkStaffWorkingForRouting helper
+  // so PTO / outside-hours / no-schedule are distinguishable in the UI.
   await Promise.all(
     candidates.map(async (c) => {
       if (c.status !== "eligible") return;
-      const working = await isStaffWorkingForRouting(
+      const result = await checkStaffWorkingForRouting(
         c.staffId,
         input.startAt,
         input.endAt,
         c.tz,
       );
-      if (!working) {
+      if (!result.working) {
         c.status = "skipped";
-        c.step = "working_hours";
-        c.reason = "outside working hours or on PTO";
+        switch (result.reason) {
+          case "pto_override":
+            c.reasonCode = "pto_override";
+            c.reason = "PTO override active for this date";
+            break;
+          case "outside_working_hours":
+            c.reasonCode = "outside_working_hours";
+            c.reason = "outside scheduled working hours";
+            break;
+          case "no_schedule":
+            c.reasonCode = "no_schedule";
+            c.reason = "no weekly schedule configured for this day";
+            break;
+        }
       }
     }),
   );
@@ -240,8 +266,8 @@ export async function simulateAssignment(
     for (const c of candidates) {
       if (c.status === "eligible" && busyIds.has(c.staffId)) {
         c.status = "skipped";
-        c.step = "internal_conflict";
-        c.reason = "already booked in this window";
+        c.reasonCode = "internal_conflict";
+        c.reason = "already has a confirmed booking that overlaps this window";
       }
     }
   }
@@ -256,8 +282,8 @@ export async function simulateAssignment(
       );
       if (collides) {
         c.status = "skipped";
-        c.step = "external_busy";
-        c.reason = "Google Calendar busy event";
+        c.reasonCode = "calendar_conflict";
+        c.reason = "connected calendar has a busy event in this window";
       }
     }),
   );
@@ -312,38 +338,59 @@ export async function simulateAssignment(
 
     if (pick) {
       decision = { ok: true, staffId: pick, mode: rule.mode, reason };
-      const winner = candidates.find((c) => c.staffId === pick);
-      if (winner) {
-        winner.status = "picked";
-        winner.step = "picker";
-        winner.reason = reason;
+      // Mark the winner + flip every other eligible candidate to a
+      // distinct "not_picked" code so the UI can render "considered
+      // but not chosen" alongside the actual skips.
+      for (const c of candidates) {
+        if (c.staffId === pick) {
+          c.status = "picked";
+          c.reasonCode = "picked";
+          c.reason = reason;
+        } else if (c.status === "eligible") {
+          c.reasonCode = "not_picked";
+          c.reason = `eligible but ${rule.mode} chose someone else`;
+        }
       }
     } else {
       decision = { ok: false, mode: rule.mode, reason: "no_pick_in_pool" };
     }
   }
 
-  // ── Counts for hero chips.
+  // ── Counts for hero chips. Sourced from the canonical reasonCode
+  // so the UI doesn't need to know the internal step naming.
   const counts = {
     inPool: candidates.length,
-    eligible: candidates.filter((c) => c.status === "eligible" || c.status === "picked").length,
-    skippedByWorkingHours: candidates.filter((c) => c.step === "working_hours").length,
-    skippedByInternalConflict: candidates.filter((c) => c.step === "internal_conflict").length,
-    skippedByExternalBusy: candidates.filter((c) => c.step === "external_busy").length,
-    skippedByRulePool: candidates.filter((c) => c.step === "rule_pool").length,
+    eligible: candidates.filter(
+      (c) => c.status === "eligible" || c.status === "picked",
+    ).length,
+    skippedByPto: candidates.filter((c) => c.reasonCode === "pto_override").length,
+    skippedByWorkingHours: candidates.filter(
+      (c) => c.reasonCode === "outside_working_hours" || c.reasonCode === "no_schedule",
+    ).length,
+    skippedByInternalConflict: candidates.filter(
+      (c) => c.reasonCode === "internal_conflict",
+    ).length,
+    skippedByExternalBusy: candidates.filter(
+      (c) => c.reasonCode === "calendar_conflict",
+    ).length,
+    skippedByRulePool: candidates.filter(
+      (c) => c.reasonCode === "not_in_rule_pool",
+    ).length,
   };
 
   return {
     rule: ruleSummary,
     decision,
-    candidates: candidates.map(({ staffId, staffName, staffEmail, status, reason, step }) => ({
-      staffId,
-      staffName,
-      staffEmail,
-      status,
-      reason,
-      step,
-    })),
+    candidates: candidates.map(
+      ({ staffId, staffName, staffEmail, status, reason, reasonCode }) => ({
+        staffId,
+        staffName,
+        staffEmail,
+        status,
+        reason,
+        reasonCode,
+      }),
+    ),
     counts,
   };
 }

@@ -147,6 +147,61 @@ export async function isStaffWorkingForRouting(
   return isStaffWorking(userId, startAt, endAt, staffTimezone);
 }
 
+/**
+ * Phase 15G — richer working-window check that distinguishes PTO
+ * overrides from "outside scheduled hours" and "no schedule
+ * configured". Used by the simulation console to render granular
+ * skip reasons. Computes the same answer as `isStaffWorkingForRouting`
+ * — never disagrees with the production engine.
+ */
+export type WorkingCheckResult =
+  | { working: true }
+  | {
+      working: false;
+      reason: "pto_override" | "outside_working_hours" | "no_schedule";
+    };
+
+export async function checkStaffWorkingForRouting(
+  userId: string,
+  startAt: Date,
+  endAt: Date,
+  staffTimezone: string,
+): Promise<WorkingCheckResult> {
+  const dateStr = new Intl.DateTimeFormat("en-CA", {
+    timeZone: staffTimezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(startAt);
+
+  const overrides = await db
+    .select({
+      unavailable: availabilityOverrides.unavailable,
+      startTime: availabilityOverrides.startTime,
+      endTime: availabilityOverrides.endTime,
+    })
+    .from(availabilityOverrides)
+    .where(
+      and(
+        eq(availabilityOverrides.userId, userId),
+        eq(availabilityOverrides.date, dateStr),
+      ),
+    );
+
+  if (overrides.some((o) => o.unavailable)) {
+    return { working: false, reason: "pto_override" };
+  }
+
+  const windows = await resolveWorkingWindows(userId, dateStr, staffTimezone, overrides);
+  if (windows.length === 0) {
+    return { working: false, reason: "no_schedule" };
+  }
+  if (windows.some((w) => w.start <= startAt && w.end >= endAt)) {
+    return { working: true };
+  }
+  return { working: false, reason: "outside_working_hours" };
+}
+
 function intervalsOverlap(a: Interval, b: Interval): boolean {
   return a.start < b.end && b.start < a.end;
 }
