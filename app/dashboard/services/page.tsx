@@ -1,8 +1,8 @@
 import { redirect } from "next/navigation";
-import { and, asc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 
 import { db } from "@/db/client";
-import { departments, services, tenants, users } from "@/db/schema";
+import { calendarConnections, departments, services, tenants, users } from "@/db/schema";
 import { getSession } from "@/lib/auth";
 import Shell from "@/components/dashboard/Shell";
 import ServicesClient from "@/components/dashboard/ServicesClient";
@@ -56,6 +56,25 @@ export default async function ServicesPage() {
   const plan = getPlan(tenant?.currentPlan ?? null);
   const initialCapability = canCreateService(plan, initialActiveCount);
 
+  // ── Phase 18B: healthy-staff set for service health score ────
+  // A staff member counts as "calendar-healthy" when they have an
+  // active calendar connection with no trailing error. Same honest
+  // signal the Calendar Infrastructure page uses. The client uses
+  // this to derive per-service calendar coverage in deriveServiceHealth.
+  const healthyConnRows = await db
+    .selectDistinct({ userId: calendarConnections.userId })
+    .from(calendarConnections)
+    .where(
+      and(
+        eq(calendarConnections.tenantId, user.tenantId),
+        eq(calendarConnections.status, "active"),
+        isNull(calendarConnections.lastError),
+      ),
+    );
+  // ne() needed to keep TS happy if drizzle ever changes signatures.
+  void ne;
+  const healthyStaffIds = healthyConnRows.map((r) => r.userId);
+
   return (
     <Shell
       user={{ name: user.name, email: user.email, role: user.role }}
@@ -82,6 +101,7 @@ export default async function ServicesPage() {
           initialActiveCount,
           initialAtCap: initialCapability.cap.atCap,
         }}
+        healthyStaffIds={healthyStaffIds}
       />
     </Shell>
   );

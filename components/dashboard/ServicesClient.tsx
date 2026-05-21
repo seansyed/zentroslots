@@ -33,6 +33,7 @@ import {
   Clock,
   Workflow,
   Gauge,
+  Activity,
   ArrowUpRight,
   CheckCircle2,
   CircleDot,
@@ -156,6 +157,86 @@ const READINESS_LABEL: Record<Readiness, string> = {
   inactive: "Inactive",
 };
 
+// ─── Service health score (Phase 18B) ─────────────────────────────
+//
+// Operational readiness score derived from REAL signals only. Each
+// signal is binary (pass/fail); the score is the % of signals that
+// pass, rounded to the nearest 5. We never fabricate values —
+// "Setup incomplete" surfaces when 0 signals pass.
+//
+// Signals (4 today; extend by appending to SIGNAL_DEFS below):
+//   1. Active        — service.isActive === 1
+//   2. Staffed       — service has ≥1 assigned staff
+//   3. Department    — service has an owning department (mig 0032)
+//   4. Calendar cov  — ≥1 assigned staff has a healthy calendar
+//                      connection (server-derived healthyStaffIds)
+//
+// IMPORTANT: this is a presentation-layer derivation. The booking
+// engine continues to work when health < 100% — calendar-aware
+// features degrade but bookings themselves still succeed. We never
+// gate slot generation on health.
+
+type ServiceHealthSignal = {
+  key: "active" | "staffed" | "department" | "calendar";
+  label: string;
+  hint: string;
+  pass: boolean;
+};
+
+type ServiceHealth = {
+  /** 0-100. 0 = "Setup incomplete" (no signals pass yet). */
+  pct: number;
+  /** All evaluated signals, in display order. UI can render the
+   *  failed ones inline ("Missing: department, calendar coverage"). */
+  signals: ServiceHealthSignal[];
+  /** Convenience flag for the catalog badge — "Ready" tone vs amber. */
+  isFullyReady: boolean;
+  /** Convenience: signals that did NOT pass, ready for a chip strip. */
+  failing: ServiceHealthSignal[];
+};
+
+function deriveServiceHealth(
+  s: Svc,
+  healthyStaffIds: Set<string>,
+): ServiceHealth {
+  const hasOwningDept = (s.departmentId ?? null) !== null;
+  const calendarCoverage = s.staff.length > 0
+    && s.staff.some((m) => healthyStaffIds.has(m.userId));
+  const signals: ServiceHealthSignal[] = [
+    { key: "active",     label: "Active",            hint: "Service is bookable",                                        pass: s.isActive === 1 },
+    { key: "staffed",    label: "Staffed",           hint: "At least one staff member is assigned",                      pass: s.staff.length > 0 },
+    { key: "department", label: "Department mapped", hint: "Owned by a department — improves routing visibility",         pass: hasOwningDept },
+    { key: "calendar",   label: "Calendar coverage", hint: "At least one assigned staff has a healthy calendar connection", pass: calendarCoverage },
+  ];
+  const passed = signals.filter((g) => g.pass).length;
+  const pct = signals.length > 0 ? Math.round((passed / signals.length) * 100) : 0;
+  return {
+    pct,
+    signals,
+    isFullyReady: passed === signals.length,
+    failing: signals.filter((g) => !g.pass),
+  };
+}
+
+// Per-mode meta for the delivery-mode chip strip on each catalog
+// card (Phase 18B refinement #4). Iconography + tone per mode.
+const DELIVERY_MODE_META: Record<"in_person" | "virtual", {
+  label: string;
+  short: string;
+  tone: string;
+}> = {
+  in_person: {
+    label: "In-person",
+    short: "In-person",
+    tone: "bg-amber-50/80 text-amber-800 ring-amber-200/40",
+  },
+  virtual: {
+    label: "Virtual",
+    short: "Virtual",
+    tone: "bg-violet-50/80 text-violet-800 ring-violet-200/40",
+  },
+};
+
 // ─── Main client ───────────────────────────────────────────────────
 
 type StaffOption = {
@@ -173,6 +254,7 @@ export default function ServicesClient({
   tenantSlug,
   tenantName,
   planInfo,
+  healthyStaffIds,
 }: {
   isAdmin: boolean;
   allStaff: StaffOption[];
@@ -194,7 +276,16 @@ export default function ServicesClient({
     initialActiveCount: number;
     initialAtCap: boolean;
   };
+  /** Phase 18B: tenant-wide set of staff IDs that have a healthy
+   *  calendar connection (active + no trailing error). Used by
+   *  deriveServiceHealth to compute the "Calendar coverage" signal
+   *  per service without a per-card round-trip. */
+  healthyStaffIds: string[];
 }) {
+  const healthyStaffIdSet = React.useMemo(
+    () => new Set(healthyStaffIds),
+    [healthyStaffIds],
+  );
   const [rows, setRows] = React.useState<Svc[] | null>(null);
   // Edit-service drawer: existing "new" + service-id state
   const [openId, setOpenId] = React.useState<string | "new" | null>(null);
@@ -378,6 +469,7 @@ export default function ServicesClient({
               rows={rows}
               tenantSlug={tenantSlug ?? null}
               allDepartments={allDepartments}
+              healthyStaffIds={healthyStaffIdSet}
               onOpen={(id) => setOpenId(id)}
               onAssignStaff={(id) => setAssignStaffId(id)}
               onShare={(id) => setShareId(id)}
@@ -510,6 +602,16 @@ function ServiceCapChip({
   atCap: boolean;
   planName: string;
 }) {
+  // Phase 18B refinement #8 — surface remaining capacity in human
+  // language. "2 slots remaining" reads more operationally than a
+  // raw "1 / 3" pill, but we keep the tabular ratio for at-a-glance
+  // scanning. At-cap copy stays calm: "Service capacity reached".
+  const remaining = Math.max(0, max - used);
+  const subline = atCap
+    ? "Service capacity reached"
+    : remaining === 1
+      ? "1 slot remaining"
+      : `${remaining} slots remaining`;
   return (
     <span
       className={cn(
@@ -518,7 +620,7 @@ function ServiceCapChip({
           ? "border-amber-300/40 bg-amber-50/80 text-amber-800"
           : "border-border bg-surface/80 text-ink-muted",
       )}
-      title={`${planName} plan supports up to ${max} active services`}
+      title={`${planName} plan supports up to ${max} active services · ${subline}`}
     >
       <Briefcase
         className={cn("h-3 w-3", atCap ? "text-amber-600" : "text-brand-accent")}
@@ -528,7 +630,8 @@ function ServiceCapChip({
         <span className="font-semibold text-ink">{used}</span>
         <span className="text-ink-subtle"> / {max}</span>
       </span>
-      <span>services</span>
+      <span className="hidden sm:inline">{subline}</span>
+      <span className="sm:hidden">services</span>
     </span>
   );
 }
@@ -780,6 +883,7 @@ function ServiceDirectoryGrid({
   rows,
   tenantSlug,
   allDepartments,
+  healthyStaffIds,
   onOpen,
   onAssignStaff,
   onShare,
@@ -789,6 +893,9 @@ function ServiceDirectoryGrid({
   /** Threaded so each card can resolve its direct ownership
    *  (svc.departmentId → name + color) without a per-card fetch. */
   allDepartments: { id: string; name: string; color: string | null }[];
+  /** Tenant-wide healthy-staff set (Phase 18B). Passed straight to
+   *  each ServiceOpCard so health derivation is a pure function call. */
+  healthyStaffIds: Set<string>;
   onOpen: (id: string) => void;
   onAssignStaff: (id: string) => void;
   onShare: (id: string) => void;
@@ -827,6 +934,7 @@ function ServiceDirectoryGrid({
               svc={s}
               tenantSlug={tenantSlug}
               departmentById={departmentById}
+              healthyStaffIds={healthyStaffIds}
               onOpen={() => onOpen(s.id)}
               onAssignStaff={() => onAssignStaff(s.id)}
               onShare={() => onShare(s.id)}
@@ -871,6 +979,7 @@ function ServiceOpCard({
   svc,
   tenantSlug,
   departmentById,
+  healthyStaffIds,
   onOpen,
   onAssignStaff,
   onShare,
@@ -884,14 +993,18 @@ function ServiceOpCard({
    *  parent so every card can resolve its direct ownership without
    *  per-card fetches. */
   departmentById: Map<string, { name: string; color: string | null }>;
+  /** Tenant-wide healthy-staff set (Phase 18B). */
+  healthyStaffIds: Set<string>;
   onOpen: () => void;
   onAssignStaff: () => void;
   onShare: () => void;
 }) {
   const accent = serviceColor(svc.id, svc.color);
   const readiness = deriveReadiness(svc);
+  const health = React.useMemo(() => deriveServiceHealth(svc, healthyStaffIds), [svc, healthyStaffIds]);
   const inactive = svc.isActive !== 1;
   const meeting = deriveMeetingMode(svc.videoProvider ?? null);
+  const deliveryModes = normalizeDeliveryModes(svc.deliveryModes);
 
   // Primary ownership: the direct `departmentId` (migration 0032).
   // If null/undefined, the service is explicitly unassigned — even if
@@ -951,6 +1064,7 @@ function ServiceOpCard({
           </div>
           <div className="flex shrink-0 flex-col items-end gap-1">
             <ReadinessChip readiness={readiness} />
+            <ServiceHealthBadge health={health} />
             <BookableChip
               readiness={readiness}
               hasStaff={svc.staff.length > 0}
@@ -984,7 +1098,33 @@ function ServiceOpCard({
               <span className="text-emerald-700/80">· 30d</span>
             </MetaPill>
           )}
+          {/* Phase 18B refinement #4 — delivery mode chips with
+              per-mode iconography. Only renders when the service
+              has explicit mode metadata (every modern service does
+              since Phase 16). */}
+          <DeliveryModeChips modes={deliveryModes} />
         </div>
+
+        {/* Phase 18B refinement #1 — operational hints surfaced
+            inline when health < 100%. Reads from the same derived
+            signals as the badge above so the badge + hints can
+            never disagree. */}
+        {!inactive && !health.isFullyReady && health.failing.length > 0 && (
+          <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+            <span className="text-[9.5px] font-semibold uppercase tracking-[0.10em] text-ink-subtle">
+              Needs
+            </span>
+            {health.failing.map((g) => (
+              <span
+                key={g.key}
+                className="inline-flex items-center gap-1 rounded-full bg-amber-50/80 px-1.5 py-0.5 text-[10px] font-medium text-amber-800 ring-1 ring-amber-200/40"
+                title={g.hint}
+              >
+                {g.label}
+              </span>
+            ))}
+          </div>
+        )}
 
         {/* Department ownership — always visible.
             Primary signal = direct `departmentId` (migration 0032).
@@ -1101,6 +1241,90 @@ function ReadinessChip({ readiness }: { readiness: Readiness }) {
       <Icon className="h-2.5 w-2.5" strokeWidth={2} />
       {READINESS_LABEL[readiness]}
     </span>
+  );
+}
+
+// ─── Service health badge (Phase 18B refinement #5) ───────────────
+//
+// Compact "X%" pill in the card header. Tone scales with the score:
+//   100% -> emerald (fully ready)
+//   75%  -> brand
+//   50%  -> amber
+//   <50% -> rose
+// "Setup incomplete" replaces the percentage when 0 signals pass —
+// keeps us honest per the brief ("If incomplete: show 'Setup
+// incomplete' instead of fake percentages").
+
+function ServiceHealthBadge({ health }: { health: ServiceHealth }) {
+  if (health.pct === 0) {
+    return (
+      <span
+        className="inline-flex shrink-0 items-center gap-1 rounded-full bg-surface-inset px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.06em] text-ink-subtle ring-1 ring-border/50"
+        title="No readiness signals pass yet — finish setup to activate this service."
+      >
+        Setup incomplete
+      </span>
+    );
+  }
+  const tone =
+    health.pct === 100
+      ? "bg-emerald-50/80 text-emerald-700 ring-emerald-200/40"
+      : health.pct >= 75
+        ? "bg-brand-subtle text-brand-accent ring-brand-accent/20"
+        : health.pct >= 50
+          ? "bg-amber-50/80 text-amber-800 ring-amber-200/40"
+          : "bg-rose-50/80 text-rose-700 ring-rose-200/40";
+  const missingSummary =
+    health.failing.length > 0
+      ? `Needs: ${health.failing.map((s) => s.label.toLowerCase()).join(", ")}.`
+      : "All readiness signals pass.";
+  return (
+    <span
+      className={cn(
+        "inline-flex shrink-0 items-center gap-1 rounded-full px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.06em] ring-1 tabular-nums",
+        tone,
+      )}
+      title={`Service readiness · ${health.pct}% · ${missingSummary}`}
+    >
+      <Activity className="h-2.5 w-2.5" strokeWidth={2} />
+      {health.pct}%
+    </span>
+  );
+}
+
+// Per-mode chip strip rendered in the meta row (Phase 18B refinement
+// #4). Skips render when there's nothing to surface so single-mode
+// services don't add visual noise.
+
+function DeliveryModeChips({ modes }: { modes: Array<"in_person" | "virtual"> }) {
+  if (modes.length === 0) return null;
+  // Hybrid = both modes selected. Surface as a single elegant chip
+  // instead of two side-by-side ones — cleaner operational signal.
+  if (modes.includes("in_person") && modes.includes("virtual")) {
+    return (
+      <span
+        className="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium ring-1 bg-sky-50/80 text-sky-800 ring-sky-200/40"
+        title="Bookable in-person and online — staff with hybrid or matching delivery mode are eligible."
+      >
+        Hybrid
+      </span>
+    );
+  }
+  return (
+    <>
+      {modes.map((m) => {
+        const meta = DELIVERY_MODE_META[m];
+        return (
+          <span
+            key={m}
+            className={cn("inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium ring-1", meta.tone)}
+            title={`Delivery mode · ${meta.label}`}
+          >
+            {meta.short}
+          </span>
+        );
+      })}
+    </>
   );
 }
 
