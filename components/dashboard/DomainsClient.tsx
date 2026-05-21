@@ -39,7 +39,7 @@ import {
 } from "lucide-react";
 
 import { PremiumCard } from "@/components/ui/Card";
-import { Button, toast } from "@/components/ui/primitives";
+import { toast } from "@/components/ui/primitives";
 import { cn } from "@/lib/cn";
 
 // ─── Types ────────────────────────────────────────────────────────
@@ -184,7 +184,9 @@ export default function DomainsClient({
   const totalFailed = rows.filter((r) => r.status === "failed").length;
 
   return (
-    <div className="mt-3 space-y-4">
+    // Inner max-width keeps long-form content readable on very wide
+    // monitors without breaking the Shell's max-w-7xl container.
+    <div className="mx-auto mt-3 max-w-[1080px] space-y-4">
       <CommandCenterHero
         active={totalActive}
         pending={totalPending}
@@ -198,6 +200,8 @@ export default function DomainsClient({
         setHostname={setHostname}
         adding={adding}
         onAdd={addDomain}
+        cnameTarget={config.cnameTarget}
+        txtPrefix={config.txtPrefix}
       />
       {rows.length === 0 ? (
         <EmptyDomains />
@@ -311,50 +315,77 @@ function HeroKpi({
 }) {
   const toneCls =
     tone === "positive"
-      ? "from-emerald-50 to-emerald-100/30 text-emerald-700 ring-emerald-200/40"
+      ? "from-emerald-50 to-emerald-100/40 text-emerald-700 ring-emerald-200/50 shadow-[0_1px_3px_-1px_rgba(16,185,129,0.18)]"
       : tone === "amber"
-        ? "from-amber-50 to-amber-100/30 text-amber-700 ring-amber-200/40"
+        ? "from-amber-50 to-amber-100/40 text-amber-700 ring-amber-200/50 shadow-[0_1px_3px_-1px_rgba(245,158,11,0.18)]"
         : tone === "red"
-          ? "from-red-50 to-red-100/30 text-red-700 ring-red-200/40"
+          ? "from-red-50 to-red-100/40 text-red-700 ring-red-200/50 shadow-[0_1px_3px_-1px_rgba(239,68,68,0.18)]"
           : tone === "brand"
-            ? "from-brand-subtle to-surface text-brand-accent ring-brand-accent/15"
-            : "from-surface-inset to-surface text-ink-subtle ring-border/40";
+            ? "from-brand-subtle to-surface text-brand-accent ring-brand-accent/20 shadow-[0_1px_3px_-1px_rgba(53,157,243,0.18)]"
+            : "from-surface-inset to-surface text-ink-subtle ring-border/50";
   return (
-    <div className="rounded-xl border border-border/60 bg-surface/85 p-2.5 ring-1 ring-inset ring-white/40 backdrop-blur-sm">
+    <div className="group/kpi relative overflow-hidden rounded-xl border border-border/65 bg-surface/85 p-2.5 shadow-[0_1px_2px_rgba(15,23,42,0.04),inset_0_1px_0_rgba(255,255,255,0.55)] backdrop-blur-sm transition-all duration-[220ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-px hover:border-border hover:shadow-[0_6px_14px_-8px_rgba(15,23,42,0.18),inset_0_1px_0_rgba(255,255,255,0.55)]">
       <div className="flex items-center gap-1.5">
-        <span className={cn("inline-flex h-5 w-5 items-center justify-center rounded-md bg-gradient-to-br ring-1", toneCls)}>
+        <span className={cn(
+          "inline-flex h-5 w-5 items-center justify-center rounded-md bg-gradient-to-br ring-1 transition-transform duration-[220ms] ease-[cubic-bezier(0.16,1,0.3,1)] group-hover/kpi:scale-[1.04]",
+          toneCls,
+        )}>
           <Icon className="h-3 w-3" strokeWidth={2} />
         </span>
-        <span className="text-[9.5px] font-semibold uppercase tracking-[0.10em] text-ink-subtle">{label}</span>
+        <span className="text-[9.5px] font-bold uppercase tracking-[0.12em] text-ink-subtle">{label}</span>
       </div>
-      <div className="mt-1.5 text-[18px] font-semibold leading-none tabular-nums tracking-tight text-ink">{value}</div>
-      <div className="mt-1 text-[10px] text-ink-muted">{sub}</div>
+      <div className="mt-2 text-[22px] font-semibold leading-none tabular-nums tracking-tight text-ink">{value}</div>
+      <div className="mt-1.5 text-[10px] leading-[1.25] text-ink-muted">{sub}</div>
     </div>
   );
 }
 
 function ArchitectureHelper() {
   return (
-    <PremiumCard className="relative overflow-hidden p-3.5">
+    <PremiumCard className="relative overflow-hidden p-3.5 sm:p-4">
       <span aria-hidden className="pointer-events-none absolute -right-12 -top-12 h-32 w-32 rounded-full bg-brand-accent/12 blur-3xl" />
       <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/60 to-transparent" />
       <div className="relative flex items-start gap-3">
-        <div className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-subtle/70 text-brand-accent ring-1 ring-brand-accent/15 shadow-[inset_0_1px_0_rgba(255,255,255,0.55)]">
+        <div className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-subtle/70 text-brand-accent ring-1 ring-brand-accent/20 shadow-[inset_0_1px_0_rgba(255,255,255,0.55)]">
           <Globe className="h-4 w-4" strokeWidth={1.75} />
         </div>
         <div className="min-w-0 flex-1">
           <div className="text-[10.5px] font-bold uppercase tracking-[0.12em] text-brand-accent">How routing works</div>
-          <h2 className="mt-0.5 text-[14px] font-semibold tracking-tight text-ink">
-            Two records · one CNAME for traffic, one TXT for ownership
+          <h2 className="mt-0.5 text-[14.5px] font-semibold leading-[1.25] tracking-tight text-ink">
+            Two records · one for traffic, one for ownership
           </h2>
-          <p className="mt-1 text-[12px] leading-relaxed text-ink-muted">
-            Add the hostname here, then in your DNS provider add a <strong className="font-semibold text-ink">CNAME</strong>
-            {" "}pointing to our edge plus a <strong className="font-semibold text-ink">TXT</strong>{" "}
-            verification record. Once both propagate (usually 1–10 minutes), click <em>Verify</em> — the booking page goes live on your hostname immediately. Existing default URLs keep working in parallel.
+          <p className="mt-1.5 max-w-[64ch] text-[12px] leading-[1.55] text-ink-muted">
+            Add a hostname here, then in your DNS provider create a{" "}
+            <RoutingTerm tone="brand">CNAME</RoutingTerm> pointing to our edge plus a{" "}
+            <RoutingTerm tone="violet">TXT</RoutingTerm> verification record. Once propagated (usually 1–10 minutes), click{" "}
+            <RoutingTerm tone="emerald">Verify</RoutingTerm> — your booking page goes live on the custom hostname immediately. Existing default URLs keep working in parallel.
           </p>
         </div>
       </div>
     </PremiumCard>
+  );
+}
+
+function RoutingTerm({
+  children,
+  tone,
+}: {
+  children: React.ReactNode;
+  tone: "brand" | "violet" | "emerald";
+}) {
+  const cls =
+    tone === "brand"
+      ? "bg-brand-subtle text-brand-accent ring-brand-accent/15"
+      : tone === "violet"
+        ? "bg-violet-50 text-violet-700 ring-violet-200/55"
+        : "bg-emerald-50 text-emerald-700 ring-emerald-200/55";
+  return (
+    <code className={cn(
+      "inline-flex items-baseline rounded px-1 py-px font-mono text-[11px] font-semibold ring-1",
+      cls,
+    )}>
+      {children}
+    </code>
   );
 }
 
@@ -376,8 +407,8 @@ function SecurityTrustStrip() {
               key={t.label}
               className="group/trust flex items-start gap-2 rounded-lg p-1.5 transition-all duration-[220ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:bg-surface-inset/40"
             >
-              <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-brand-subtle to-surface text-brand-accent ring-1 ring-brand-accent/15 shadow-[0_1px_3px_-1px_rgba(53,157,243,0.18)] transition-all duration-[220ms] ease-[cubic-bezier(0.16,1,0.3,1)] group-hover/trust:shadow-[0_2px_8px_-1px_rgba(53,157,243,0.26)] group-hover/trust:ring-brand-accent/30">
-                <Icon className="h-3.5 w-3.5" strokeWidth={2} />
+              <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-brand-subtle to-surface text-brand-accent ring-1 ring-brand-accent/20 shadow-[0_1px_3px_-1px_rgba(53,157,243,0.22),inset_0_1px_0_rgba(255,255,255,0.55)] transition-all duration-[220ms] ease-[cubic-bezier(0.16,1,0.3,1)] group-hover/trust:shadow-[0_2px_8px_-1px_rgba(53,157,243,0.30),inset_0_1px_0_rgba(255,255,255,0.55)] group-hover/trust:ring-brand-accent/35 group-hover/trust:scale-[1.03]">
+                <Icon className="h-3.5 w-3.5" strokeWidth={2.25} />
               </span>
               <div className="min-w-0">
                 <div className="text-[11.5px] font-semibold leading-[1.2] tracking-tight text-ink">{t.label}</div>
@@ -396,31 +427,44 @@ function AddDomainCard({
   setHostname,
   adding,
   onAdd,
+  cnameTarget,
+  txtPrefix,
 }: {
   hostname: string;
   setHostname: (s: string) => void;
   adding: boolean;
   onAdd: () => void;
+  cnameTarget: string;
+  txtPrefix: string;
 }) {
+  const [showPreview, setShowPreview] = React.useState(false);
+  // Preview hostname — falls back to a credible example so non-technical
+  // operators see what records will look like before they commit.
+  const previewHost = (hostname.trim().toLowerCase() || "book.acme.com");
+
   return (
-    <PremiumCard className="relative overflow-hidden p-4 sm:p-5">
-      <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/60 to-transparent" />
-      <header className="flex flex-wrap items-end justify-between gap-3">
+    <PremiumCard className="relative overflow-hidden bg-gradient-to-br from-brand-subtle/35 via-surface to-surface p-4 shadow-[0_1px_2px_rgba(15,23,42,0.05),0_2px_6px_-3px_rgba(15,23,42,0.05),inset_0_1px_0_rgba(255,255,255,0.65)] sm:p-5">
+      <span aria-hidden className="pointer-events-none absolute -right-16 -top-16 h-40 w-40 rounded-full bg-brand-accent/15 blur-3xl" />
+      <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/70 to-transparent" />
+
+      <header className="relative flex flex-wrap items-end justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-1.5">
-            <span className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-brand-subtle text-brand-accent ring-1 ring-brand-accent/20 shadow-[inset_0_1px_0_rgba(255,255,255,0.55)]">
+            <span className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-brand-accent text-white shadow-[0_2px_6px_-2px_rgba(53,157,243,0.35),inset_0_1px_0_rgba(255,255,255,0.22)]">
               <Globe className="h-3.5 w-3.5" strokeWidth={2} />
             </span>
-            <div className="text-[10.5px] font-bold uppercase tracking-[0.12em] text-brand-accent">Connect a hostname</div>
+            <div className="text-[10.5px] font-bold uppercase tracking-[0.12em] text-brand-accent">Hostname onboarding</div>
           </div>
-          <h3 className="mt-1.5 text-[15.5px] font-semibold leading-[1.2] tracking-tight text-ink">Add a custom domain</h3>
-          <p className="mt-0.5 text-[11.5px] leading-[1.45] text-ink-muted">Subdomain only — apex domains aren&rsquo;t supported.</p>
+          <h3 className="mt-1.5 text-[15.5px] font-semibold leading-[1.2] tracking-tight text-ink">Connect a custom domain</h3>
+          <p className="mt-0.5 text-[11.5px] leading-[1.45] text-ink-muted">
+            Subdomain only · DNS verification typically takes 1–10 minutes · TLS auto-provisioned on the edge.
+          </p>
         </div>
       </header>
 
-      <div className="mt-4 flex flex-col gap-2 sm:flex-row">
-        <div className="relative flex-1">
-          <span aria-hidden className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-subtle">
+      <div className="relative mt-4 flex flex-col gap-2 sm:flex-row">
+        <div className="group/host relative flex-1">
+          <span aria-hidden className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-subtle transition-colors group-focus-within/host:text-brand-accent">
             <Globe className="h-3.5 w-3.5" strokeWidth={1.75} />
           </span>
           <input
@@ -434,38 +478,119 @@ function AddDomainCard({
             inputMode="url"
             autoComplete="off"
             spellCheck={false}
-            className="w-full rounded-lg border border-border bg-surface py-2 pl-9 pr-3 font-mono text-[12px] text-ink outline-none transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] placeholder:font-sans placeholder:text-ink-subtle focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/15"
+            className="w-full rounded-lg border border-border bg-surface py-2.5 pl-9 pr-3 font-mono text-[12.5px] text-ink shadow-[inset_0_1px_2px_rgba(15,23,42,0.04)] outline-none transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] placeholder:font-sans placeholder:text-ink-subtle focus:border-brand-accent focus:shadow-[inset_0_1px_2px_rgba(15,23,42,0.04),0_0_0_3px_rgba(53,157,243,0.15)]"
           />
         </div>
-        <Button size="sm" onClick={onAdd} disabled={adding || !hostname.trim()}>
+        <button
+          type="button"
+          onClick={onAdd}
+          disabled={adding || !hostname.trim()}
+          className="group/cta relative inline-flex h-10 min-w-[140px] items-center justify-center gap-1.5 overflow-hidden rounded-lg bg-gradient-to-b from-brand-accent to-brand-hover px-4 text-[12.5px] font-semibold tracking-tight text-white shadow-[0_2px_8px_-2px_rgba(53,157,243,0.30),inset_0_1px_0_rgba(255,255,255,0.18)] transition-all duration-[220ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-px hover:shadow-[0_6px_18px_-4px_rgba(53,157,243,0.42),inset_0_1px_0_rgba(255,255,255,0.18)] active:translate-y-0 active:shadow-[0_1px_4px_-1px_rgba(53,157,243,0.30)] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0"
+        >
+          <span aria-hidden className="pointer-events-none absolute inset-0 bg-gradient-to-b from-white/[0.08] to-transparent opacity-60 transition-opacity duration-300 group-hover/cta:opacity-100" />
           {adding ? (
             <>
-              <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" strokeWidth={2} />
-              Adding…
+              <Loader2 className="relative h-3.5 w-3.5 animate-spin" strokeWidth={2} />
+              <span className="relative">Connecting…</span>
             </>
           ) : (
             <>
-              Add domain
-              <ArrowRight className="ml-1.5 h-3 w-3" strokeWidth={2.25} />
+              <span className="relative">Connect domain</span>
+              <ArrowRight className="relative h-3.5 w-3.5 transition-transform duration-[220ms] ease-[cubic-bezier(0.16,1,0.3,1)] group-hover/cta:translate-x-0.5" strokeWidth={2.25} />
             </>
           )}
-        </Button>
+        </button>
       </div>
 
-      <div className="mt-3 flex flex-wrap items-center gap-1.5">
+      <div className="relative mt-3 flex flex-wrap items-center gap-1.5">
         <span className="text-[10.5px] font-medium text-ink-subtle">Examples:</span>
         {["book.acme.com", "meet.your-firm.com", "schedule.example.io"].map((eg) => (
           <button
             key={eg}
             type="button"
             onClick={() => setHostname(eg)}
-            className="inline-flex items-center rounded-full bg-surface-inset px-2 py-0.5 font-mono text-[10.5px] text-ink-muted transition-colors hover:bg-surface-inset/70 hover:text-ink"
+            className="inline-flex items-center rounded-full bg-surface px-2 py-0.5 font-mono text-[10.5px] text-ink-muted ring-1 ring-border/60 transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-px hover:bg-brand-subtle hover:text-brand-accent hover:ring-brand-accent/30"
           >
             {eg}
           </button>
         ))}
       </div>
+
+      {/* DNS preview panel — Phase 15B Part 2 */}
+      <div className="relative mt-3.5">
+        <button
+          type="button"
+          onClick={() => setShowPreview((x) => !x)}
+          className="inline-flex items-center gap-1.5 text-[10.5px] font-semibold uppercase tracking-[0.10em] text-ink-subtle transition-colors hover:text-ink"
+        >
+          <ChevronDown
+            className={cn("h-3 w-3 transition-transform duration-200", showPreview ? "rotate-180" : "")}
+            strokeWidth={2.25}
+          />
+          Preview DNS records you&rsquo;ll add
+        </button>
+        {showPreview && (
+          <div className="mt-2 overflow-hidden rounded-xl border border-border/65 bg-surface shadow-[inset_0_1px_0_rgba(255,255,255,0.55)]">
+            <div className="flex items-center justify-between border-b border-border/55 bg-surface-subtle/60 px-3 py-1.5">
+              <span className="inline-flex items-center gap-1.5">
+                <TerminalIcon />
+                <span className="text-[10px] font-bold uppercase tracking-[0.10em] text-ink-subtle">
+                  Sample · {previewHost}
+                </span>
+              </span>
+              <span className="text-[10px] text-ink-subtle">Generated after you click Connect</span>
+            </div>
+            <div className="divide-y divide-border/45">
+              <PreviewRow type="CNAME" host={previewHost} value={cnameTarget} hint="Routes incoming traffic to ZentroMeet's edge." />
+              <PreviewRow type="TXT" host={`${txtPrefix}.${previewHost}`} value="zm_verify_••••••••" hint="Proves ownership of the hostname." />
+            </div>
+            <div className="border-t border-border/45 bg-surface-subtle/40 px-3 py-1.5 text-[10px] text-ink-subtle">
+              Real verification token is generated when you connect — copy-able from the lifecycle card below.
+            </div>
+          </div>
+        )}
+      </div>
     </PremiumCard>
+  );
+}
+
+function TerminalIcon() {
+  return (
+    <svg viewBox="0 0 16 16" className="h-3 w-3 text-ink-subtle" fill="none" stroke="currentColor" strokeWidth={1.75} aria-hidden>
+      <rect x="1.5" y="2.5" width="13" height="11" rx="1.5" />
+      <path d="M4 6l2 2-2 2M7.5 10h4" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function PreviewRow({
+  type,
+  host,
+  value,
+  hint,
+}: {
+  type: "CNAME" | "TXT";
+  host: string;
+  value: string;
+  hint: string;
+}) {
+  return (
+    <div className="grid gap-0.5 px-3 py-2 sm:grid-cols-[60px,1fr,1fr]">
+      <div className="flex items-center">
+        <span className="inline-flex h-4 items-center rounded bg-surface-inset px-1.5 font-mono text-[9.5px] font-bold uppercase tracking-[0.10em] text-ink ring-1 ring-border/50">
+          {type}
+        </span>
+      </div>
+      <div className="flex items-center gap-1.5">
+        <span className="text-[9.5px] font-semibold uppercase tracking-[0.10em] text-ink-subtle sm:hidden">Name</span>
+        <code className="truncate font-mono text-[11px] text-ink">{host}</code>
+      </div>
+      <div className="flex items-center gap-1.5">
+        <span className="text-[9.5px] font-semibold uppercase tracking-[0.10em] text-ink-subtle sm:hidden">Value</span>
+        <code className="truncate font-mono text-[11px] text-ink-muted">{value}</code>
+      </div>
+      <div className="col-span-full mt-1 text-[10px] leading-relaxed text-ink-subtle">{hint}</div>
+    </div>
   );
 }
 
@@ -532,24 +657,29 @@ function DomainCard({
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
-          <Button size="sm" variant="secondary" onClick={handleVerify} disabled={verifying}>
+          <button
+            type="button"
+            onClick={handleVerify}
+            disabled={verifying}
+            className="group/verify inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-surface px-2.5 text-[11.5px] font-semibold text-ink shadow-[0_1px_2px_rgba(15,23,42,0.04),inset_0_1px_0_rgba(255,255,255,0.55)] transition-all duration-[220ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-px hover:border-border-strong hover:shadow-[0_4px_12px_-6px_rgba(15,23,42,0.18),inset_0_1px_0_rgba(255,255,255,0.55)] active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:translate-y-0"
+          >
             {verifying ? (
               <>
-                <Loader2 className="mr-1 h-3 w-3 animate-spin" strokeWidth={2} />
+                <Loader2 className="h-3 w-3 animate-spin" strokeWidth={2} />
                 Verifying…
               </>
             ) : (
               <>
-                <RotateCw className="mr-1 h-3 w-3" strokeWidth={2} />
+                <RotateCw className="h-3 w-3 transition-transform duration-300 group-hover/verify:rotate-45" strokeWidth={2} />
                 {isLive ? "Re-check" : "Verify"}
               </>
             )}
-          </Button>
+          </button>
           <button
             type="button"
             onClick={onRemove}
             aria-label={`Remove ${domain.host}`}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border bg-surface text-ink-muted transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-px hover:border-red-200 hover:bg-red-50/60 hover:text-red-700 hover:shadow-sm"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border bg-surface text-ink-muted shadow-[0_1px_2px_rgba(15,23,42,0.04),inset_0_1px_0_rgba(255,255,255,0.55)] transition-all duration-[220ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-px hover:border-red-200 hover:bg-red-50/60 hover:text-red-700 hover:shadow-[0_4px_10px_-6px_rgba(239,68,68,0.30)] active:translate-y-0"
           >
             <Trash2 className="h-3.5 w-3.5" strokeWidth={1.75} />
           </button>
@@ -746,29 +876,55 @@ function SslStatusChip({ status }: { status: SslStatus }) {
 
 function EmptyDomains() {
   return (
-    <PremiumCard className="relative overflow-hidden p-6 text-center sm:p-8">
-      <span aria-hidden className="pointer-events-none absolute -right-16 -top-16 h-40 w-40 rounded-full bg-brand-accent/12 blur-3xl" />
+    <PremiumCard className="relative overflow-hidden p-6 sm:p-8">
+      <span aria-hidden className="pointer-events-none absolute -right-16 -top-16 h-44 w-44 rounded-full bg-brand-accent/12 blur-3xl" />
+      <span aria-hidden className="pointer-events-none absolute -left-12 -bottom-12 h-32 w-32 rounded-full bg-emerald-200/[0.16] blur-3xl" />
       <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/60 to-transparent" />
-      <div className="relative mx-auto mb-3 inline-flex">
-        <span aria-hidden className="absolute inset-0 rounded-2xl bg-brand-accent/10 blur-xl" />
-        <span className="relative inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-brand-subtle to-surface text-brand-accent ring-1 ring-brand-accent/15 shadow-[inset_0_1px_0_rgba(255,255,255,0.55)]">
-          <Globe className="h-5 w-5" strokeWidth={1.75} />
-        </span>
-      </div>
-      <div className="relative text-[14px] font-semibold tracking-tight text-ink">No custom domains yet</div>
-      <p className="relative mx-auto mt-1 max-w-sm text-[11.5px] leading-relaxed text-ink-muted">
-        Add a hostname above to start routing your booking page through your own domain. Verification typically takes 1–10 minutes once DNS records are added.
-      </p>
-      <div className="relative mt-4">
+
+      <div className="relative flex flex-col items-center text-center">
+        <div className="relative mb-3 inline-flex">
+          <span aria-hidden className="absolute inset-0 rounded-2xl bg-brand-accent/10 blur-xl" />
+          <span className="relative inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-brand-subtle to-surface text-brand-accent ring-1 ring-brand-accent/20 shadow-[0_4px_14px_-4px_rgba(53,157,243,0.30),inset_0_1px_0_rgba(255,255,255,0.55)]">
+            <Globe className="h-5 w-5" strokeWidth={1.75} />
+          </span>
+        </div>
+
+        <div className="text-[10.5px] font-bold uppercase tracking-[0.12em] text-brand-accent">White-label routing</div>
+        <h3 className="mt-1 text-[16px] font-semibold tracking-tight text-ink sm:text-[17px]">
+          Connect your own branded booking hostname
+        </h3>
+        <p className="mx-auto mt-1.5 max-w-md text-[12px] leading-[1.5] text-ink-muted">
+          Serve your booking page from <code className="rounded bg-surface-inset px-1 py-px font-mono text-[11px] text-ink">book.acme.com</code> instead of <code className="rounded bg-surface-inset px-1 py-px font-mono text-[11px] text-ink">/u/your-slug</code> — fully white-labeled, TLS auto-provisioned, ownership-verified.
+        </p>
+
+        {/* Trust signals — three subtle onboarding confidence anchors */}
+        <ul className="mx-auto mt-4 grid w-full max-w-md grid-cols-1 gap-1.5 text-[11px] text-ink-muted sm:grid-cols-3 sm:gap-2">
+          {[
+            { icon: Lock, label: "TLS auto-provisioned" },
+            { icon: Globe, label: "Cloudflare · Route 53 · GoDaddy" },
+            { icon: CheckCircle2, label: "Default URLs stay active" },
+          ].map(({ icon: Icon, label }) => (
+            <li
+              key={label}
+              className="flex items-center justify-center gap-1.5 rounded-lg bg-surface/70 px-2 py-1.5 ring-1 ring-border/55 backdrop-blur-sm"
+            >
+              <Icon className="h-3 w-3 shrink-0 text-emerald-600" strokeWidth={2} />
+              <span className="text-[10.5px] leading-tight text-ink-muted">{label}</span>
+            </li>
+          ))}
+        </ul>
+
         <button
           type="button"
           onClick={() => {
-            document.querySelector<HTMLInputElement>("input[placeholder='book.acme.com']")?.focus();
+            const el = document.querySelector<HTMLInputElement>("input[placeholder='book.acme.com']");
+            el?.focus();
+            el?.scrollIntoView({ behavior: "smooth", block: "center" });
           }}
-          className="inline-flex items-center gap-1 text-[11.5px] font-medium text-brand-accent hover:underline"
+          className="group/cta mt-5 inline-flex h-9 items-center gap-1.5 rounded-lg bg-gradient-to-b from-brand-accent to-brand-hover px-3.5 text-[12px] font-semibold text-white shadow-[0_2px_8px_-2px_rgba(53,157,243,0.30),inset_0_1px_0_rgba(255,255,255,0.18)] transition-all duration-[220ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-px hover:shadow-[0_6px_18px_-4px_rgba(53,157,243,0.42),inset_0_1px_0_rgba(255,255,255,0.18)]"
         >
-          Add your first domain
-          <ArrowUpRight className="h-3 w-3" strokeWidth={2.25} />
+          Connect your first domain
+          <ArrowRight className="h-3.5 w-3.5 transition-transform duration-[220ms] ease-[cubic-bezier(0.16,1,0.3,1)] group-hover/cta:translate-x-0.5" strokeWidth={2.25} />
         </button>
       </div>
     </PremiumCard>
