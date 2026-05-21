@@ -131,6 +131,22 @@ export async function getEligibleStaff(input: EligibilityInput): Promise<string[
 
 // ─── Helpers ───────────────────────────────────────────────────────────
 
+/**
+ * Public re-export of the working-hours predicate, for the simulation
+ * console + any future consumer that needs to reuse the exact same
+ * working-window logic (availability + PTO overrides + timezone) the
+ * routing engine itself uses. Pure additive — the production engine
+ * still calls the private `isStaffWorking` below.
+ */
+export async function isStaffWorkingForRouting(
+  userId: string,
+  startAt: Date,
+  endAt: Date,
+  staffTimezone: string,
+): Promise<boolean> {
+  return isStaffWorking(userId, startAt, endAt, staffTimezone);
+}
+
 function intervalsOverlap(a: Interval, b: Interval): boolean {
   return a.start < b.end && b.start < a.end;
 }
