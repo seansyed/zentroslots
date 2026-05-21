@@ -5,20 +5,40 @@ import ImpersonationBanner from "@/components/ImpersonationBanner";
 
 const APP_BASE_URL = process.env.APP_BASE_URL ?? "http://localhost:3001";
 
+// Platform-wide brand metadata. Tenant-uploaded logos (via Settings
+// -> Branding) continue to override the per-workspace sidebar mark
+// at runtime — this metadata only sets the *default* identity used
+// for the browser tab, social previews, and any surface where no
+// tenant context exists yet (login, public landing).
 export const metadata: Metadata = {
   metadataBase: new URL(APP_BASE_URL),
-  title: { default: "Scheduling SaaS — Calendly-style bookings", template: "%s — Scheduling SaaS" },
+  title: {
+    default: "ZentroMeet — Appointments. Automation. Growth.",
+    template: "%s — ZentroMeet",
+  },
   description:
-    "Multi-tenant scheduling platform with custom branding, Google Meet, and enterprise-grade availability rules.",
-  applicationName: "Scheduling SaaS",
+    "Premium scheduling infrastructure for service businesses — workforce orchestration, calendar sync, and a booking experience customers actually finish.",
+  applicationName: "ZentroMeet",
   openGraph: {
-    title: "Scheduling SaaS",
+    title: "ZentroMeet — Appointments. Automation. Growth.",
     description: "Book meetings without the back-and-forth.",
     type: "website",
-    siteName: "Scheduling SaaS",
+    siteName: "ZentroMeet",
+    images: ["/zentromeet-wordmark.svg"],
   },
-  twitter: { card: "summary_large_image", title: "Scheduling SaaS" },
-  icons: { icon: "/favicon.ico" },
+  twitter: {
+    card: "summary_large_image",
+    title: "ZentroMeet",
+    images: ["/zentromeet-wordmark.svg"],
+  },
+  // The mark is square (1:1) and renders cleanly at favicon size.
+  // Apple touch icon reuses the same file — circular shape masks
+  // gracefully on iOS home screens.
+  icons: {
+    icon: "/zentromeet-mark.svg",
+    apple: "/zentromeet-mark.svg",
+    shortcut: "/zentromeet-mark.svg",
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

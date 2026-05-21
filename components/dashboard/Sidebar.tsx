@@ -293,12 +293,21 @@ export default function Sidebar({
           className={cn("flex min-w-0 items-center gap-3", collapsed && "justify-center")}
         >
           {tenant?.logoUrl ? (
+            // Tenant-uploaded logo wins — workspace branding flow is
+            // unchanged from Settings -> Branding.
             // eslint-disable-next-line @next/next/no-img-element
             <img src={tenant.logoUrl} alt="" className="h-9 w-9 shrink-0 rounded-xl object-contain" />
           ) : (
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-brand-accent to-brand-hover text-sm font-semibold text-white shadow-sm">
-              {(tenant?.name ?? "Z").slice(0, 1).toUpperCase()}
-            </div>
+            // Platform default: the ZentroMeet circular mark.
+            // Replaces the prior single-letter gradient circle so
+            // workspaces without custom branding still feel
+            // on-brand instead of generic.
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src="/zentromeet-mark.svg"
+              alt="ZentroMeet"
+              className="h-9 w-9 shrink-0 rounded-full object-contain shadow-sm"
+            />
           )}
           {!collapsed && (
             <div className="min-w-0 flex-1">

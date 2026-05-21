@@ -53,9 +53,26 @@ export default function LoginPage() {
 
   return (
     <div className="mx-auto max-w-md px-6 py-16">
-      <h1 className="text-2xl font-semibold">
+      {/* Platform brand lockup. Sets the tone before the form —
+          the wordmark is the only ZentroMeet identity in the
+          auth flow (no tenant branding exists yet at this point
+          since the user isn't signed in). */}
+      <div className="mb-8 flex justify-center">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/zentromeet-wordmark.svg"
+          alt="ZentroMeet"
+          className="h-12 w-auto"
+        />
+      </div>
+      <h1 className="text-center text-2xl font-semibold tracking-tight text-ink">
         {mode === "login" ? "Sign in" : "Create an account"}
       </h1>
+      <p className="mt-1 text-center text-[12.5px] text-ink-muted">
+        {mode === "login"
+          ? "Welcome back to your workspace."
+          : "Start your scheduling workspace in under a minute."}
+      </p>
 
       <div className="mt-6 space-y-3 rounded-lg border bg-white p-6 shadow-sm">
         {mode === "signup" && (
