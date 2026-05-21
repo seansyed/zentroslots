@@ -73,15 +73,24 @@ type VerifyOutcome = {
 
 // ─── Root component ───────────────────────────────────────────────
 
+type PlanInfo = { id: string; name: string; maxCustomDomains: number };
+
 export default function DomainsClient({
   initial,
   config,
   tenantSlug,
+  plan,
 }: {
   initial: Domain[];
   config: Config;
   tenantSlug: string;
+  plan: PlanInfo;
 }) {
+  // Phase 15D plan gating — backend enforces the same cap at
+  // /api/tenant/domains POST. The UI here mirrors that contract so
+  // the form never appears when adding would 402/403.
+  const featureUnlocked = plan.maxCustomDomains > 0;
+  const capReached = featureUnlocked && initial.length >= plan.maxCustomDomains;
   const [rows, setRows] = React.useState<Domain[]>(initial);
   const [hostname, setHostname] = React.useState("");
   const [adding, setAdding] = React.useState(false);
@@ -192,19 +201,30 @@ export default function DomainsClient({
         pending={totalPending}
         failed={totalFailed}
         tenantSlug={tenantSlug}
+        plan={plan}
+        usedCount={rows.length}
       />
       <ArchitectureHelper />
       <SecurityTrustStrip />
-      <AddDomainCard
-        hostname={hostname}
-        setHostname={setHostname}
-        adding={adding}
-        onAdd={addDomain}
-        cnameTarget={config.cnameTarget}
-        txtPrefix={config.txtPrefix}
-      />
+      {!featureUnlocked ? (
+        // Free plan — onboarding form is hidden behind the premium
+        // upsell card. Backend rejects POST /api/tenant/domains with
+        // 402 if anyone tries to bypass.
+        <PaidPlanUpsellCard />
+      ) : !capReached ? (
+        <AddDomainCard
+          hostname={hostname}
+          setHostname={setHostname}
+          adding={adding}
+          onAdd={addDomain}
+          cnameTarget={config.cnameTarget}
+          txtPrefix={config.txtPrefix}
+        />
+      ) : null}
       {rows.length === 0 ? (
-        <EmptyDomains />
+        // Only show "no domains yet" empty state to paid plans —
+        // Free plans see the upsell card above instead.
+        featureUnlocked ? <EmptyDomains /> : null
       ) : (
         <div className="space-y-3">
           {rows.map((d) => (
@@ -231,12 +251,24 @@ function CommandCenterHero({
   pending,
   failed,
   tenantSlug,
+  plan,
+  usedCount,
 }: {
   active: number;
   pending: number;
   failed: number;
   tenantSlug: string;
+  plan: PlanInfo;
+  usedCount: number;
 }) {
+  const capabilityLabel =
+    plan.maxCustomDomains <= 0
+      ? "Custom domains unavailable"
+      : `${usedCount} of ${plan.maxCustomDomains} domain${plan.maxCustomDomains === 1 ? "" : "s"} used`;
+  const capabilitySub =
+    plan.maxCustomDomains <= 0
+      ? `${plan.name} plan`
+      : `${plan.name} plan · 1 custom domain included`;
   const allHealthy = active > 0 && failed === 0;
   const tone = allHealthy
     ? { dot: "bg-emerald-500", ring: "shadow-[0_0_0_4px_rgba(16,185,129,0.18)]", chip: "bg-emerald-50 text-emerald-700 ring-emerald-200/45", label: "Routing live" }
@@ -286,6 +318,23 @@ function CommandCenterHero({
               <ExternalLink className="h-2.5 w-2.5" strokeWidth={2} />
               Default URL · /u/{tenantSlug}
             </Link>
+            {/* Phase 15D capability badge — surfaces the per-plan
+                domain cap so the operator knows the limit before
+                trying to add a second one. */}
+            <span
+              className={cn(
+                "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.10em] ring-1",
+                plan.maxCustomDomains <= 0
+                  ? "bg-surface-inset text-ink-muted ring-border/40"
+                  : usedCount >= plan.maxCustomDomains
+                    ? "bg-amber-50 text-amber-700 ring-amber-200/55"
+                    : "bg-brand-subtle text-brand-accent ring-brand-accent/20",
+              )}
+              title={capabilitySub}
+            >
+              <Sparkles className="h-2.5 w-2.5" strokeWidth={2.25} />
+              {capabilityLabel}
+            </span>
           </div>
         </div>
       </div>
@@ -871,6 +920,62 @@ function SslStatusChip({ status }: { status: SslStatus }) {
       <Sparkles className="h-2 w-2" strokeWidth={2.5} />
       TLS provisioning
     </span>
+  );
+}
+
+// ─── Free-plan upsell card (Phase 15D) ──────────────────────────
+
+function PaidPlanUpsellCard() {
+  return (
+    <PremiumCard className="relative overflow-hidden p-5 sm:p-7">
+      <span aria-hidden className="pointer-events-none absolute -right-16 -top-16 h-44 w-44 rounded-full bg-brand-accent/15 blur-3xl" />
+      <span aria-hidden className="pointer-events-none absolute -left-12 -bottom-12 h-32 w-32 rounded-full bg-emerald-200/[0.16] blur-3xl" />
+      <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/60 to-transparent" />
+
+      <div className="relative grid items-start gap-5 sm:grid-cols-[minmax(0,1fr),auto]">
+        <div className="min-w-0">
+          <div className="inline-flex items-center gap-1.5 rounded-full bg-brand-accent/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.12em] text-brand-accent">
+            <Sparkles className="h-3 w-3" strokeWidth={2.25} />
+            White-label routing · paid plans
+          </div>
+          <h3 className="mt-2 text-[18px] font-semibold tracking-tight text-ink sm:text-[20px]">
+            Use your own branded booking domain
+          </h3>
+          <p className="mt-1.5 max-w-lg text-[12.5px] leading-relaxed text-ink-muted">
+            Serve bookings from <code className="rounded bg-surface-inset px-1 py-px font-mono text-[11px] text-ink">schedule.yourfirm.com</code> instead of a shared ZentroMeet URL.
+          </p>
+
+          <ul className="mt-4 grid gap-1.5 sm:grid-cols-2">
+            {[
+              { icon: ShieldCheck, label: "Automatic SSL provisioning" },
+              { icon: Wifi, label: "Cloudflare edge routing" },
+              { icon: KeyRound, label: "White-label booking links" },
+              { icon: CheckCircle2, label: "DNS verification wizard" },
+            ].map(({ icon: Icon, label }) => (
+              <li key={label} className="flex items-center gap-1.5 text-[11.5px] text-ink-muted">
+                <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-gradient-to-br from-emerald-50 to-emerald-100/40 text-emerald-700 ring-1 ring-emerald-200/50">
+                  <Icon className="h-3 w-3" strokeWidth={2} />
+                </span>
+                <span>{label}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        <div className="flex flex-col items-start gap-2 sm:items-end">
+          <Link
+            href="/dashboard/billing"
+            className="group/cta inline-flex h-10 items-center gap-1.5 rounded-lg bg-gradient-to-b from-brand-accent to-brand-hover px-4 text-[12.5px] font-semibold text-white shadow-[0_2px_8px_-2px_rgba(53,157,243,0.30),inset_0_1px_0_rgba(255,255,255,0.18)] transition-all duration-[220ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-px hover:shadow-[0_6px_18px_-4px_rgba(53,157,243,0.42)]"
+          >
+            Upgrade to Solo
+            <ArrowRight className="h-3.5 w-3.5 transition-transform duration-[220ms] group-hover/cta:translate-x-0.5" strokeWidth={2.25} />
+          </Link>
+          <p className="max-w-[200px] text-[10.5px] leading-relaxed text-ink-subtle sm:text-right">
+            From $10/month · cancel anytime. Includes 1 custom domain.
+          </p>
+        </div>
+      </div>
+    </PremiumCard>
   );
 }
 

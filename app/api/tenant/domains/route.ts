@@ -4,7 +4,7 @@ import crypto from "node:crypto";
 import { z } from "zod";
 
 import { db } from "@/db/client";
-import { tenantDomains } from "@/db/schema";
+import { tenantDomains, tenants } from "@/db/schema";
 import { audit, ipFromHeaders } from "@/lib/audit";
 import { errorResponse, HttpError, requireRole, requireUser } from "@/lib/auth";
 import {
@@ -15,6 +15,7 @@ import {
   serializeDomain,
   validateHostname,
 } from "@/lib/domains";
+import { getPlan } from "@/lib/plans";
 
 /**
  * /api/tenant/domains
@@ -54,6 +55,36 @@ export async function POST(req: NextRequest) {
     const admin = await requireRole(["admin"]);
     const ipAddress = ipFromHeaders(req.headers);
     const body = createSchema.parse(await req.json());
+
+    // ─── Plan gate (Phase 15D) ──────────────────────────────────
+    // Hard cap on tenant_domains rows per tenant, sourced from
+    // PLANS[plan].limits.maxCustomDomains. Free = 0 (feature unavailable);
+    // every paid tier = 1 today. The 1-per-tenant ceiling matches the
+    // current Cloudflare Custom Hostname enrollment cost model. To bump
+    // the cap later, only PLANS needs to change — this enforcement
+    // reads from there.
+    const tenantRow = await db.query.tenants.findFirst({
+      where: eq(tenants.id, admin.tenantId),
+      columns: { currentPlan: true },
+    });
+    const plan = getPlan(tenantRow?.currentPlan);
+    const cap = plan.limits.maxCustomDomains;
+    if (cap <= 0) {
+      throw new HttpError(
+        402,
+        "Custom domains are only available on paid plans. Upgrade to Solo or higher to connect a domain.",
+      );
+    }
+    const existingCount = await db
+      .select({ id: tenantDomains.id })
+      .from(tenantDomains)
+      .where(eq(tenantDomains.tenantId, admin.tenantId));
+    if (existingCount.length >= cap) {
+      throw new HttpError(
+        403,
+        `Your workspace already has an active custom domain. Remove the current one before adding another.`,
+      );
+    }
 
     const v = validateHostname(body.hostname);
     if (!v.ok) throw new HttpError(400, v.error);

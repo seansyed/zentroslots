@@ -5,6 +5,7 @@ import { db } from "@/db/client";
 import { tenantDomains, tenants, users } from "@/db/schema";
 import { getSession } from "@/lib/auth";
 import { CNAME_TARGET, TXT_PREFIX } from "@/lib/domains";
+import { getPlan } from "@/lib/plans";
 import Shell from "@/components/dashboard/Shell";
 import DomainsClient from "@/components/dashboard/DomainsClient";
 
@@ -23,6 +24,8 @@ export default async function DomainSettingsPage() {
     .from(tenantDomains)
     .where(eq(tenantDomains.tenantId, tenant.id))
     .orderBy(tenantDomains.createdAt);
+
+  const plan = getPlan(tenant.currentPlan);
 
   return (
     <Shell
@@ -52,6 +55,11 @@ export default async function DomainSettingsPage() {
         }))}
         config={{ cnameTarget: CNAME_TARGET, txtPrefix: TXT_PREFIX }}
         tenantSlug={tenant.slug}
+        plan={{
+          id: plan.id,
+          name: plan.name,
+          maxCustomDomains: plan.limits.maxCustomDomains,
+        }}
       />
     </Shell>
   );
