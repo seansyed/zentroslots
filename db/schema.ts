@@ -681,7 +681,15 @@ export const tenantDomains = pgTable(
     // SSL provisioning lifecycle (architecture-ready). Real cert issuance
     // is delegated to the edge (Caddy / Cloudflare SSL for SaaS / ACM)
     // and reflected back into this column when wired.
-    sslStatus: varchar("ssl_status", { length: 16 }).notNull().default("pending"),
+    sslStatus: varchar("ssl_status", { length: 32 }).notNull().default("pending"),
+    // Cloudflare Custom Hostname UUID — populated by the edge
+    // provisioning step after DNS verification passes.
+    cfHostnameId: varchar("cf_hostname_id", { length: 64 }),
+    // Last error message from CF or DNS — surfaced in the UI when the
+    // domain is unhealthy. Null when there's nothing wrong.
+    verificationErrors: text("verification_errors"),
+    // Wall-clock when ssl_status first transitioned to "active".
+    activatedAt: timestamp("activated_at", { withTimezone: true }),
     verifiedAt: timestamp("verified_at", { withTimezone: true }),
     lastCheckedAt: timestamp("last_checked_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -691,6 +699,7 @@ export const tenantDomains = pgTable(
     tenantIdx: index("tenant_domains_tenant_idx").on(t.tenantId),
     normalizedHostUnique: index("tenant_domains_normalized_host_unique").on(t.normalizedHost),
     statusIdx: index("tenant_domains_status_idx").on(t.status),
+    cfHostnameIdx: index("tenant_domains_cf_hostname_id_idx").on(t.cfHostnameId),
   })
 );
 

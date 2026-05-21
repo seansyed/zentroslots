@@ -5,6 +5,7 @@ import { z } from "zod";
 
 import { db } from "@/db/client";
 import { tenantDomains } from "@/db/schema";
+import { audit, ipFromHeaders } from "@/lib/audit";
 import { errorResponse, HttpError, requireRole, requireUser } from "@/lib/auth";
 import {
   CNAME_TARGET,
@@ -51,6 +52,7 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   try {
     const admin = await requireRole(["admin"]);
+    const ipAddress = ipFromHeaders(req.headers);
     const body = createSchema.parse(await req.json());
 
     const v = validateHostname(body.hostname);
@@ -94,6 +96,16 @@ export async function POST(req: NextRequest) {
     // Custom domains start pending — they're not in the routing pool yet,
     // but invalidate defensively in case a stale negative entry exists.
     invalidateHostnameCache(host);
+
+    await audit({
+      tenantId: admin.tenantId,
+      action: "domain.added",
+      actorUserId: admin.id,
+      entityType: "tenant_domain",
+      entityId: row.id,
+      ipAddress,
+      metadata: { host },
+    });
 
     return NextResponse.json(
       {

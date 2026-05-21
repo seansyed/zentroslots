@@ -22,13 +22,24 @@ import { tenantDomains, tenants } from "@/db/schema";
 
 // ─── Configuration ───────────────────────────────────────────────
 
-/** CNAME target customers point their hostnames at. */
+/** CNAME target customers point their hostnames at. Phase 15C wires
+ *  this to the Cloudflare custom-hostname fallback so the platform
+ *  edge serves the booking page directly with automatic TLS.
+ *
+ *  Priority order (first present wins):
+ *    1. CLOUDFLARE_CUSTOM_HOSTNAME_FALLBACK  (production edge)
+ *    2. DOMAINS_CNAME_TARGET                  (manual override)
+ *    3. "edge.zentromeet.com"                 (sensible default)
+ */
 export const CNAME_TARGET = (
-  process.env.DOMAINS_CNAME_TARGET ?? "cname.zentromeet.com"
+  process.env.CLOUDFLARE_CUSTOM_HOSTNAME_FALLBACK ??
+  process.env.DOMAINS_CNAME_TARGET ??
+  "edge.zentromeet.com"
 ).toLowerCase().replace(/\.$/, "");
 
-/** TXT prefix used to scope the verification record under the host. */
-export const TXT_PREFIX = process.env.DOMAINS_TXT_PREFIX ?? "_zentromeet";
+/** TXT prefix used to scope the verification record under the host.
+ *  Phase 15C aligned to "_zentromeet-verify" per ops convention. */
+export const TXT_PREFIX = process.env.DOMAINS_TXT_PREFIX ?? "_zentromeet-verify";
 
 /** Hostnames that ALWAYS bypass custom-domain routing — the app's own
  *  surfaces, local dev, and direct-IP access. */
@@ -297,6 +308,9 @@ export function serializeDomain(row: DomainRow) {
     verificationToken: row.verificationToken,
     status: row.status,
     sslStatus: row.sslStatus,
+    cfHostnameId: row.cfHostnameId ?? null,
+    verificationErrors: row.verificationErrors ?? null,
+    activatedAt: row.activatedAt?.toISOString() ?? null,
     verifiedAt: row.verifiedAt?.toISOString() ?? null,
     lastCheckedAt: row.lastCheckedAt?.toISOString() ?? null,
     createdAt: row.createdAt.toISOString(),
