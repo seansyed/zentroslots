@@ -12,6 +12,7 @@ import {
   users,
 } from "@/db/schema";
 import { getExternalBusyForUser } from "@/lib/calendar/sync";
+import { loadTenantFeatures } from "@/lib/features";
 import {
   readDefaultWorkspaceHours,
   getDefaultForDay,
@@ -67,11 +68,21 @@ export async function getAvailableSlots(params: {
   // connection — output is then byte-identical to the pre-feature
   // behavior. Freebusy is also wrapped in try/catch inside the
   // orchestrator so a Google API failure can't break availability.
-  const [existing, externalBusy] = await Promise.all([
+  const [existing, externalBusy, features] = await Promise.all([
     getBookingsInRange(staffUserId, viewerDay),
     getExternalBusyForUser(staffUserId, viewerDay.start, viewerDay.end),
+    loadTenantFeatures(staff.tenantId),
   ]);
   const combinedBusy: Interval[] = [...existing, ...externalBusy];
+
+  // Phase 16: tenant-level `bookingBuffers` gate. When OFF, the engine
+  // ignores per-service before/after padding entirely — back-to-back
+  // slots reappear even on services that have buffer minutes set.
+  // This is a SAFE collapse to 0/0; service rows are not mutated and
+  // re-enabling the toggle restores buffers on the next request (60s
+  // cache TTL aside).
+  const effectiveBufferBefore = features.bookingBuffers ? service.bufferBefore : 0;
+  const effectiveBufferAfter  = features.bookingBuffers ? service.bufferAfter  : 0;
 
   // Walk every window independently and concatenate.
   const all: string[] = [];
@@ -79,8 +90,8 @@ export async function getAvailableSlots(params: {
     const slots = buildSlots({
       window,
       durationMinutes: service.durationMinutes,
-      bufferBefore: service.bufferBefore,
-      bufferAfter: service.bufferAfter,
+      bufferBefore: effectiveBufferBefore,
+      bufferAfter: effectiveBufferAfter,
       existing: combinedBusy,
     });
     all.push(...slots);

@@ -119,19 +119,28 @@ export async function triggerAutomation(args: TriggerArgs): Promise<TriggerResul
       return { status: "skipped", logId: already.id, reason: "already_sent" };
     }
 
-    // ── (1b) Tenant feature gate. Reminders are the only scheduling
-    // event currently behind a feature toggle — the admin can disable
-    // them at Settings → Feature Controls. Disabling silently skips
-    // both the 24h and 1h reminders; confirmations / cancels /
-    // reschedules are unaffected (they're separate toggles enforced
-    // elsewhere — cancel/reschedule are gated at the API layer, not
-    // here, because the gate decides whether the ACTION runs at all).
-    if (
-      args.eventType === "appointment.reminder_24h" ||
-      args.eventType === "appointment.reminder_1h"
-    ) {
+    // ── (1b) Tenant feature gates. Two layers, evaluated in order:
+    //   1. emailNotifications — master switch for ALL outbound email.
+    //      When off, no scheduling email of any kind is sent. This is
+    //      the kill switch a tenant flips during a migration, sandbox
+    //      test, or compliance freeze.
+    //   2. reminders — narrower: silences only the 24h + 1h reminders
+    //      while leaving confirmation / cancel / reschedule alive.
+    // Both load through the 60s in-process cache; one call covers both.
+    {
       const features = await loadTenantFeatures(args.tenantId);
-      if (!features.reminders) {
+      if (!features.emailNotifications) {
+        return await writeLog({
+          ...skeleton(args, channel),
+          status: "skipped",
+          skippedReason: "feature_disabled_email_notifications",
+        });
+      }
+      if (
+        (args.eventType === "appointment.reminder_24h" ||
+          args.eventType === "appointment.reminder_1h") &&
+        !features.reminders
+      ) {
         return await writeLog({
           ...skeleton(args, channel),
           status: "skipped",

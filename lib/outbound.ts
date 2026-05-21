@@ -8,6 +8,7 @@
 import { eq } from "drizzle-orm";
 import { db } from "@/db/client";
 import { tenants } from "@/db/schema";
+import { loadTenantFeatures } from "@/lib/features";
 
 const TIMEOUT_MS = 5000;
 
@@ -17,6 +18,13 @@ export async function postTenantWebhook(args: {
   metadata?: Record<string, unknown>;
 }): Promise<void> {
   try {
+    // Phase 16: tenant-level `webhookDelivery` gate. When OFF, the
+    // outbound POST is skipped entirely — the configured URL is left
+    // intact so re-enabling the toggle resumes delivery immediately.
+    // Failure mode is identical to "no URL configured": silent return.
+    const features = await loadTenantFeatures(args.tenantId);
+    if (!features.webhookDelivery) return;
+
     const tenant = await db.query.tenants.findFirst({ where: eq(tenants.id, args.tenantId) });
     const url = tenant?.notificationWebhookUrl;
     if (!url) return;

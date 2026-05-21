@@ -24,11 +24,14 @@ import { tenantFeatureSettings } from "@/db/schema";
 // runtime site (engine, API, UI). The TypeScript compiler will catch
 // any consumer that forgets to handle a new key.
 export type FeatureFlag =
-  | "reminders"      // engine skips appointment.reminder_* events
-  | "rescheduling"   // admin + public reschedule routes 403; UI hides buttons
-  | "cancellations"  // admin + public cancel routes 403; UI hides buttons
-  | "intakeForms"    // public booking skips intake step; service.intakeFormId becomes no-op
-  | "googleMeet";    // booking POST skips createCalendarEventForStaff()
+  | "reminders"          // engine skips appointment.reminder_* events
+  | "rescheduling"       // admin + public reschedule routes 403; UI hides buttons
+  | "cancellations"      // admin + public cancel routes 403; UI hides buttons
+  | "intakeForms"        // public booking skips intake step; service.intakeFormId becomes no-op
+  | "googleMeet"         // booking POST skips createCalendarEventForStaff()
+  | "emailNotifications" // Phase 16: lib/communications/engine.ts skips email dispatch
+  | "bookingBuffers"     // Phase 16: lib/availability.ts ignores per-service before/after buffers
+  | "webhookDelivery";   // Phase 16: lib/outbound.ts skips POST to notificationWebhookUrl
 
 export const FEATURE_FLAGS: readonly FeatureFlag[] = [
   "reminders",
@@ -36,6 +39,9 @@ export const FEATURE_FLAGS: readonly FeatureFlag[] = [
   "cancellations",
   "intakeForms",
   "googleMeet",
+  "emailNotifications",
+  "bookingBuffers",
+  "webhookDelivery",
 ] as const;
 
 export type FeatureFlags = Record<FeatureFlag, boolean>;
@@ -48,6 +54,9 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlags = {
   cancellations: true,
   intakeForms: true,
   googleMeet: true,
+  emailNotifications: true,
+  bookingBuffers: true,
+  webhookDelivery: true,
 };
 
 // Human-readable metadata for the admin UI. Description is what tenants
@@ -81,6 +90,21 @@ export const FEATURE_FLAG_META: Record<
     label: "Google Meet auto-links",
     description: "Auto-generate a Google Meet link when a booking is created for a Google-Meet-enabled service.",
     impact: "When off, no Meet link is created — staff can still attach one manually.",
+  },
+  emailNotifications: {
+    label: "Email notifications",
+    description: "Send transactional booking emails — confirmations, reschedules, cancellations, and reminders.",
+    impact: "When off, the communications engine skips every outbound email. Customers receive no booking emails of any kind.",
+  },
+  bookingBuffers: {
+    label: "Booking buffers",
+    description: "Honor the per-service \"buffer before\" and \"buffer after\" padding when computing availability.",
+    impact: "When off, the availability engine ignores buffer minutes — back-to-back bookings become possible even when buffers are configured on a service.",
+  },
+  webhookDelivery: {
+    label: "Outbound webhooks",
+    description: "Deliver booking lifecycle events (created, cancelled, rescheduled) to your configured notification webhook URL.",
+    impact: "When off, no outbound webhook POSTs are made. Your webhook receiver will stop seeing booking events until re-enabled.",
   },
 };
 
