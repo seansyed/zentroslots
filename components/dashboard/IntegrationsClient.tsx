@@ -285,7 +285,7 @@ export default function IntegrationsClient({
   const loading = providers === null;
 
   return (
-    <div className="mt-4 space-y-5">
+    <div className="mt-3 space-y-4">
       {/* ───────── COMMAND CENTER HERO ───────────────────────────────── */}
       <CommandCenterHero summary={summary} loading={loading} />
 
@@ -646,23 +646,23 @@ function CategorySection({
   const anchorId = cat === "calendar" ? "calendar-section" : undefined;
   return (
     <section id={anchorId} className="relative scroll-mt-6">
-      <header className="mb-2 flex items-end justify-between gap-3">
+      <header className="mb-1.5 flex items-end justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-1.5">
-            <span className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-brand-subtle text-brand-accent ring-1 ring-brand-accent/15 shadow-[inset_0_1px_0_rgba(255,255,255,0.55)]">
-              <Icon className="h-3.5 w-3.5" strokeWidth={1.75} />
+            <span className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-brand-subtle text-brand-accent ring-1 ring-brand-accent/20 shadow-[inset_0_1px_0_rgba(255,255,255,0.55)]">
+              <Icon className="h-3.5 w-3.5" strokeWidth={2} />
             </span>
-            <div className="text-[10px] font-semibold uppercase tracking-[0.10em] text-brand-accent">
+            <div className="text-[10.5px] font-bold uppercase tracking-[0.12em] text-brand-accent">
               {meta.eyebrow}
             </div>
           </div>
-          <h2 className="mt-1.5 text-[15px] font-semibold tracking-tight text-ink">
+          <h2 className="mt-1.5 text-[15.5px] font-semibold leading-[1.2] tracking-tight text-ink">
             {meta.label}
           </h2>
-          <p className="mt-0.5 text-[11.5px] text-ink-muted">{meta.description}</p>
+          <p className="mt-0.5 text-[11.5px] leading-[1.45] text-ink-muted">{meta.description}</p>
         </div>
         {/* Quiet count chip for scannability across categories */}
-        <span className="hidden shrink-0 items-center gap-1 self-start rounded-full bg-surface-inset px-1.5 py-0.5 text-[9.5px] font-semibold uppercase tracking-[0.08em] text-ink-subtle ring-1 ring-border/40 sm:inline-flex">
+        <span className="hidden shrink-0 items-center gap-1 self-start rounded-full bg-surface-inset px-1.5 py-0.5 text-[9.5px] font-semibold uppercase tracking-[0.10em] text-ink-subtle ring-1 ring-border/50 sm:inline-flex">
           {providers.length} provider{providers.length === 1 ? "" : "s"}
         </span>
       </header>
@@ -713,12 +713,12 @@ function ProviderCard({
       className={cn(
         "group relative overflow-hidden rounded-2xl border bg-surface p-3.5 transition-all duration-[220ms] ease-[cubic-bezier(0.16,1,0.3,1)] sm:p-4",
         isLive
-          ? // Live providers: stronger border + layered shadow stack → "production connected" confidence
-            "border-border shadow-[0_1px_2px_rgba(15,23,42,0.05),inset_0_1px_0_rgba(255,255,255,0.60)] hover:-translate-y-px hover:border-border-strong hover:shadow-[0_10px_26px_-14px_rgba(15,23,42,0.18),0_3px_8px_-4px_rgba(15,23,42,0.06)]"
+          ? // Live providers: stronger border + two-layer shadow stack + dual inner highlight (top + bottom) → "active infrastructure surface"
+            "border-border-strong shadow-[0_1px_2px_rgba(15,23,42,0.06),0_2px_6px_-3px_rgba(15,23,42,0.06),inset_0_1px_0_rgba(255,255,255,0.65),inset_0_-1px_0_rgba(15,23,42,0.025)] hover:-translate-y-px hover:shadow-[0_12px_30px_-14px_rgba(15,23,42,0.20),0_4px_10px_-4px_rgba(15,23,42,0.08),inset_0_1px_0_rgba(255,255,255,0.65)]"
           : provider.wired
-            ? "border-border/65 shadow-[0_1px_2px_rgba(15,23,42,0.03)] hover:-translate-y-px hover:border-border hover:shadow-[0_6px_16px_-10px_rgba(15,23,42,0.14)]"
+            ? "border-border/70 shadow-[0_1px_2px_rgba(15,23,42,0.04),inset_0_1px_0_rgba(255,255,255,0.45)] hover:-translate-y-px hover:border-border hover:shadow-[0_8px_20px_-12px_rgba(15,23,42,0.16),inset_0_1px_0_rgba(255,255,255,0.45)]"
             : // Roadmap providers: solid (not muted) — readiness, not "missing"
-              "border-border/65 shadow-[0_1px_2px_rgba(15,23,42,0.025)] hover:border-border hover:shadow-[0_6px_16px_-10px_rgba(15,23,42,0.12)]",
+              "border-border/70 shadow-[0_1px_2px_rgba(15,23,42,0.03),inset_0_1px_0_rgba(255,255,255,0.40)] hover:border-border hover:shadow-[0_8px_20px_-12px_rgba(15,23,42,0.14),inset_0_1px_0_rgba(255,255,255,0.40)]",
       )}
     >
       {/* Brand rail — fades in on hover only when live, otherwise quiet */}
@@ -748,29 +748,27 @@ function ProviderCard({
             {provider.description}
           </p>
 
-          {/* Capabilities — tighter rhythm */}
+          {/* Capabilities — telemetry-density (Part 7) */}
           {v?.capabilities && v.capabilities.length > 0 && (
-            <ul className="mt-2 grid gap-y-0.5 gap-x-3 sm:grid-cols-2">
+            <ul className="mt-2 grid gap-y-[3px] gap-x-3 sm:grid-cols-2">
               {v.capabilities.map((cap) => (
                 <li
                   key={cap}
-                  className="flex items-start gap-1.5 text-[10.5px] leading-[1.35] text-ink-muted"
+                  className="flex items-start gap-1.5 text-[10.5px] leading-[1.3] text-ink-muted"
                 >
                   <span
                     className={cn(
-                      "mt-[3px] inline-flex h-2.5 w-2.5 shrink-0 items-center justify-center rounded-full",
+                      "mt-[3.5px] inline-flex h-2 w-2 shrink-0 items-center justify-center rounded-full",
                       isLive
-                        ? "bg-emerald-100/80 text-emerald-700 ring-1 ring-emerald-200/50"
+                        ? "bg-emerald-500/90 text-white shadow-[0_0_0_2px_rgba(16,185,129,0.15)]"
                         : provider.wired
-                          ? "bg-surface-inset text-ink-subtle ring-1 ring-border/40"
-                          : "bg-amber-50 text-amber-700 ring-1 ring-amber-200/50",
+                          ? "bg-slate-300 text-white"
+                          : "bg-slate-300 text-white",
                     )}
                   >
                     {isLive ? (
-                      <Check className="h-2 w-2" strokeWidth={3.5} />
-                    ) : (
-                      <span className="inline-block h-1 w-1 rounded-full bg-current" />
-                    )}
+                      <Check className="h-1.5 w-1.5" strokeWidth={4} />
+                    ) : null}
                   </span>
                   <span>{cap}</span>
                 </li>
@@ -827,33 +825,87 @@ function ConnectionStateChip({
   state: ConnectionState;
   roadmap?: string;
 }) {
+  // All chips share the SAME pill structure (size, padding, weight,
+  // tracking, ring thickness) — only color family + content vary.
+  // This makes the section read as one unified badge language.
+  const base =
+    "inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.08em] ring-1";
+
   if (state === "connected") {
-    // Stronger contrast — production-connected confidence (Part 3)
+    // Gold-standard Live badge — production-connected confidence (Part 3 + 4)
     return (
-      <span className="inline-flex items-center gap-1 rounded-full bg-gradient-to-b from-emerald-50 to-emerald-100/60 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.08em] text-emerald-800 ring-1 ring-emerald-300/60 shadow-[0_1px_2px_-1px_rgba(16,185,129,0.20)]">
+      <span
+        className={cn(
+          base,
+          "bg-gradient-to-b from-emerald-50 to-emerald-100/60 text-emerald-800 ring-emerald-300/60 shadow-[0_1px_2px_-1px_rgba(16,185,129,0.22)]",
+        )}
+      >
         <span
           aria-hidden
-          className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500 shadow-[0_0_0_3px_rgba(16,185,129,0.22)]"
+          className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500 shadow-[0_0_0_3px_rgba(16,185,129,0.24)]"
         />
         Live
       </span>
     );
   }
+
   if (state === "disabled") {
     return (
-      <span className="inline-flex items-center gap-1 rounded-full bg-surface-inset px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.08em] text-ink-muted ring-1 ring-border/40">
+      <span
+        className={cn(
+          base,
+          "bg-surface-inset text-ink-muted ring-border/40",
+        )}
+      >
         <span aria-hidden className="inline-block h-1.5 w-1.5 rounded-full bg-slate-400" />
         Available
       </span>
     );
   }
-  // Roadmap — softer "rolling out" tone, no longer feels disabled (Part 4)
+
+  // Roadmap — color family varies per status but pill structure is identical (Part 5)
+  const tone = roadmapTone(roadmap);
   return (
-    <span className="inline-flex items-center gap-1 rounded-full bg-gradient-to-b from-blue-50 to-blue-100/40 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.08em] text-blue-700 ring-1 ring-blue-200/50">
-      <Sparkles className="h-2 w-2" strokeWidth={2.25} />
+    <span className={cn(base, tone.classes)}>
+      <Sparkles className="h-2 w-2" strokeWidth={2.5} />
       {roadmap ?? "Early access"}
     </span>
   );
+}
+
+function roadmapTone(roadmap: string | undefined): { classes: string } {
+  const r = (roadmap ?? "").toLowerCase();
+  // Each roadmap status carries its own color family for instant
+  // scanning, while the pill shape stays unified.
+  if (r.includes("webhook")) {
+    return {
+      classes:
+        "bg-gradient-to-b from-emerald-50 to-emerald-100/45 text-emerald-700 ring-emerald-200/55",
+    };
+  }
+  if (r.includes("enterprise")) {
+    return {
+      classes:
+        "bg-gradient-to-b from-violet-50 to-violet-100/45 text-violet-700 ring-violet-200/55",
+    };
+  }
+  if (r.includes("rolling")) {
+    return {
+      classes:
+        "bg-gradient-to-b from-amber-50 to-amber-100/45 text-amber-700 ring-amber-200/55",
+    };
+  }
+  if (r.includes("infrastructure")) {
+    return {
+      classes:
+        "bg-gradient-to-b from-indigo-50 to-indigo-100/45 text-indigo-700 ring-indigo-200/55",
+    };
+  }
+  // Default: "Backend in progress", "Early access" — blue (active development)
+  return {
+    classes:
+      "bg-gradient-to-b from-blue-50 to-blue-100/45 text-blue-700 ring-blue-200/55",
+  };
 }
 
 // ─── Provider mark (monogram disc) ───────────────────────────────
@@ -919,19 +971,21 @@ function ProviderToggle({
       onClick={onChange}
       disabled={disabled}
       className={cn(
-        "relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-all duration-[220ms] ease-[cubic-bezier(0.16,1,0.3,1)] focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1",
+        "group/toggle relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-all duration-[220ms] ease-[cubic-bezier(0.16,1,0.3,1)] focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1",
         on
-          ? // Live: inset depth + soft brand-tinted glow → operational feel (Part 2)
-            "shadow-[inset_0_1px_2px_rgba(15,23,42,0.10),0_0_0_3px_var(--toggle-glow,rgba(53,157,243,0.14))]"
-          : "bg-surface-inset ring-1 ring-border/60 hover:ring-border",
-        disabled && "opacity-50 cursor-not-allowed",
+          ? // Live: dual inset depth + soft brand-tinted glow → operational feel
+            "shadow-[inset_0_1px_2px_rgba(15,23,42,0.14),inset_0_-1px_0_rgba(255,255,255,0.12),0_0_0_3px_var(--toggle-glow,rgba(53,157,243,0.14))]"
+          : // Off: better track contrast + hover lift
+            "bg-surface-inset ring-1 ring-border/70 hover:ring-border hover:bg-surface-inset/80",
+        // Disabled state: staged-but-unavailable — slightly more visible than 0.5
+        disabled && "cursor-not-allowed opacity-[0.55] saturate-[0.85] hover:ring-border/70",
       )}
       style={
         on
           ? ({
               backgroundColor: c,
               ["--tw-ring-color" as never]: c,
-              ["--toggle-glow" as never]: hexAlpha(c, 0.16),
+              ["--toggle-glow" as never]: hexAlpha(c, 0.18),
             } as React.CSSProperties)
           : undefined
       }
@@ -939,8 +993,11 @@ function ProviderToggle({
       <span
         aria-hidden
         className={cn(
-          "inline-block h-4 w-4 transform rounded-full bg-white shadow-[0_1px_3px_rgba(15,23,42,0.24),inset_0_0.5px_0_rgba(255,255,255,0.65)] transition-transform duration-[220ms] ease-[cubic-bezier(0.16,1,0.3,1)]",
-          on ? "translate-x-[18px]" : "translate-x-0.5",
+          "inline-block h-4 w-4 transform rounded-full bg-white transition-all duration-[220ms] ease-[cubic-bezier(0.16,1,0.3,1)]",
+          on
+            ? // Thumb glow when ON — subtle outer halo + crisp inner highlight
+              "translate-x-[18px] shadow-[0_1px_3px_rgba(15,23,42,0.28),0_0_0_1px_rgba(255,255,255,0.55),inset_0_0.5px_0_rgba(255,255,255,0.75)]"
+            : "translate-x-0.5 shadow-[0_1px_3px_rgba(15,23,42,0.20),inset_0_0.5px_0_rgba(255,255,255,0.55)] group-hover/toggle:shadow-[0_2px_5px_rgba(15,23,42,0.24)]",
         )}
       />
     </button>

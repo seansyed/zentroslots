@@ -193,20 +193,21 @@ function CopilotLauncher({
       className={cn(
         "group fixed bottom-5 right-5 z-40 inline-flex h-12 w-12 items-center justify-center rounded-full",
         "bg-gradient-to-br from-brand-accent to-brand-hover text-white",
-        "shadow-[0_10px_28px_rgba(53,157,243,0.40)] ring-1 ring-brand-accent/30",
+        // Phase 14D: softer base shadow + smaller glow → calmer idle state
+        "shadow-[0_6px_18px_rgba(53,157,243,0.28)] ring-1 ring-brand-accent/25",
         "transition-all duration-[220ms] ease-[cubic-bezier(0.16,1,0.3,1)]",
-        "hover:-translate-y-0.5 hover:shadow-[0_14px_36px_rgba(53,157,243,0.50)]",
+        "hover:-translate-y-px hover:shadow-[0_10px_26px_rgba(53,157,243,0.36)]",
         "active:translate-y-0",
         "sm:bottom-6 sm:right-6 sm:h-13 sm:w-13",
       )}
       style={{ height: 52, width: 52 }}
     >
-      {/* Pulse halo */}
+      {/* Pulse halo — calmer idle (Phase 14D) */}
       {!reduce && !open && (
         <>
           <span
             aria-hidden
-            className="absolute inset-0 rounded-full bg-brand-accent/35 blur-md"
+            className="absolute inset-0 rounded-full bg-brand-accent/22 blur-md"
             style={{ animation: "zm-pulse-glow 2.6s cubic-bezier(0.16, 1, 0.3, 1) infinite" }}
           />
           <span
@@ -214,9 +215,9 @@ function CopilotLauncher({
             className="absolute -inset-1 rounded-full"
             style={{
               background:
-                "conic-gradient(from 0deg, rgba(53,157,243,0.35), rgba(16,185,129,0.25), rgba(53,157,243,0.35))",
+                "conic-gradient(from 0deg, rgba(53,157,243,0.22), rgba(16,185,129,0.16), rgba(53,157,243,0.22))",
               filter: "blur(8px)",
-              opacity: 0.55,
+              opacity: 0.40,
             }}
           />
         </>
