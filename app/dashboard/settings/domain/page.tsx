@@ -4,8 +4,11 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db/client";
 import { tenantDomains, tenants, users } from "@/db/schema";
 import { getSession } from "@/lib/auth";
+import { CNAME_TARGET, TXT_PREFIX } from "@/lib/domains";
 import Shell from "@/components/dashboard/Shell";
 import DomainsClient from "@/components/dashboard/DomainsClient";
+
+export const dynamic = "force-dynamic";
 
 export default async function DomainSettingsPage() {
   const session = await getSession();
@@ -18,29 +21,37 @@ export default async function DomainSettingsPage() {
   const rows = await db
     .select()
     .from(tenantDomains)
-    .where(eq(tenantDomains.tenantId, tenant.id));
+    .where(eq(tenantDomains.tenantId, tenant.id))
+    .orderBy(tenantDomains.createdAt);
 
   return (
     <Shell
       user={{ name: user.name, email: user.email, role: user.role }}
       tenant={{ name: tenant.name, slug: tenant.slug, plan: tenant.currentPlan, logoUrl: tenant.logoUrl }}
-      title="Custom domain"
-      crumbs={[{ label: "Dashboard", href: "/dashboard" }, { label: "Settings" }, { label: "Domain" }]}
+      title="Custom Domains"
+      crumbs={[
+        { label: "Dashboard", href: "/dashboard" },
+        { label: "Settings" },
+        { label: "Custom Domains" },
+      ]}
     >
-      <h1 className="text-heading font-semibold text-ink">Custom domain</h1>
-      <p className="mt-1 text-sm text-ink-muted">
-        Serve your booking page from your own hostname (e.g. <code className="rounded bg-surface-inset px-1.5 py-0.5 font-mono text-xs">book.acme.com</code>).
-        Verification only — DNS routing is configured by your administrator.
-      </p>
-
+      {/* The Command Center hero lives inside the client so the KPI
+          tiles can react instantly to verify / add / delete actions. */}
       <DomainsClient
         initial={rows.map((r) => ({
           id: r.id,
           host: r.host,
+          normalizedHost: r.normalizedHost,
           verificationToken: r.verificationToken,
+          status: r.status as "pending" | "verified" | "failed",
+          sslStatus: r.sslStatus as "pending" | "active" | "failed",
           verifiedAt: r.verifiedAt?.toISOString() ?? null,
+          lastCheckedAt: r.lastCheckedAt?.toISOString() ?? null,
           createdAt: r.createdAt.toISOString(),
+          updatedAt: r.updatedAt.toISOString(),
         }))}
+        config={{ cnameTarget: CNAME_TARGET, txtPrefix: TXT_PREFIX }}
+        tenantSlug={tenant.slug}
       />
     </Shell>
   );

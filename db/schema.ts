@@ -672,12 +672,25 @@ export const tenantDomains = pgTable(
       .notNull()
       .references(() => tenants.id, { onDelete: "cascade" }),
     host: varchar("host", { length: 253 }).notNull(),
+    // Lowercased + trailing-dot-stripped form. Used by middleware for
+    // O(1) hostname → tenant resolution. Globally unique.
+    normalizedHost: varchar("normalized_host", { length: 253 }).notNull(),
     verificationToken: varchar("verification_token", { length: 64 }).notNull(),
+    // Lifecycle: pending → verified | failed
+    status: varchar("status", { length: 16 }).notNull().default("pending"),
+    // SSL provisioning lifecycle (architecture-ready). Real cert issuance
+    // is delegated to the edge (Caddy / Cloudflare SSL for SaaS / ACM)
+    // and reflected back into this column when wired.
+    sslStatus: varchar("ssl_status", { length: 16 }).notNull().default("pending"),
     verifiedAt: timestamp("verified_at", { withTimezone: true }),
+    lastCheckedAt: timestamp("last_checked_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
     tenantIdx: index("tenant_domains_tenant_idx").on(t.tenantId),
+    normalizedHostUnique: index("tenant_domains_normalized_host_unique").on(t.normalizedHost),
+    statusIdx: index("tenant_domains_status_idx").on(t.status),
   })
 );
 
