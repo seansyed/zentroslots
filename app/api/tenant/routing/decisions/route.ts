@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import { auditLogs, bookings, services, users } from "@/db/schema";
@@ -76,13 +76,13 @@ export async function GET() {
         ? db
             .select({ id: users.id, name: users.name })
             .from(users)
-            .where(sql`${users.id} = ANY(${staffIds})`)
+            .where(inArray(users.id, staffIds))
         : Promise.resolve([] as Array<{ id: string; name: string }>),
       serviceIds.length > 0
         ? db
             .select({ id: services.id, name: services.name })
             .from(services)
-            .where(sql`${services.id} = ANY(${serviceIds})`)
+            .where(inArray(services.id, serviceIds))
         : Promise.resolve([] as Array<{ id: string; name: string }>),
     ]);
     const staffById = new Map(staffRows.map((s) => [s.id, s.name]));
@@ -97,7 +97,7 @@ export async function GET() {
       const bookingRows = await db
         .select({ id: bookings.id, status: bookings.status })
         .from(bookings)
-        .where(sql`${bookings.id} = ANY(${bookingIds})`);
+        .where(inArray(bookings.id, bookingIds));
       for (const b of bookingRows) stillLiveStatusById.set(b.id, b.status);
     }
 

@@ -9,7 +9,7 @@
  * uses. Tenants haven't configured routing have empty stats; the
  * picker treats missing rows as "0 today".
  */
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import { staffAssignmentStats } from "@/db/schema";
@@ -36,8 +36,8 @@ export async function loadBusyStats(
     .where(
       and(
         eq(staffAssignmentStats.tenantId, tenantId),
-        sql`${staffAssignmentStats.staffId} = ANY(${staffIds})`
-      )
+        inArray(staffAssignmentStats.staffId, staffIds),
+      ),
     );
 
   // Apply rolling-window logic INLINE here so a stale counter doesn't

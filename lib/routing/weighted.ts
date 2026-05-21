@@ -21,7 +21,7 @@
  * fall through to a weighted random pick using the provided RNG.
  * The seedable RNG argument exists so tests can pin outcomes.
  */
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import { staffAssignmentStats } from "@/db/schema";
@@ -45,8 +45,8 @@ export async function loadTotals(
     .where(
       and(
         eq(staffAssignmentStats.tenantId, tenantId),
-        sql`${staffAssignmentStats.staffId} = ANY(${staffIds})`
-      )
+        inArray(staffAssignmentStats.staffId, staffIds),
+      ),
     );
   return rows;
 }

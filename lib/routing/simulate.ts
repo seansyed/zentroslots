@@ -20,7 +20,7 @@
  * orchestrator is the right shape for the booking hot path; this is
  * the right shape for the operator console.
  */
-import { and, eq, gte, lt, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, lt, sql } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import {
@@ -215,7 +215,11 @@ export async function simulateAssignment(
   );
 
   // ── (5) Internal booking conflicts — one query for all still-
-  // eligible candidates.
+  // eligible candidates. Use inArray() rather than `= ANY(${arr})`
+  // because the postgres-js driver serializes single-element arrays
+  // as bare strings in the ANY position, which PG then tries to
+  // parse as an array literal and fails with "malformed array
+  // literal". inArray() emits IN (...) which is always safe.
   const stillEligibleIds = candidates
     .filter((c) => c.status === "eligible")
     .map((c) => c.staffId);
@@ -227,7 +231,7 @@ export async function simulateAssignment(
         and(
           eq(bookings.tenantId, input.tenantId),
           eq(bookings.status, "confirmed"),
-          sql`${bookings.staffUserId} = ANY(${stillEligibleIds})`,
+          inArray(bookings.staffUserId, stillEligibleIds),
           gte(bookings.endAt, input.startAt),
           lt(bookings.startAt, input.endAt),
         ),

@@ -8,7 +8,7 @@
  * Stable tie-break: by user id ascending. This makes test outcomes
  * deterministic.
  */
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import { staffAssignmentStats } from "@/db/schema";
@@ -31,8 +31,8 @@ export async function loadStats(tenantId: string, staffIds: string[]): Promise<S
     .where(
       and(
         eq(staffAssignmentStats.tenantId, tenantId),
-        sql`${staffAssignmentStats.staffId} = ANY(${staffIds})`
-      )
+        inArray(staffAssignmentStats.staffId, staffIds),
+      ),
     );
   return rows;
 }

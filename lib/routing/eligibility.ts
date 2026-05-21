@@ -21,7 +21,7 @@
  * to throw. The constraint is the final backstop, but the engine MUST
  * pick a staff member who'll succeed at insert time.
  */
-import { and, eq, gte, lt, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, lt, sql } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import {
@@ -78,8 +78,8 @@ export async function getEligibleStaff(input: EligibilityInput): Promise<string[
     .where(
       and(
         eq(users.tenantId, input.tenantId),
-        sql`${users.id} = ANY(${candidates})`
-      )
+        inArray(users.id, candidates),
+      ),
     );
   const tzByUser = new Map(userRows.map((u) => [u.id, u.timezone]));
 
@@ -103,11 +103,11 @@ export async function getEligibleStaff(input: EligibilityInput): Promise<string[
       and(
         eq(bookings.tenantId, input.tenantId),
         eq(bookings.status, "confirmed"),
-        sql`${bookings.staffUserId} = ANY(${working})`,
+        inArray(bookings.staffUserId, working),
         // Overlap: existing.endAt > requested.start AND existing.startAt < requested.end
         gte(bookings.endAt, input.startAt),
-        lt(bookings.startAt, input.endAt)
-      )
+        lt(bookings.startAt, input.endAt),
+      ),
     );
   const internallyBusy = new Set(conflictRows.map((r) => r.staffUserId));
   let free = working.filter((id) => !internallyBusy.has(id));
