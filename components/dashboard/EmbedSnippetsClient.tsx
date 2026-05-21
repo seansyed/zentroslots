@@ -26,16 +26,21 @@ import {
   ChevronDown,
   Code2,
   Copy,
+  Download,
   ExternalLink,
   Eye,
+  Globe,
   Layers,
   Link2,
   Monitor,
   MousePointerClick,
   PanelTop,
+  Play,
   QrCode,
+  ShieldCheck,
   Smartphone,
   Sparkles,
+  Zap,
   type LucideIcon,
 } from "lucide-react";
 
@@ -122,6 +127,19 @@ export default function EmbedSnippetsClient({
     [framework, baseUrl, tenantSlug, cfg, canHideBranding],
   );
 
+  if (services.length === 0) {
+    return (
+      <div className="mx-auto mt-3 max-w-[1180px] space-y-4">
+        <StudioHero
+          mode={cfg.mode}
+          canHideBranding={canHideBranding}
+          planName={planName}
+        />
+        <EmbedEmptyState />
+      </div>
+    );
+  }
+
   return (
     <div className="mx-auto mt-3 max-w-[1180px] space-y-4">
       <StudioHero
@@ -163,6 +181,35 @@ export default function EmbedSnippetsClient({
           <PremiumCard className="relative overflow-hidden p-4">
             <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/60 to-transparent" />
             <SectionHeader eyebrow="Step 2 · appearance" title="Match your brand" icon={Eye} />
+
+            {/* Preset chips — one-click style starters */}
+            <div className="mt-3 flex flex-wrap items-center gap-1.5">
+              <span className="text-[10.5px] font-semibold uppercase tracking-[0.10em] text-ink-subtle">Presets:</span>
+              {APPEARANCE_PRESETS.map((p) => {
+                const applied =
+                  cfg.radius === p.radius &&
+                  cfg.compact === p.compact &&
+                  cfg.hideHeader === p.hideHeader;
+                return (
+                  <button
+                    key={p.name}
+                    type="button"
+                    onClick={() => setCfg((cur) => ({ ...cur, radius: p.radius, compact: p.compact, hideHeader: p.hideHeader }))}
+                    aria-pressed={applied}
+                    className={cn(
+                      "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10.5px] font-semibold ring-1 transition-all duration-[200ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-px",
+                      applied
+                        ? "bg-brand-accent text-white ring-brand-accent shadow-[0_2px_8px_-2px_rgba(53,157,243,0.40),inset_0_1px_0_rgba(255,255,255,0.18)]"
+                        : "bg-surface text-ink-muted ring-border/60 hover:bg-brand-subtle hover:text-brand-accent hover:ring-brand-accent/30",
+                    )}
+                  >
+                    {applied && <Check className="h-2.5 w-2.5" strokeWidth={2.75} />}
+                    {p.name}
+                  </button>
+                );
+              })}
+            </div>
+
             <div className="mt-3 grid gap-3 sm:grid-cols-2">
               <Field label="Accent color">
                 <div className="flex items-center gap-2">
@@ -218,7 +265,15 @@ export default function EmbedSnippetsClient({
         <PreviewPane previewUrl={previewUrl} directLink={directLink} device={device} setDevice={setDevice} mode={cfg.mode} color={cfg.color} buttonLabel={cfg.buttonLabel} radius={cfg.radius} minHeight={cfg.minHeight} />
       </div>
 
-      <InstallCard framework={framework} setFramework={setFramework} snippet={snippet} directLink={directLink} />
+      <InstallCard
+        framework={framework}
+        setFramework={setFramework}
+        snippet={snippet}
+        directLink={directLink}
+        previewUrl={previewUrl}
+      />
+
+      <EmbedTrustStrip />
 
       <DirectLinkCard directLink={directLink} />
     </div>
@@ -262,11 +317,25 @@ function StudioHero({ mode, canHideBranding, planName }: { mode: WidgetMode; can
 
 // ─── Mode selector ──────────────────────────────────────────────
 
-const MODE_META: Record<WidgetMode, { title: string; icon: LucideIcon; sub: string }> = {
-  inline: { title: "Inline embed", icon: PanelTop, sub: "Iframe inside your page" },
-  popup: { title: "Popup modal", icon: MousePointerClick, sub: "Click a button → modal opens" },
+type ModeBadge = { label: string; tone: "emerald" | "violet" | "indigo" };
+
+/** One-click style starters. Each applies a radius + density combo. */
+const APPEARANCE_PRESETS: { name: string; radius: number; compact: boolean; hideHeader: boolean }[] = [
+  { name: "Rounded",    radius: 16, compact: false, hideHeader: false },
+  { name: "Sharp",      radius: 0,  compact: false, hideHeader: false },
+  { name: "Soft SaaS",  radius: 12, compact: false, hideHeader: false },
+  { name: "Enterprise", radius: 6,  compact: true,  hideHeader: false },
+  { name: "Minimal",    radius: 8,  compact: true,  hideHeader: true  },
+];
+
+const MODE_META: Record<
+  WidgetMode,
+  { title: string; icon: LucideIcon; sub: string; badge?: ModeBadge }
+> = {
+  inline: { title: "Inline embed", icon: PanelTop, sub: "Iframe inside your page", badge: { label: "Recommended", tone: "emerald" } },
+  popup: { title: "Popup modal", icon: MousePointerClick, sub: "Click a button → modal opens", badge: { label: "Most popular", tone: "violet" } },
   floating: { title: "Floating button", icon: ArrowUpRight, sub: "Bottom-right launcher on every page" },
-  fullpage: { title: "Full-page", icon: ExternalLink, sub: "Direct link · white-label microsite" },
+  fullpage: { title: "Full-page", icon: ExternalLink, sub: "Direct link · white-label microsite", badge: { label: "Enterprise", tone: "indigo" } },
 };
 
 function ModeSelector({ mode, onChange }: { mode: WidgetMode; onChange: (m: WidgetMode) => void }) {
@@ -286,7 +355,7 @@ function ModeSelector({ mode, onChange }: { mode: WidgetMode; onChange: (m: Widg
             className={cn(
               "group relative overflow-hidden rounded-2xl border p-3.5 text-left transition-all duration-[220ms] ease-[cubic-bezier(0.16,1,0.3,1)]",
               active
-                ? "border-brand-accent bg-gradient-to-br from-brand-subtle/40 to-surface shadow-[0_1px_2px_rgba(15,23,42,0.05),0_4px_14px_-4px_rgba(53,157,243,0.20),inset_0_1px_0_rgba(255,255,255,0.65)]"
+                ? "border-brand-accent bg-gradient-to-br from-brand-subtle/55 via-surface to-surface ring-2 ring-brand-accent/15 ring-offset-1 ring-offset-surface shadow-[0_1px_2px_rgba(15,23,42,0.06),0_8px_22px_-8px_rgba(53,157,243,0.30),inset_0_1px_0_rgba(255,255,255,0.70)]"
                 : "border-border/70 bg-surface shadow-[0_1px_2px_rgba(15,23,42,0.04),inset_0_1px_0_rgba(255,255,255,0.45)] hover:-translate-y-px hover:border-border hover:shadow-[0_6px_16px_-10px_rgba(15,23,42,0.16)]",
             )}
           >
@@ -304,6 +373,23 @@ function ModeSelector({ mode, onChange }: { mode: WidgetMode; onChange: (m: Widg
                   )}
                 </div>
                 <p className="mt-0.5 text-[10.5px] leading-tight text-ink-muted">{meta.sub}</p>
+                {meta.badge && (
+                  <span
+                    className={cn(
+                      "mt-1.5 inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-[0.10em] ring-1",
+                      meta.badge.tone === "emerald" && "bg-gradient-to-b from-emerald-50 to-emerald-100/55 text-emerald-700 ring-emerald-200/55",
+                      meta.badge.tone === "violet" && "bg-gradient-to-b from-violet-50 to-violet-100/55 text-violet-700 ring-violet-200/55",
+                      meta.badge.tone === "indigo" && "bg-gradient-to-b from-indigo-50 to-indigo-100/55 text-indigo-700 ring-indigo-200/55",
+                    )}
+                  >
+                    {meta.badge.tone === "violet" ? (
+                      <Sparkles className="h-2 w-2" strokeWidth={2.5} />
+                    ) : (
+                      <span aria-hidden className="inline-block h-1.5 w-1.5 rounded-full bg-current" />
+                    )}
+                    {meta.badge.label}
+                  </span>
+                )}
               </div>
             </div>
           </button>
@@ -343,7 +429,12 @@ function PreviewPane({ previewUrl, directLink, device, setDevice, mode, color, b
       <div className={cn("relative mx-auto transition-all duration-[280ms] ease-[cubic-bezier(0.16,1,0.3,1)]", device === "mobile" ? "max-w-[360px]" : "max-w-none")}>
         {mode === "inline" && (
           <BrowserChrome>
-            <iframe key={previewUrl} src={previewUrl} title="Inline embed preview" loading="lazy" className="block w-full bg-white" style={{ height: `${Math.min(minHeight, 620)}px`, borderRadius: `${radius}px` }} />
+            <PreviewIframe
+              src={previewUrl}
+              title="Inline embed preview"
+              height={Math.min(minHeight, 620)}
+              radius={radius}
+            />
           </BrowserChrome>
         )}
         {mode === "popup" && (
@@ -375,7 +466,12 @@ function PreviewPane({ previewUrl, directLink, device, setDevice, mode, color, b
         )}
         {mode === "fullpage" && (
           <BrowserChrome url={directLink}>
-            <iframe key={previewUrl} src={previewUrl} title="Full-page preview" loading="lazy" className="block h-[480px] w-full bg-white" />
+            <PreviewIframe
+              src={previewUrl}
+              title="Full-page preview"
+              height={480}
+              radius={0}
+            />
           </BrowserChrome>
         )}
       </div>
@@ -408,8 +504,15 @@ function BrowserChrome({ children, url }: { children: React.ReactNode; url?: str
 // ─── Install card ──────────────────────────────────────────────
 
 const FRAMEWORK_LABELS: Record<Framework, string> = { html: "HTML", react: "React", nextjs: "Next.js", wordpress: "WordPress", webflow: "Webflow" };
+const FRAMEWORK_DIFFICULTY: Record<Framework, "easy" | "medium" | "advanced"> = {
+  html: "easy",
+  react: "medium",
+  nextjs: "medium",
+  wordpress: "easy",
+  webflow: "easy",
+};
 
-function InstallCard({ framework, setFramework, snippet, directLink }: { framework: Framework; setFramework: (f: Framework) => void; snippet: string; directLink: string }) {
+function InstallCard({ framework, setFramework, snippet, directLink, previewUrl }: { framework: Framework; setFramework: (f: Framework) => void; snippet: string; directLink: string; previewUrl: string }) {
   const [copied, setCopied] = React.useState(false);
   async function copy() {
     try {
@@ -433,17 +536,40 @@ function InstallCard({ framework, setFramework, snippet, directLink }: { framewo
           <h3 className="mt-0.5 text-[15px] font-semibold tracking-tight text-ink">Paste this into your site</h3>
           <p className="mt-0.5 text-[11.5px] text-ink-muted">Production-ready. Cached at the edge. Works on any framework.</p>
         </div>
+        <div className="flex shrink-0 items-center gap-1.5">
+          <a
+            href={previewUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-surface px-2.5 text-[11.5px] font-semibold text-ink shadow-[0_1px_2px_rgba(15,23,42,0.04),inset_0_1px_0_rgba(255,255,255,0.55)] transition-all hover:-translate-y-px hover:border-border-strong hover:shadow-[0_4px_12px_-6px_rgba(15,23,42,0.18)]"
+          >
+            <Play className="h-3 w-3" strokeWidth={2} />
+            Test embed
+          </a>
+          <a
+            href={directLink}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-surface px-2.5 text-[11.5px] font-semibold text-ink shadow-[0_1px_2px_rgba(15,23,42,0.04),inset_0_1px_0_rgba(255,255,255,0.55)] transition-all hover:-translate-y-px hover:border-border-strong hover:shadow-[0_4px_12px_-6px_rgba(15,23,42,0.18)]"
+          >
+            <ExternalLink className="h-3 w-3" strokeWidth={2} />
+            Standalone
+          </a>
+        </div>
       </header>
 
-      <div className="mt-3 inline-flex items-center gap-0.5 rounded-lg border border-border bg-surface p-0.5 shadow-sm">
-        {(Object.keys(FRAMEWORK_LABELS) as Framework[]).map((f) => {
-          const active = framework === f;
-          return (
-            <button key={f} type="button" onClick={() => setFramework(f)} className={cn("inline-flex h-7 items-center rounded-md px-2.5 text-[11px] font-semibold transition-all duration-[180ms]", active ? "bg-ink text-white shadow-sm" : "text-ink-muted hover:bg-surface-inset hover:text-ink")}>
-              {FRAMEWORK_LABELS[f]}
-            </button>
-          );
-        })}
+      <div className="mt-3 flex flex-wrap items-center gap-1.5">
+        <div className="inline-flex items-center gap-0.5 rounded-lg border border-border bg-surface p-0.5 shadow-sm">
+          {(Object.keys(FRAMEWORK_LABELS) as Framework[]).map((f) => {
+            const active = framework === f;
+            return (
+              <button key={f} type="button" onClick={() => setFramework(f)} className={cn("inline-flex h-7 items-center rounded-md px-2.5 text-[11px] font-semibold transition-all duration-[180ms]", active ? "bg-ink text-white shadow-sm" : "text-ink-muted hover:bg-surface-inset hover:text-ink")}>
+                {FRAMEWORK_LABELS[f]}
+              </button>
+            );
+          })}
+        </div>
+        <DifficultyBadge level={FRAMEWORK_DIFFICULTY[framework]} />
       </div>
 
       <div className="mt-3 overflow-hidden rounded-xl bg-[#0b1220] shadow-[0_4px_14px_-6px_rgba(15,23,42,0.30)]">
@@ -465,6 +591,21 @@ function InstallCard({ framework, setFramework, snippet, directLink }: { framewo
         Direct booking URL: <a href={directLink} target="_blank" rel="noopener noreferrer" className="font-mono text-brand-accent hover:underline">{directLink}</a>
       </p>
     </PremiumCard>
+  );
+}
+
+function DifficultyBadge({ level }: { level: "easy" | "medium" | "advanced" }) {
+  const meta =
+    level === "easy"
+      ? { label: "1-line install", cls: "bg-gradient-to-b from-emerald-50 to-emerald-100/55 text-emerald-700 ring-emerald-200/55" }
+      : level === "medium"
+        ? { label: "Component + hook", cls: "bg-gradient-to-b from-blue-50 to-blue-100/55 text-blue-700 ring-blue-200/55" }
+        : { label: "Advanced", cls: "bg-gradient-to-b from-violet-50 to-violet-100/55 text-violet-700 ring-violet-200/55" };
+  return (
+    <span className={cn("inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.10em] ring-1", meta.cls)}>
+      <Zap className="h-2.5 w-2.5" strokeWidth={2.5} />
+      {meta.label}
+    </span>
   );
 }
 
@@ -509,10 +650,29 @@ function DirectLinkCard({ directLink }: { directLink: string }) {
           </div>
 
           {showQr && (
-            <div className="mt-3 inline-flex flex-col items-center gap-2 rounded-xl border border-border/65 bg-surface p-3">
+            <div className="mt-3 inline-flex flex-col items-center gap-2 rounded-xl border border-border/65 bg-gradient-to-b from-white to-slate-50 p-4 shadow-[0_4px_16px_-6px_rgba(15,23,42,0.16),inset_0_1px_0_rgba(255,255,255,0.65)]">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={qrUrl} alt="Booking QR" width={240} height={240} className="rounded-md ring-1 ring-border/40" />
+              <img src={qrUrl} alt="Booking QR" width={240} height={240} className="rounded-md ring-1 ring-border/40 shadow-sm" />
               <p className="text-[10.5px] text-ink-subtle">Scan with any phone camera to open the booking flow.</p>
+              <div className="mt-1 flex items-center gap-1.5">
+                <a
+                  href={qrUrl}
+                  download="zentromeet-booking-qr.png"
+                  className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-surface px-2.5 text-[11.5px] font-semibold text-ink shadow-[0_1px_2px_rgba(15,23,42,0.04),inset_0_1px_0_rgba(255,255,255,0.55)] transition-all hover:-translate-y-px hover:border-border-strong hover:shadow-md"
+                >
+                  <Download className="h-3 w-3" strokeWidth={2} />
+                  Download PNG
+                </a>
+                <a
+                  href={qrUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-surface px-2.5 text-[11.5px] font-semibold text-ink shadow-[0_1px_2px_rgba(15,23,42,0.04),inset_0_1px_0_rgba(255,255,255,0.55)] transition-all hover:-translate-y-px hover:border-border-strong hover:shadow-md"
+                >
+                  <ExternalLink className="h-3 w-3" strokeWidth={2} />
+                  Open
+                </a>
+              </div>
             </div>
           )}
         </div>
@@ -777,6 +937,179 @@ ${attrs}
   }
 
   return "";
+}
+
+// ─── Preview iframe with shimmer loading ─────────────────────────
+
+function PreviewIframe({
+  src,
+  title,
+  height,
+  radius,
+}: {
+  src: string;
+  title: string;
+  height: number;
+  radius: number;
+}) {
+  const [loaded, setLoaded] = React.useState(false);
+  // Reset loaded state whenever src changes
+  React.useEffect(() => {
+    setLoaded(false);
+  }, [src]);
+  return (
+    <div className="relative" style={{ height: `${height}px` }}>
+      {/* Shimmer skeleton — only visible until the iframe fires onLoad.
+          Keeps the layout from shifting when params change. */}
+      <div
+        aria-hidden
+        className={cn(
+          "pointer-events-none absolute inset-0 transition-opacity duration-[280ms]",
+          loaded ? "opacity-0" : "opacity-100",
+        )}
+        style={{ borderRadius: `${radius}px` }}
+      >
+        <div className="h-full w-full bg-gradient-to-b from-slate-50 to-white" style={{ borderRadius: `${radius}px` }}>
+          <div className="zm-embed-shimmer h-full w-full" style={{ borderRadius: `${radius}px` }} />
+        </div>
+        <style jsx>{`
+          .zm-embed-shimmer {
+            background: linear-gradient(
+              90deg,
+              rgba(241, 245, 249, 0) 0%,
+              rgba(241, 245, 249, 0.55) 50%,
+              rgba(241, 245, 249, 0) 100%
+            );
+            background-size: 200% 100%;
+            animation: zmShimmer 1400ms cubic-bezier(0.16, 1, 0.3, 1) infinite;
+          }
+          @keyframes zmShimmer {
+            0% { background-position: -200% 0; }
+            100% { background-position: 200% 0; }
+          }
+        `}</style>
+      </div>
+      <iframe
+        key={src}
+        src={src}
+        title={title}
+        loading="lazy"
+        onLoad={() => setLoaded(true)}
+        className={cn(
+          "block h-full w-full bg-white transition-opacity duration-[280ms]",
+          loaded ? "opacity-100" : "opacity-0",
+        )}
+        style={{ borderRadius: `${radius}px` }}
+      />
+    </div>
+  );
+}
+
+// ─── Empty state ─────────────────────────────────────────────────
+
+function EmbedEmptyState() {
+  return (
+    <PremiumCard className="relative overflow-hidden p-6 sm:p-10">
+      <span aria-hidden className="pointer-events-none absolute -right-16 -top-16 h-44 w-44 rounded-full bg-brand-accent/12 blur-3xl" />
+      <span aria-hidden className="pointer-events-none absolute -left-12 -bottom-12 h-32 w-32 rounded-full bg-emerald-200/[0.16] blur-3xl" />
+      <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/60 to-transparent" />
+
+      <div className="relative grid items-center gap-6 sm:grid-cols-[minmax(0,1fr),minmax(0,1fr)]">
+        <div>
+          <div className="inline-flex items-center gap-1.5 rounded-full bg-brand-accent/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.12em] text-brand-accent">
+            <Sparkles className="h-3 w-3" strokeWidth={2.25} />
+            One service away
+          </div>
+          <h3 className="mt-2 text-[18px] font-semibold tracking-tight text-ink sm:text-[20px]">
+            Create a service to start embedding
+          </h3>
+          <p className="mt-1.5 max-w-md text-[12.5px] leading-relaxed text-ink-muted">
+            Embeds book real services on your booking flow. Once you publish at least one service with an assigned host, the studio unlocks live preview, install snippets for 5 frameworks, QR codes, and UTM tracking.
+          </p>
+          <a
+            href="/dashboard/settings/services"
+            className="mt-4 inline-flex h-9 items-center gap-1.5 rounded-lg bg-gradient-to-b from-brand-accent to-brand-hover px-3.5 text-[12px] font-semibold text-white shadow-[0_2px_8px_-2px_rgba(53,157,243,0.30),inset_0_1px_0_rgba(255,255,255,0.18)] transition-all duration-[220ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-px hover:shadow-[0_6px_18px_-4px_rgba(53,157,243,0.42)]"
+          >
+            Create your first service
+            <ArrowRight className="h-3.5 w-3.5" strokeWidth={2.25} />
+          </a>
+
+          <ul className="mt-4 space-y-1.5">
+            {[
+              "Inline · Popup · Floating · Full-page modes",
+              "HTML, React, Next.js, WordPress, Webflow snippets",
+              "Branded QR codes + UTM tracking + edge cache",
+            ].map((line) => (
+              <li key={line} className="flex items-start gap-1.5 text-[11.5px] text-ink-muted">
+                <Check className="mt-[3px] h-2.5 w-2.5 shrink-0 text-emerald-600" strokeWidth={2.5} />
+                <span>{line}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        {/* Visual: stylized booking-card mock */}
+        <div
+          aria-hidden
+          className="relative mx-auto w-full max-w-[320px] overflow-hidden rounded-2xl border border-border/60 bg-gradient-to-b from-slate-50 to-white p-3.5 shadow-[0_24px_60px_-24px_rgba(15,23,42,0.30),inset_0_1px_0_rgba(255,255,255,0.65)]"
+        >
+          <div className="flex items-center gap-2">
+            <div className="h-7 w-7 rounded-lg bg-brand-accent/85" />
+            <div>
+              <div className="h-2 w-24 rounded-full bg-slate-200" />
+              <div className="mt-1 h-1.5 w-16 rounded-full bg-slate-100" />
+            </div>
+          </div>
+          <div className="mt-3 grid grid-cols-3 gap-1">
+            {Array.from({ length: 9 }).map((_, i) => (
+              <div
+                key={i}
+                className={cn(
+                  "h-7 rounded-md",
+                  i === 4 ? "bg-brand-accent/85" : "bg-slate-100",
+                )}
+              />
+            ))}
+          </div>
+          <div className="mt-3 h-9 rounded-lg bg-brand-accent/85 shadow-sm" />
+        </div>
+      </div>
+    </PremiumCard>
+  );
+}
+
+// ─── Trust strip ─────────────────────────────────────────────────
+
+export function EmbedTrustStrip() {
+  const items: { icon: LucideIcon; label: string; sub: string }[] = [
+    { icon: ShieldCheck, label: "HTTPS only", sub: "TLS everywhere" },
+    { icon: Sparkles, label: "Mobile optimized", sub: "Touch-first flow" },
+    { icon: Zap, label: "Edge delivered", sub: "Cached globally" },
+    { icon: Globe, label: "Works anywhere", sub: "Any framework" },
+  ];
+  return (
+    <div className="rounded-2xl border border-border/55 bg-surface/75 p-2.5 shadow-[0_1px_2px_rgba(15,23,42,0.03),inset_0_1px_0_rgba(255,255,255,0.6)] backdrop-blur-sm sm:p-3">
+      <ul className="grid grid-cols-2 gap-x-2 gap-y-2 sm:grid-cols-4 sm:gap-x-1">
+        {items.map((t) => {
+          const Icon = t.icon;
+          return (
+            <li
+              key={t.label}
+              className="group/trust flex items-start gap-2 rounded-lg p-1.5 transition-all duration-[220ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:bg-surface-inset/40"
+            >
+              <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-brand-subtle to-surface text-brand-accent ring-1 ring-brand-accent/20 shadow-[0_1px_3px_-1px_rgba(53,157,243,0.22),inset_0_1px_0_rgba(255,255,255,0.55)] transition-all duration-[220ms] group-hover/trust:scale-[1.03] group-hover/trust:shadow-[0_2px_8px_-1px_rgba(53,157,243,0.30),inset_0_1px_0_rgba(255,255,255,0.55)]">
+                <Icon className="h-3.5 w-3.5" strokeWidth={2.25} />
+              </span>
+              <div className="min-w-0">
+                <div className="text-[11.5px] font-semibold leading-[1.2] tracking-tight text-ink">{t.label}</div>
+                <div className="mt-0.5 text-[10.5px] leading-[1.25] text-ink-muted">{t.sub}</div>
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
 }
 
 function escapeHtml(s: string): string {
