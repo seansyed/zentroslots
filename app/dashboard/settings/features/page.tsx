@@ -18,7 +18,7 @@ import {
   type FeatureFlag,
   mergeFlags,
 } from "@/lib/features";
-import { getPlan } from "@/lib/plans";
+import { getPlan, meetsPlan, type PlanId } from "@/lib/plans";
 import {
   isProviderEnabled,
   readEnabledIntegrations,
@@ -319,6 +319,18 @@ export default async function FeatureControlsPage() {
     },
   ];
 
+  // ── Plan-gate computation (Phase 16K) ────────────────────────────────
+  // Capability-tier visibility lives on this page. For each locked-tier
+  // capability we declare the minimum plan that unlocks it, then derive
+  // status + locked state from the current plan. Backend enforcement
+  // for individual capabilities still lives in their own gates (e.g.
+  // plan.limits.maxCustomDomains for domains) — this surface is the
+  // honest entitlement map an admin sees.
+  const currentPlanId = plan.id as PlanId;
+  const hasPro = meetsPlan(currentPlanId, "pro");
+  const hasTeam = meetsPlan(currentPlanId, "team");
+  const hasEnterprise = meetsPlan(currentPlanId, "enterprise");
+
   // ── External (read-only) policy references ───────────────────────────
   const externalRefs: ExternalPolicyRef[] = [
     // Automation refs ────────────────────────────────────────────────
@@ -343,6 +355,40 @@ export default async function FeatureControlsPage() {
       planLocked: false,
       manageHref: "/dashboard/settings/notifications",
       manageLabel: "Manage webhook URL",
+    },
+    // SMS reminders — locked everywhere today (no SMS provider wired
+    // into the platform). When backend SMS lands, the lock collapses
+    // to Pro+ via the requiredPlan tier. Copy is explicit about both
+    // gates so an admin upgrading to Pro doesn't expect SMS to "just
+    // work".
+    {
+      sectionId: "automation",
+      label: "SMS reminders",
+      detail:
+        "Send SMS reminders before appointments. Customers will only receive email reminders on Free. Requires a Pro plan and an SMS provider integration — the provider step is not yet available on any plan.",
+      status: "plan_gated",
+      planLocked: true,
+      requiredPlan: "pro",
+      manageHref: "/dashboard/billing",
+      manageLabel: "Compare plans",
+    },
+    // Workflow automations — the automation engine works for every
+    // active tenant today (lib/automations + automation_rules). The
+    // brief reserves this capability for Pro+ in the upcoming
+    // tightening; this card is the visibility surface for that
+    // entitlement. We surface honest copy and route admins to the
+    // existing automations page on Pro+, billing on Free/Solo.
+    {
+      sectionId: "automation",
+      label: "Workflow automations",
+      detail: hasPro
+        ? "Trigger follow-up actions after bookings, cancellations, or no-shows. Configure individual rules under Settings → Automations."
+        : "Trigger follow-up actions after bookings, cancellations, or no-shows. Reserved for Pro and above.",
+      status: hasPro ? "active" : "plan_gated",
+      planLocked: !hasPro,
+      requiredPlan: "pro",
+      manageHref: hasPro ? "/dashboard/settings/automations" : "/dashboard/billing",
+      manageLabel: hasPro ? "Manage automations" : "Upgrade to Pro",
     },
     // Scheduling Infrastructure refs ─────────────────────────────────
     {
@@ -396,6 +442,48 @@ export default async function FeatureControlsPage() {
       manageHref: "/dashboard/settings/workspace-hours",
       manageLabel: "Manage workspace hours",
     },
+    // Round-robin routing — the routing engine ships with this mode
+    // today for every tenant (lib/routing). The brief reserves this
+    // capability for Team+ as part of the upcoming plan tightening;
+    // we surface it here so admins on lower tiers see the upgrade
+    // pathway. Existing rules on lower-tier workspaces stay honored
+    // by the engine — this surface does not retroactively disable.
+    {
+      sectionId: "scheduling",
+      label: "Round-robin routing",
+      detail: hasTeam
+        ? "Distribute meetings evenly across eligible staff. Configure under Settings → Staff Routing."
+        : "Distribute meetings evenly across eligible staff. Reserved for Team and above.",
+      status: hasTeam ? "active" : "plan_gated",
+      planLocked: !hasTeam,
+      requiredPlan: "team",
+      manageHref: hasTeam ? "/dashboard/settings/routing" : "/dashboard/billing",
+      manageLabel: hasTeam ? "Manage routing" : "Upgrade to Team",
+    },
+    {
+      sectionId: "scheduling",
+      label: "Pooled availability",
+      detail: hasTeam
+        ? "Offer the earliest available slot across multiple hosts. Configure under Settings → Staff Routing."
+        : "Offer the earliest available slot across multiple hosts. Reserved for Team and above.",
+      status: hasTeam ? "active" : "plan_gated",
+      planLocked: !hasTeam,
+      requiredPlan: "team",
+      manageHref: hasTeam ? "/dashboard/settings/routing" : "/dashboard/billing",
+      manageLabel: hasTeam ? "Manage routing" : "Upgrade to Team",
+    },
+    {
+      sectionId: "scheduling",
+      label: "Advanced routing rules",
+      detail: hasEnterprise
+        ? "Priority routing, weighted assignment, and fallback logic. Configure under Settings → Staff Routing."
+        : "Priority routing, weighted assignment, and fallback logic. Reserved for Enterprise.",
+      status: hasEnterprise ? "active" : "plan_gated",
+      planLocked: !hasEnterprise,
+      requiredPlan: "enterprise",
+      manageHref: hasEnterprise ? "/dashboard/settings/routing" : "/dashboard/billing",
+      manageLabel: hasEnterprise ? "Manage routing" : "Upgrade to Enterprise",
+    },
     // Branding refs ──────────────────────────────────────────────────
     {
       sectionId: "branding",
@@ -424,7 +512,7 @@ export default async function FeatureControlsPage() {
       label: "Custom domains",
       detail:
         plan.limits.maxCustomDomains <= 0
-          ? `The ${plan.name} plan does not include custom domains. Upgrade to connect a domain.`
+          ? "Serve booking pages from your own domain. 1 custom domain included with Pro and above."
           : systemHealth.customDomainsCount === 0
             ? `Your ${plan.name} plan includes ${plan.limits.maxCustomDomains} custom ${
                 plan.limits.maxCustomDomains === 1 ? "domain" : "domains"
@@ -439,14 +527,15 @@ export default async function FeatureControlsPage() {
             ? "active"
             : "available",
       planLocked: plan.limits.maxCustomDomains <= 0,
-      manageHref: "/dashboard/settings/domain",
-      manageLabel: plan.limits.maxCustomDomains <= 0 ? "Upgrade plan" : "Manage custom domains",
+      requiredPlan: "pro",
+      manageHref: plan.limits.maxCustomDomains <= 0 ? "/dashboard/billing" : "/dashboard/settings/domain",
+      manageLabel: plan.limits.maxCustomDomains <= 0 ? "Upgrade to Pro" : "Manage domains",
     },
     {
       sectionId: "branding",
-      label: "Remove \"Powered by\"",
+      label: "Remove ZentroMeet branding",
       detail: !plan.limits.customBranding
-        ? `The ${plan.name} plan keeps the \"Powered by\" footer. Upgrade to a branding-enabled plan to remove it.`
+        ? "Hide the \"Powered by ZentroMeet\" footer on public booking pages. Included with Pro and above."
         : tenant.hidePoweredBy
           ? "Powered-by footer is hidden on your public booking pages."
           : "Branding removal is available on your plan — toggle it on under workspace branding.",
@@ -456,8 +545,26 @@ export default async function FeatureControlsPage() {
           ? "active"
           : "available",
       planLocked: !plan.limits.customBranding,
-      manageHref: !plan.limits.customBranding ? "/pricing" : "/dashboard/settings/branding",
-      manageLabel: !plan.limits.customBranding ? "Upgrade plan" : "Open branding settings",
+      requiredPlan: "pro",
+      manageHref: !plan.limits.customBranding ? "/dashboard/billing" : "/dashboard/settings/branding",
+      manageLabel: !plan.limits.customBranding ? "Upgrade to Pro" : "Open branding settings",
+    },
+    // Advanced embed customization — the embed studio at
+    // /dashboard/settings/embed ships theme + behavior overrides
+    // today; the brief reserves the full white-label surface
+    // (custom launcher behavior, deep theme tokens, headless
+    // installation) for Team+. This ref is the entitlement marker.
+    {
+      sectionId: "branding",
+      label: "Advanced embed customization",
+      detail: hasTeam
+        ? "White-label embeds with custom launcher behavior and theme overrides. Manage in the embed studio."
+        : "White-label embeds with custom launcher behavior and theme overrides. Reserved for Team and above.",
+      status: hasTeam ? "active" : "plan_gated",
+      planLocked: !hasTeam,
+      requiredPlan: "team",
+      manageHref: hasTeam ? "/dashboard/settings/embed" : "/dashboard/billing",
+      manageLabel: hasTeam ? "Open embed studio" : "Upgrade to Team",
     },
   ];
 

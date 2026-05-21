@@ -246,6 +246,34 @@ export function getPlan(id: string | null | undefined): Plan {
   return PLANS.free;
 }
 
+// ─── Plan-tier comparison (Phase 16K) ──────────────────────────────
+// Tier ordering for "does the current plan meet the required tier?"
+// checks. Free < Solo < Pro < Team < Enterprise. The Feature Controls
+// capability-visibility surface uses this to decide whether to render
+// a card as "active / available" (current plan meets the tier) versus
+// "plan_gated" (a higher tier is required). Backend enforcement for
+// individual capabilities still lives in each feature's own gate
+// (e.g. plan.limits.maxCustomDomains for domains) — this helper is a
+// shared yes/no for UI gating only, never a substitute for the real
+// limit checks.
+
+export const PLAN_RANK: Record<PlanId, number> = {
+  free: 0,
+  solo: 1,
+  pro: 2,
+  team: 3,
+  enterprise: 4,
+};
+
+export function meetsPlan(current: PlanId, required: PlanId): boolean {
+  return PLAN_RANK[current] >= PLAN_RANK[required];
+}
+
+/** Display label for plan-tier badges ("Available on Pro", etc.). */
+export function planBadgeLabel(p: PlanId): string {
+  return PLANS[p].name.toUpperCase();
+}
+
 export function isUnlimited(n: number): boolean {
   return n < 0;
 }

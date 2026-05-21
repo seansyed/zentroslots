@@ -68,6 +68,11 @@ export type ExternalPolicyRef = {
    */
   status: "active" | "available" | "disabled" | "plan_gated" | "always_on";
   planLocked: boolean;
+  /** Minimum plan tier that unlocks this capability. Used to render
+   *  the "Available on Pro" / "Team plan required" badge on locked
+   *  cards. Optional — refs without a required tier (SMTP delivery,
+   *  webhook URL, always-on safeguards) omit it. */
+  requiredPlan?: "free" | "solo" | "pro" | "team" | "enterprise";
   manageHref: string;
   manageLabel: string;
 };
@@ -181,6 +186,7 @@ export default function FeatureControlsClient({
   const externalActive = externalRefs.filter(
     (r) => r.status === "active" || r.status === "always_on",
   ).length;
+  const lockedCount = externalRefs.filter((r) => r.planLocked).length;
 
   const refsBySection = React.useMemo(() => {
     const out: Record<string, ExternalPolicyRef[]> = {};
@@ -223,11 +229,16 @@ export default function FeatureControlsClient({
                 dedicated pages.
               </p>
             </div>
-            <div className="grid grid-cols-3 gap-3 text-center">
+            <div className="grid grid-cols-2 gap-3 text-center sm:grid-cols-4">
               <HeroStat value={`${flagsOn}/${totalLiveFlags}`} label="Live toggles on" />
               <HeroStat
                 value={String(externalActive)}
                 label="External policies active"
+              />
+              <HeroStat
+                value={String(lockedCount)}
+                label="Locked capabilities"
+                accent={lockedCount > 0 ? "violet" : "muted"}
               />
               <HeroStat
                 value={changedCount > 0 ? `${changedCount}` : "—"}
@@ -639,7 +650,7 @@ function HeroStat({
 }: {
   value: string;
   label: string;
-  accent?: "default" | "amber" | "muted";
+  accent?: "default" | "amber" | "muted" | "violet";
 }) {
   return (
     <div className="min-w-[88px] rounded-xl border border-border bg-surface px-3 py-2 text-left">
@@ -648,9 +659,11 @@ function HeroStat({
           "text-lg font-semibold tabular-nums " +
           (accent === "amber"
             ? "text-amber-700"
-            : accent === "muted"
-              ? "text-ink-subtle"
-              : "text-ink")
+            : accent === "violet"
+              ? "text-violet-700"
+              : accent === "muted"
+                ? "text-ink-subtle"
+                : "text-ink")
         }
       >
         {value}
@@ -724,18 +737,41 @@ function healthIcon(id: string) {
 
 function ExternalRefRow({ ref_ }: { ref_: ExternalPolicyRef }) {
   const meta = externalRefVisual(ref_.status);
+  const locked = ref_.planLocked;
   return (
-    <Card className="flex items-start gap-3 p-4 transition-colors hover:bg-surface-muted/30">
+    <Card
+      className={
+        "flex items-start gap-3 p-4 transition-colors " +
+        (locked
+          ? "border-violet-100/80 bg-gradient-to-br from-violet-50/40 via-surface to-surface hover:bg-violet-50/40"
+          : "hover:bg-surface-muted/30")
+      }
+      title={locked ? "Upgrade required to enable" : undefined}
+    >
+      {/* Icon lane — Lock when plan-locked, otherwise status icon */}
       <div
         className={
-          "mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg " + meta.iconWrap
+          "mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-lg " +
+          (locked ? "bg-violet-100/80 text-violet-700" : meta.iconWrap)
         }
       >
-        <meta.Icon className={"h-4 w-4 " + meta.iconColor} />
+        {locked ? (
+          <Lock className="h-4 w-4" />
+        ) : (
+          <meta.Icon className={"h-4 w-4 " + meta.iconColor} />
+        )}
       </div>
+
+      {/* Body */}
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-sm font-semibold text-ink">{ref_.label}</span>
+          <span
+            className={
+              "text-sm font-semibold " + (locked ? "text-ink-muted" : "text-ink")
+            }
+          >
+            {ref_.label}
+          </span>
           <span
             className={
               "rounded-full px-2 py-0.5 text-[10px] font-medium " + meta.pill
@@ -743,30 +779,75 @@ function ExternalRefRow({ ref_ }: { ref_: ExternalPolicyRef }) {
           >
             {meta.statusLabel}
           </span>
-          {ref_.planLocked && (
-            <span className="inline-flex items-center gap-1 rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-[10px] font-medium text-violet-700">
-              <Lock className="h-3 w-3" /> Plan locked
-            </span>
+          {ref_.requiredPlan && (
+            <PlanBadge plan={ref_.requiredPlan} locked={locked} />
           )}
           <span className="rounded-full border border-dashed border-border px-2 py-0.5 text-[10px] font-medium text-ink-subtle">
             Managed elsewhere
           </span>
         </div>
-        <p className="mt-1 text-xs text-ink-muted">{ref_.detail}</p>
+        <p
+          className={
+            "mt-1 text-xs " + (locked ? "text-ink-subtle" : "text-ink-muted")
+          }
+        >
+          {ref_.detail}
+        </p>
       </div>
+
+      {/* Disabled-style switch for locked items — visual cue that the
+          capability cannot be toggled here. Pure decoration; no event
+          handlers attached. */}
+      {locked && (
+        <div
+          className="mr-1 hidden self-center sm:inline-flex"
+          aria-hidden="true"
+        >
+          <span className="relative inline-flex h-6 w-11 cursor-not-allowed items-center rounded-full bg-slate-200 opacity-60">
+            <span className="ml-0.5 inline-block h-5 w-5 rounded-full bg-white shadow" />
+          </span>
+        </div>
+      )}
+
+      {/* CTA */}
       <Link
         href={ref_.manageHref}
         className={
-          "ml-2 inline-flex shrink-0 items-center gap-1 self-center rounded-lg border px-2.5 py-1.5 text-xs font-medium hover:bg-surface-muted " +
-          (ref_.planLocked
-            ? "border-violet-200 bg-violet-50 text-violet-800"
+          "ml-2 inline-flex shrink-0 items-center gap-1 self-center rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors hover:bg-surface-muted " +
+          (locked
+            ? "border-violet-200 bg-violet-50 text-violet-800 hover:bg-violet-100"
             : "border-border bg-surface text-ink")
         }
       >
+        {locked && <Lock className="h-3 w-3" />}
         {ref_.manageLabel}
         <ArrowUpRight className="h-3 w-3" />
       </Link>
     </Card>
+  );
+}
+
+function PlanBadge({
+  plan,
+  locked,
+}: {
+  plan: NonNullable<ExternalPolicyRef["requiredPlan"]>;
+  locked: boolean;
+}) {
+  const styles = locked
+    ? "border-violet-200 bg-violet-50 text-violet-700"
+    : "border-emerald-200 bg-emerald-50 text-emerald-700";
+  const label = plan.toUpperCase();
+  return (
+    <span
+      className={
+        "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold tracking-wide " +
+        styles
+      }
+    >
+      {locked && <Lock className="h-2.5 w-2.5" />}
+      {label}
+    </span>
   );
 }
 
