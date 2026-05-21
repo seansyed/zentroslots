@@ -543,7 +543,7 @@ function HeroKpi({
 
 function ArchitectureHelper() {
   return (
-    <PremiumCard className="relative overflow-hidden p-4">
+    <PremiumCard className="relative overflow-hidden p-3.5">
       <span
         aria-hidden
         className="pointer-events-none absolute -right-12 -top-12 h-32 w-32 rounded-full bg-brand-accent/12 blur-3xl"
@@ -553,7 +553,7 @@ function ArchitectureHelper() {
         className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/60 to-transparent"
       />
       <div className="relative flex items-start gap-3">
-        <div className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-subtle/70 text-brand-accent ring-1 ring-brand-accent/15">
+        <div className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-subtle/70 text-brand-accent ring-1 ring-brand-accent/15 shadow-[inset_0_1px_0_rgba(255,255,255,0.55)]">
           <Info className="h-4 w-4" strokeWidth={1.75} />
         </div>
         <div className="min-w-0 flex-1">
@@ -646,22 +646,28 @@ function CategorySection({
   const anchorId = cat === "calendar" ? "calendar-section" : undefined;
   return (
     <section id={anchorId} className="relative scroll-mt-6">
-      <header className="mb-2.5">
-        <div className="flex items-center gap-1.5">
-          <span className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-brand-subtle text-brand-accent ring-1 ring-brand-accent/15">
-            <Icon className="h-3.5 w-3.5" strokeWidth={1.75} />
-          </span>
-          <div className="text-[10px] font-semibold uppercase tracking-[0.10em] text-brand-accent">
-            {meta.eyebrow}
+      <header className="mb-2 flex items-end justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5">
+            <span className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-brand-subtle text-brand-accent ring-1 ring-brand-accent/15 shadow-[inset_0_1px_0_rgba(255,255,255,0.55)]">
+              <Icon className="h-3.5 w-3.5" strokeWidth={1.75} />
+            </span>
+            <div className="text-[10px] font-semibold uppercase tracking-[0.10em] text-brand-accent">
+              {meta.eyebrow}
+            </div>
           </div>
+          <h2 className="mt-1.5 text-[15px] font-semibold tracking-tight text-ink">
+            {meta.label}
+          </h2>
+          <p className="mt-0.5 text-[11.5px] text-ink-muted">{meta.description}</p>
         </div>
-        <h2 className="mt-1.5 text-[15px] font-semibold tracking-tight text-ink">
-          {meta.label}
-        </h2>
-        <p className="mt-0.5 text-[11.5px] text-ink-muted">{meta.description}</p>
+        {/* Quiet count chip for scannability across categories */}
+        <span className="hidden shrink-0 items-center gap-1 self-start rounded-full bg-surface-inset px-1.5 py-0.5 text-[9.5px] font-semibold uppercase tracking-[0.08em] text-ink-subtle ring-1 ring-border/40 sm:inline-flex">
+          {providers.length} provider{providers.length === 1 ? "" : "s"}
+        </span>
       </header>
 
-      <div className="space-y-2.5">
+      <div className="space-y-2">
         {providers.map((p) => (
           <ProviderCard
             key={p.id}
@@ -701,85 +707,67 @@ function ProviderCard({
 }) {
   const v = PROVIDER_VISUAL[provider.id];
   const state = providerState(provider);
+  const isLive = provider.enabled && provider.wired;
   return (
     <article
       className={cn(
-        "group relative overflow-hidden rounded-2xl border bg-surface p-4 transition-all duration-[220ms] ease-[cubic-bezier(0.16,1,0.3,1)] sm:p-5",
-        provider.enabled
-          ? "border-border/70 shadow-[0_1px_2px_rgba(15,23,42,0.04),inset_0_1px_0_rgba(255,255,255,0.55)] hover:-translate-y-px hover:border-border-strong hover:shadow-[0_8px_22px_-12px_rgba(15,23,42,0.16)]"
+        "group relative overflow-hidden rounded-2xl border bg-surface p-3.5 transition-all duration-[220ms] ease-[cubic-bezier(0.16,1,0.3,1)] sm:p-4",
+        isLive
+          ? // Live providers: stronger border + layered shadow stack → "production connected" confidence
+            "border-border shadow-[0_1px_2px_rgba(15,23,42,0.05),inset_0_1px_0_rgba(255,255,255,0.60)] hover:-translate-y-px hover:border-border-strong hover:shadow-[0_10px_26px_-14px_rgba(15,23,42,0.18),0_3px_8px_-4px_rgba(15,23,42,0.06)]"
           : provider.wired
-            ? "border-border/65 bg-surface shadow-[0_1px_2px_rgba(15,23,42,0.03)] hover:border-border"
-            : "border-border/60 bg-surface-subtle/40",
+            ? "border-border/65 shadow-[0_1px_2px_rgba(15,23,42,0.03)] hover:-translate-y-px hover:border-border hover:shadow-[0_6px_16px_-10px_rgba(15,23,42,0.14)]"
+            : // Roadmap providers: solid (not muted) — readiness, not "missing"
+              "border-border/65 shadow-[0_1px_2px_rgba(15,23,42,0.025)] hover:border-border hover:shadow-[0_6px_16px_-10px_rgba(15,23,42,0.12)]",
       )}
-      style={
-        provider.enabled
-          ? ({
-              ["--provider-rail" as never]: v?.brandColor,
-            } as React.CSSProperties)
-          : undefined
-      }
     >
-      {/* Active state accent rail */}
-      {provider.enabled && v && (
+      {/* Brand rail — fades in on hover only when live, otherwise quiet */}
+      {isLive && v && (
         <span
           aria-hidden
-          className="pointer-events-none absolute inset-y-4 left-0 w-[2px] rounded-r-full opacity-0 transition-opacity duration-300 group-hover:opacity-100"
+          className="pointer-events-none absolute inset-y-3.5 left-0 w-[2px] rounded-r-full opacity-0 transition-opacity duration-300 group-hover:opacity-100"
           style={{ backgroundColor: v.brandColor }}
         />
       )}
 
-      <div className="flex items-start gap-3.5">
+      {/* Article-level row: mark · content · toggle (toggle self-centers vertically) */}
+      <div className="flex items-center gap-3">
         <ProviderMark
           letter={v?.monogram ?? provider.name[0]}
           color={v?.brandColor ?? "#64748b"}
-          active={provider.enabled && provider.wired}
+          active={isLive}
         />
         <div className="min-w-0 flex-1">
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-1.5">
-                <h4 className="text-[13.5px] font-semibold tracking-tight text-ink">
-                  {provider.name}
-                </h4>
-                <ConnectionStateChip
-                  state={state}
-                  roadmap={v?.roadmap}
-                />
-              </div>
-              <p className="mt-0.5 text-[11.5px] leading-relaxed text-ink-muted">
-                {provider.description}
-              </p>
-            </div>
-            <ProviderToggle
-              on={provider.enabled}
-              disabled={busy || !provider.wired}
-              onChange={onToggle}
-              brandColor={v?.brandColor}
-            />
+          <div className="flex flex-wrap items-center gap-1.5">
+            <h4 className="text-[13.5px] font-semibold tracking-tight text-ink">
+              {provider.name}
+            </h4>
+            <ConnectionStateChip state={state} roadmap={v?.roadmap} />
           </div>
+          <p className="mt-0.5 text-[11.5px] leading-[1.45] text-ink-muted">
+            {provider.description}
+          </p>
 
-          {/* Capabilities matrix */}
+          {/* Capabilities — tighter rhythm */}
           {v?.capabilities && v.capabilities.length > 0 && (
-            <ul className="mt-3 grid gap-y-1 gap-x-3 sm:grid-cols-2">
+            <ul className="mt-2 grid gap-y-0.5 gap-x-3 sm:grid-cols-2">
               {v.capabilities.map((cap) => (
                 <li
                   key={cap}
-                  className="flex items-start gap-1.5 text-[10.5px] leading-tight text-ink-muted"
+                  className="flex items-start gap-1.5 text-[10.5px] leading-[1.35] text-ink-muted"
                 >
                   <span
                     className={cn(
                       "mt-[3px] inline-flex h-2.5 w-2.5 shrink-0 items-center justify-center rounded-full",
-                      provider.enabled && provider.wired
-                        ? "bg-emerald-100/80 text-emerald-700"
+                      isLive
+                        ? "bg-emerald-100/80 text-emerald-700 ring-1 ring-emerald-200/50"
                         : provider.wired
-                          ? "bg-surface-inset text-ink-subtle"
-                          : "bg-amber-50 text-amber-700",
+                          ? "bg-surface-inset text-ink-subtle ring-1 ring-border/40"
+                          : "bg-amber-50 text-amber-700 ring-1 ring-amber-200/50",
                     )}
                   >
-                    {provider.enabled && provider.wired ? (
+                    {isLive ? (
                       <Check className="h-2 w-2" strokeWidth={3.5} />
-                    ) : provider.wired ? (
-                      <span className="inline-block h-1 w-1 rounded-full bg-current" />
                     ) : (
                       <span className="inline-block h-1 w-1 rounded-full bg-current" />
                     )}
@@ -790,9 +778,9 @@ function ProviderCard({
             </ul>
           )}
 
-          {/* Inline contextual link (e.g. staff calendar mgr, webhook) */}
+          {/* Inline contextual link */}
           {v?.linkLabel && v?.linkHref && (
-            <div className="mt-2.5">
+            <div className="mt-1.5">
               <Link
                 href={v.linkHref}
                 className="inline-flex items-center gap-1 text-[11px] font-medium text-brand-accent transition-colors hover:text-brand-hover"
@@ -802,6 +790,16 @@ function ProviderCard({
               </Link>
             </div>
           )}
+        </div>
+
+        {/* Toggle column — perfectly vertical-centered by items-center on the parent flex */}
+        <div className="flex shrink-0 flex-col items-end gap-1">
+          <ProviderToggle
+            on={provider.enabled}
+            disabled={busy || !provider.wired}
+            onChange={onToggle}
+            brandColor={v?.brandColor}
+          />
         </div>
       </div>
     </article>
@@ -830,11 +828,12 @@ function ConnectionStateChip({
   roadmap?: string;
 }) {
   if (state === "connected") {
+    // Stronger contrast — production-connected confidence (Part 3)
     return (
-      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.08em] text-emerald-700 ring-1 ring-emerald-200/50">
+      <span className="inline-flex items-center gap-1 rounded-full bg-gradient-to-b from-emerald-50 to-emerald-100/60 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.08em] text-emerald-800 ring-1 ring-emerald-300/60 shadow-[0_1px_2px_-1px_rgba(16,185,129,0.20)]">
         <span
           aria-hidden
-          className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500 shadow-[0_0_0_3px_rgba(16,185,129,0.18)]"
+          className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500 shadow-[0_0_0_3px_rgba(16,185,129,0.22)]"
         />
         Live
       </span>
@@ -848,9 +847,9 @@ function ConnectionStateChip({
       </span>
     );
   }
-  // roadmap
+  // Roadmap — softer "rolling out" tone, no longer feels disabled (Part 4)
   return (
-    <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.08em] text-amber-700 ring-1 ring-amber-200/50">
+    <span className="inline-flex items-center gap-1 rounded-full bg-gradient-to-b from-blue-50 to-blue-100/40 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.08em] text-blue-700 ring-1 ring-blue-200/50">
       <Sparkles className="h-2 w-2" strokeWidth={2.25} />
       {roadmap ?? "Early access"}
     </span>
@@ -871,24 +870,28 @@ function ProviderMark({
   const initial = (letter || "?").toUpperCase().slice(0, 1);
   return (
     <div className="relative shrink-0">
+      {/* Soft brand bloom — only behind LIVE marks. Quiet on roadmap. */}
       <span
         aria-hidden
         className={cn(
           "absolute inset-0 rounded-xl blur-md transition-opacity duration-300",
-          active ? "opacity-30" : "opacity-0 group-hover:opacity-15",
+          active ? "opacity-30" : "opacity-0 group-hover:opacity-12",
         )}
         style={{ backgroundColor: color }}
       />
       <div
-        className={cn(
-          "relative flex h-10 w-10 items-center justify-center rounded-xl text-[14px] font-semibold text-white ring-1 ring-black/[0.06] shadow-[0_2px_8px_-2px_rgba(15,23,42,0.18)] transition-transform duration-[220ms] ease-[cubic-bezier(0.16,1,0.3,1)] group-hover:scale-[1.03]",
-          !active && "opacity-90",
-        )}
+        className="relative flex h-10 w-10 items-center justify-center rounded-xl text-[14.5px] font-semibold leading-none tracking-tight text-white shadow-[0_2px_8px_-2px_rgba(15,23,42,0.20),inset_0_1px_0_rgba(255,255,255,0.22),inset_0_-1px_0_rgba(0,0,0,0.10)] ring-1 ring-black/[0.08] transition-transform duration-[220ms] ease-[cubic-bezier(0.16,1,0.3,1)] group-hover:scale-[1.04]"
         style={{
-          background: `linear-gradient(135deg, ${color} 0%, ${darken(color, 0.18)} 100%)`,
+          background: `linear-gradient(135deg, ${color} 0%, ${darken(color, 0.20)} 100%)`,
+          // Full color for every provider — roadmap providers are still
+          // recognizable, the roadmap chip is the only state indicator.
         }}
       >
-        {initial}
+        <span
+          aria-hidden
+          className="pointer-events-none absolute inset-x-1 top-0.5 h-2 rounded-md bg-gradient-to-b from-white/14 to-transparent"
+        />
+        <span className="relative">{initial}</span>
       </div>
     </div>
   );
@@ -907,6 +910,7 @@ function ProviderToggle({
   disabled?: boolean;
   brandColor?: string;
 }) {
+  const c = brandColor ?? "#359df3";
   return (
     <button
       type="button"
@@ -916,14 +920,18 @@ function ProviderToggle({
       disabled={disabled}
       className={cn(
         "relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-all duration-[220ms] ease-[cubic-bezier(0.16,1,0.3,1)] focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1",
-        on ? "shadow-[inset_0_1px_2px_rgba(15,23,42,0.08)]" : "bg-surface-inset ring-1 ring-border/60",
+        on
+          ? // Live: inset depth + soft brand-tinted glow → operational feel (Part 2)
+            "shadow-[inset_0_1px_2px_rgba(15,23,42,0.10),0_0_0_3px_var(--toggle-glow,rgba(53,157,243,0.14))]"
+          : "bg-surface-inset ring-1 ring-border/60 hover:ring-border",
         disabled && "opacity-50 cursor-not-allowed",
       )}
       style={
         on
           ? ({
-              backgroundColor: brandColor ?? "var(--brand-accent, #359df3)",
-              ["--tw-ring-color" as never]: brandColor ?? "var(--brand-accent, #359df3)",
+              backgroundColor: c,
+              ["--tw-ring-color" as never]: c,
+              ["--toggle-glow" as never]: hexAlpha(c, 0.16),
             } as React.CSSProperties)
           : undefined
       }
@@ -931,12 +939,20 @@ function ProviderToggle({
       <span
         aria-hidden
         className={cn(
-          "inline-block h-4 w-4 transform rounded-full bg-white shadow-[0_1px_3px_rgba(15,23,42,0.22)] transition-transform duration-[220ms] ease-[cubic-bezier(0.16,1,0.3,1)]",
+          "inline-block h-4 w-4 transform rounded-full bg-white shadow-[0_1px_3px_rgba(15,23,42,0.24),inset_0_0.5px_0_rgba(255,255,255,0.65)] transition-transform duration-[220ms] ease-[cubic-bezier(0.16,1,0.3,1)]",
           on ? "translate-x-[18px]" : "translate-x-0.5",
         )}
       />
     </button>
   );
+}
+
+// Lightweight hex → rgba helper (no deps).
+function hexAlpha(hex: string, alpha: number): string {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) return `rgba(53,157,243,${alpha})`;
+  const n = parseInt(m[1], 16);
+  return `rgba(${(n >> 16) & 0xff}, ${(n >> 8) & 0xff}, ${n & 0xff}, ${alpha})`;
 }
 
 // ─── Webhook section ──────────────────────────────────────────────
