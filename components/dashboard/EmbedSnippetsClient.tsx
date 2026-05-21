@@ -127,6 +127,20 @@ export default function EmbedSnippetsClient({
     [framework, baseUrl, tenantSlug, cfg, canHideBranding],
   );
 
+  // Sandbox URL points to /embed/demo with the current widget config —
+  // the demo page loads the real /embed/v1.js runtime and mounts the
+  // widget exactly the way it would on a customer site (Phase 16C).
+  const sandboxUrl = React.useMemo(() => {
+    const q = new URLSearchParams();
+    q.set("tenant", tenantSlug);
+    if (cfg.serviceSlug) q.set("service", cfg.serviceSlug);
+    q.set("mode", cfg.mode === "fullpage" ? "inline" : cfg.mode);
+    q.set("color", cfg.color);
+    q.set("label", cfg.buttonLabel);
+    q.set("radius", String(cfg.radius));
+    return `${baseUrl}/embed/demo?${q.toString()}`;
+  }, [baseUrl, tenantSlug, cfg]);
+
   if (services.length === 0) {
     return (
       <div className="mx-auto mt-3 max-w-[1180px] space-y-4">
@@ -271,6 +285,8 @@ export default function EmbedSnippetsClient({
         snippet={snippet}
         directLink={directLink}
         previewUrl={previewUrl}
+        sandboxUrl={sandboxUrl}
+        mode={cfg.mode}
       />
 
       <EmbedTrustStrip />
@@ -426,16 +442,35 @@ function PreviewPane({ previewUrl, directLink, device, setDevice, mode, color, b
         </div>
       </header>
 
-      <div className={cn("relative mx-auto transition-all duration-[280ms] ease-[cubic-bezier(0.16,1,0.3,1)]", device === "mobile" ? "max-w-[360px]" : "max-w-none")}>
+      <div className={cn(
+        "relative mx-auto transition-all duration-[320ms] ease-[cubic-bezier(0.16,1,0.3,1)]",
+        device === "mobile" ? "max-w-[360px]" : "max-w-none",
+      )}>
+        {/* Soft brand edge glow behind active preview canvas */}
+        <span
+          aria-hidden
+          className="pointer-events-none absolute -inset-2 -z-10 rounded-3xl bg-gradient-to-br from-brand-accent/[0.06] via-transparent to-emerald-200/[0.06] blur-2xl"
+        />
         {mode === "inline" && (
-          <BrowserChrome>
-            <PreviewIframe
-              src={previewUrl}
-              title="Inline embed preview"
-              height={Math.min(minHeight, 620)}
-              radius={radius}
-            />
-          </BrowserChrome>
+          device === "mobile" ? (
+            <PhoneChrome>
+              <PreviewIframe
+                src={previewUrl}
+                title="Inline embed preview"
+                height={620}
+                radius={0}
+              />
+            </PhoneChrome>
+          ) : (
+            <BrowserChrome>
+              <PreviewIframe
+                src={previewUrl}
+                title="Inline embed preview"
+                height={Math.min(Math.max(minHeight, 560), 680)}
+                radius={radius}
+              />
+            </BrowserChrome>
+          )
         )}
         {mode === "popup" && (
           <BrowserChrome>
@@ -453,14 +488,34 @@ function PreviewPane({ previewUrl, directLink, device, setDevice, mode, color, b
         )}
         {mode === "floating" && (
           <BrowserChrome>
-            <div className="relative h-[440px] bg-gradient-to-br from-slate-50 to-white p-6">
+            <div className="relative h-[480px] bg-gradient-to-br from-slate-50 to-white p-6">
               <p className="text-[12px] text-ink-muted">Customer&rsquo;s website content…</p>
+              <div className="mt-2 space-y-2">
+                {[80, 65, 72, 58, 80, 62].map((w, i) => (
+                  <div key={i} className="h-2 rounded-full bg-slate-200/70" style={{ width: `${w}%` }} />
+                ))}
+              </div>
+              {/* Idle pulse + launcher */}
               <div className="absolute bottom-4 right-4">
-                <div className="inline-flex items-center gap-2 rounded-full px-3.5 py-2.5 text-[12.5px] font-semibold text-white shadow-[0_8px_22px_-4px_rgba(15,23,42,0.30),inset_0_1px_0_rgba(255,255,255,0.16)]" style={{ background: color }}>
+                <span
+                  aria-hidden
+                  className="absolute inset-0 -m-1 rounded-full blur-md"
+                  style={{ background: color, opacity: 0.32, animation: "zmFloatingPulse 2.6s cubic-bezier(0.16,1,0.3,1) infinite" }}
+                />
+                <div
+                  className="relative inline-flex items-center gap-2 rounded-full px-3.5 py-2.5 text-[12.5px] font-semibold text-white shadow-[0_8px_22px_-4px_rgba(15,23,42,0.30),inset_0_1px_0_rgba(255,255,255,0.16)]"
+                  style={{ background: color }}
+                >
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5"><rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg>
                   {buttonLabel}
                 </div>
               </div>
+              <style jsx>{`
+                @keyframes zmFloatingPulse {
+                  0%, 100% { transform: scale(1); opacity: 0.32; }
+                  50%      { transform: scale(1.18); opacity: 0.14; }
+                }
+              `}</style>
             </div>
           </BrowserChrome>
         )}
@@ -483,20 +538,39 @@ function PreviewPane({ previewUrl, directLink, device, setDevice, mode, color, b
 
 function BrowserChrome({ children, url }: { children: React.ReactNode; url?: string }) {
   return (
-    <div className="overflow-hidden rounded-xl bg-gradient-to-b from-slate-100/90 to-slate-50 ring-1 ring-slate-200/80 shadow-[0_18px_40px_-18px_rgba(15,23,42,0.22),0_4px_10px_-4px_rgba(15,23,42,0.08)]">
+    <div className="overflow-hidden rounded-xl bg-gradient-to-b from-slate-100/90 to-slate-50 ring-1 ring-slate-200/80 shadow-[0_24px_50px_-20px_rgba(15,23,42,0.22),0_4px_12px_-4px_rgba(15,23,42,0.08)]">
       <div className="flex items-center gap-2 px-2.5 py-1.5">
         <div className="flex shrink-0 gap-1">
           <span aria-hidden className="h-2.5 w-2.5 rounded-full bg-[#ff5f57]/85" />
           <span aria-hidden className="h-2.5 w-2.5 rounded-full bg-[#febc2e]/85" />
           <span aria-hidden className="h-2.5 w-2.5 rounded-full bg-[#28c840]/85" />
         </div>
-        {url && (
-          <div className="ml-1 flex min-w-0 flex-1 items-center gap-1 truncate rounded-md border border-slate-200/80 bg-white/80 px-2 py-1 font-mono text-[10px] text-slate-500 backdrop-blur-sm">
-            <span className="truncate">{url}</span>
-          </div>
-        )}
+        <div className="ml-1 flex min-w-0 flex-1 items-center gap-1.5 truncate rounded-md border border-slate-200/80 bg-white/80 px-2 py-1 font-mono text-[10px] text-slate-500 backdrop-blur-sm">
+          <svg aria-hidden viewBox="0 0 24 24" className="h-2.5 w-2.5 shrink-0 text-emerald-600" fill="currentColor"><path d="M12 1a4 4 0 0 0-4 4v3H7a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-9a2 2 0 0 0-2-2h-1V5a4 4 0 0 0-4-4zm-2 7V5a2 2 0 1 1 4 0v3h-4z" /></svg>
+          <span className="truncate">{url ?? "yoursite.com — embed preview"}</span>
+        </div>
       </div>
       <div className="overflow-hidden border-t border-slate-200/80 bg-white">{children}</div>
+    </div>
+  );
+}
+
+/** Realistic mobile bezel — matches the Brand Studio phone preview. */
+function PhoneChrome({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="relative mx-auto rounded-[36px] bg-slate-900 p-2 shadow-[0_36px_64px_-18px_rgba(15,23,42,0.40),0_10px_22px_-8px_rgba(15,23,42,0.20)]">
+      <div
+        aria-hidden
+        className="absolute left-1/2 top-2.5 z-10 flex h-5 w-28 -translate-x-1/2 items-center justify-center rounded-full bg-slate-900"
+      >
+        <span className="h-1.5 w-1.5 rounded-full bg-slate-700" />
+      </div>
+      <span aria-hidden className="absolute -left-0.5 top-20 h-10 w-0.5 rounded-r bg-slate-800" />
+      <span aria-hidden className="absolute -left-0.5 top-32 h-16 w-0.5 rounded-r bg-slate-800" />
+      <span aria-hidden className="absolute -right-0.5 top-24 h-20 w-0.5 rounded-l bg-slate-800" />
+      <div className="overflow-hidden rounded-[28px] bg-white ring-1 ring-black/5">
+        {children}
+      </div>
     </div>
   );
 }
@@ -512,7 +586,7 @@ const FRAMEWORK_DIFFICULTY: Record<Framework, "easy" | "medium" | "advanced"> = 
   webflow: "easy",
 };
 
-function InstallCard({ framework, setFramework, snippet, directLink, previewUrl }: { framework: Framework; setFramework: (f: Framework) => void; snippet: string; directLink: string; previewUrl: string }) {
+function InstallCard({ framework, setFramework, snippet, directLink, previewUrl, sandboxUrl, mode }: { framework: Framework; setFramework: (f: Framework) => void; snippet: string; directLink: string; previewUrl: string; sandboxUrl: string; mode: WidgetMode }) {
   const [copied, setCopied] = React.useState(false);
   async function copy() {
     try {
@@ -529,31 +603,49 @@ function InstallCard({ framework, setFramework, snippet, directLink, previewUrl 
       <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/60 to-transparent" />
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div className="min-w-0">
-          <div className="inline-flex items-center gap-1.5 text-[10.5px] font-bold uppercase tracking-[0.12em] text-brand-accent">
-            <Code2 className="h-3 w-3" strokeWidth={2} />
-            Install snippet
+          <div className="flex items-center gap-1.5">
+            <div className="inline-flex items-center gap-1.5 text-[10.5px] font-bold uppercase tracking-[0.12em] text-brand-accent">
+              <Code2 className="h-3 w-3" strokeWidth={2} />
+              Install snippet
+            </div>
+            <span className="inline-flex items-center gap-1 rounded-full bg-gradient-to-b from-emerald-50 to-emerald-100/55 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-[0.10em] text-emerald-700 ring-1 ring-emerald-200/55">
+              <Zap className="h-2 w-2" strokeWidth={2.75} />
+              Live in under 60 s
+            </span>
           </div>
-          <h3 className="mt-0.5 text-[15px] font-semibold tracking-tight text-ink">Paste this into your site</h3>
+          <h3 className="mt-1 text-[15px] font-semibold tracking-tight text-ink">Paste this into your site</h3>
           <p className="mt-0.5 text-[11.5px] text-ink-muted">Production-ready. Cached at the edge. Works on any framework.</p>
         </div>
-        <div className="flex shrink-0 items-center gap-1.5">
+        <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+          {/* Sandbox: mounts the real /embed/v1.js runtime in the chosen mode */}
+          <a
+            href={sandboxUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="group/sb inline-flex h-8 items-center gap-1.5 rounded-md bg-gradient-to-b from-brand-accent to-brand-hover px-2.5 text-[11.5px] font-semibold text-white shadow-[0_2px_8px_-2px_rgba(53,157,243,0.30),inset_0_1px_0_rgba(255,255,255,0.18)] transition-all duration-[220ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-px hover:shadow-[0_6px_18px_-4px_rgba(53,157,243,0.42)]"
+          >
+            <Play className="h-3 w-3" strokeWidth={2} />
+            {mode === "popup" ? "Test popup" : mode === "floating" ? "Test floating button" : mode === "inline" ? "Open live sandbox" : "Open preview"}
+            <ArrowRight className="h-3 w-3 transition-transform duration-[220ms] group-hover/sb:translate-x-0.5" strokeWidth={2.25} />
+          </a>
+          {/* Iframe-only preview (no runtime — just the embed page itself) */}
           <a
             href={previewUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-surface px-2.5 text-[11.5px] font-semibold text-ink shadow-[0_1px_2px_rgba(15,23,42,0.04),inset_0_1px_0_rgba(255,255,255,0.55)] transition-all hover:-translate-y-px hover:border-border-strong hover:shadow-[0_4px_12px_-6px_rgba(15,23,42,0.18)]"
+            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-surface px-2.5 text-[11.5px] font-semibold text-ink shadow-[0_1px_2px_rgba(15,23,42,0.04),inset_0_1px_0_rgba(255,255,255,0.55)] transition-all duration-[220ms] hover:-translate-y-px hover:border-border-strong hover:shadow-[0_4px_12px_-6px_rgba(15,23,42,0.18)]"
           >
-            <Play className="h-3 w-3" strokeWidth={2} />
-            Test embed
+            <Eye className="h-3 w-3" strokeWidth={2} />
+            Iframe only
           </a>
           <a
             href={directLink}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-surface px-2.5 text-[11.5px] font-semibold text-ink shadow-[0_1px_2px_rgba(15,23,42,0.04),inset_0_1px_0_rgba(255,255,255,0.55)] transition-all hover:-translate-y-px hover:border-border-strong hover:shadow-[0_4px_12px_-6px_rgba(15,23,42,0.18)]"
+            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-surface px-2.5 text-[11.5px] font-semibold text-ink shadow-[0_1px_2px_rgba(15,23,42,0.04),inset_0_1px_0_rgba(255,255,255,0.55)] transition-all duration-[220ms] hover:-translate-y-px hover:border-border-strong hover:shadow-[0_4px_12px_-6px_rgba(15,23,42,0.18)]"
           >
             <ExternalLink className="h-3 w-3" strokeWidth={2} />
-            Standalone
+            Direct link
           </a>
         </div>
       </header>
@@ -650,15 +742,22 @@ function DirectLinkCard({ directLink }: { directLink: string }) {
           </div>
 
           {showQr && (
-            <div className="mt-3 inline-flex flex-col items-center gap-2 rounded-xl border border-border/65 bg-gradient-to-b from-white to-slate-50 p-4 shadow-[0_4px_16px_-6px_rgba(15,23,42,0.16),inset_0_1px_0_rgba(255,255,255,0.65)]">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={qrUrl} alt="Booking QR" width={240} height={240} className="rounded-md ring-1 ring-border/40 shadow-sm" />
-              <p className="text-[10.5px] text-ink-subtle">Scan with any phone camera to open the booking flow.</p>
+            <div className="mt-3 inline-flex flex-col items-center gap-2 rounded-2xl border border-border/65 bg-gradient-to-b from-white via-white to-slate-50 p-5 shadow-[0_8px_24px_-8px_rgba(15,23,42,0.18),inset_0_1px_0_rgba(255,255,255,0.75)]">
+              <div className="text-[10.5px] font-bold uppercase tracking-[0.12em] text-brand-accent">
+                Scan to book instantly
+              </div>
+              <div className="rounded-xl bg-white p-2 ring-1 ring-border/40 shadow-[0_2px_8px_-2px_rgba(15,23,42,0.10)]">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={qrUrl} alt="Booking QR" width={220} height={220} className="block" />
+              </div>
+              <p className="max-w-[220px] text-center text-[10.5px] leading-relaxed text-ink-subtle">
+                Open any phone camera, point it at this code, and the booking flow opens directly.
+              </p>
               <div className="mt-1 flex items-center gap-1.5">
                 <a
                   href={qrUrl}
                   download="zentromeet-booking-qr.png"
-                  className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-surface px-2.5 text-[11.5px] font-semibold text-ink shadow-[0_1px_2px_rgba(15,23,42,0.04),inset_0_1px_0_rgba(255,255,255,0.55)] transition-all hover:-translate-y-px hover:border-border-strong hover:shadow-md"
+                  className="inline-flex h-8 items-center gap-1.5 rounded-md bg-gradient-to-b from-brand-accent to-brand-hover px-2.5 text-[11.5px] font-semibold text-white shadow-[0_2px_8px_-2px_rgba(53,157,243,0.30),inset_0_1px_0_rgba(255,255,255,0.18)] transition-all duration-[220ms] hover:-translate-y-px hover:shadow-[0_6px_18px_-4px_rgba(53,157,243,0.42)]"
                 >
                   <Download className="h-3 w-3" strokeWidth={2} />
                   Download PNG
@@ -667,7 +766,7 @@ function DirectLinkCard({ directLink }: { directLink: string }) {
                   href={qrUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-surface px-2.5 text-[11.5px] font-semibold text-ink shadow-[0_1px_2px_rgba(15,23,42,0.04),inset_0_1px_0_rgba(255,255,255,0.55)] transition-all hover:-translate-y-px hover:border-border-strong hover:shadow-md"
+                  className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-surface px-2.5 text-[11.5px] font-semibold text-ink shadow-[0_1px_2px_rgba(15,23,42,0.04),inset_0_1px_0_rgba(255,255,255,0.55)] transition-all duration-[220ms] hover:-translate-y-px hover:border-border-strong hover:shadow-md"
                 >
                   <ExternalLink className="h-3 w-3" strokeWidth={2} />
                   Open
@@ -1084,12 +1183,14 @@ export function EmbedTrustStrip() {
   const items: { icon: LucideIcon; label: string; sub: string }[] = [
     { icon: ShieldCheck, label: "HTTPS only", sub: "TLS everywhere" },
     { icon: Sparkles, label: "Mobile optimized", sub: "Touch-first flow" },
-    { icon: Zap, label: "Edge delivered", sub: "Cached globally" },
+    { icon: Zap, label: "Edge delivered", sub: "24h CDN cache" },
     { icon: Globe, label: "Works anywhere", sub: "Any framework" },
+    { icon: Code2, label: "Async loader", sub: "Lazy iframe mount" },
+    { icon: PanelTop, label: "16 KB runtime", sub: "Zero deps · no eval" },
   ];
   return (
     <div className="rounded-2xl border border-border/55 bg-surface/75 p-2.5 shadow-[0_1px_2px_rgba(15,23,42,0.03),inset_0_1px_0_rgba(255,255,255,0.6)] backdrop-blur-sm sm:p-3">
-      <ul className="grid grid-cols-2 gap-x-2 gap-y-2 sm:grid-cols-4 sm:gap-x-1">
+      <ul className="grid grid-cols-2 gap-x-2 gap-y-2 sm:grid-cols-3 sm:gap-x-1 lg:grid-cols-6">
         {items.map((t) => {
           const Icon = t.icon;
           return (
