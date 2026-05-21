@@ -1,10 +1,30 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { and, asc, count, desc, eq, gte, lt, sql } from "drizzle-orm";
+import {
+  Activity,
+  ArrowUpRight,
+  BarChart3,
+  Briefcase,
+  CalendarRange,
+  CheckCircle2,
+  DollarSign,
+  Gauge,
+  Lock,
+  Sparkles,
+  TrendingUp,
+  Users,
+  Zap,
+  type LucideIcon,
+} from "lucide-react";
 import { db } from "@/db/client";
 import { analyticsDailySnapshots, bookings, services, tenants, users } from "@/db/schema";
 import { getSession } from "@/lib/auth";
 import { planFeature } from "@/lib/quotas";
+import { getPlan } from "@/lib/plans";
 import Shell from "@/components/dashboard/Shell";
+import { PremiumCard } from "@/components/ui/Card";
+import { cn } from "@/lib/cn";
 import { generateInsights, type Insight } from "@/lib/analytics/insights";
 import { effectivePermissions } from "@/lib/security/permissions";
 import type { DailyAggregate, SnapshotExtras } from "@/lib/analytics/types";
@@ -28,11 +48,9 @@ export default async function AnalyticsPage() {
   if (!planFeature(tenant.currentPlan, "analytics")) {
     return (
       <Shell {...shellProps}>
-        <h1 className="text-heading font-semibold text-ink">Analytics</h1>
-        <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-6 text-sm text-amber-800">
-          Analytics is a Pro feature.{" "}
-          <a href="/dashboard/billing" className="font-medium underline">Upgrade your plan</a> to unlock charts and revenue estimates.
-        </div>
+        <LockedAnalyticsPreview
+          currentPlanName={getPlan(tenant.currentPlan).name}
+        />
       </Shell>
     );
   }
@@ -602,6 +620,375 @@ function BarChart({ days }: { days: { label: string; n: number }[] }) {
       })}
       <text x={PAD} y={H - 4} fontSize="10" fill="#94a3b8">{days[0]?.label}</text>
       <text x={W - PAD} y={H - 4} fontSize="10" fill="#94a3b8" textAnchor="end">{days[days.length - 1]?.label}</text>
+    </svg>
+  );
+}
+
+// ─── Locked Analytics Preview (Phase 11) ──────────────────────────
+//
+// Premium upgrade surface shown to tenants on plans without the
+// `analytics` capability. Replaces the prior amber "feature locked"
+// alert with an aspirational preview of the unlocked experience:
+//
+//   • Hero with upgrade CTA
+//   • 5 KPI cards — labels are real, values are skeleton bars
+//     (NOT fake numbers — keeps us honest, no fabricated metrics)
+//   • Two decorative chart silhouettes (pure SVG, no real data)
+//   • Three sample AI-style insight cards, clearly marked "preview"
+//   • Plan comparison card pairing the current plan with Pro
+//
+// Server component. No client interactivity beyond static links
+// (Upgrade CTAs route to /dashboard/billing). The brief mandated
+// "Disabled KPI cards / Blurred charts / Locked overlays / Upgrade
+// CTA / Plan comparison mini-card" — this delivers all of that.
+
+function LockedAnalyticsPreview({ currentPlanName }: { currentPlanName: string }) {
+  const proPlan = getPlan("pro");
+  const proFeatures = proPlan.features;
+
+  // KPI labels surfaced in the preview grid. Values intentionally
+  // rendered as skeleton bars rather than fabricated numbers —
+  // honest about what's locked without inventing metrics.
+  const kpiPreview: Array<{ icon: LucideIcon; label: string; tone: string }> = [
+    { icon: CalendarRange, label: "Total bookings",     tone: "bg-brand-subtle/60 text-brand-accent" },
+    { icon: DollarSign,    label: "Revenue",            tone: "bg-emerald-50 text-emerald-700" },
+    { icon: TrendingUp,    label: "Avg booking value",  tone: "bg-sky-50 text-sky-700" },
+    { icon: Activity,      label: "Conversion %",       tone: "bg-violet-50 text-violet-700" },
+    { icon: Gauge,         label: "Utilization %",      tone: "bg-amber-50 text-amber-700" },
+  ];
+
+  const sampleInsights: Array<{ icon: LucideIcon; tone: string; body: string }> = [
+    {
+      icon: TrendingUp,
+      tone: "bg-emerald-50 text-emerald-700 ring-emerald-200/40",
+      body: "Spot your highest-conversion hours and replicate them across the calendar.",
+    },
+    {
+      icon: Users,
+      tone: "bg-brand-subtle/60 text-brand-accent ring-brand-accent/20",
+      body: "See which staff convert above tenant average and route more leads their way.",
+    },
+    {
+      icon: Activity,
+      tone: "bg-amber-50 text-amber-700 ring-amber-200/40",
+      body: "Catch cancellation trends early — the engine flags when rates drift.",
+    },
+  ];
+
+  return (
+    <div className="space-y-5 pb-12">
+      {/* Hero */}
+      <PremiumCard className="relative overflow-hidden p-6">
+        <span aria-hidden className="pointer-events-none absolute -right-20 -top-20 h-56 w-56 rounded-full bg-brand-accent/15 blur-3xl" />
+        <span aria-hidden className="pointer-events-none absolute -left-16 bottom-0 h-40 w-40 rounded-full bg-violet-500/8 blur-3xl" />
+        <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/60 to-transparent" />
+        <div className="relative flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+          <div className="max-w-2xl">
+            <div className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.10em] text-amber-700 ring-1 ring-amber-200/40">
+              <Lock className="h-3 w-3" strokeWidth={2} />
+              Preview · {proPlan.name} feature
+            </div>
+            <h1 className="mt-3 text-[24px] font-semibold tracking-tight text-ink sm:text-[26px]">
+              Operational intelligence for your scheduling business.
+            </h1>
+            <p className="mt-2 text-[13px] leading-relaxed text-ink-muted">
+              Revenue trends, conversion rates, staff performance, and forecasting — wired to your real
+              booking data. Upgrade to {proPlan.name} to unlock the full analytics workspace.
+            </p>
+          </div>
+          <Link
+            href="/dashboard/billing"
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-brand-accent px-4 py-2.5 text-[12.5px] font-semibold text-white shadow-[0_4px_18px_rgba(53,157,243,0.30)] transition-all duration-[260ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:shadow-[0_8px_24px_rgba(53,157,243,0.40)]"
+          >
+            <Sparkles className="h-3.5 w-3.5" strokeWidth={2} />
+            Upgrade to {proPlan.name}
+          </Link>
+        </div>
+      </PremiumCard>
+
+      {/* KPI preview grid — labels real, values skeleton (no fake numbers) */}
+      <div>
+        <SectionLabel
+          eyebrow="KPI cockpit"
+          title="Executive metrics, locked"
+          hint="Renders with your real data once you upgrade."
+        />
+        <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+          {kpiPreview.map((k) => {
+            const Icon = k.icon;
+            return (
+              <div
+                key={k.label}
+                className="relative overflow-hidden rounded-2xl border border-border/60 bg-surface p-3.5 transition-all duration-[260ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:shadow-soft"
+              >
+                <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/50 to-transparent" />
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[10px] font-semibold uppercase tracking-[0.10em] text-ink-subtle">
+                      {k.label}
+                    </div>
+                    {/* Skeleton bars where the metric would render —
+                        honest about what's locked, no fabricated data. */}
+                    <div className="mt-2 space-y-1.5" aria-hidden>
+                      <div className="h-5 w-3/4 rounded-md bg-gradient-to-r from-ink/10 via-ink/[0.06] to-transparent" />
+                      <div className="h-2 w-1/2 rounded-md bg-ink/[0.06]" />
+                    </div>
+                  </div>
+                  <span className={cn("inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg", k.tone)}>
+                    <Icon className="h-3.5 w-3.5" strokeWidth={1.75} />
+                  </span>
+                </div>
+                {/* Subtle lock indicator at the bottom */}
+                <div className="mt-3 inline-flex items-center gap-1 text-[10px] font-medium text-ink-subtle">
+                  <Lock className="h-2.5 w-2.5" strokeWidth={2} />
+                  Locked
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Chart silhouettes — pure decoration, no real data */}
+      <div>
+        <SectionLabel
+          eyebrow="Trends"
+          title="Booking + revenue charts, locked"
+          hint="Recharts-powered trend lines, comparisons, and forecasts."
+        />
+        <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-2">
+          <ChartPreviewCard title="Booking trend · 30 days" icon={BarChart3}>
+            <AreaSilhouette />
+          </ChartPreviewCard>
+          <ChartPreviewCard title="Revenue · 30 days" icon={DollarSign}>
+            <BarSilhouette />
+          </ChartPreviewCard>
+        </div>
+      </div>
+
+      {/* Sample insight cards — clearly marked preview */}
+      <div>
+        <SectionLabel
+          eyebrow="AI signals"
+          title="Operational insights, locked"
+          hint="Auto-generated when the engine has enough data to be useful."
+        />
+        <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-3">
+          {sampleInsights.map((s, i) => {
+            const Icon = s.icon;
+            return (
+              <div
+                key={i}
+                className="relative overflow-hidden rounded-2xl border border-border/60 bg-surface p-4 transition-all duration-[260ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:shadow-soft"
+              >
+                <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/50 to-transparent" />
+                <div className="flex items-start gap-2.5">
+                  <span className={cn("inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ring-1", s.tone)}>
+                    <Icon className="h-3.5 w-3.5" strokeWidth={1.75} />
+                  </span>
+                  <div className="min-w-0">
+                    <div className="inline-flex items-center gap-1 rounded-full bg-surface-inset px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.08em] text-ink-subtle ring-1 ring-border/40">
+                      Preview
+                    </div>
+                    <p className="mt-1.5 text-[12px] leading-relaxed text-ink-muted">{s.body}</p>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Plan comparison card */}
+      <PremiumCard className="relative overflow-hidden p-5">
+        <span aria-hidden className="pointer-events-none absolute -right-16 -top-16 h-48 w-48 rounded-full bg-brand-accent/12 blur-3xl" />
+        <span aria-hidden className="pointer-events-none absolute -left-12 bottom-0 h-32 w-32 rounded-full bg-amber-400/10 blur-3xl" />
+        <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/60 to-transparent" />
+        <div className="relative grid gap-4 lg:grid-cols-[1fr_1fr_auto] lg:items-center">
+          {/* Current plan side */}
+          <div className="rounded-xl border border-border bg-surface p-4">
+            <div className="text-[10px] font-semibold uppercase tracking-[0.10em] text-ink-subtle">
+              Current plan
+            </div>
+            <div className="mt-1 flex items-baseline gap-2">
+              <span className="text-[18px] font-semibold tracking-tight text-ink">{currentPlanName}</span>
+              <span className="inline-flex items-center rounded-full bg-surface-inset px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.06em] text-ink-subtle ring-1 ring-border/40">
+                you&apos;re here
+              </span>
+            </div>
+            <ul className="mt-3 space-y-1.5 text-[11.5px] text-ink-muted">
+              <li className="flex items-start gap-1.5">
+                <span aria-hidden className="mt-1.5 inline-block h-1 w-1 shrink-0 rounded-full bg-ink-subtle" />
+                <span>Booking essentials + public booking page</span>
+              </li>
+              <li className="flex items-start gap-1.5">
+                <span aria-hidden className="mt-1.5 inline-block h-1 w-1 shrink-0 rounded-full bg-ink-subtle" />
+                <span>Operational intelligence locked</span>
+              </li>
+              <li className="flex items-start gap-1.5">
+                <span aria-hidden className="mt-1.5 inline-block h-1 w-1 shrink-0 rounded-full bg-ink-subtle" />
+                <span>Custom branding locked</span>
+              </li>
+            </ul>
+          </div>
+
+          {/* Pro plan side — highlighted */}
+          <div className="relative rounded-xl border-2 border-brand-accent/40 bg-gradient-to-br from-brand-subtle/40 via-surface to-surface p-4 shadow-[0_8px_24px_rgba(53,157,243,0.12)]">
+            <div className="absolute -top-2 right-3 inline-flex items-center gap-1 rounded-full bg-brand-accent px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.08em] text-white shadow-[0_4px_12px_rgba(53,157,243,0.32)]">
+              <Sparkles className="h-2.5 w-2.5" strokeWidth={2} />
+              Recommended
+            </div>
+            <div className="text-[10px] font-semibold uppercase tracking-[0.10em] text-brand-accent">
+              Upgrade to
+            </div>
+            <div className="mt-1 flex items-baseline gap-2">
+              <span className="text-[18px] font-semibold tracking-tight text-ink">{proPlan.name}</span>
+              {proPlan.priceCents !== null && (
+                <span className="text-[11.5px] font-medium text-ink-muted">
+                  ${(proPlan.priceCents / 100).toFixed(0)}/mo
+                </span>
+              )}
+            </div>
+            <ul className="mt-3 space-y-1.5 text-[11.5px] text-ink">
+              {proFeatures.map((f) => (
+                <li key={f} className="flex items-start gap-1.5">
+                  <CheckCircle2 className="mt-0.5 h-3 w-3 shrink-0 text-brand-accent" strokeWidth={2} />
+                  <span>{f}</span>
+                </li>
+              ))}
+              <li className="flex items-start gap-1.5">
+                <CheckCircle2 className="mt-0.5 h-3 w-3 shrink-0 text-brand-accent" strokeWidth={2} />
+                <span className="font-medium">Full analytics workspace</span>
+              </li>
+            </ul>
+          </div>
+
+          {/* CTA column */}
+          <div className="flex flex-col items-stretch gap-2 lg:items-end">
+            <Link
+              href="/dashboard/billing"
+              className="inline-flex items-center justify-center gap-1.5 rounded-md bg-brand-accent px-4 py-2.5 text-[12.5px] font-semibold text-white shadow-[0_4px_18px_rgba(53,157,243,0.30)] transition-all duration-[260ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:shadow-[0_8px_24px_rgba(53,157,243,0.40)]"
+            >
+              <Zap className="h-3.5 w-3.5" strokeWidth={2} />
+              Unlock analytics
+              <ArrowUpRight className="h-3 w-3" strokeWidth={2} />
+            </Link>
+            <Link
+              href="/pricing"
+              className="text-center text-[11px] text-ink-muted underline-offset-2 hover:text-ink hover:underline"
+            >
+              Compare every plan
+            </Link>
+          </div>
+        </div>
+      </PremiumCard>
+    </div>
+  );
+}
+
+// Section header used inside the locked preview only.
+function SectionLabel({
+  eyebrow,
+  title,
+  hint,
+}: {
+  eyebrow: string;
+  title: string;
+  hint: string;
+}) {
+  return (
+    <div className="flex flex-wrap items-end justify-between gap-2">
+      <div>
+        <div className="text-[10px] font-semibold uppercase tracking-[0.10em] text-brand-accent">
+          {eyebrow}
+        </div>
+        <h2 className="mt-0.5 text-[14px] font-semibold tracking-tight text-ink">{title}</h2>
+      </div>
+      <p className="max-w-md text-[11px] text-ink-subtle">{hint}</p>
+    </div>
+  );
+}
+
+// Decorative chart silhouette wrapper. Title row + lock chip +
+// blurred chart content. Pure decoration, no real data.
+function ChartPreviewCard({
+  title,
+  icon: Icon,
+  children,
+}: {
+  title: string;
+  icon: LucideIcon;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="relative overflow-hidden rounded-2xl border border-border/60 bg-surface p-4 transition-all duration-[260ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:shadow-soft">
+      <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/50 to-transparent" />
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <span className="inline-flex h-6 w-6 items-center justify-center rounded-lg bg-brand-subtle/60 text-brand-accent">
+            <Icon className="h-3.5 w-3.5" strokeWidth={1.75} />
+          </span>
+          <span className="text-[12.5px] font-semibold tracking-tight text-ink">{title}</span>
+        </div>
+        <span className="inline-flex items-center gap-1 rounded-full bg-surface-inset px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.08em] text-ink-subtle ring-1 ring-border/40">
+          <Lock className="h-2.5 w-2.5" strokeWidth={2} />
+          Locked
+        </span>
+      </div>
+      {/* Decorative blur layer + soft brand wash */}
+      <div className="relative mt-3 overflow-hidden rounded-lg">
+        <div aria-hidden className="absolute inset-0 bg-gradient-to-b from-brand-subtle/0 via-brand-subtle/20 to-brand-subtle/0" />
+        <div aria-hidden className="opacity-50 blur-[1px]">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+// Pure decorative SVG area silhouette. Hand-crafted curve, no real
+// data. Used inside the locked-preview ChartPreviewCard.
+function AreaSilhouette() {
+  return (
+    <svg viewBox="0 0 400 110" className="w-full" preserveAspectRatio="none" role="presentation">
+      <defs>
+        <linearGradient id="zm-locked-area" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#359df3" stopOpacity="0.35" />
+          <stop offset="100%" stopColor="#359df3" stopOpacity="0.02" />
+        </linearGradient>
+      </defs>
+      <path
+        d="M 0 80 L 25 70 L 55 75 L 90 55 L 130 60 L 165 40 L 200 50 L 235 30 L 275 38 L 310 22 L 345 30 L 380 15 L 400 18 L 400 110 L 0 110 Z"
+        fill="url(#zm-locked-area)"
+      />
+      <path
+        d="M 0 80 L 25 70 L 55 75 L 90 55 L 130 60 L 165 40 L 200 50 L 235 30 L 275 38 L 310 22 L 345 30 L 380 15 L 400 18"
+        fill="none"
+        stroke="#359df3"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+// Pure decorative SVG bar silhouette — staggered heights to feel
+// like a real revenue chart, but no actual data.
+function BarSilhouette() {
+  const heights = [38, 52, 30, 65, 42, 70, 48, 80, 55, 90, 62, 78];
+  return (
+    <svg viewBox="0 0 400 110" className="w-full" preserveAspectRatio="none" role="presentation">
+      {heights.map((h, i) => (
+        <rect
+          key={i}
+          x={6 + i * 33}
+          y={100 - h}
+          width="22"
+          height={h}
+          rx="3"
+          fill="#10b981"
+          opacity={0.5 + (i / heights.length) * 0.3}
+        />
+      ))}
     </svg>
   );
 }
