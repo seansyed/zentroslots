@@ -278,6 +278,20 @@ function BookingCard({
                   Join meeting
                 </a>
               )}
+              {/* F11 — ICS download. The route handler verifies the
+                  client session + booking ownership, then returns a
+                  text/calendar attachment so the browser saves it. */}
+              <a
+                href={`/api/client/${encodeURIComponent(tenantSlug)}/bookings/${encodeURIComponent(booking.id)}/ics`}
+                className="inline-flex min-h-[36px] items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-[12px] font-medium text-slate-700 shadow-sm transition-all hover:-translate-y-0.5 hover:bg-slate-50 hover:shadow-sm"
+                aria-label="Download calendar file (.ics)"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-3.5 w-3.5" aria-hidden>
+                  <rect x="3" y="4" width="18" height="18" rx="2" />
+                  <path d="M16 2v4M8 2v4M3 10h18M12 14v4M10 16h4" strokeLinecap="round" />
+                </svg>
+                Add to calendar
+              </a>
               {booking.rescheduleToken && (
                 <Link
                   href={`/reschedule/${encodeURIComponent(booking.rescheduleToken)}`}

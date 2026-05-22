@@ -1,10 +1,11 @@
 import Link from "next/link";
-import { and, desc, eq, gte } from "drizzle-orm";
+import { and, asc, desc, eq, gte, sql } from "drizzle-orm";
 
 import { db } from "@/db/client";
-import { bookings, services, users } from "@/db/schema";
+import { bookingOccurrences, bookingSeries, bookings, services, users, waitlists } from "@/db/schema";
 import ClientPortalShell from "@/components/client/ClientPortalShell";
 import { TimeText } from "@/components/client/TimeText";
+import { summarizeRRule } from "@/lib/recurrence-summary";
 import { requireClientPortalContext } from "./_lib/guard";
 
 export const dynamic = "force-dynamic";
@@ -55,6 +56,100 @@ export default async function ClientHomePage(props: {
     .orderBy(desc(bookings.startAt))
     .limit(5);
 
+  // ── F9 Recurring-series visibility ───────────────────────────────
+  // Surface every active series owned by this customer's email along
+  // with the next few materialized occurrences. Customers who never
+  // joined a recurring series see an empty array → section hides.
+  const activeSeries = await db
+    .select({
+      id: bookingSeries.id,
+      recurrenceRule: bookingSeries.recurrenceRule,
+      occurrenceCount: bookingSeries.occurrenceCount,
+      endDate: bookingSeries.endDate,
+      serviceName: services.name,
+      staffName: users.name,
+    })
+    .from(bookingSeries)
+    .innerJoin(services, eq(services.id, bookingSeries.serviceId))
+    .leftJoin(users, eq(users.id, bookingSeries.staffUserId))
+    .where(
+      and(
+        eq(bookingSeries.tenantId, tenant.id),
+        sql`lower(${bookingSeries.customerEmail}) = ${customer.email.toLowerCase()}`,
+        eq(bookingSeries.status, "active"),
+      ),
+    )
+    .orderBy(asc(bookingSeries.createdAt))
+    .limit(3);
+
+  const seriesWithUpcoming = await Promise.all(
+    activeSeries.map(async (s) => {
+      const upcoming = await db
+        .select({
+          id: bookingOccurrences.id,
+          startAt: bookingOccurrences.occurrenceStartAt,
+          status: bookingOccurrences.status,
+        })
+        .from(bookingOccurrences)
+        .where(
+          and(
+            eq(bookingOccurrences.bookingSeriesId, s.id),
+            eq(bookingOccurrences.status, "scheduled"),
+            gte(bookingOccurrences.occurrenceStartAt, now),
+          ),
+        )
+        .orderBy(asc(bookingOccurrences.occurrenceStartAt))
+        .limit(3);
+      return { ...s, upcoming };
+    }),
+  );
+
+  // ── F10 Waitlist queue position ──────────────────────────────────
+  // Find every waiting entry for this customer. Then compute each
+  // entry's queue position via a SQL count of waiting peers with
+  // higher priority or earlier created_at (the same ordering the
+  // waitlist engine uses to promote). One round-trip per entry — fine
+  // for the typical 0–2 entries per customer; capped at 5.
+  const activeWaits = await db
+    .select({
+      id: waitlists.id,
+      serviceId: waitlists.serviceId,
+      priority: waitlists.priority,
+      createdAt: waitlists.createdAt,
+      preferredDate: waitlists.preferredDate,
+      preferredTimeRange: waitlists.preferredTimeRange,
+      serviceName: services.name,
+    })
+    .from(waitlists)
+    .innerJoin(services, eq(services.id, waitlists.serviceId))
+    .where(
+      and(
+        eq(waitlists.tenantId, tenant.id),
+        sql`lower(${waitlists.customerEmail}) = ${customer.email.toLowerCase()}`,
+        eq(waitlists.status, "waiting"),
+      ),
+    )
+    .orderBy(asc(waitlists.createdAt))
+    .limit(5);
+
+  const waitsWithPosition = await Promise.all(
+    activeWaits.map(async (w) => {
+      const [row] = await db.execute<{ ahead: number }>(sql`
+        SELECT COUNT(*)::int AS ahead
+          FROM ${waitlists}
+         WHERE ${waitlists.tenantId} = ${tenant.id}
+           AND ${waitlists.serviceId} = ${w.serviceId}
+           AND ${waitlists.status} = 'waiting'
+           AND (
+             ${waitlists.priority} > ${w.priority}
+             OR (${waitlists.priority} = ${w.priority} AND ${waitlists.createdAt} < ${w.createdAt})
+           )
+      `);
+      const ahead = Number(row?.ahead ?? 0);
+      return { ...w, position: ahead + 1 };
+    }),
+  );
+
   const firstName = customer.name.split(" ")[0] || "there";
 
   return (
@@ -98,6 +193,134 @@ export default async function ClientHomePage(props: {
           />
         )}
       </section>
+
+      {/* F9 — Recurring series. Only rendered when the customer is on
+          at least one active series. The booking_series engine already
+          materializes occurrences into the bookings table, so this is
+          purely a visibility layer — no behavior change. */}
+      {seriesWithUpcoming.length > 0 && (
+        <section className="relative mt-5 overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <span
+            aria-hidden
+            className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-slate-200 to-transparent"
+          />
+          <div className="flex items-baseline justify-between">
+            <div className="text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-500">
+              Your recurring schedule
+            </div>
+            <Link
+              href={`/client/${tenant.slug}/bookings`}
+              className="text-[11.5px] font-medium text-slate-500 transition hover:text-slate-900"
+            >
+              View all →
+            </Link>
+          </div>
+          <ul className="mt-3 space-y-3">
+            {seriesWithUpcoming.map((s) => (
+              <li
+                key={s.id}
+                className="rounded-xl border border-slate-200 bg-gradient-to-br from-slate-50/70 to-white p-3.5"
+              >
+                <div className="flex items-start gap-3">
+                  <div
+                    className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-white shadow-sm"
+                    style={{ backgroundColor: tenant.primaryColor }}
+                    aria-hidden
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4">
+                      <path d="M3 12a9 9 0 1 0 3-6.7M3 3v6h6" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[13.5px] font-semibold tracking-tight text-slate-900">
+                      {s.serviceName}
+                      {s.staffName && (
+                        <span className="font-normal text-slate-500"> · with {s.staffName}</span>
+                      )}
+                    </div>
+                    <div className="mt-0.5 text-[11.5px] text-slate-500">
+                      <span className="font-medium text-slate-700">{summarizeRRule(s.recurrenceRule)}</span>
+                      {s.occurrenceCount ? (
+                        <> · {s.occurrenceCount} total</>
+                      ) : null}
+                      {s.endDate ? (
+                        <> · ends <TimeText iso={new Date(s.endDate + "T00:00:00").toISOString()} format="MMM d" /></>
+                      ) : null}
+                    </div>
+                    {s.upcoming.length > 0 ? (
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {s.upcoming.map((o) => (
+                          <span
+                            key={o.id}
+                            className="inline-flex items-center gap-1 rounded-md bg-white px-2 py-0.5 text-[10.5px] font-medium tabular-nums text-slate-700 ring-1 ring-slate-200"
+                          >
+                            <TimeText iso={o.startAt.toISOString()} format="MMM d · h:mm a" />
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="mt-2 text-[10.5px] text-slate-400">
+                        Upcoming occurrences will appear here.
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {/* F10 — Waitlist queue position. Surfaces every active waiting
+          entry for this customer with the live queue position. Cap at 5
+          entries (the per-customer SLO most tenants never approach). */}
+      {waitsWithPosition.length > 0 && (
+        <section className="relative mt-5 overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <span
+            aria-hidden
+            className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-slate-200 to-transparent"
+          />
+          <div className="text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-500">
+            On the waitlist
+          </div>
+          <ul className="mt-3 space-y-2.5">
+            {waitsWithPosition.map((w) => (
+              <li
+                key={w.id}
+                className="flex items-center gap-3 rounded-xl border border-slate-200 bg-gradient-to-br from-amber-50/40 to-white p-3"
+              >
+                <div
+                  className="inline-flex h-10 w-10 shrink-0 flex-col items-center justify-center rounded-lg text-white shadow-sm"
+                  style={{ backgroundColor: tenant.primaryColor }}
+                  aria-hidden
+                >
+                  <span className="text-[9px] font-semibold uppercase tracking-wider opacity-90">Pos</span>
+                  <span className="text-[14px] font-semibold leading-none tabular-nums">{w.position}</span>
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="text-[13.5px] font-semibold tracking-tight text-slate-900">
+                    {w.serviceName}
+                  </div>
+                  <div className="mt-0.5 text-[11.5px] text-slate-500">
+                    {w.preferredDate ? (
+                      <>
+                        Preferred:{" "}
+                        <TimeText
+                          iso={new Date(w.preferredDate + "T12:00:00").toISOString()}
+                          format="MMM d"
+                        />
+                        {w.preferredTimeRange !== "any" && <> · {w.preferredTimeRange}</>}
+                        {" · "}
+                      </>
+                    ) : null}
+                    We&rsquo;ll email instantly if a slot opens.
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       {/* Quick actions */}
       <section className="mt-5 grid gap-3 sm:grid-cols-2">
