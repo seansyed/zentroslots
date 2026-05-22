@@ -207,7 +207,7 @@ function buildNav(
         ]
       : []),
     ...(flagOrRoleDefault("canManageAutomation", roleDefaults.canManageAutomation)
-      ? [{ label: "Follow-up automations", href: "/dashboard/settings/automations", icon: Sparkles }]
+      ? [{ label: "Follow-up automations", href: "/dashboard/settings/automations", icon: Sparkles, premium: needsProUpgrade }]
       : []),
     { label: "Security", href: "/dashboard/settings/security", icon: Shield },
     ...(flagOrRoleDefault("canManageSecurity", role === "admin")

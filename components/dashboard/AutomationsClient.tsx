@@ -1,8 +1,12 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
+import { Lock, Sparkles } from "lucide-react";
 
 import { Badge, Button, Card, Skeleton, toast } from "@/components/ui/primitives";
+import { useCapability } from "@/components/billing/CapabilityProvider";
+import { LockedFeatureCard } from "@/components/billing/LockedFeatureCard";
 
 type ReviewRule = {
   id: string;
@@ -67,6 +71,22 @@ export default function AutomationsClient() {
   }, []);
   React.useEffect(() => { refresh(); }, [refresh]);
 
+  // ── Plan capability gate (mirrors RecurringClient Phase 6) ──────────
+  // Three render branches:
+  //   1. cap.allowed → normal premium UX
+  //   2. !cap.allowed AND no grandfathered rules → full locked page
+  //   3. !cap.allowed AND grandfathered rules exist → rules visible
+  //      read-only with banner; ALL mutation surfaces hidden.
+  // Backend already 402s every mutation route (Phase 1 ships
+  // assertCanCreateAutomationRule). The UI mirroring is purely about
+  // not letting the operator find a button that will fail.
+  const cap = useCapability("automation_rules");
+  const grandfatheredCount =
+    (data?.reviews.tenantDefault ? 1 : 0) +
+    (data?.reviews.serviceRules.length ?? 0) +
+    (data?.followups.all.length ?? 0);
+  const actionsDisabled = !cap.allowed;
+
   if (loading || !data) {
     return (
       <div className="mt-6 space-y-3">
@@ -76,8 +96,30 @@ export default function AutomationsClient() {
     );
   }
 
+  // Branch 2 — Free tenant with no grandfathered rules. Render the
+  // LockedFeatureCard instead of the operational dashboard. Operational
+  // sections never mount.
+  if (!cap.allowed && grandfatheredCount === 0) {
+    return (
+      <div className="mt-6 space-y-6 pb-12">
+        <LockedFeatureCard
+          cap="automation_rules"
+          title="Customer follow-up automation"
+          description="Automatically engage customers after appointments, cancellations, no-shows, and completed services. Set review requests, rebooking nudges, and post-visit follow-ups that fire on real booking lifecycle events."
+        >
+          <></>
+        </LockedFeatureCard>
+      </div>
+    );
+  }
+
   return (
     <div className="mt-6 space-y-8">
+      {/* Grandfather banner — branch 3 only. */}
+      {!cap.allowed && grandfatheredCount > 0 && (
+        <GrandfatherBanner cap={cap} count={grandfatheredCount} />
+      )}
+
       {/* REVIEW REQUESTS */}
       <section>
         <h2 className="text-sm font-semibold text-ink">Review requests</h2>
@@ -90,6 +132,7 @@ export default function AutomationsClient() {
           rule={data.reviews.tenantDefault}
           platforms={data.reviewPlatforms}
           onSaved={refresh}
+          actionsDisabled={actionsDisabled}
         />
         {data.reviews.serviceRules.length > 0 && (
           <div className="mt-3 space-y-3">
@@ -104,16 +147,21 @@ export default function AutomationsClient() {
                 rule={r}
                 platforms={data.reviewPlatforms}
                 onSaved={refresh}
+                actionsDisabled={actionsDisabled}
               />
             ))}
           </div>
         )}
-        <AddServiceOverride
-          kind="review"
-          services={data.services}
-          existing={data.reviews.serviceRules.map((r) => r.serviceId).filter((v): v is string => v !== null)}
-          onAdd={(serviceId) => createDraftReviewRule(serviceId, data.reviewPlatforms[0], refresh)}
-        />
+        {/* Add affordance disappears entirely when locked — keeps the
+            grandfathered view clean without an inert dropdown. */}
+        {!actionsDisabled && (
+          <AddServiceOverride
+            kind="review"
+            services={data.services}
+            existing={data.reviews.serviceRules.map((r) => r.serviceId).filter((v): v is string => v !== null)}
+            onAdd={(serviceId) => createDraftReviewRule(serviceId, data.reviewPlatforms[0], refresh)}
+          />
+        )}
       </section>
 
       {/* FOLLOW-UPS */}
@@ -136,15 +184,18 @@ export default function AutomationsClient() {
                 serviceName={data.services.find((s) => s.id === r.serviceId)?.name}
                 triggerEvents={data.triggerEvents}
                 onSaved={refresh}
+                actionsDisabled={actionsDisabled}
               />
             ))
           )}
         </div>
-        <AddFollowupRule
-          services={data.services}
-          triggerEvents={data.triggerEvents}
-          onAdd={refresh}
-        />
+        {!actionsDisabled && (
+          <AddFollowupRule
+            services={data.services}
+            triggerEvents={data.triggerEvents}
+            onAdd={refresh}
+          />
+        )}
       </section>
     </div>
   );
@@ -158,12 +209,14 @@ function ReviewRuleEditor({
   rule,
   platforms,
   onSaved,
+  actionsDisabled,
 }: {
   scope: "tenant" | "service";
   serviceName?: string;
   rule: ReviewRule | null;
   platforms: string[];
   onSaved: () => void;
+  actionsDisabled?: boolean;
 }) {
   const [enabled, setEnabled] = React.useState(rule?.enabled ?? true);
   const [delay, setDelay] = React.useState(rule?.delayMinutes?.toString() ?? "60");
@@ -280,13 +333,26 @@ function ReviewRuleEditor({
       </div>
 
       <div className="mt-4 flex items-center justify-between">
-        {rule && (
+        {/* Mutation buttons hidden (not disabled) when capability locked,
+            matching the RecurringClient lockdown pattern. Read-only view
+            preserves the operator's visibility of grandfathered config. */}
+        {!actionsDisabled && rule && (
           <button onClick={remove} disabled={saving} className="text-xs text-red-600 hover:text-red-700 disabled:opacity-50">
             Remove
           </button>
         )}
+        {actionsDisabled && rule && (
+          <span
+            className="inline-flex items-center gap-1 rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800"
+            title="Grandfathered — upgrade to manage this rule"
+          >
+            <Lock className="h-3 w-3" /> Grandfathered
+          </span>
+        )}
         <div className="ml-auto">
-          <Button onClick={save} disabled={saving}>{saving ? "Saving…" : rule ? "Save changes" : "Create rule"}</Button>
+          {!actionsDisabled && (
+            <Button onClick={save} disabled={saving}>{saving ? "Saving…" : rule ? "Save changes" : "Create rule"}</Button>
+          )}
         </div>
       </div>
     </Card>
@@ -300,11 +366,13 @@ function FollowupRuleEditor({
   serviceName,
   triggerEvents,
   onSaved,
+  actionsDisabled,
 }: {
   rule: FollowupRule;
   serviceName?: string;
   triggerEvents: string[];
   onSaved: () => void;
+  actionsDisabled?: boolean;
 }) {
   const [enabled, setEnabled] = React.useState(rule.enabled);
   const [trigger, setTrigger] = React.useState(rule.triggerEvent);
@@ -408,10 +476,21 @@ function FollowupRuleEditor({
       </div>
 
       <div className="mt-4 flex items-center justify-between">
-        <button onClick={remove} disabled={saving} className="text-xs text-red-600 hover:text-red-700 disabled:opacity-50">
-          Remove
-        </button>
-        <Button onClick={save} disabled={saving}>{saving ? "Saving…" : "Save changes"}</Button>
+        {!actionsDisabled ? (
+          <>
+            <button onClick={remove} disabled={saving} className="text-xs text-red-600 hover:text-red-700 disabled:opacity-50">
+              Remove
+            </button>
+            <Button onClick={save} disabled={saving}>{saving ? "Saving…" : "Save changes"}</Button>
+          </>
+        ) : (
+          <span
+            className="inline-flex items-center gap-1 rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800"
+            title="Grandfathered — upgrade to manage this rule"
+          >
+            <Lock className="h-3 w-3" /> Grandfathered
+          </span>
+        )}
       </div>
     </Card>
   );
@@ -563,4 +642,47 @@ async function createDraftReviewRule(
   } catch (e) {
     toast(e instanceof Error ? e.message : "Create failed", "error");
   }
+}
+
+// ─── Free-plan grandfather banner (mirrors RecurringClient Phase 6) ────
+//
+// Shown ABOVE the page chrome when a Free / Solo tenant has existing
+// rules from a previous paid subscription. The cron continues to fire
+// these rules (Phase 2 cron guards) so the banner is purely UX honesty:
+// "your rules still work, but you cannot edit them without upgrading."
+
+function GrandfatherBanner({
+  cap,
+  count,
+}: {
+  cap: { reason: string };
+  count: number;
+}) {
+  return (
+    <div className="rounded-xl border border-amber-200/70 bg-gradient-to-r from-amber-50 via-surface to-surface p-4 shadow-sm">
+      <div className="flex items-start gap-3">
+        <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-amber-100 text-amber-700">
+          <Sparkles className="h-4 w-4" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold text-ink">
+            {count} automation{count === 1 ? " is" : "s are"} grandfathered from
+            your previous subscription
+          </p>
+          <p className="mt-0.5 text-[12px] leading-relaxed text-ink-muted">
+            Existing review requests and follow-ups continue to fire on every
+            qualifying booking event. Upgrade to Pro to create new rules, edit
+            existing ones, or activate new triggers.
+          </p>
+          <div className="mt-2 text-[11px] text-ink-subtle">{cap.reason}</div>
+        </div>
+        <Link
+          href="/dashboard/billing"
+          className="shrink-0 rounded-md bg-brand-accent px-3 py-1.5 text-[12px] font-semibold text-white shadow-sm hover:bg-brand-accent/90"
+        >
+          See plans
+        </Link>
+      </div>
+    </div>
+  );
 }

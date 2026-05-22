@@ -4,8 +4,10 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db/client";
 import { tenants, users } from "@/db/schema";
 import { getSession } from "@/lib/auth";
+import { loadCapabilitiesForTenant } from "@/lib/billing/loadCapabilities";
 import Shell from "@/components/dashboard/Shell";
 import AutomationsClient from "@/components/dashboard/AutomationsClient";
+import { CapabilityProvider } from "@/components/billing/CapabilityProvider";
 import { effectivePermissions, userHasPermission } from "@/lib/security/permissions";
 
 export const metadata = { title: "Follow-up automations" };
@@ -26,6 +28,12 @@ export default async function AutomationsPage() {
   if (!tenant) redirect("/dashboard");
 
   const permissions = effectivePermissions(user);
+
+  // Phase 6+ capability hydration — server-fetched payload feeds
+  // <CapabilityProvider> so AutomationsClient reads `automation_rules`
+  // state via useCapability() with zero flicker.
+  const capabilities = await loadCapabilitiesForTenant(tenant.id);
+
   return (
     <Shell
       user={{ name: user.name, email: user.email, role: user.role, permissions }}
@@ -37,15 +45,17 @@ export default async function AutomationsPage() {
         { label: "Follow-up automations" },
       ]}
     >
-      <h1 className="text-heading font-semibold text-ink">Follow-up automations</h1>
-      <p className="mt-1 max-w-2xl text-sm text-ink-muted">
-        Review requests and post-appointment follow-ups. Rules fire
-        after a booking flips to <code>completed</code> or
-        <code>no_show</code>. Without a rule, nothing extra is sent —
-        same behavior as before this feature shipped.
-      </p>
+      <CapabilityProvider initial={capabilities}>
+        <h1 className="text-heading font-semibold text-ink">Follow-up automations</h1>
+        <p className="mt-1 max-w-2xl text-sm text-ink-muted">
+          Review requests and post-appointment follow-ups. Rules fire
+          after a booking flips to <code>completed</code> or
+          <code>no_show</code>. Without a rule, nothing extra is sent —
+          same behavior as before this feature shipped.
+        </p>
 
-      <AutomationsClient />
+        <AutomationsClient />
+      </CapabilityProvider>
     </Shell>
   );
 }
