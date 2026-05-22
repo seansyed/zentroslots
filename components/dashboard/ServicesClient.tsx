@@ -103,6 +103,71 @@ type Svc = {
   bookingsLast30d?: number;
 };
 
+// ─── Wave G — currency conversion helpers ────────────────────────────────
+//
+// The DB / API contract is integer cents (preserved unchanged). The
+// service editor form works in USD dollar strings so admins type
+// "49.99" instead of "4999". Conversion happens at exactly two
+// boundaries: load (cents → dollars input string) and save (string
+// → cents int). Float math is contained to ONE Math.round() call
+// per save to defuse 0.1 + 0.2 = 0.30000…04 precision drift.
+//
+// All three helpers are pure + module-scoped so they can be unit-tested
+// in isolation later without React.
+
+/** cents (integer) → input-friendly USD string.
+ *  • 0 → "" (empty input is the cleanest "no price" UX)
+ *  • 4900 → "49.00"
+ *  • 4999 → "49.99"
+ *  • 4905 → "49.05" (preserves leading-zero cents) */
+function centsToDollarsInput(cents: number): string {
+  if (!cents || cents === 0 || !Number.isFinite(cents)) return "";
+  return (cents / 100).toFixed(2);
+}
+
+/** dollar input string → cents (integer ≥ 0).
+ *  Empty / whitespace / NaN → 0 (= "$0").
+ *  Negative → 0 (input sanitizer should prevent this; defensive).
+ *  Rounds to defuse float precision: 49.99 * 100 === 4998.999999…9. */
+function dollarsToCents(input: string): number {
+  const trimmed = (input ?? "").trim();
+  if (!trimmed) return 0;
+  const n = Number(trimmed);
+  if (!Number.isFinite(n) || n < 0) return 0;
+  return Math.round(n * 100);
+}
+
+/** Filter onChange events for a currency input.
+ *  Allows: digits + at most one "." + at most 2 fractional digits.
+ *  Strips: letters, "$", commas, extra dots, 3+ decimal places.
+ *  Returns the cleaned controlled-input value. */
+function sanitizeCurrencyInput(raw: string): string {
+  let s = (raw ?? "").replace(/[^\d.]/g, "");
+  const firstDot = s.indexOf(".");
+  if (firstDot !== -1) {
+    // Collapse any subsequent dots so users can't type "49..99".
+    s = s.slice(0, firstDot + 1) + s.slice(firstDot + 1).replace(/\./g, "");
+    const [whole, frac = ""] = s.split(".");
+    s = whole + "." + frac.slice(0, 2);
+  }
+  return s;
+}
+
+/** Normalize on blur — converts mid-typing artifacts to a clean
+ *  display form:
+ *    "49."   → "49"
+ *    "49.5"  → "49.50"
+ *    ".99"   → "0.99"
+ *    ""      → "" (preserved; means $0) */
+function normalizeCurrencyOnBlur(raw: string): string {
+  const s = sanitizeCurrencyInput(raw);
+  if (!s) return "";
+  if (s === ".") return "";
+  const n = Number(s);
+  if (!Number.isFinite(n)) return "";
+  return n.toFixed(2);
+}
+
 const DEFAULT_COLORS = [
   "#359df3", "#7c3aed", "#0d9488", "#ea580c",
   "#db2777", "#65a30d", "#0891b2", "#c026d3",
@@ -1093,7 +1158,10 @@ function ServiceOpCard({
           </MetaPill>
           {svc.price > 0 && (
             <MetaPill icon={null} tint="neutral">
-              <span className="font-semibold text-ink">${(svc.price / 100).toFixed(0)}</span>
+              {/* Wave G — always render 2 decimals so $49 and $49.99
+                  are visually consistent in the service list. Was
+                  toFixed(0), which silently rounded $49.99 → "$50". */}
+              <span className="font-semibold text-ink">${(svc.price / 100).toFixed(2)}</span>
             </MetaPill>
           )}
           <MetaPill icon={meeting.icon} tint={meeting.tint}>
@@ -2060,7 +2128,18 @@ function ServiceDrawer({
   const [name, setName] = React.useState("");
   const [description, setDescription] = React.useState("");
   const [durationMinutes, setDurationMinutes] = React.useState(30);
-  const [price, setPrice] = React.useState(0);
+  // Wave G — currency UX correction.
+  //
+  // The DB column + API contract are integer cents (preserved as-is).
+  // The FORM works in dollars so admins type "49.99" instead of "4999".
+  // We hold the input as a string for three reasons:
+  //   1) decimals without floating-point input weirdness ("49." mid-typing)
+  //   2) empty input means "$0" without coercing to NaN
+  //   3) onChange filter keeps the textbox to a valid currency shape
+  // Conversion happens at two boundaries only: load (cents → dollars
+  // string) and save (dollars string → cents int). Everything outside
+  // the form continues to receive integer cents.
+  const [priceDollars, setPriceDollars] = React.useState("");
   const [bufferBefore, setBufferBefore] = React.useState(0);
   const [bufferAfter, setBufferAfter] = React.useState(0);
   const [color, setColor] = React.useState<string>(DEFAULT_COLORS[0]);
@@ -2085,7 +2164,9 @@ function ServiceDrawer({
   React.useEffect(() => {
     if (svc) {
       setName(svc.name); setDescription(svc.description ?? "");
-      setDurationMinutes(svc.durationMinutes); setPrice(svc.price);
+      setDurationMinutes(svc.durationMinutes);
+      // Wave G — convert stored cents to a dollars input string.
+      setPriceDollars(centsToDollarsInput(svc.price));
       setBufferBefore(svc.bufferBefore); setBufferAfter(svc.bufferAfter);
       setColor(svc.color ?? DEFAULT_COLORS[0]);
       setIsActive(svc.isActive === 1);
@@ -2096,7 +2177,10 @@ function ServiceDrawer({
       setDeptQuery("");
     } else if (isNew) {
       setName(""); setDescription(""); setDurationMinutes(30);
-      setPrice(0); setBufferBefore(0); setBufferAfter(0);
+      // Empty string = "$0" on submit (see dollarsToCents). Cleaner
+      // input UX than literal "0" or "0.00".
+      setPriceDollars("");
+      setBufferBefore(0); setBufferAfter(0);
       setColor(DEFAULT_COLORS[0]); setIsActive(true);
       setVideoProvider("google_meet");
       setDeliveryModes(["virtual", "in_person"]);
@@ -2136,9 +2220,18 @@ function ServiceDrawer({
         setBusy(false);
         return;
       }
+      // Wave G — convert the dollars input string to integer cents
+      // exactly once, at the API boundary. dollarsToCents uses
+      // Math.round to defuse 0.1 + 0.2 = 0.30000…04 float drift.
+      const priceCents = dollarsToCents(priceDollars);
+      if (priceCents < 0 || !Number.isFinite(priceCents)) {
+        toast("Price must be zero or a positive number (e.g. 49.99)", "error");
+        setBusy(false);
+        return;
+      }
       const payload = {
         name, description: description || null,
-        durationMinutes, price, bufferBefore, bufferAfter, color,
+        durationMinutes, price: priceCents, bufferBefore, bufferAfter, color,
         isActive,
         videoProvider,
         // Phase 16 (migration 0037). Sorted for deterministic
@@ -2234,8 +2327,33 @@ function ServiceDrawer({
             <Field label="Duration (min)">
               <input type="number" min={5} step={5} value={durationMinutes} disabled={!isAdmin} onChange={(e) => setDurationMinutes(Number(e.target.value))} className="w-full rounded-md border border-border bg-surface px-3 py-2 disabled:bg-surface-inset" />
             </Field>
-            <Field label="Price (cents)">
-              <input type="number" min={0} step={50} value={price} disabled={!isAdmin} onChange={(e) => setPrice(Number(e.target.value))} className="w-full rounded-md border border-border bg-surface px-3 py-2 disabled:bg-surface-inset" />
+            <Field label="Price (USD)">
+              {/* Wave G — currency-friendly input. type=text + inputMode=
+                  decimal gives mobile users the numeric keypad with a
+                  decimal key while letting us control the string shape
+                  (digits + at most one dot + at most 2 fractional
+                  digits). The "$" prefix sits inside the same border
+                  so it reads as a single input. Disabled state matches
+                  the other admin-gated fields. */}
+              <div className="relative">
+                <span aria-hidden className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-ink-subtle">$</span>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={priceDollars}
+                  placeholder="0.00"
+                  disabled={!isAdmin}
+                  onChange={(e) => setPriceDollars(sanitizeCurrencyInput(e.target.value))}
+                  onBlur={(e) => {
+                    // Normalize on blur: "49." → "49", trailing dots
+                    // stripped. Empty stays empty (= $0).
+                    const v = e.target.value;
+                    if (!v) return;
+                    setPriceDollars(normalizeCurrencyOnBlur(v));
+                  }}
+                  className="w-full rounded-md border border-border bg-surface pl-7 pr-3 py-2 disabled:bg-surface-inset"
+                />
+              </div>
             </Field>
             <Field label="Buffer before">
               <input type="number" min={0} max={240} value={bufferBefore} disabled={!isAdmin} onChange={(e) => setBufferBefore(Number(e.target.value))} className="w-full rounded-md border border-border bg-surface px-3 py-2 disabled:bg-surface-inset" />
