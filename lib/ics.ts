@@ -35,7 +35,7 @@ export function buildIcs(args: IcsArgs): string {
   const lines: string[] = [
     "BEGIN:VCALENDAR",
     "VERSION:2.0",
-    "PRODID:-//Scheduling SaaS//EN",
+    "PRODID:-//ZentroMeet//EN",
     `METHOD:${method}`,
     "CALSCALE:GREGORIAN",
     "BEGIN:VEVENT",

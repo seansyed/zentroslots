@@ -17,7 +17,7 @@
  */
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { and, asc, eq, gte, lte } from "drizzle-orm";
+import { and, asc, desc, eq, gte, lte, sql } from "drizzle-orm";
 import {
   Sparkles,
   Activity,
@@ -26,6 +26,7 @@ import {
   TrendingUp,
   TrendingDown,
   ArrowRight,
+  ArrowUpRight,
   Building2,
   Layers,
   AlertTriangle,
@@ -43,13 +44,35 @@ import {
   Target,
   ShieldAlert,
   Wand2,
+  Lock,
+  DollarSign,
+  Zap,
+  LineChart,
+  Eye,
+  Clock,
+  Mail,
+  ServerCog,
+  Shield,
+  FileText,
+  Flame,
+  Megaphone,
+  CircleAlert,
+  PartyPopper,
   type LucideIcon,
 } from "lucide-react";
 
 import { db } from "@/db/client";
-import { analyticsDailySnapshots, tenants, users } from "@/db/schema";
+import {
+  analyticsDailySnapshots,
+  calendarConnections,
+  calendarSyncLogs,
+  scheduledReports,
+  tenants,
+  users,
+} from "@/db/schema";
 import { getSession } from "@/lib/auth";
 import { planFeature } from "@/lib/quotas";
+import { getPlan } from "@/lib/plans";
 import Shell from "@/components/dashboard/Shell";
 import { PremiumCard, MetricCard } from "@/components/ui/Card";
 import { FadeIn } from "@/components/ui/Motion";
@@ -110,6 +133,35 @@ type RhythmTile = {
   icon: LucideIcon;
 };
 
+// Phase 12B — Operational Health Strip
+type HealthStatus = "healthy" | "warning" | "degraded" | "critical" | "idle";
+
+type HealthTileData = {
+  label: string;
+  status: HealthStatus;
+  primary: string;       // headline (e.g. "100% delivered")
+  detail: string;        // sub line (e.g. "Last 24h · 142 sent · 0 failed")
+  icon: LucideIcon;
+};
+
+// Phase 12B — Executive activity timeline
+type TimelineKind =
+  | "revenue_milestone"
+  | "booking_spike"
+  | "cancel_spike"
+  | "waitlist_conversion"
+  | "review_burst"
+  | "calm_window";
+
+type TimelineEntry = {
+  kind: TimelineKind;
+  dateLabel: string;     // "Tue, May 14"
+  headline: string;
+  detail: string;
+  tone: "positive" | "warning" | "neutral" | "brand";
+  icon: LucideIcon;
+};
+
 export default async function ExecutiveAnalyticsPage() {
   const session = await getSession();
   if (!session) redirect("/dashboard/login");
@@ -138,7 +190,9 @@ export default async function ExecutiveAnalyticsPage() {
   if (!planFeature(tenant.currentPlan, "analytics")) {
     return (
       <Shell {...shellProps}>
-        <UpgradePrompt />
+        <LockedExecutivePreview
+          currentPlanName={getPlan(tenant.currentPlan).name}
+        />
       </Shell>
     );
   }
@@ -194,6 +248,68 @@ export default async function ExecutiveAnalyticsPage() {
     aggregateDepartmentAnalytics({ tenantId: user.tenantId, windowStart: currentStart, windowEnd: today }),
     aggregateCustomerIntelligence({ tenantId: user.tenantId, windowStart: currentStart, windowEnd: today }),
   ]);
+
+  // ── Phase 12B · Operational health inputs ─────────────────────────
+  // Cheap aggregate queries that surface the four health pillars:
+  //   1) Calendar sync — count of connections by status + last-24h
+  //      success-rate from calendar_sync_logs
+  //   2) Reminder delivery — derived from snapshot sent/suppressed
+  //   3) Booking ingestion — does today's snapshot row exist?
+  //   4) Scheduled reports — last generated row freshness
+  //
+  // All wrapped in a try/catch — if any health query errors (e.g.
+  // missing table on an old tenant DB), the strip silently hides and
+  // the rest of the cockpit keeps rendering. No fake health values.
+  const last24h = new Date(today.getTime() - 24 * 60 * 60_000);
+
+  const [connectionStatusRows, syncLogStatusRows, lastReportRow] = await Promise.all([
+    db
+      .select({
+        status: calendarConnections.status,
+        n: sql<number>`count(*)::int`,
+      })
+      .from(calendarConnections)
+      .where(eq(calendarConnections.tenantId, user.tenantId))
+      .groupBy(calendarConnections.status)
+      .catch(() => [] as Array<{ status: string; n: number }>),
+    db
+      .select({
+        status: calendarSyncLogs.status,
+        n: sql<number>`count(*)::int`,
+      })
+      .from(calendarSyncLogs)
+      .where(
+        and(
+          eq(calendarSyncLogs.tenantId, user.tenantId),
+          gte(calendarSyncLogs.createdAt, last24h)
+        )
+      )
+      .groupBy(calendarSyncLogs.status)
+      .catch(() => [] as Array<{ status: string; n: number }>),
+    db
+      .select({
+        periodType: scheduledReports.periodType,
+        generatedAt: scheduledReports.generatedAt,
+      })
+      .from(scheduledReports)
+      .where(eq(scheduledReports.tenantId, user.tenantId))
+      .orderBy(desc(scheduledReports.generatedAt))
+      .limit(1)
+      .catch(() => [] as Array<{ periodType: string; generatedAt: Date }>),
+  ]);
+
+  const operationalHealth = deriveOperationalHealth({
+    today,
+    snapshots,
+    connectionStatusRows,
+    syncLogStatusRows,
+    lastReport: lastReportRow[0] ?? null,
+  });
+
+  // ── Phase 12B · Executive activity timeline ───────────────────────
+  // Pure derivation from `snapshots` — no extra query. Surfaces 5–8
+  // notable operational events from the trailing window.
+  const timelineEntries = deriveExecutiveTimeline(snapshots);
 
   const hasLocations = locations.length > 0;
   const hasDepartments = departments.length > 0;
@@ -324,6 +440,60 @@ export default async function ExecutiveAnalyticsPage() {
                 <LuxKpi label="Repeat customer %" kpi={exec.repeatCustomerPct} suffix="%" icon={Users} tone="positive" />
                 <LuxKpi label="Staff efficiency" kpi={exec.staffEfficiency} suffix="%" icon={Activity} tone="brand" />
               </div>
+
+              {/* Phase 12B — Financial impact strip. All three tiles
+                  draw from the same trailing window as the KPI grid,
+                  but they express the dollars that operational drift
+                  is costing (or that good momentum is projecting).
+                  All values are derived from existing snapshot data —
+                  no fabricated metrics. The tiles render in a single
+                  row that wraps cleanly on mobile. */}
+              <FinancialImpactStrip
+                cancelImpactCents={
+                  exec.cancellations.comparison.currentValue *
+                  exec.avgBookingValue.comparison.currentValue
+                }
+                cancelTrendPct={exec.cancellations.comparison.percentChange}
+                noShowImpactCents={(() => {
+                  // No-show isn't a top-level exec KPI — derive it
+                  // from the snapshot sum × avg booking value.
+                  const noShows = snapshots
+                    .slice(-halfDays)
+                    .reduce((s, r) => s + (r.noShowBookings ?? 0), 0);
+                  return noShows * exec.avgBookingValue.comparison.currentValue;
+                })()}
+                noShowCount={snapshots
+                  .slice(-halfDays)
+                  .reduce((s, r) => s + (r.noShowBookings ?? 0), 0)}
+                forecastedRevenueCents={(() => {
+                  // Prefer the precomputed forecasting result from
+                  // the latest snapshot's `extras.forecasting` block
+                  // (recomputed nightly). Fall back to a trailing-30
+                  // projection if the forecaster hasn't run yet.
+                  const latest = snapshots[snapshots.length - 1];
+                  const projected =
+                    latest?.extras?.forecasting?.projectedRevenueNext30Days;
+                  if (typeof projected === "number" && projected > 0) {
+                    return projected;
+                  }
+                  const trailing30Sum = snapshots
+                    .slice(-30)
+                    .reduce(
+                      (s, r) =>
+                        s + (r.extras?.revenue?.grossRevenueCents ?? 0),
+                      0,
+                    );
+                  return trailing30Sum;
+                })()}
+                forecastConfidence={
+                  snapshots[snapshots.length - 1]?.extras?.forecasting
+                    ?.confidenceScore ?? 0
+                }
+                forecastTrend={
+                  snapshots[snapshots.length - 1]?.extras?.forecasting
+                    ?.trendDirection ?? "flat"
+                }
+              />
             </div>
           </FadeIn>
         )}
@@ -335,9 +505,19 @@ export default async function ExecutiveAnalyticsPage() {
           </FadeIn>
         )}
 
+        {/* Phase 12B — Operational health strip. Renders only when
+            at least one health tile has a non-idle signal — keeps
+            brand-new tenants (no data anywhere) from seeing a row
+            full of grey "idle" tiles. */}
+        {operationalHealth.some((t) => t.status !== "idle") && (
+          <FadeIn delay={6}>
+            <OperationalHealthStrip tiles={operationalHealth} />
+          </FadeIn>
+        )}
+
         {/* Multi-location + Department */}
         {(hasLocations || hasDepartments) && (
-          <FadeIn delay={6}>
+          <FadeIn delay={7}>
             <div className="space-y-4">
               <SectionHead
                 eyebrow="Distribution"
@@ -376,7 +556,7 @@ export default async function ExecutiveAnalyticsPage() {
 
         {/* Customer intelligence */}
         {hasCustomerData && (
-          <FadeIn delay={7}>
+          <FadeIn delay={8}>
             <div>
               <SectionHead
                 eyebrow="Customer intelligence"
@@ -394,9 +574,20 @@ export default async function ExecutiveAnalyticsPage() {
           </FadeIn>
         )}
 
+        {/* Phase 12B — Executive activity timeline. Surfaces 5–8
+            notable operational events from the trailing window:
+            best booking day, biggest cancellation spike, first
+            waitlist conversion, etc. Pure derivation from snapshots
+            already in memory — no extra query. */}
+        {timelineEntries.length > 0 && (
+          <FadeIn delay={9}>
+            <ExecutiveTimeline entries={timelineEntries} />
+          </FadeIn>
+        )}
+
         {/* Optimization recommendations */}
         {optimizationRecs.length > 0 && (
-          <FadeIn delay={8}>
+          <FadeIn delay={10}>
             <div className="space-y-4">
               <SectionHead
                 eyebrow="Strategic recommendations"
@@ -1187,40 +1378,1144 @@ function SectionHead({
   );
 }
 
-// ─── Upgrade prompt ───────────────────────────────────────────────
+// ─── Phase 12B · Financial impact strip ──────────────────────────────
+//
+// Three executive-finance tiles that sit directly under the KPI grid:
+//   1. Cancellation impact $ — the dollars cancellations are taking off
+//      the table in the current period
+//   2. No-show impact $ — same idea, for no-shows
+//   3. Forecasted monthly revenue — pulled from
+//      `extras.forecasting.projectedRevenueNext30Days` when the nightly
+//      forecaster has run, with a trailing-30 fallback
+//
+// Every value is derived from snapshot data the cron already writes.
+// No fabricated metrics.
 
-function UpgradePrompt() {
+function FinancialImpactStrip({
+  cancelImpactCents,
+  cancelTrendPct,
+  noShowImpactCents,
+  noShowCount,
+  forecastedRevenueCents,
+  forecastConfidence,
+  forecastTrend,
+}: {
+  cancelImpactCents: number;
+  cancelTrendPct: number;
+  noShowImpactCents: number;
+  noShowCount: number;
+  forecastedRevenueCents: number;
+  forecastConfidence: number;
+  forecastTrend: "up" | "down" | "flat";
+}) {
+  const trendIcon =
+    forecastTrend === "up" ? TrendingUp : forecastTrend === "down" ? TrendingDown : Activity;
+  const trendTone =
+    forecastTrend === "up" ? "positive" : forecastTrend === "down" ? "warning" : "brand";
+  const trendLabel =
+    forecastTrend === "up" ? "Trending up" : forecastTrend === "down" ? "Softening" : "Flat";
+
   return (
-    <div className="mt-6">
-      <PremiumCard interactive={false} className="relative overflow-hidden bg-gradient-to-br from-amber-50/40 via-surface to-surface">
-        <div
-          aria-hidden
-          className="pointer-events-none absolute -right-24 -top-24 h-64 w-64 rounded-full bg-amber-200/30 blur-3xl"
-        />
-        <div className="relative flex items-start gap-3 p-2">
-          <div className="zm-pulse-glow inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-amber-200/40 bg-gradient-to-br from-amber-50 to-surface text-amber-700 shadow-soft">
-            <Crown className="h-5 w-5" strokeWidth={1.75} />
+    <div className="mt-3 grid gap-3 sm:grid-cols-3">
+      <ImpactTile
+        label="Cancellation impact"
+        value={dollars(cancelImpactCents)}
+        detail={
+          cancelTrendPct === 0
+            ? "Cancellation activity is flat vs prior window."
+            : cancelTrendPct > 0
+              ? `Cancellations up ${cancelTrendPct}% — revenue exposure is rising.`
+              : `Cancellations down ${Math.abs(cancelTrendPct)}% — exposure is easing.`
+        }
+        icon={CircleAlert}
+        tone={cancelTrendPct > 5 ? "warning" : "neutral"}
+      />
+      <ImpactTile
+        label="No-show impact"
+        value={dollars(noShowImpactCents)}
+        detail={
+          noShowCount > 0
+            ? `${noShowCount} no-show${noShowCount === 1 ? "" : "s"} in window × avg booking value.`
+            : "No recorded no-shows this window."
+        }
+        icon={Flame}
+        tone={noShowCount > 0 ? "warning" : "neutral"}
+      />
+      <ImpactTile
+        label="Forecasted monthly revenue"
+        value={dollars(forecastedRevenueCents)}
+        detail={
+          forecastConfidence >= 0.55
+            ? `${trendLabel} · ${Math.round(forecastConfidence * 100)}% confidence on the projection.`
+            : `${trendLabel} · early signal — the forecaster gains confidence as history accumulates.`
+        }
+        icon={trendIcon}
+        tone={trendTone}
+      />
+    </div>
+  );
+}
+
+function ImpactTile({
+  label,
+  value,
+  detail,
+  icon: Icon,
+  tone,
+}: {
+  label: string;
+  value: string;
+  detail: string;
+  icon: LucideIcon;
+  tone: "positive" | "warning" | "neutral" | "brand";
+}) {
+  const iconTone =
+    tone === "positive"
+      ? "bg-emerald-50 text-emerald-700 ring-emerald-200/40"
+      : tone === "warning"
+        ? "bg-amber-50 text-amber-700 ring-amber-200/40"
+        : tone === "brand"
+          ? "bg-brand-subtle/60 text-brand-accent ring-brand-accent/15"
+          : "bg-surface-inset text-ink-muted ring-border/40";
+  return (
+    <div className="relative overflow-hidden rounded-2xl border border-border/60 bg-surface p-4 transition-all duration-[260ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:shadow-soft">
+      <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/50 to-transparent" />
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="text-[10px] font-semibold uppercase tracking-[0.10em] text-ink-subtle">
+            {label}
           </div>
-          <div className="min-w-0 flex-1">
-            <div className="text-[10px] font-semibold uppercase tracking-[0.10em] text-amber-700">
-              Pro feature
+          <div className="mt-1 text-[20px] font-semibold tracking-tight text-ink">{value}</div>
+          <p className="mt-1 text-[11.5px] leading-relaxed text-ink-muted">{detail}</p>
+        </div>
+        <span className={cn("inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ring-1", iconTone)}>
+          <Icon className="h-4 w-4" strokeWidth={1.75} />
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// ─── Phase 12B · Operational health strip ────────────────────────────
+
+function OperationalHealthStrip({ tiles }: { tiles: HealthTileData[] }) {
+  return (
+    <div>
+      <SectionHead
+        eyebrow="Operational health"
+        title="System pulse"
+        description="Real-time health of the integrations that keep your booking flow running."
+      />
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {tiles.map((t) => (
+          <HealthTile key={t.label} tile={t} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function HealthTile({ tile }: { tile: HealthTileData }) {
+  const Icon = tile.icon;
+  const ring =
+    tile.status === "healthy"
+      ? "ring-emerald-200/40 bg-emerald-50/60"
+      : tile.status === "warning"
+        ? "ring-amber-200/40 bg-amber-50/60"
+        : tile.status === "degraded"
+          ? "ring-orange-200/40 bg-orange-50/60"
+          : tile.status === "critical"
+            ? "ring-rose-200/40 bg-rose-50/60"
+            : "ring-border/40 bg-surface-inset/60";
+  const dotTone =
+    tile.status === "healthy"
+      ? "bg-emerald-500"
+      : tile.status === "warning"
+        ? "bg-amber-500"
+        : tile.status === "degraded"
+          ? "bg-orange-500"
+          : tile.status === "critical"
+            ? "bg-rose-500"
+            : "bg-ink-subtle";
+  const dotPulse = tile.status === "healthy" || tile.status === "warning";
+  const iconTone =
+    tile.status === "healthy"
+      ? "bg-emerald-100/80 text-emerald-700"
+      : tile.status === "warning"
+        ? "bg-amber-100/80 text-amber-700"
+        : tile.status === "degraded"
+          ? "bg-orange-100/80 text-orange-700"
+          : tile.status === "critical"
+            ? "bg-rose-100/80 text-rose-700"
+            : "bg-surface text-ink-subtle";
+  const statusLabel =
+    tile.status === "healthy"
+      ? "Healthy"
+      : tile.status === "warning"
+        ? "Warning"
+        : tile.status === "degraded"
+          ? "Degraded"
+          : tile.status === "critical"
+            ? "Critical"
+            : "Idle";
+
+  return (
+    <div
+      className={cn(
+        "relative overflow-hidden rounded-2xl border border-border/60 p-4 ring-1 transition-all duration-[260ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:shadow-soft",
+        ring,
+      )}
+    >
+      <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/55 to-transparent" />
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <div className="text-[10px] font-semibold uppercase tracking-[0.10em] text-ink-subtle">
+            {tile.label}
+          </div>
+          <div className="mt-1 text-[15px] font-semibold tracking-tight text-ink">
+            {tile.primary}
+          </div>
+          <p className="mt-1 text-[11.5px] leading-relaxed text-ink-muted">{tile.detail}</p>
+        </div>
+        <span className={cn("inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg", iconTone)}>
+          <Icon className="h-4 w-4" strokeWidth={1.75} />
+        </span>
+      </div>
+      <div className="mt-3 inline-flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.10em] text-ink-muted">
+        <span aria-hidden className="relative inline-flex h-1.5 w-1.5">
+          {dotPulse && (
+            <span className={cn("absolute inset-0 inline-flex animate-ping rounded-full opacity-60", dotTone)} />
+          )}
+          <span className={cn("relative inline-block h-1.5 w-1.5 rounded-full", dotTone)} />
+        </span>
+        {statusLabel}
+      </div>
+    </div>
+  );
+}
+
+// ─── Phase 12B · Executive timeline ──────────────────────────────────
+
+function ExecutiveTimeline({ entries }: { entries: TimelineEntry[] }) {
+  return (
+    <div>
+      <SectionHead
+        eyebrow="Activity intelligence"
+        title="Executive timeline"
+        description="Notable operational events surfaced from your trailing window."
+      />
+      <PremiumCard className="relative overflow-hidden p-4 sm:p-5">
+        <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/50 to-transparent" />
+        <ol className="relative space-y-3">
+          {/* Vertical rail */}
+          <span
+            aria-hidden
+            className="pointer-events-none absolute left-[15px] top-1 bottom-1 w-px bg-gradient-to-b from-border via-border/60 to-transparent"
+          />
+          {entries.map((e, i) => (
+            <TimelineEntryCard key={i} entry={e} />
+          ))}
+        </ol>
+      </PremiumCard>
+    </div>
+  );
+}
+
+function TimelineEntryCard({ entry }: { entry: TimelineEntry }) {
+  const Icon = entry.icon;
+  const iconTone =
+    entry.tone === "positive"
+      ? "bg-emerald-50 text-emerald-700 ring-emerald-200/40"
+      : entry.tone === "warning"
+        ? "bg-amber-50 text-amber-700 ring-amber-200/40"
+        : entry.tone === "brand"
+          ? "bg-brand-subtle/60 text-brand-accent ring-brand-accent/15"
+          : "bg-surface-inset text-ink-muted ring-border/40";
+  return (
+    <li className="relative flex items-start gap-3 pl-0">
+      <span
+        className={cn(
+          "relative z-10 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full ring-2 ring-surface",
+          iconTone,
+        )}
+      >
+        <Icon className="h-3.5 w-3.5" strokeWidth={1.75} />
+      </span>
+      <div className="min-w-0 flex-1 pb-1">
+        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+          <span className="text-[12.5px] font-semibold tracking-tight text-ink">
+            {entry.headline}
+          </span>
+          <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-subtle">
+            {entry.dateLabel}
+          </span>
+        </div>
+        <p className="mt-0.5 text-[11.5px] leading-relaxed text-ink-muted">{entry.detail}</p>
+      </div>
+    </li>
+  );
+}
+
+// ─── Phase 12B · Operational health derivation ───────────────────────
+//
+// All inputs come from queries that ran at page load. The function is
+// pure and exhaustive — it always emits four tiles. Tiles for systems
+// the tenant hasn't enabled yet render in the "idle" state so the
+// strip is honest about coverage without lying about health.
+
+function deriveOperationalHealth(input: {
+  today: Date;
+  snapshots: DailyAggregate[];
+  connectionStatusRows: Array<{ status: string; n: number }>;
+  syncLogStatusRows: Array<{ status: string; n: number }>;
+  lastReport: { periodType: string; generatedAt: Date } | null;
+}): HealthTileData[] {
+  const { today, snapshots, connectionStatusRows, syncLogStatusRows, lastReport } = input;
+  const tiles: HealthTileData[] = [];
+
+  // 1) Calendar sync
+  const totalConnections = connectionStatusRows.reduce((s, r) => s + r.n, 0);
+  const activeConnections =
+    connectionStatusRows.find((r) => r.status === "active")?.n ?? 0;
+  const errorConnections =
+    (connectionStatusRows.find((r) => r.status === "error")?.n ?? 0) +
+    (connectionStatusRows.find((r) => r.status === "revoked")?.n ?? 0);
+  const syncSuccess = syncLogStatusRows.find((r) => r.status === "success")?.n ?? 0;
+  const syncFailure = syncLogStatusRows.find((r) => r.status === "failure")?.n ?? 0;
+  const syncTotal = syncSuccess + syncFailure;
+  const syncSuccessPct = syncTotal === 0 ? null : Math.round((syncSuccess / syncTotal) * 100);
+
+  if (totalConnections === 0) {
+    tiles.push({
+      label: "Calendar sync",
+      status: "idle",
+      primary: "Not connected",
+      detail: "Connect a calendar at Settings → Calendar to begin two-way sync.",
+      icon: CalendarRange,
+    });
+  } else {
+    let status: HealthStatus = "healthy";
+    if (errorConnections > 0 && errorConnections >= activeConnections) status = "critical";
+    else if (errorConnections > 0) status = "warning";
+    else if (syncSuccessPct !== null && syncSuccessPct < 80) status = "degraded";
+    else if (syncSuccessPct !== null && syncSuccessPct < 95) status = "warning";
+
+    const primary =
+      syncSuccessPct !== null ? `${syncSuccessPct}% sync success` : `${activeConnections} active`;
+    const detail =
+      syncTotal > 0
+        ? `Last 24h · ${syncSuccess} synced · ${syncFailure} failed · ${activeConnections}/${totalConnections} connections active.`
+        : `${activeConnections}/${totalConnections} connection${totalConnections === 1 ? "" : "s"} active · no sync traffic in last 24h.`;
+
+    tiles.push({
+      label: "Calendar sync",
+      status,
+      primary,
+      detail,
+      icon: CalendarRange,
+    });
+  }
+
+  // 2) Reminder delivery — pulled from snapshot counters, last 7 days
+  const recent7 = snapshots.slice(-7);
+  const sent7 = recent7.reduce((s, r) => s + (r.reminderEmailsSent ?? 0), 0);
+  const suppressed7 = recent7.reduce((s, r) => s + (r.reminderEmailsSuppressed ?? 0), 0);
+  if (sent7 === 0 && suppressed7 === 0) {
+    tiles.push({
+      label: "Reminder delivery",
+      status: "idle",
+      primary: "No traffic",
+      detail: "No reminder emails sent in the last 7 days.",
+      icon: Mail,
+    });
+  } else {
+    const total = sent7 + suppressed7;
+    const deliveredPct = total === 0 ? 100 : Math.round((sent7 / total) * 100);
+    let status: HealthStatus = "healthy";
+    if (deliveredPct < 70) status = "critical";
+    else if (deliveredPct < 85) status = "degraded";
+    else if (deliveredPct < 95) status = "warning";
+    tiles.push({
+      label: "Reminder delivery",
+      status,
+      primary: `${deliveredPct}% delivered`,
+      detail: `Last 7 days · ${sent7} sent · ${suppressed7} suppressed.`,
+      icon: Mail,
+    });
+  }
+
+  // 3) Booking ingestion freshness — does the most recent snapshot row
+  //    cover yesterday or today? If the cron stalled, the cockpit goes
+  //    blind, so we surface it.
+  const latest = snapshots[snapshots.length - 1];
+  if (!latest) {
+    tiles.push({
+      label: "Booking ingestion",
+      status: "idle",
+      primary: "Awaiting first snapshot",
+      detail: "The nightly aggregation will populate as soon as bookings start flowing.",
+      icon: ServerCog,
+    });
+  } else {
+    const latestDate = new Date(`${latest.snapshotDate}T00:00:00Z`);
+    const ageDays = Math.max(
+      0,
+      Math.floor((today.getTime() - latestDate.getTime()) / (24 * 60 * 60_000)),
+    );
+    let status: HealthStatus = "healthy";
+    let primary = "Up to date";
+    if (ageDays === 0) {
+      primary = "Up to date";
+      status = "healthy";
+    } else if (ageDays === 1) {
+      primary = "1 day behind";
+      status = "warning";
+    } else if (ageDays <= 3) {
+      primary = `${ageDays} days behind`;
+      status = "degraded";
+    } else {
+      primary = `${ageDays} days behind`;
+      status = "critical";
+    }
+    tiles.push({
+      label: "Booking ingestion",
+      status,
+      primary,
+      detail: `Latest snapshot covers ${latest.snapshotDate} · ${latest.totalBookings} bookings recorded.`,
+      icon: ServerCog,
+    });
+  }
+
+  // 4) Scheduled reports — was the last scheduled report generated
+  //    within its expected cadence window?
+  if (!lastReport) {
+    tiles.push({
+      label: "Scheduled reports",
+      status: "idle",
+      primary: "Not configured",
+      detail: "Enable scheduled reports to receive automated executive summaries.",
+      icon: FileText,
+    });
+  } else {
+    const ageMs = today.getTime() - lastReport.generatedAt.getTime();
+    const ageDays = Math.floor(ageMs / (24 * 60 * 60_000));
+    let status: HealthStatus = "healthy";
+    let primary = "On cadence";
+    if (lastReport.periodType === "weekly") {
+      if (ageDays > 10) status = "critical";
+      else if (ageDays > 7) status = "warning";
+    } else if (lastReport.periodType === "monthly") {
+      if (ageDays > 40) status = "critical";
+      else if (ageDays > 32) status = "warning";
+    } else if (ageDays > 3) {
+      status = "warning";
+    }
+    if (status !== "healthy") primary = `${ageDays}d since last report`;
+    tiles.push({
+      label: "Scheduled reports",
+      status,
+      primary,
+      detail: `Last generated ${lastReport.generatedAt.toISOString().slice(0, 10)} · ${capitalize(lastReport.periodType)} cadence.`,
+      icon: FileText,
+    });
+  }
+
+  return tiles;
+}
+
+// ─── Phase 12B · Executive timeline derivation ───────────────────────
+//
+// Pure derivation over the in-memory `snapshots` array. Surfaces:
+//
+//   - Best booking day in window
+//   - Biggest cancellation spike day
+//   - First waitlist conversion in window (if any)
+//   - First review burst (>3 reviews completed in a day)
+//   - Best revenue day (if revenue extras present)
+//   - Calmest day in window (when the rest is busy)
+//
+// Each entry is grounded in a real row — no fabricated dates or
+// fabricated counts. Returns at most 8 entries, ordered by date.
+
+function deriveExecutiveTimeline(snapshots: DailyAggregate[]): TimelineEntry[] {
+  if (snapshots.length < 3) return [];
+
+  const entries: TimelineEntry[] = [];
+  const seenDates = new Set<string>();
+
+  const fmt = (d: string) =>
+    new Date(`${d}T00:00:00Z`).toLocaleDateString(undefined, {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+    });
+
+  // Best booking day
+  const bestBookingDay = snapshots.reduce(
+    (best, r) => ((r.totalBookings ?? 0) > (best?.totalBookings ?? 0) ? r : best),
+    null as DailyAggregate | null,
+  );
+  if (bestBookingDay && (bestBookingDay.totalBookings ?? 0) > 0) {
+    entries.push({
+      kind: "booking_spike",
+      dateLabel: fmt(bestBookingDay.snapshotDate),
+      headline: "Highest booking day in window",
+      detail: `${bestBookingDay.totalBookings} bookings — your strongest single-day volume in the trailing ${snapshots.length}-day window.`,
+      tone: "positive",
+      icon: PartyPopper,
+    });
+    seenDates.add(bestBookingDay.snapshotDate);
+  }
+
+  // Biggest cancellation spike
+  const worstCancelDay = snapshots.reduce(
+    (worst, r) =>
+      (r.cancelledBookings ?? 0) > (worst?.cancelledBookings ?? 0) ? r : worst,
+    null as DailyAggregate | null,
+  );
+  if (
+    worstCancelDay &&
+    (worstCancelDay.cancelledBookings ?? 0) >= 2 &&
+    !seenDates.has(worstCancelDay.snapshotDate)
+  ) {
+    entries.push({
+      kind: "cancel_spike",
+      dateLabel: fmt(worstCancelDay.snapshotDate),
+      headline: "Cancellation spike",
+      detail: `${worstCancelDay.cancelledBookings} cancellation${worstCancelDay.cancelledBookings === 1 ? "" : "s"} concentrated on this date — worth a retrospective.`,
+      tone: "warning",
+      icon: ShieldAlert,
+    });
+    seenDates.add(worstCancelDay.snapshotDate);
+  }
+
+  // Best revenue day (extras.revenue.grossRevenueCents)
+  const bestRevenueDay = snapshots.reduce<DailyAggregate | null>((best, r) => {
+    const cur = r.extras?.revenue?.grossRevenueCents ?? 0;
+    const bestVal = best?.extras?.revenue?.grossRevenueCents ?? 0;
+    return cur > bestVal ? r : best;
+  }, null);
+  if (
+    bestRevenueDay &&
+    (bestRevenueDay.extras?.revenue?.grossRevenueCents ?? 0) > 0 &&
+    !seenDates.has(bestRevenueDay.snapshotDate)
+  ) {
+    entries.push({
+      kind: "revenue_milestone",
+      dateLabel: fmt(bestRevenueDay.snapshotDate),
+      headline: "Best revenue day in window",
+      detail: `${dollars(bestRevenueDay.extras?.revenue?.grossRevenueCents ?? 0)} in gross revenue — your top single-day take this window.`,
+      tone: "positive",
+      icon: TrendingUp,
+    });
+    seenDates.add(bestRevenueDay.snapshotDate);
+  }
+
+  // First waitlist conversion in window
+  const firstWaitlistDay = snapshots.find((r) => (r.waitlistConversions ?? 0) > 0);
+  if (firstWaitlistDay && !seenDates.has(firstWaitlistDay.snapshotDate)) {
+    entries.push({
+      kind: "waitlist_conversion",
+      dateLabel: fmt(firstWaitlistDay.snapshotDate),
+      headline: "Waitlist converted to booking",
+      detail: `${firstWaitlistDay.waitlistConversions} waitlist seat${firstWaitlistDay.waitlistConversions === 1 ? "" : "s"} filled — demand exceeding standard capacity.`,
+      tone: "brand",
+      icon: Megaphone,
+    });
+    seenDates.add(firstWaitlistDay.snapshotDate);
+  }
+
+  // First review burst (≥3 reviews in a day)
+  const reviewBurstDay = snapshots.find((r) => (r.reviewsCompleted ?? 0) >= 3);
+  if (reviewBurstDay && !seenDates.has(reviewBurstDay.snapshotDate)) {
+    entries.push({
+      kind: "review_burst",
+      dateLabel: fmt(reviewBurstDay.snapshotDate),
+      headline: "Review momentum",
+      detail: `${reviewBurstDay.reviewsCompleted} customer reviews completed — social proof compounding.`,
+      tone: "positive",
+      icon: Sparkles,
+    });
+    seenDates.add(reviewBurstDay.snapshotDate);
+  }
+
+  // Calm window — lowest-activity day in window (only if we still
+  // have spare slots and the window has otherwise been busy)
+  if (entries.length < 5) {
+    const avgBookings =
+      snapshots.reduce((s, r) => s + (r.totalBookings ?? 0), 0) / snapshots.length;
+    if (avgBookings >= 2) {
+      const calmDay = snapshots.reduce(
+        (calm, r) => ((r.totalBookings ?? 0) < (calm?.totalBookings ?? Infinity) ? r : calm),
+        null as DailyAggregate | null,
+      );
+      if (calmDay && !seenDates.has(calmDay.snapshotDate)) {
+        entries.push({
+          kind: "calm_window",
+          dateLabel: fmt(calmDay.snapshotDate),
+          headline: "Quietest day in window",
+          detail: `${calmDay.totalBookings} bookings — a natural day to push optimization work or reach dormant customers.`,
+          tone: "neutral",
+          icon: Clock,
+        });
+        seenDates.add(calmDay.snapshotDate);
+      }
+    }
+  }
+
+  // Order by date ascending so the rail reads chronologically.
+  entries.sort((a, b) => (a.dateLabel < b.dateLabel ? -1 : 1));
+
+  return entries.slice(0, 8);
+}
+
+// ─── Phase 12A · Locked executive preview ────────────────────────────
+//
+// What Free-plan tenants see at /dashboard/analytics/executive.
+//
+// The unlocked 1670-line cockpit (Phase 8A/8B) is intentionally
+// untouched. This component replaces the previous 35-line amber
+// `<UpgradePrompt />` with a premium preview that mirrors the
+// vocabulary, layout rhythm, and honest-data discipline of the
+// Phase 11 `LockedAnalyticsPreview`:
+//
+//   - Hero with executive eyebrow + live-pulse upgrade CTA
+//   - Strategic value props (Daily brief · Forecasting · Recommendations)
+//   - Executive KPI cockpit — labels only, skeleton bars (no fake values)
+//   - Daily Operational Brief silhouette
+//   - Forecast + Predictive insights silhouette
+//   - "How the cockpit works" three-step loop (Observe → Forecast → Recommend)
+//   - Plan-comparison card with current vs Pro and final CTA
+//
+// No data is fabricated. Every preview tile is decorative — the real
+// engine fires the moment the tenant upgrades.
+
+function LockedExecutivePreview({ currentPlanName }: { currentPlanName: string }) {
+  const proPlan = getPlan("pro");
+  const proFeatures = proPlan.features;
+
+  // Executive KPI labels — the same five surfaces the unlocked
+  // cockpit renders at the top of its MetricCard strip. Values
+  // stay as skeleton bars, not fabricated numbers.
+  const execKpis: Array<{ icon: LucideIcon; label: string; tone: string }> = [
+    { icon: DollarSign,   label: "Revenue trajectory",     tone: "bg-emerald-50 text-emerald-700" },
+    { icon: Users,        label: "Customer retention",     tone: "bg-violet-50 text-violet-700" },
+    { icon: Gauge,        label: "Staff efficiency",       tone: "bg-brand-subtle/60 text-brand-accent" },
+    { icon: Telescope,    label: "Forecast confidence",    tone: "bg-sky-50 text-sky-700" },
+    { icon: Wand2,        label: "Optimization signals",   tone: "bg-amber-50 text-amber-700" },
+  ];
+
+  // Sample predictive insights — each one is a plain-language
+  // example of what the engine surfaces in the unlocked cockpit.
+  // Marked "Preview" so there's no chance of mistaking them for
+  // real operational reads.
+  const samplePredictions: Array<{ icon: LucideIcon; tone: string; title: string; body: string }> = [
+    {
+      icon: TrendingUp,
+      tone: "bg-emerald-50 text-emerald-700 ring-emerald-200/40",
+      title: "Demand window opening",
+      body: "The engine flags rising booking velocity before utilization tightens — open secondary slots while you still can.",
+    },
+    {
+      icon: ShieldAlert,
+      tone: "bg-amber-50 text-amber-700 ring-amber-200/40",
+      title: "Cancellation drift detected",
+      body: "When cancel rates start trending against the prior window, the cockpit surfaces it days before it shows up in revenue.",
+    },
+    {
+      icon: Target,
+      tone: "bg-brand-subtle/60 text-brand-accent ring-brand-accent/20",
+      title: "Routing rebalance candidate",
+      body: "Staff load distribution gets a score every day — uneven routing is flagged with a specific rebalance suggestion.",
+    },
+  ];
+
+  return (
+    <div className="space-y-5 pb-12">
+      {/* ── Hero ─────────────────────────────────────────────── */}
+      <PremiumCard className="relative overflow-hidden p-6">
+        <span aria-hidden className="pointer-events-none absolute -right-20 -top-20 h-56 w-56 rounded-full bg-brand-accent/15 blur-3xl" />
+        <span aria-hidden className="pointer-events-none absolute -left-16 bottom-0 h-40 w-40 rounded-full bg-amber-400/10 blur-3xl" />
+        <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/60 to-transparent" />
+        <div className="relative flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+          <div className="max-w-2xl">
+            <div className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.10em] text-amber-700 ring-1 ring-amber-200/40">
+              <Crown className="h-3 w-3" strokeWidth={2} />
+              Pro feature · Executive cockpit
             </div>
-            <h2 className="mt-0.5 text-[18px] font-semibold tracking-tight text-ink">
-              Executive analytics
-            </h2>
-            <p className="mt-1 text-[12px] leading-relaxed text-ink-muted">
-              Unlock executive KPIs, predictive insights, multi-location performance, and optimization recommendations.
+            <h1 className="mt-3 text-[24px] font-semibold tracking-tight text-ink sm:text-[26px]">
+              The executive view of your scheduling business.
+            </h1>
+            <p className="mt-2 text-[13px] leading-relaxed text-ink-muted">
+              A daily operational brief, predictive insights, multi-location performance,
+              and optimization recommendations — wired to your real booking, revenue,
+              and staffing data. Upgrade to {proPlan.name} to open the cockpit.
             </p>
+          </div>
+          <Link
+            href="/dashboard/billing"
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-brand-accent px-4 py-2.5 text-[12.5px] font-semibold text-white shadow-[0_4px_18px_rgba(53,157,243,0.30)] transition-all duration-[260ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:shadow-[0_8px_24px_rgba(53,157,243,0.40)]"
+          >
+            <span aria-hidden className="relative inline-flex h-2 w-2">
+              <span className="absolute inset-0 inline-flex h-full w-full animate-ping rounded-full bg-white/60" />
+              <span className="relative inline-block h-2 w-2 rounded-full bg-white" />
+            </span>
+            Upgrade to {proPlan.name}
+          </Link>
+        </div>
+      </PremiumCard>
+
+      {/* ── Value props ──────────────────────────────────────── */}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <ExecValueProp
+          icon={Sun}
+          title="Daily operational brief"
+          body="One executive paragraph every morning — what happened, what changed, where to focus next."
+        />
+        <ExecValueProp
+          icon={Telescope}
+          title="Predictive forecasting"
+          body="Revenue and demand projections with confidence bands tuned to your real booking history."
+        />
+        <ExecValueProp
+          icon={Lightbulb}
+          title="Strategic recommendations"
+          body="Concrete plays scored by effort × impact — adjust hours, route bookings, fix friction points."
+        />
+      </div>
+
+      {/* ── Executive KPI cockpit ────────────────────────────── */}
+      <div>
+        <ExecSectionLabel
+          eyebrow="Cockpit metrics"
+          title="Executive KPIs, locked"
+          hint="Five surfaces the cockpit renders the moment you upgrade."
+        />
+        <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+          {execKpis.map((k) => {
+            const Icon = k.icon;
+            return (
+              <div
+                key={k.label}
+                className="relative overflow-hidden rounded-2xl border border-border/60 bg-surface p-3.5 transition-all duration-[260ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:shadow-soft"
+              >
+                <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/50 to-transparent" />
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[10px] font-semibold uppercase tracking-[0.10em] text-ink-subtle">
+                      {k.label}
+                    </div>
+                    <div className="mt-2 space-y-1.5" aria-hidden>
+                      <div className="h-5 w-3/4 animate-pulse rounded-md bg-gradient-to-r from-ink/10 via-ink/[0.06] to-transparent" />
+                      <div
+                        className="h-2 w-1/2 animate-pulse rounded-md bg-ink/[0.06]"
+                        style={{ animationDelay: "200ms" }}
+                      />
+                    </div>
+                  </div>
+                  <span className={cn("inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg", k.tone)}>
+                    <Icon className="h-3.5 w-3.5" strokeWidth={1.75} />
+                  </span>
+                </div>
+                <div className="mt-3 inline-flex items-center gap-1 text-[10px] font-medium text-ink-subtle">
+                  <Lock className="h-2.5 w-2.5" strokeWidth={2} />
+                  Locked
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* ── Daily operational brief silhouette ───────────────── */}
+      <div>
+        <ExecSectionLabel
+          eyebrow="Daily brief"
+          title="Today's operational read, locked"
+          hint="A plain-language morning summary, surfaced when the engine has enough signal."
+        />
+        <div className="mt-3">
+          <PremiumCard className="relative overflow-hidden p-5">
+            <span aria-hidden className="pointer-events-none absolute -right-12 -top-12 h-44 w-44 rounded-full bg-brand-accent/10 blur-3xl" />
+            <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/50 to-transparent" />
+            <div className="relative flex items-start gap-3">
+              <div className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-amber-50 to-surface text-amber-700 ring-1 ring-amber-200/40">
+                <Sun className="h-4 w-4" strokeWidth={1.75} />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <div className="text-[10px] font-semibold uppercase tracking-[0.10em] text-amber-700">
+                    Morning brief
+                  </div>
+                  <span className="inline-flex items-center gap-1 rounded-full bg-surface-inset px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.08em] text-ink-subtle ring-1 ring-border/40">
+                    <Lock className="h-2.5 w-2.5" strokeWidth={2} />
+                    Preview
+                  </span>
+                </div>
+                <div className="mt-2 space-y-1.5" aria-hidden>
+                  <div className="h-3 w-11/12 animate-pulse rounded-md bg-gradient-to-r from-ink/10 via-ink/[0.06] to-transparent" />
+                  <div className="h-3 w-10/12 animate-pulse rounded-md bg-ink/[0.06]" style={{ animationDelay: "120ms" }} />
+                  <div className="h-3 w-9/12 animate-pulse rounded-md bg-ink/[0.06]" style={{ animationDelay: "220ms" }} />
+                </div>
+                <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
+                  {["Expected daily bookings", "Revenue vs prior", "Cancellations vs prior"].map((label, i) => (
+                    <div
+                      key={label}
+                      className="rounded-xl border border-border/60 bg-surface-inset/60 p-2.5"
+                    >
+                      <div className="text-[9px] font-semibold uppercase tracking-[0.10em] text-ink-subtle">
+                        {label}
+                      </div>
+                      <div
+                        className="mt-1.5 h-3.5 w-1/2 animate-pulse rounded bg-ink/[0.08]"
+                        style={{ animationDelay: `${i * 100}ms` }}
+                        aria-hidden
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </PremiumCard>
+        </div>
+      </div>
+
+      {/* ── Forecast + Predictive insights silhouette ────────── */}
+      <div>
+        <ExecSectionLabel
+          eyebrow="Forecast & insights"
+          title="Forward-looking intelligence, locked"
+          hint="Confidence-banded projections + auto-surfaced strategic insights."
+        />
+        <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-3">
+          <ChartPreviewCard
+            title="60-day forecast"
+            icon={LineChart}
+            className="lg:col-span-2"
+          >
+            <ForecastSilhouette />
+          </ChartPreviewCard>
+
+          <div className="flex flex-col gap-3">
+            {samplePredictions.map((s, i) => {
+              const Icon = s.icon;
+              return (
+                <div
+                  key={i}
+                  className="relative overflow-hidden rounded-2xl border border-border/60 bg-surface p-3.5 transition-all duration-[260ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:shadow-soft"
+                >
+                  <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/50 to-transparent" />
+                  <div className="flex items-start gap-2.5">
+                    <span className={cn("inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ring-1", s.tone)}>
+                      <Icon className="h-3.5 w-3.5" strokeWidth={1.75} />
+                    </span>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[11.5px] font-semibold tracking-tight text-ink">
+                          {s.title}
+                        </span>
+                        <span className="inline-flex items-center rounded-full bg-surface-inset px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.08em] text-ink-subtle ring-1 ring-border/40">
+                          Preview
+                        </span>
+                      </div>
+                      <p className="mt-1 text-[11.5px] leading-relaxed text-ink-muted">{s.body}</p>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      {/* ── How the cockpit works ────────────────────────────── */}
+      <PremiumCard className="p-5">
+        <ExecSectionLabel
+          eyebrow="How it works"
+          title="From operational signal to executive decision"
+          hint="The cockpit runs the loop your ops team would run manually — every morning."
+        />
+        <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <ExecLoopStep
+            step={1}
+            icon={Eye}
+            title="Observe"
+            body="Every booking, cancel, no-show, refund, and staff shift rolls into a daily snapshot — tenant-scoped."
+          />
+          <ExecLoopStep
+            step={2}
+            icon={Telescope}
+            title="Forecast"
+            body="The engine projects revenue, demand, and capacity with confidence bands tuned to your history."
+          />
+          <ExecLoopStep
+            step={3}
+            icon={Wand2}
+            title="Recommend"
+            body="Strategic plays scored by effort × impact — clear next moves with an expected operational outcome."
+          />
+        </div>
+      </PremiumCard>
+
+      {/* ── Plan comparison + CTA ────────────────────────────── */}
+      <PremiumCard className="relative overflow-hidden p-5">
+        <span aria-hidden className="pointer-events-none absolute -right-16 -top-16 h-48 w-48 rounded-full bg-brand-accent/12 blur-3xl" />
+        <span aria-hidden className="pointer-events-none absolute -left-12 bottom-0 h-32 w-32 rounded-full bg-amber-400/10 blur-3xl" />
+        <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/60 to-transparent" />
+        <div className="relative grid gap-4 lg:grid-cols-[1fr_1fr_auto] lg:items-center">
+          {/* Current plan */}
+          <div className="rounded-xl border border-border bg-surface p-4">
+            <div className="text-[10px] font-semibold uppercase tracking-[0.10em] text-ink-subtle">
+              Current plan
+            </div>
+            <div className="mt-1 flex items-baseline gap-2">
+              <span className="text-[18px] font-semibold tracking-tight text-ink">{currentPlanName}</span>
+              <span className="inline-flex items-center rounded-full bg-surface-inset px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.06em] text-ink-subtle ring-1 ring-border/40">
+                you&apos;re here
+              </span>
+            </div>
+            <ul className="mt-3 space-y-1.5 text-[11.5px] text-ink-muted">
+              <li className="flex items-start gap-1.5">
+                <span aria-hidden className="mt-1.5 inline-block h-1 w-1 shrink-0 rounded-full bg-ink-subtle" />
+                <span>Standard analytics dashboard locked</span>
+              </li>
+              <li className="flex items-start gap-1.5">
+                <span aria-hidden className="mt-1.5 inline-block h-1 w-1 shrink-0 rounded-full bg-ink-subtle" />
+                <span>Executive cockpit + daily brief locked</span>
+              </li>
+              <li className="flex items-start gap-1.5">
+                <span aria-hidden className="mt-1.5 inline-block h-1 w-1 shrink-0 rounded-full bg-ink-subtle" />
+                <span>Forecasting + predictive insights locked</span>
+              </li>
+            </ul>
+          </div>
+
+          {/* Pro plan */}
+          <div className="relative rounded-xl border-2 border-brand-accent/40 bg-gradient-to-br from-brand-subtle/40 via-surface to-surface p-4 shadow-[0_8px_24px_rgba(53,157,243,0.12)]">
+            <div className="absolute -top-2 right-3 inline-flex items-center gap-1 rounded-full bg-brand-accent px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.08em] text-white shadow-[0_4px_12px_rgba(53,157,243,0.32)]">
+              <Sparkles className="h-2.5 w-2.5" strokeWidth={2} />
+              Recommended
+            </div>
+            <div className="text-[10px] font-semibold uppercase tracking-[0.10em] text-brand-accent">
+              Upgrade to
+            </div>
+            <div className="mt-1 flex items-baseline gap-2">
+              <span className="text-[18px] font-semibold tracking-tight text-ink">{proPlan.name}</span>
+              {proPlan.priceCents !== null && (
+                <span className="text-[11.5px] font-medium text-ink-muted">
+                  ${(proPlan.priceCents / 100).toFixed(0)}/mo
+                </span>
+              )}
+            </div>
+            <ul className="mt-3 space-y-1.5 text-[11.5px] text-ink">
+              {proFeatures.map((f) => (
+                <li key={f} className="flex items-start gap-1.5">
+                  <CheckCircle2 className="mt-0.5 h-3 w-3 shrink-0 text-brand-accent" strokeWidth={2} />
+                  <span>{f}</span>
+                </li>
+              ))}
+              <li className="flex items-start gap-1.5">
+                <CheckCircle2 className="mt-0.5 h-3 w-3 shrink-0 text-brand-accent" strokeWidth={2} />
+                <span className="font-medium">Executive cockpit + daily brief</span>
+              </li>
+              <li className="flex items-start gap-1.5">
+                <CheckCircle2 className="mt-0.5 h-3 w-3 shrink-0 text-brand-accent" strokeWidth={2} />
+                <span className="font-medium">Predictive forecasting + recommendations</span>
+              </li>
+            </ul>
+          </div>
+
+          {/* CTA column */}
+          <div className="flex flex-col items-stretch gap-2 lg:items-end">
             <Link
               href="/dashboard/billing"
-              className="mt-3 inline-flex h-9 items-center gap-1.5 rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover px-3 text-[12px] font-medium text-white shadow-[0_6px_16px_rgba(53,157,243,0.35)] transition-all hover:-translate-y-0.5 hover:shadow-[0_10px_24px_rgba(53,157,243,0.45)]"
+              className="inline-flex items-center justify-center gap-1.5 rounded-md bg-brand-accent px-4 py-2.5 text-[12.5px] font-semibold text-white shadow-[0_4px_18px_rgba(53,157,243,0.30)] transition-all duration-[260ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:shadow-[0_8px_24px_rgba(53,157,243,0.40)]"
             >
-              Upgrade plan
-              <ArrowRight className="h-3 w-3" strokeWidth={2.25} />
+              <Zap className="h-3.5 w-3.5" strokeWidth={2} />
+              Unlock cockpit
+              <ArrowUpRight className="h-3 w-3" strokeWidth={2} />
+            </Link>
+            <Link
+              href="/pricing"
+              className="text-center text-[11px] text-ink-muted underline-offset-2 hover:text-ink hover:underline"
+            >
+              Compare every plan
             </Link>
           </div>
         </div>
       </PremiumCard>
+    </div>
+  );
+}
+
+// ─── Locked-preview helpers ───────────────────────────────────────
+
+function ExecValueProp({
+  icon: Icon,
+  title,
+  body,
+}: {
+  icon: LucideIcon;
+  title: string;
+  body: string;
+}) {
+  return (
+    <div className="relative overflow-hidden rounded-2xl border border-border/60 bg-surface p-4 transition-all duration-[260ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:shadow-soft">
+      <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/50 to-transparent" />
+      <div className="flex items-start gap-2.5">
+        <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand-subtle/60 text-brand-accent ring-1 ring-brand-accent/15">
+          <Icon className="h-4 w-4" strokeWidth={1.75} />
+        </span>
+        <div className="min-w-0">
+          <div className="text-[12.5px] font-semibold tracking-tight text-ink">{title}</div>
+          <p className="mt-1 text-[11.5px] leading-relaxed text-ink-muted">{body}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ExecSectionLabel({
+  eyebrow,
+  title,
+  hint,
+}: {
+  eyebrow: string;
+  title: string;
+  hint: string;
+}) {
+  return (
+    <div className="flex flex-wrap items-end justify-between gap-2">
+      <div>
+        <div className="text-[10px] font-semibold uppercase tracking-[0.10em] text-brand-accent">
+          {eyebrow}
+        </div>
+        <h2 className="mt-0.5 text-[14px] font-semibold tracking-tight text-ink">{title}</h2>
+      </div>
+      <p className="max-w-md text-[11px] text-ink-subtle">{hint}</p>
+    </div>
+  );
+}
+
+function ChartPreviewCard({
+  title,
+  icon: Icon,
+  className,
+  children,
+}: {
+  title: string;
+  icon: LucideIcon;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      className={cn(
+        "relative overflow-hidden rounded-2xl border border-border/60 bg-surface p-4 transition-all duration-[260ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:shadow-soft",
+        className,
+      )}
+    >
+      <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/50 to-transparent" />
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <span className="inline-flex h-6 w-6 items-center justify-center rounded-lg bg-brand-subtle/60 text-brand-accent">
+            <Icon className="h-3.5 w-3.5" strokeWidth={1.75} />
+          </span>
+          <span className="text-[12.5px] font-semibold tracking-tight text-ink">{title}</span>
+        </div>
+        <span className="inline-flex items-center gap-1 rounded-full bg-surface-inset px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.08em] text-ink-subtle ring-1 ring-border/40">
+          <Lock className="h-2.5 w-2.5" strokeWidth={2} />
+          Locked
+        </span>
+      </div>
+      <div className="mt-3" aria-hidden>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+// Decorative forecast silhouette — a soft, blurred area path with
+// a confidence-band overlay. Pure SVG, no real data, no fabricated
+// numbers — the shape is purely atmospheric.
+function ForecastSilhouette() {
+  return (
+    <svg
+      viewBox="0 0 320 90"
+      className="h-32 w-full"
+      preserveAspectRatio="none"
+      aria-hidden
+    >
+      <defs>
+        <linearGradient id="execForecastFill" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#359df3" stopOpacity="0.32" />
+          <stop offset="100%" stopColor="#359df3" stopOpacity="0" />
+        </linearGradient>
+        <linearGradient id="execForecastBand" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#359df3" stopOpacity="0.14" />
+          <stop offset="100%" stopColor="#359df3" stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      {/* Confidence band */}
+      <path
+        d="M0,60 Q40,46 80,42 T160,30 T240,22 T320,14 L320,40 Q240,50 160,56 T80,68 T0,80 Z"
+        fill="url(#execForecastBand)"
+      />
+      {/* Trend line */}
+      <path
+        d="M0,68 Q40,58 80,52 T160,42 T240,30 T320,20"
+        stroke="#359df3"
+        strokeWidth="2"
+        fill="none"
+        strokeLinecap="round"
+        opacity="0.85"
+      />
+      {/* Filled trend area */}
+      <path
+        d="M0,68 Q40,58 80,52 T160,42 T240,30 T320,20 L320,90 L0,90 Z"
+        fill="url(#execForecastFill)"
+      />
+      {/* Dashed projection */}
+      <path
+        d="M200,36 Q260,24 320,12"
+        stroke="#359df3"
+        strokeWidth="1.5"
+        strokeDasharray="4 4"
+        fill="none"
+        opacity="0.55"
+      />
+    </svg>
+  );
+}
+
+function ExecLoopStep({
+  step,
+  icon: Icon,
+  title,
+  body,
+}: {
+  step: number;
+  icon: LucideIcon;
+  title: string;
+  body: string;
+}) {
+  return (
+    <div className="relative overflow-hidden rounded-xl border border-border/60 bg-surface-inset/40 p-3.5">
+      <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/50 to-transparent" />
+      <div className="flex items-start gap-2.5">
+        <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-brand-subtle/60 text-brand-accent ring-1 ring-brand-accent/15">
+          <Icon className="h-3.5 w-3.5" strokeWidth={1.75} />
+        </span>
+        <div className="min-w-0">
+          <div className="flex items-baseline gap-1.5">
+            <span className="text-[9px] font-semibold uppercase tracking-[0.10em] text-ink-subtle">
+              Step {step}
+            </span>
+            <span className="text-[12.5px] font-semibold tracking-tight text-ink">{title}</span>
+          </div>
+          <p className="mt-1 text-[11.5px] leading-relaxed text-ink-muted">{body}</p>
+        </div>
+      </div>
     </div>
   );
 }

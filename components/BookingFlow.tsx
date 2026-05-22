@@ -466,18 +466,31 @@ export default function BookingFlow({
                 onClick={() => !disabled && setDate(d.iso)}
                 title={disabled ? "Not available for booking" : undefined}
                 className={
-                  "group relative flex shrink-0 flex-col items-center justify-center rounded-2xl border px-3.5 py-2.5 text-center transition-all duration-[180ms] focus:outline-none focus:ring-2 focus:ring-offset-2 " +
+                  // Phase 17B active date pill — refined shadows:
+                  //   - softer outer blur (28px → 36px)
+                  //   - lower outer opacity (accent55 → accent3a)
+                  //   - smaller secondary shadow opacity (33 → 24)
+                  //   - inset highlight gentler (white/22 → white/18)
+                  //   - 200ms → 180ms for slightly snappier feel
+                  //   - light wash at top of gradient softened
+                  "group relative flex shrink-0 flex-col items-center justify-center rounded-2xl border px-3.5 py-2.5 text-center transition-all duration-[180ms] focus:outline-none focus:ring-2 focus:ring-offset-2 active:scale-[0.98] " +
                   (disabled
-                    ? "border-slate-200 bg-slate-50 text-slate-300 line-through cursor-not-allowed"
+                    ? "border-slate-200 bg-slate-50 text-slate-300 line-through cursor-not-allowed active:scale-100"
                     : isSelected
-                      ? "border-transparent text-white shadow-[0_8px_20px_rgba(15,23,42,0.18)]"
-                      : "border-slate-200 bg-white text-slate-700 hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-[0_4px_12px_rgba(15,23,42,0.06)]")
+                      ? "border-transparent text-white ring-1 ring-inset ring-white/15"
+                      : "border-slate-200 bg-white text-slate-700 hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-[0_4px_12px_rgba(15,23,42,0.07)]")
                 }
                 style={{
                   ...((!disabled && isSelected
                     ? {
+                        // Phase 17B: softer gradient blend — accent
+                        // base with subtle top wash at gentler stops
+                        // for cleaner premium depth.
+                        backgroundImage: `linear-gradient(180deg, ${accent}f2 0%, ${accent} 55%, ${accent}f7 100%)`,
                         backgroundColor: accent,
-                        boxShadow: `0 8px 22px ${accent}44`,
+                        // Softer shadow set: larger blur, lower opacity
+                        // for a calmer "premium tactile" footprint.
+                        boxShadow: `0 14px 36px ${accent}3a, 0 3px 8px ${accent}24, inset 0 1px 0 rgba(255,255,255,0.18)`,
                       }
                     : {}) as React.CSSProperties),
                   transitionTimingFunction: MOTION_CURVE,
@@ -530,7 +543,12 @@ export default function BookingFlow({
               <div className="text-[12px] text-slate-500">{durationMinutes}-minute appointments</div>
             </div>
             {!loadingSlots && slots.length > 0 && (
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-medium text-emerald-700 ring-1 ring-emerald-200/60">
+              // Phase 17B: lighter "X open" badge —
+              //   - bg-emerald-50 → emerald-50/70 (softer)
+              //   - ring opacity ring-emerald-200/60 → /40 (cleaner)
+              //   - font-medium → font-normal (lighter)
+              //   - count itself keeps font-semibold for emphasis
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50/70 px-2.5 py-1 text-[11px] font-normal text-emerald-700 ring-1 ring-emerald-200/40">
                 <span aria-hidden className="relative inline-flex h-1.5 w-1.5">
                   <span className="absolute inset-0 animate-ping rounded-full bg-emerald-400/55" />
                   <span className="relative h-1.5 w-1.5 rounded-full bg-emerald-500" />
@@ -883,7 +901,8 @@ function SlotsGrouped({
   }
 
   return (
-    <div className="mt-5 space-y-5">
+    // Phase 17: tightened mt-5 → mt-4, space-y-5 → space-y-4
+    <div className="mt-4 space-y-4">
       {groups.map((g) => {
         if (g.slots.length === 0) return null;
         return (
@@ -896,30 +915,60 @@ function SlotsGrouped({
                 &middot; {g.slots.length} {g.slots.length === 1 ? "slot" : "slots"}
               </span>
             </div>
-            <div className="mt-2 grid grid-cols-2 gap-2.5 sm:grid-cols-3">
+            {/* Phase 17B: gap-2.5 → gap-2 for tighter horizontal rhythm */}
+            <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
               {g.slots.map((iso) => (
                 <button
                   key={iso}
                   onClick={() => onPick(iso)}
-                  className="group relative overflow-hidden rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-[13px] font-medium text-slate-700 shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-all duration-[180ms] hover:-translate-y-0.5 focus:outline-none focus:ring-2"
+                  // Phase 17B premium slot button:
+                  //   - py-2.5 → py-2 (4px tighter — better density,
+                  //     still touch-friendly at 36px tap target)
+                  //   - 200ms → 160ms transitions for snappier
+                  //     "tactile" feel without losing smoothness
+                  //   - active:scale-[0.97] → 0.98 (less dramatic
+                  //     press — brief asked for subtle)
+                  //   - New ultra-soft inner glow overlay (radial
+                  //     gradient at very low opacity) gives the slot
+                  //     a calm premium hover feel without flash
+                  className="group relative overflow-hidden rounded-xl border border-slate-200 bg-white px-3 py-2 text-[13px] font-medium text-slate-700 shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-all duration-[160ms] hover:-translate-y-0.5 hover:shadow-[0_4px_10px_rgba(15,23,42,0.06)] focus:outline-none focus:ring-2 focus:ring-offset-1 active:scale-[0.98] active:translate-y-0"
                   style={{
                     transitionTimingFunction: MOTION_CURVE,
                     /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
                     ["--tw-ring-color" as any]: accent,
                   }}
                 >
+                  {/* Phase 17B: ultra-soft inner glow — a radial
+                      gradient layer that adds dimensional depth on
+                      hover without any bright color flash. Sits
+                      BELOW the fill overlay so it stays visible at
+                      the edges during hover transitions. */}
+                  <span
+                    aria-hidden
+                    className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-[160ms] group-hover:opacity-100"
+                    style={{
+                      backgroundImage: `radial-gradient(circle at 50% 0%, ${accent}1f, transparent 70%)`,
+                      transitionTimingFunction: MOTION_CURVE,
+                    }}
+                  />
+                  {/* Hover border accent — picks up the brand tone */}
+                  <span
+                    aria-hidden
+                    className="pointer-events-none absolute inset-0 rounded-xl opacity-0 ring-1 ring-inset transition-opacity duration-[160ms] group-hover:opacity-100"
+                    style={{ "--tw-ring-color": accent, transitionTimingFunction: MOTION_CURVE } as React.CSSProperties}
+                  />
                   {/* Hover fill — calm tint of the brand accent */}
                   <span
                     aria-hidden
-                    className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-[180ms] group-hover:opacity-100"
+                    className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-[160ms] group-hover:opacity-100"
                     style={{ backgroundColor: accent, transitionTimingFunction: MOTION_CURVE }}
                   />
                   <span
                     aria-hidden
-                    className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-[180ms] group-hover:opacity-100"
+                    className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-[160ms] group-hover:opacity-100"
                     style={{ boxShadow: `0 8px 20px ${accent}33`, transitionTimingFunction: MOTION_CURVE }}
                   />
-                  <span className="relative tabular-nums transition-colors duration-[180ms] group-hover:text-white" style={{ transitionTimingFunction: MOTION_CURVE }}>
+                  <span className="relative tabular-nums transition-colors duration-[160ms] group-hover:text-white" style={{ transitionTimingFunction: MOTION_CURVE }}>
                     {formatInTimeZone(iso, tz, "h:mm a")}
                   </span>
                 </button>

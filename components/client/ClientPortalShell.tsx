@@ -180,7 +180,7 @@ export default function ClientPortalShell({ tenant, customer, title, children }:
 
           {!tenant.hidePoweredBy && (
             <footer className="mt-12 border-t border-slate-200 pt-4 text-center text-[11px] text-slate-400">
-              Powered by Scheduling SaaS
+              Powered by ZentroMeet
             </footer>
           )}
         </main>

@@ -34,6 +34,8 @@ import { Lock } from "lucide-react";
 
 // ─── Types (unchanged contract with /api/tenant/booking-series) ───────
 
+// ─── Types (unchanged contract with /api/tenant/booking-series) ───────
+
 type Series = {
   id: string;
   serviceId: string;

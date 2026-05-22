@@ -7,7 +7,7 @@ import { PLANS, formatPrice } from "@/lib/plans";
 export const metadata: Metadata = {
   title: "Pricing",
   description: "Simple, predictable pricing. Free tier, 14-day trial on paid plans, no credit card to start.",
-  openGraph: { title: "Pricing — Scheduling SaaS" },
+  openGraph: { title: "Pricing — ZentroMeet" },
 };
 
 export default function PricingPage() {

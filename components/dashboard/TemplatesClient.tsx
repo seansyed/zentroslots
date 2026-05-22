@@ -4,20 +4,50 @@ import * as React from "react";
 import { Badge, Button, Card, Skeleton, toast } from "@/components/ui/primitives";
 import { hasWarnings, lintHtmlTemplate, type LintFinding } from "@/lib/communications/html-lint";
 
+// Kept in sync with lib/communications/template-types.ts. The API
+// returns one row per type in TEMPLATE_TYPES — if this union ever
+// drifts, the `labelFor()` helper below renders the unknown type
+// gracefully instead of crashing on `undefined.title`.
 type TemplateType =
   | "booking_confirmation"
   | "booking_cancelled"
   | "booking_rescheduled"
   | "reminder_24h"
-  | "reminder_1h";
+  | "reminder_1h"
+  | "appointment_completed"
+  | "appointment_no_show"
+  | "review_request"
+  | "followup"
+  | "waitlist_slot_available";
 
 const TEMPLATE_LABELS: Record<TemplateType, { title: string; subtitle: string }> = {
-  booking_confirmation: { title: "Booking confirmation", subtitle: "Sent immediately when a customer books" },
-  booking_cancelled:    { title: "Booking cancellation", subtitle: "Sent when a booking is cancelled" },
-  booking_rescheduled:  { title: "Booking rescheduled",  subtitle: "Sent when a booking moves to a new time" },
-  reminder_24h:         { title: "Reminder — 24 hours",  subtitle: "Sent ~24 hours before the appointment" },
-  reminder_1h:          { title: "Reminder — 1 hour",    subtitle: "Sent ~1 hour before the appointment" },
+  booking_confirmation:    { title: "Booking confirmation",    subtitle: "Sent immediately when a customer books" },
+  booking_cancelled:       { title: "Booking cancellation",    subtitle: "Sent when a booking is cancelled" },
+  booking_rescheduled:     { title: "Booking rescheduled",     subtitle: "Sent when a booking moves to a new time" },
+  reminder_24h:            { title: "Reminder — 24 hours",     subtitle: "Sent ~24 hours before the appointment" },
+  reminder_1h:             { title: "Reminder — 1 hour",       subtitle: "Sent ~1 hour before the appointment" },
+  appointment_completed:   { title: "Completion follow-up",    subtitle: "Sent after an appointment is marked completed" },
+  appointment_no_show:     { title: "Missed booking",          subtitle: "Sent when a customer no-shows" },
+  review_request:          { title: "Review request",          subtitle: "Sent post-completion to invite a review" },
+  followup:                { title: "Follow-up",               subtitle: "Custom follow-up triggered by your automations" },
+  waitlist_slot_available: { title: "Waitlist slot available", subtitle: "Sent when a waitlist spot opens for a customer" },
 };
+
+// Defensive lookup — never returns undefined. If the API ever ships a
+// type ahead of this client (e.g. a Phase-N addition before a redeploy),
+// the row still renders with a humanized label instead of crashing the
+// whole page.
+function labelFor(type: string): { title: string; subtitle: string } {
+  const known = (TEMPLATE_LABELS as Record<string, { title: string; subtitle: string }>)[type];
+  if (known) return known;
+  // Convert "review_request" → "Review request"
+  const pretty = type
+    .split(/[_.]/)
+    .filter(Boolean)
+    .map((s, i) => (i === 0 ? s[0].toUpperCase() + s.slice(1) : s))
+    .join(" ");
+  return { title: pretty || type, subtitle: "Custom template" };
+}
 
 // Sample context shown in preview + test-send. Real sends use the
 // booking's actual values; these are only for the editor.
@@ -123,7 +153,7 @@ export default function TemplatesClient({ currentUserEmail }: { currentUserEmail
     async (type: TemplateType) => {
       const params = new URLSearchParams({ type });
       if (scopeServiceId) params.set("serviceId", scopeServiceId);
-      const target = TEMPLATE_LABELS[type].title;
+      const target = labelFor(type).title;
       const msg = scopeServiceId
         ? `Revert "${target}" to inherit from business default?`
         : `Revert "${target}" to the system default? Your customizations will be lost.`;
@@ -150,7 +180,7 @@ export default function TemplatesClient({ currentUserEmail }: { currentUserEmail
     const q = search.trim().toLowerCase();
     if (!q) return rows;
     return rows.filter((r) => {
-      const title = TEMPLATE_LABELS[r.templateType].title.toLowerCase();
+      const title = labelFor(r.templateType).title.toLowerCase();
       const subject = (r.subject ?? "").toLowerCase();
       return title.includes(q) || subject.includes(q);
     });
@@ -298,7 +328,7 @@ function TemplateCard({
    *  the "I just want to reset to default" path). */
   onQuickRestore?: () => void;
 }) {
-  const meta = TEMPLATE_LABELS[row.templateType];
+  const meta = labelFor(row.templateType);
   // Source labels — only meaningful in service scope. In business scope
   // the "tenant" source effectively means "custom"; "system" means "default".
   const isServiceScope = row.scope === "service";
@@ -374,7 +404,7 @@ function TemplateEditor({
   onSaved: () => void;
   currentUserEmail: string;
 }) {
-  const meta = TEMPLATE_LABELS[initial.templateType];
+  const meta = labelFor(initial.templateType);
   const initialDraft = React.useMemo(
     () => ({
       subject: initial.subject,

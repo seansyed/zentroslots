@@ -300,7 +300,7 @@ async function sendViaSmtp(args: SendArgs, from: string): Promise<void> {
 }
 
 export async function sendEmail(args: SendArgs): Promise<{ ok: boolean; reason?: string; provider?: Provider }> {
-  const from = args.from ?? process.env.EMAIL_FROM ?? "Scheduling SaaS <no-reply@localhost>";
+  const from = args.from ?? process.env.EMAIL_FROM ?? "ZentroMeet <no-reply@localhost>";
   const provider = activeProvider();
   let result: { ok: boolean; reason?: string };
 
@@ -395,7 +395,7 @@ function fmt(d: Date, tz: string): string {
 function shell(body: string): string {
   return `<!doctype html>
 <html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Scheduling SaaS</title>
+<title>ZentroMeet</title>
 <style>
   body { margin:0; background:#f8fafc; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color:#0f172a; }
   .wrap { max-width:560px; margin:0 auto; padding:24px; }
@@ -409,7 +409,7 @@ function shell(body: string): string {
   .footer { color:#94a3b8; font-size:12px; text-align:center; margin-top:16px; }
 </style></head>
 <body><div class="wrap"><div class="card">${body}</div>
-<div class="footer">Scheduling SaaS · automated message, please do not reply</div></div></body></html>`;
+<div class="footer">ZentroMeet · automated message, please do not reply</div></div></body></html>`;
 }
 
 function rows(b: BookingForEmail, tz: string): string {

@@ -171,7 +171,7 @@ export default async function PublicServicePage(props: {
           }}
         />
 
-        <div className="relative mx-auto max-w-2xl px-6 py-9 sm:py-10">
+        <div className="relative mx-auto max-w-2xl px-6 py-6 sm:py-7">
           <Link
             href={`/u/${tenant.slug}`}
             className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-500 transition-colors hover:text-slate-900"
@@ -179,8 +179,8 @@ export default async function PublicServicePage(props: {
             <span aria-hidden>←</span> {tenant.name}
           </Link>
 
-          {/* Step rail */}
-          <nav className="mt-4 flex items-center gap-2 text-[11px]" aria-label="Booking progress">
+          {/* Step rail (Phase 17: tightened mt-4 → mt-3) */}
+          <nav className="mt-3 flex items-center gap-2 text-[11px]" aria-label="Booking progress">
             <span className="text-slate-400">1. Service</span>
             <span aria-hidden className="text-slate-300">›</span>
             <span className="font-semibold tracking-tight text-slate-900">2. Date &amp; time</span>
@@ -188,17 +188,17 @@ export default async function PublicServicePage(props: {
             <span className="text-slate-400">3. Your details</span>
           </nav>
 
-          <h1 className="mt-4 text-[26px] font-semibold tracking-tight text-slate-900 sm:text-[28px]">
+          <h1 className="mt-3 text-[24px] font-semibold tracking-tight text-slate-900 sm:text-[26px]">
             {service.name}
           </h1>
           {service.description && (
-            <p className="mt-2 max-w-xl text-[14px] leading-relaxed text-slate-600">
+            <p className="mt-1.5 max-w-xl text-[14px] leading-relaxed text-slate-600">
               {service.description}
             </p>
           )}
 
-          {/* Service meta chips */}
-          <div className="mt-5 flex flex-wrap items-center gap-2 text-[11.5px]">
+          {/* Service meta chips (Phase 17: tightened mt-5 → mt-4) */}
+          <div className="mt-4 flex flex-wrap items-center gap-2 text-[11.5px]">
             <span className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white/80 px-3 py-1 text-slate-700 shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-3.5 w-3.5 text-slate-500" aria-hidden>
                 <circle cx="12" cy="12" r="9" />
@@ -218,26 +218,32 @@ export default async function PublicServicePage(props: {
             </span>
           </div>
 
-          {/* Trust ribbon — calm, no marketing hype */}
-          <div className="mt-5 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11px] text-slate-500">
-            <span className="inline-flex items-center gap-1.5">
+          {/* Trust ribbon — Phase 17B refinement:
+              - Slightly larger text (11px → 11.5px) with medium weight
+              - Tighter gap-x-4 → gap-x-3.5 on tight viewports
+              - Each item gets gap-1.5 → gap-2 between icon + label
+                for cleaner alignment rhythm
+              - First item's pulse dot retained as the only animated
+                element — others use static glyphs for calm hierarchy */}
+          <div className="mt-4 flex flex-wrap items-center gap-x-3.5 gap-y-1.5 text-[11.5px] font-medium text-slate-500">
+            <span className="inline-flex items-center gap-2">
               <span aria-hidden className="relative inline-flex h-1.5 w-1.5">
                 <span className="absolute inset-0 animate-ping rounded-full bg-emerald-400/55" />
                 <span className="relative h-1.5 w-1.5 rounded-full bg-emerald-500" />
               </span>
               Real-time availability
             </span>
-            <span className="inline-flex items-center gap-1.5">
+            <span className="inline-flex items-center gap-2">
               <CheckGlyph />
               Confirmed instantly
             </span>
-            <span className="inline-flex items-center gap-1.5">
+            <span className="inline-flex items-center gap-2">
               <CheckGlyph />
-              Calendar invite included
+              Reminders included
             </span>
-            <span className="inline-flex items-center gap-1.5" title="Your local timezone is detected automatically">
+            <span className="inline-flex items-center gap-2" title="Your local timezone is detected automatically">
               <GlobeGlyph />
-              Shown in your timezone
+              Timezone auto-adjusted
             </span>
           </div>
         </div>
@@ -271,8 +277,42 @@ export default async function PublicServicePage(props: {
         />
 
         {showPoweredBy && (
-          <footer className="mt-12 border-t border-slate-200/70 pt-4 text-center text-[10.5px] tracking-wide text-slate-400">
-            Powered by ZentroMeet
+          // Phase 17B footer micro-polish:
+          //   - gap-1.5 → gap-2.5 between mark/text (cleaner rhythm)
+          //   - eyebrow opacity rebalanced to feel intentional
+          //   - mark gets a faint rounded shadow on hover for depth
+          //   - typography weights stay subtle but consistent
+          //   - vertical spacing pt-5 → pt-6 for a touch more air
+          <footer className="mt-10 border-t border-slate-200/70 pt-6">
+            <a
+              href="https://app.zentromeet.com"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="group mx-auto flex w-fit items-center gap-2.5 text-[11px] tracking-wide transition-colors duration-200"
+              aria-label="Powered by ZentroMeet — premium scheduling platform"
+            >
+              <span className="text-[10px] font-medium uppercase tracking-[0.12em] text-slate-400/70 transition-colors duration-200 group-hover:text-slate-500">
+                Powered by
+              </span>
+              {/* ZentroMeet mark — circular blue Z badge with a soft
+                  shadow on hover that gives a hint of depth without
+                  being attention-seeking. */}
+              <svg
+                viewBox="0 0 160 160"
+                className="h-[18px] w-[18px] rounded-full opacity-85 shadow-[0_0_0_rgba(53,157,243,0)] transition-all duration-200 group-hover:opacity-100 group-hover:shadow-[0_2px_8px_rgba(53,157,243,0.25)]"
+                aria-hidden
+              >
+                <circle cx="80" cy="80" r="80" fill="#359df3" />
+                <g fill="#0f172a">
+                  <rect x="40" y="40" width="80" height="15" />
+                  <rect x="40" y="105" width="80" height="15" />
+                </g>
+                <line x1="118" y1="48" x2="42" y2="112" stroke="#0f172a" strokeWidth="22" />
+              </svg>
+              <span className="font-semibold tracking-tight text-slate-500 transition-colors duration-200 group-hover:text-slate-900">
+                ZentroMeet
+              </span>
+            </a>
           </footer>
         )}
       </main>
@@ -317,7 +357,7 @@ function StaffIdentityBlock({
   // specific person. Keep the block calm in that case.
   if (isAutoRouted) {
     return (
-      <section className="mt-8 relative overflow-hidden rounded-3xl border border-slate-200 bg-white p-5 shadow-[0_4px_18px_rgba(15,23,42,0.04)] sm:p-6">
+      <section className="mt-6 relative overflow-hidden rounded-3xl border border-slate-200 bg-white p-4 shadow-[0_4px_18px_rgba(15,23,42,0.04)] sm:p-5">
         <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-slate-200 to-transparent" />
         <div className="flex items-center gap-4">
           <div
@@ -346,7 +386,7 @@ function StaffIdentityBlock({
   }
 
   return (
-    <section className="mt-8 relative overflow-hidden rounded-3xl border border-slate-200 bg-white p-5 shadow-[0_4px_18px_rgba(15,23,42,0.04)] sm:p-6">
+    <section className="mt-6 relative overflow-hidden rounded-3xl border border-slate-200 bg-white p-4 shadow-[0_4px_18px_rgba(15,23,42,0.04)] sm:p-5">
       <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-slate-200 to-transparent" />
 
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:gap-5">

@@ -5,7 +5,7 @@ import Footer from "@/components/Footer";
 export const metadata: Metadata = {
   title: "Features",
   description: "Public booking pages, custom branding, availability overrides, Google Meet, reminders, analytics.",
-  openGraph: { title: "Features — Scheduling SaaS" },
+  openGraph: { title: "Features — ZentroMeet" },
 };
 
 const FEATURES = [
