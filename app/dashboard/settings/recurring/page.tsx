@@ -29,14 +29,8 @@ export default async function RecurringBookingsPage() {
         { label: "Recurring bookings" },
       ]}
     >
-      <h1 className="text-heading font-semibold text-ink">Recurring bookings</h1>
-      <p className="mt-1 max-w-2xl text-sm text-ink-muted">
-        Create weekly/monthly appointment series. Each occurrence is
-        materialized as a real booking ahead of time, validated against
-        booking rules and availability. Pausing the series stops new
-        occurrences without affecting bookings already on the calendar.
-      </p>
-
+      {/* Hero + page chrome live inside the client now — single
+          source of truth for the header + KPIs + engine panel. */}
       <RecurringClient />
     </Shell>
   );
