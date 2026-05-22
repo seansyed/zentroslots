@@ -7,6 +7,7 @@ import { getSession, isManagerial } from "@/lib/auth";
 import DashboardBookings from "@/components/DashboardBookings";
 import Shell from "@/components/dashboard/Shell";
 import OnboardingChecklist, { type ChecklistItem } from "@/components/dashboard/OnboardingChecklist";
+import { getDashboardChecklistSummary } from "@/lib/onboarding/integrity";
 import TenantAnnouncementBanner from "@/components/dashboard/TenantAnnouncementBanner";
 import DashboardHero from "@/components/dashboard/DashboardHero";
 import DashboardKpiGrid from "@/components/dashboard/DashboardKpiGrid";
@@ -29,8 +30,18 @@ export default async function DashboardPage(props: {
   if (!user) redirect("/dashboard/login");
   const tenant = await db.query.tenants.findFirst({ where: eq(tenants.id, user.tenantId) });
 
-  // First-time admin? Push to the onboarding wizard.
-  if (user.role === "admin" && tenant && !tenant.onboardingCompletedAt) {
+  // First-time admin? Push to the onboarding wizard — UNLESS they
+  // explicitly chose "Finish later" (the escape hatch). That choice
+  // sets `onboardingSkippedAt` so the wizard becomes opt-in instead
+  // of forced. The wizard itself remains resumable from
+  // /dashboard/onboarding any time. Completion still requires the
+  // terminal `complete` action, which sets `onboardingCompletedAt`.
+  if (
+    user.role === "admin" &&
+    tenant &&
+    !tenant.onboardingCompletedAt &&
+    !tenant.onboardingSkippedAt
+  ) {
     redirect("/dashboard/onboarding");
   }
 
@@ -233,12 +244,16 @@ export default async function DashboardPage(props: {
     .limit(6);
 
   // Onboarding checklist (only shown when something is incomplete).
-  const hasServices = (await db.select({ n: count() }).from(services).where(eq(services.tenantId, user.tenantId)))[0]?.n ?? 0;
-  const hasAvailability = (await db.select({ n: count() }).from(availability).where(eq(availability.userId, user.id)))[0]?.n ?? 0;
+  // Consolidated to ONE round-trip via lib/onboarding/integrity.ts —
+  // EXISTS short-circuits on first row, unlike the two COUNT(*) scans
+  // we used before. `googleRefreshToken`, `logoUrl`, and `tagline` are
+  // already loaded into `user` / `tenant`, so no extra query is needed
+  // for those checklist items.
+  const checklistSummary = await getDashboardChecklistSummary(user.tenantId, user.id);
   const checklistItems: ChecklistItem[] = [
     { id: "google",   label: "Connect Google Calendar",          href: "/dashboard/settings/integrations", done: Boolean(user.googleRefreshToken) },
-    { id: "service",  label: "Add at least one service",         href: "/dashboard/services",              done: Number(hasServices) > 0 },
-    { id: "hours",    label: "Set your weekly working hours",    href: "/dashboard/availability",          done: Number(hasAvailability) > 0 },
+    { id: "service",  label: "Add at least one service",         href: "/dashboard/services",              done: checklistSummary.hasServices },
+    { id: "hours",    label: "Set your weekly working hours",    href: "/dashboard/availability",          done: checklistSummary.hasAvailability },
     { id: "booking",  label: "Receive your first booking",       href: "/dashboard/calendar",              done: bookingCount > 0 },
     { id: "branding", label: "Customize your booking page",      href: "/dashboard/settings/branding",     done: Boolean(tenant?.logoUrl || tenant?.tagline) },
   ];

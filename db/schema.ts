@@ -60,8 +60,23 @@ export const tenants = pgTable(
     description: text("description"),
     bookingHeadline: varchar("booking_headline", { length: 200 }),
 
-    // Onboarding
+    // Onboarding — see lib/onboarding/* for the typed reader/writer and
+    // lib/onboarding/types.ts for the jsonb shape of `onboardingProgress`.
+    //
+    //   completed_at  → terminal "all done" state (existing semantic)
+    //   started_at    → first step persisted; set by the wizard on entry
+    //   skipped_at    → "finish later" escape hatch; admin is freed from
+    //                   the forced wizard redirect but onboarding is NOT
+    //                   considered complete
+    //   progress      → { currentStep, steps[], templateApplied, telemetry }
+    //
+    // Migration 0042. All three new fields are additive + backwards
+    // compatible: pre-migration tenants still work, post-migration code
+    // gracefully handles `{}`.
     onboardingCompletedAt: timestamp("onboarding_completed_at", { withTimezone: true }),
+    onboardingStartedAt: timestamp("onboarding_started_at", { withTimezone: true }),
+    onboardingSkippedAt: timestamp("onboarding_skipped_at", { withTimezone: true }),
+    onboardingProgress: jsonb("onboarding_progress").notNull().default({}),
 
     // Outbound webhook for operational alerts (Slack-compatible)
     notificationWebhookUrl: text("notification_webhook_url"),
