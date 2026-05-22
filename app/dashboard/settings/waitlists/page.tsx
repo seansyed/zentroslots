@@ -29,13 +29,8 @@ export default async function WaitlistsPage() {
         { label: "Waitlists" },
       ]}
     >
-      <h1 className="text-heading font-semibold text-ink">Waitlists</h1>
-      <p className="mt-1 max-w-2xl text-sm text-ink-muted">
-        Customers join from your public booking page when a date is full.
-        When a booking gets cancelled or rescheduled, the next-best match
-        is offered a 15-minute reservation hold.
-      </p>
-
+      {/* Hero + page chrome live inside the client now — single
+          source of truth for header + KPIs + engine panel. */}
       <WaitlistsClient />
     </Shell>
   );
