@@ -3,9 +3,10 @@ import { notFound } from "next/navigation";
 import { and, eq, isNull, or } from "drizzle-orm";
 
 import { db } from "@/db/client";
-import { calendarConnections, departments, serviceStaff, services, staffAssignmentRules, tenants, users } from "@/db/schema";
+import { calendarConnections, customers, departments, serviceStaff, services, staffAssignmentRules, tenants, users } from "@/db/schema";
 import BookingFlow from "@/components/BookingFlow";
 import { resolvePublicProfile } from "@/lib/identity";
+import { getClientSession } from "@/lib/client-auth";
 
 /**
  * Public service booking page — Phase 14A staff identity + service
@@ -147,6 +148,30 @@ export default async function PublicServicePage(props: {
   // virtual (default video booking).
   const meeting = deriveMeetingMode(service.videoProvider);
 
+  // Phase 19 — Wave 1 F1 / F2 (1-click rebook via pre-fill).
+  // If the visitor is signed into the customer portal for THIS tenant,
+  // hydrate name + email so the confirm form is pre-filled and they
+  // can click "Pick date → Confirm" without re-typing.
+  //
+  // CRITICAL: only pre-fill when session.tenantId === tenant.id.
+  // Cross-tenant pre-fill would leak the visitor's identity to a
+  // workspace they haven't authorized.
+  let signedInCustomer: { name: string; email: string; firstName: string } | null = null;
+  const clientSession = await getClientSession();
+  if (clientSession && clientSession.tenantId === tenant.id) {
+    const c = await db.query.customers.findFirst({
+      where: and(eq(customers.id, clientSession.customerId), eq(customers.tenantId, tenant.id)),
+      columns: { name: true, email: true },
+    });
+    if (c) {
+      signedInCustomer = {
+        name: c.name,
+        email: c.email,
+        firstName: c.name.split(/\s+/)[0] || "there",
+      };
+    }
+  }
+
   return (
     <div className="relative min-h-screen overflow-hidden bg-gradient-to-b from-slate-50 via-white to-white">
       {/* Page-wide ambient depth (extremely subtle) */}
@@ -256,6 +281,31 @@ export default async function PublicServicePage(props: {
         </div>
       </header>
 
+      {/* Phase 19 — recognized-visitor bar. Surfaces when the visitor is
+          signed into the customer portal for THIS tenant. Confirms the
+          recognition (so the pre-filled form doesn't feel "spooky") and
+          offers a one-tap escape back to the portal. Calm tone — no
+          color flash, no animation; just continuity. */}
+      {signedInCustomer && (
+        <div className="border-b border-slate-200/70 bg-slate-50/50">
+          <div className="mx-auto flex max-w-2xl flex-col gap-1 px-6 py-2.5 text-[11.5px] sm:flex-row sm:items-center sm:justify-between">
+            <div className="text-slate-600">
+              Welcome back,{" "}
+              <span className="font-semibold text-slate-900">{signedInCustomer.firstName}</span>
+              <span className="hidden sm:inline">
+                {" "}— your details are pre-filled.
+              </span>
+            </div>
+            <Link
+              href={`/client/${tenant.slug}`}
+              className="inline-flex items-center gap-1 font-medium text-slate-500 transition-colors hover:text-slate-900"
+            >
+              <span aria-hidden>←</span> Back to portal
+            </Link>
+          </div>
+        </div>
+      )}
+
       <main className="relative mx-auto max-w-2xl px-6 pb-16">
         {/* Staff identity block — premium humanized identity above the
             booking flow. Answers "who am I booking with?" directly. */}
@@ -281,6 +331,11 @@ export default async function PublicServicePage(props: {
           tenantName={tenant.name}
           autoRouted={isAutoRouted}
           googleConnected={googleConnected}
+          // Phase 19 — pre-fill name + email when the visitor is signed
+          // into the portal for THIS tenant. See signedInCustomer
+          // resolution above for the tenant-isolation guard.
+          defaultClientName={signedInCustomer?.name}
+          defaultClientEmail={signedInCustomer?.email}
         />
 
         {showPoweredBy && (

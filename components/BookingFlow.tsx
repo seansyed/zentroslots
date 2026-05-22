@@ -36,6 +36,14 @@ type Props = {
    *  When true the trust strip surfaces a "Real-time calendar sync"
    *  line — honest signal, only shown when the data backs it. */
   googleConnected?: boolean;
+  /** Phase 19 — Wave 1 F1. When the visitor is already signed into the
+   *  customer portal for THIS tenant, the page hydrates these from the
+   *  customer record so the confirm-step form is pre-filled and the
+   *  rebook flow collapses to "pick date → confirm" (~2 clicks). Cross-
+   *  tenant pre-fill is intentionally NEVER done — the page-level guard
+   *  matches session.tenantId === tenant.id before passing values in. */
+  defaultClientName?: string;
+  defaultClientEmail?: string;
 };
 
 type Step = "pick-time" | "confirm" | "done";
@@ -52,6 +60,8 @@ export default function BookingFlow({
   tenantName,
   autoRouted = false,
   googleConnected = false,
+  defaultClientName,
+  defaultClientEmail,
 }: Props) {
   const accent = accentColor || DEFAULT_ACCENT;
 
@@ -76,8 +86,11 @@ export default function BookingFlow({
   const [scanningNext, setScanningNext] = useState(false);
 
   const [step, setStep] = useState<Step>("pick-time");
-  const [clientName, setClientName] = useState("");
-  const [clientEmail, setClientEmail] = useState("");
+  // Phase 19 — Wave 1 F1: hydrate from props when the visitor is signed
+  // into the portal for this tenant. The inputs remain editable so a
+  // customer can override (e.g. booking on behalf of a family member).
+  const [clientName, setClientName] = useState(defaultClientName ?? "");
+  const [clientEmail, setClientEmail] = useState(defaultClientEmail ?? "");
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
