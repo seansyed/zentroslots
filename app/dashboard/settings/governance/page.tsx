@@ -80,23 +80,18 @@ export default async function GovernancePage() {
         plan: tenant.currentPlan,
         logoUrl: tenant.logoUrl,
       }}
-      title="Governance"
+      title="Governance Center"
       crumbs={[
         { label: "Dashboard", href: "/dashboard" },
         { label: "Settings" },
-        { label: "Governance" },
+        { label: "Governance Center" },
       ]}
     >
-      <h1 className="text-heading font-semibold text-ink">Governance</h1>
-      <p className="mt-1 max-w-2xl text-sm text-ink-muted">
-        Retention windows, password policy, export controls, and audit
-        history for <span className="font-medium">{tenant.name}</span>.
-        All retention is disabled by default — data is kept indefinitely
-        until you opt in. Audit + export-audit windows enforce a hard
-        floor of 90 days for compliance.
-      </p>
-
+      {/* Page hero is rendered inside the client so the posture badge,
+          last-update timestamp, and KPI strip can react instantly to
+          policy edits without a full server round-trip. */}
       <GovernanceClient
+        tenantName={tenant.name}
         policy={policy}
         hardFloors={HARD_FLOOR_DAYS}
         governanceEvents={governanceFiltered.map((e) => ({
