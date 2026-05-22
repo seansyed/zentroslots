@@ -41,6 +41,7 @@ import {
 import { PremiumCard } from "@/components/ui/Card";
 import { toast } from "@/components/ui/primitives";
 import { cn } from "@/lib/cn";
+import { usePlanCapabilities } from "@/components/billing/CapabilityProvider";
 
 // ─── Types ────────────────────────────────────────────────────────
 
@@ -73,22 +74,33 @@ type VerifyOutcome = {
 
 // ─── Root component ───────────────────────────────────────────────
 
+// PlanInfo is derived from the CapabilityProvider — no longer a prop.
+// Kept as a private type so the inner Hero stays explicitly typed
+// rather than threading the entire provider payload through props.
 type PlanInfo = { id: string; name: string; maxCustomDomains: number };
 
 export default function DomainsClient({
   initial,
   config,
   tenantSlug,
-  plan,
 }: {
   initial: Domain[];
   config: Config;
   tenantSlug: string;
-  plan: PlanInfo;
 }) {
-  // Phase 15D plan gating — backend enforces the same cap at
-  // /api/tenant/domains POST. The UI here mirrors that contract so
-  // the form never appears when adding would 402/403.
+  // Phase 3 frontend capability hydration — read plan + limits from
+  // the server-hydrated CapabilityProvider instead of duplicated
+  // props. Fail-closed: when the provider is missing, the hook
+  // returns a null payload and we treat the feature as locked.
+  // Backend enforces the same cap at POST /api/tenant/domains.
+  const { payload } = usePlanCapabilities();
+  const plan: PlanInfo = payload
+    ? {
+        id: payload.plan.id,
+        name: payload.plan.name,
+        maxCustomDomains: payload.limits.maxCustomDomains,
+      }
+    : { id: "free", name: "Free", maxCustomDomains: 0 };
   const featureUnlocked = plan.maxCustomDomains > 0;
   const capReached = featureUnlocked && initial.length >= plan.maxCustomDomains;
   const [rows, setRows] = React.useState<Domain[]>(initial);

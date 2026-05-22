@@ -4,8 +4,10 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db/client";
 import { tenants, users } from "@/db/schema";
 import { getSession } from "@/lib/auth";
+import { loadCapabilitiesForTenant } from "@/lib/billing/loadCapabilities";
 import Shell from "@/components/dashboard/Shell";
 import WaitlistsClient from "@/components/dashboard/WaitlistsClient";
+import { CapabilityProvider } from "@/components/billing/CapabilityProvider";
 
 export const metadata = { title: "Waitlists" };
 export const dynamic = "force-dynamic";
@@ -18,6 +20,11 @@ export default async function WaitlistsPage() {
   const tenant = await db.query.tenants.findFirst({ where: eq(tenants.id, user.tenantId) });
   if (!tenant) redirect("/dashboard");
 
+  // Phase 3 capability hydration — server-fetched payload feeds
+  // <CapabilityProvider> so children can consume capabilities via
+  // useCapability() (e.g., future "waitlists Pro+" gates).
+  const capabilities = await loadCapabilitiesForTenant(tenant.id);
+
   return (
     <Shell
       user={{ name: user.name, email: user.email, role: user.role }}
@@ -29,9 +36,11 @@ export default async function WaitlistsPage() {
         { label: "Waitlists" },
       ]}
     >
-      {/* Hero + page chrome live inside the client now — single
-          source of truth for header + KPIs + engine panel. */}
-      <WaitlistsClient />
+      <CapabilityProvider initial={capabilities}>
+        {/* Hero + page chrome live inside the client now — single
+            source of truth for header + KPIs + engine panel. */}
+        <WaitlistsClient />
+      </CapabilityProvider>
     </Shell>
   );
 }

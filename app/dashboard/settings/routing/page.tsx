@@ -11,10 +11,12 @@ import {
 } from "@/db/schema";
 import { getSession } from "@/lib/auth";
 import { getPlan, meetsPlan, type PlanId } from "@/lib/plans";
+import { loadCapabilitiesForTenant } from "@/lib/billing/loadCapabilities";
 import Shell from "@/components/dashboard/Shell";
 import RoutingClient, {
   type RoutingPageBootstrap,
 } from "@/components/dashboard/RoutingClient";
+import { CapabilityProvider } from "@/components/billing/CapabilityProvider";
 
 export const metadata = { title: "Routing Intelligence Center" };
 export const dynamic = "force-dynamic";
@@ -28,7 +30,11 @@ export default async function StaffRoutingPage() {
   if (!tenant) redirect("/dashboard");
 
   // ── Hero metrics from real backend state ──────────────────────────────
-  const [staffRows, calRows, activeServices, ruleRows] = await Promise.all([
+  // Capabilities loaded in parallel (Phase 3 hydration). The routing
+  // page keeps its existing bootstrap-prop architecture; the provider
+  // is mounted alongside so future surface refactors can switch to
+  // the hook without touching the server fetch.
+  const [staffRows, calRows, activeServices, ruleRows, capabilities] = await Promise.all([
     db
       .select({ id: users.id, role: users.role, name: users.name })
       .from(users)
@@ -54,6 +60,7 @@ export default async function StaffRoutingPage() {
       })
       .from(staffAssignmentRules)
       .where(eq(staffAssignmentRules.tenantId, tenant.id)),
+    loadCapabilitiesForTenant(tenant.id),
   ]);
 
   const staff = staffRows.filter((s) => s.role !== "client");
@@ -126,7 +133,9 @@ export default async function StaffRoutingPage() {
         { label: "Staff routing" },
       ]}
     >
-      <RoutingClient bootstrap={bootstrap} />
+      <CapabilityProvider initial={capabilities}>
+        <RoutingClient bootstrap={bootstrap} />
+      </CapabilityProvider>
     </Shell>
   );
 }

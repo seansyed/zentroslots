@@ -22,6 +22,7 @@ import { analyticsDailySnapshots, bookings, services, tenants, users } from "@/d
 import { getSession } from "@/lib/auth";
 import { planFeature } from "@/lib/quotas";
 import { getPlan } from "@/lib/plans";
+import { loadCapabilitiesForTenant } from "@/lib/billing/loadCapabilities";
 import Shell from "@/components/dashboard/Shell";
 import { PremiumCard } from "@/components/ui/Card";
 import { cn } from "@/lib/cn";
@@ -117,16 +118,24 @@ export default async function AnalyticsPage() {
   // empty charts.
   const thirtyDayCutoff = new Date(now.getTime() - 30 * 24 * 60 * 60_000)
     .toISOString().slice(0, 10);
-  const snapshotRows = await db
-    .select()
-    .from(analyticsDailySnapshots)
-    .where(
-      and(
-        eq(analyticsDailySnapshots.tenantId, user.tenantId),
-        gte(analyticsDailySnapshots.snapshotDate, thirtyDayCutoff)
+  const [snapshotRows, capabilityPayload] = await Promise.all([
+    db
+      .select()
+      .from(analyticsDailySnapshots)
+      .where(
+        and(
+          eq(analyticsDailySnapshots.tenantId, user.tenantId),
+          gte(analyticsDailySnapshots.snapshotDate, thirtyDayCutoff)
+        )
       )
-    )
-    .orderBy(asc(analyticsDailySnapshots.snapshotDate));
+      .orderBy(asc(analyticsDailySnapshots.snapshotDate)),
+    // Phase 3 — server-side capability check. The CSV download is
+    // backed by the analytics_export capability (Pro+). If the
+    // tenant's plan doesn't unlock it we render a locked indicator
+    // instead of a 402-on-click link.
+    loadCapabilitiesForTenant(user.tenantId),
+  ]);
+  const canExportAnalytics = capabilityPayload.capabilities.analytics_export.allowed;
 
   const aggregates: DailyAggregate[] = snapshotRows.map((r) => ({
     tenantId: r.tenantId,
@@ -305,12 +314,26 @@ export default async function AnalyticsPage() {
         <>
           <div className="mt-10 flex items-baseline justify-between gap-3">
             <h2 className="text-lg font-medium">Last {aggregates.length}-day rollup</h2>
-            <a
-              href="/api/tenant/analytics/export?range=30"
-              className="text-xs text-slate-500 underline-offset-2 hover:text-slate-900 hover:underline"
-            >
-              ↓ Export CSV
-            </a>
+            {canExportAnalytics ? (
+              <a
+                href="/api/tenant/analytics/export?range=30"
+                className="text-xs text-slate-500 underline-offset-2 hover:text-slate-900 hover:underline"
+              >
+                ↓ Export CSV
+              </a>
+            ) : (
+              // Phase 3 capability-aware locked variant. Same row
+              // position so the layout doesn't shift across plans —
+              // just the action is replaced with an upgrade hint.
+              <Link
+                href="/dashboard/billing"
+                className="inline-flex items-center gap-1 text-xs font-medium text-ink-subtle underline-offset-2 hover:text-ink hover:underline"
+                title={capabilityPayload.capabilities.analytics_export.reason}
+              >
+                <Lock className="h-3 w-3" strokeWidth={2} />
+                CSV export · upgrade
+              </Link>
+            )}
           </div>
 
           <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">

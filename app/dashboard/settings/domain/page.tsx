@@ -5,9 +5,10 @@ import { db } from "@/db/client";
 import { tenantDomains, tenants, users } from "@/db/schema";
 import { getSession } from "@/lib/auth";
 import { CNAME_TARGET, TXT_PREFIX } from "@/lib/domains";
-import { getPlan } from "@/lib/plans";
+import { loadCapabilitiesForTenant } from "@/lib/billing/loadCapabilities";
 import Shell from "@/components/dashboard/Shell";
 import DomainsClient from "@/components/dashboard/DomainsClient";
+import { CapabilityProvider } from "@/components/billing/CapabilityProvider";
 
 export const dynamic = "force-dynamic";
 
@@ -19,13 +20,18 @@ export default async function DomainSettingsPage() {
   const tenant = await db.query.tenants.findFirst({ where: eq(tenants.id, user.tenantId) });
   if (!tenant) redirect("/dashboard");
 
-  const rows = await db
-    .select()
-    .from(tenantDomains)
-    .where(eq(tenantDomains.tenantId, tenant.id))
-    .orderBy(tenantDomains.createdAt);
-
-  const plan = getPlan(tenant.currentPlan);
+  const [rows, capabilities] = await Promise.all([
+    db
+      .select()
+      .from(tenantDomains)
+      .where(eq(tenantDomains.tenantId, tenant.id))
+      .orderBy(tenantDomains.createdAt),
+    // Phase 3 capability hydration. Server-fetched payload is handed
+    // to <CapabilityProvider initial=...> so the client tree reads
+    // plan + capability state synchronously on first render — no
+    // unlock flicker, no client-side fetch on mount.
+    loadCapabilitiesForTenant(tenant.id),
+  ]);
 
   return (
     <Shell
@@ -38,29 +44,28 @@ export default async function DomainSettingsPage() {
         { label: "Custom Domains" },
       ]}
     >
-      {/* The Command Center hero lives inside the client so the KPI
-          tiles can react instantly to verify / add / delete actions. */}
-      <DomainsClient
-        initial={rows.map((r) => ({
-          id: r.id,
-          host: r.host,
-          normalizedHost: r.normalizedHost,
-          verificationToken: r.verificationToken,
-          status: r.status as "pending" | "verified" | "failed",
-          sslStatus: r.sslStatus as "pending" | "active" | "failed",
-          verifiedAt: r.verifiedAt?.toISOString() ?? null,
-          lastCheckedAt: r.lastCheckedAt?.toISOString() ?? null,
-          createdAt: r.createdAt.toISOString(),
-          updatedAt: r.updatedAt.toISOString(),
-        }))}
-        config={{ cnameTarget: CNAME_TARGET, txtPrefix: TXT_PREFIX }}
-        tenantSlug={tenant.slug}
-        plan={{
-          id: plan.id,
-          name: plan.name,
-          maxCustomDomains: plan.limits.maxCustomDomains,
-        }}
-      />
+      <CapabilityProvider initial={capabilities}>
+        {/* The Command Center hero lives inside the client so the KPI
+            tiles can react instantly to verify / add / delete actions.
+            Plan + custom_domains capability come from the provider
+            above — no more duplicated `plan` prop. */}
+        <DomainsClient
+          initial={rows.map((r) => ({
+            id: r.id,
+            host: r.host,
+            normalizedHost: r.normalizedHost,
+            verificationToken: r.verificationToken,
+            status: r.status as "pending" | "verified" | "failed",
+            sslStatus: r.sslStatus as "pending" | "active" | "failed",
+            verifiedAt: r.verifiedAt?.toISOString() ?? null,
+            lastCheckedAt: r.lastCheckedAt?.toISOString() ?? null,
+            createdAt: r.createdAt.toISOString(),
+            updatedAt: r.updatedAt.toISOString(),
+          }))}
+          config={{ cnameTarget: CNAME_TARGET, txtPrefix: TXT_PREFIX }}
+          tenantSlug={tenant.slug}
+        />
+      </CapabilityProvider>
     </Shell>
   );
 }
