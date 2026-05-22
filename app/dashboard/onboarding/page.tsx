@@ -8,6 +8,8 @@ import { loadOnboardingProgress } from "@/lib/onboarding/state";
 import { recordOnboardingEvent } from "@/lib/onboarding/telemetry";
 import { ONBOARDING_EVENTS } from "@/lib/onboarding/types";
 
+export const dynamic = "force-dynamic";
+
 export default async function OnboardingPage() {
   const session = await getSession();
   if (!session) redirect("/dashboard/login");
@@ -27,8 +29,7 @@ export default async function OnboardingPage() {
   const isResumed = Boolean(state?.startedAt);
 
   // Telemetry: distinguish a fresh entry from a resume. Both fire-and-
-  // forget so they never block the render. `recordOnboardingEvent`
-  // never throws.
+  // forget so they never block the render.
   void recordOnboardingEvent({
     tenantId: tenant.id,
     actorUserId: user.id,
@@ -37,19 +38,16 @@ export default async function OnboardingPage() {
   });
 
   return (
-    <div className="mx-auto max-w-xl px-6 py-12">
-      <div className="text-xs font-medium uppercase tracking-wider text-slate-500">
-        {tenant.name}
-      </div>
-      <h1 className="mt-1 text-2xl font-semibold">Set up your workspace</h1>
-      <p className="mt-1 text-sm text-slate-600">A few quick steps and you&rsquo;re ready to take bookings.</p>
-
-      <OnboardingWizard
-        defaultTimezone={user.timezone}
-        tenantSlug={tenant.slug}
-        initialStep={resumeStep}
-        initialProgress={initialProgress}
-      />
-    </div>
+    <OnboardingWizard
+      defaultTimezone={user.timezone}
+      tenantName={tenant.name}
+      tenantSlug={tenant.slug}
+      tenantPlan={tenant.currentPlan ?? tenant.plan ?? "free"}
+      userEmail={user.email}
+      userName={user.name}
+      initialStep={resumeStep}
+      initialProgress={initialProgress}
+      hasGoogleConnected={Boolean(user.googleRefreshToken)}
+    />
   );
 }
