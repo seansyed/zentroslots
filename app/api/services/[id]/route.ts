@@ -18,11 +18,12 @@ const patchSchema = z.object({
   bufferAfter: z.number().int().min(0).max(240).optional(),
   color: z.string().regex(/^#[0-9a-fA-F]{6}$/).nullable().optional(),
   isActive: z.union([z.number().int().min(0).max(1), z.boolean()]).optional(),
-  // Wave A removed zoom + teams because both silently failed.
-  // Wave C re-enabled teams — Microsoft Graph adapter creates Teams
-  // online meetings as part of event creation. Zoom remains out
-  // until a Zoom adapter ships.
-  videoProvider: z.enum(["google_meet", "teams", "none"]).optional(),
+  // Wave A removed zoom + teams. Wave C re-enabled teams via the
+  // Microsoft Graph adapter. Wave D re-enables zoom via the side-car
+  // meeting dispatch (Zoom doesn't host the calendar event, just the
+  // meeting; orchestrator wires the join URL into the Google /
+  // Outlook event description).
+  videoProvider: z.enum(["google_meet", "teams", "zoom", "none"]).optional(),
   staffUserIds: z.array(z.string().uuid()).optional(),
   // Direct department ownership (migration 0032). Pass `null` to
   // clear the assignment, a uuid to assign, or omit to leave the

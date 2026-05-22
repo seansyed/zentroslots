@@ -82,12 +82,19 @@ export async function notifyReconnectRequired(args: {
     const providerLabel =
       claimed.provider === "google" ? "Google Calendar" :
       claimed.provider === "microsoft" ? "Microsoft Outlook" :
+      claimed.provider === "zoom" ? "Zoom" :
       claimed.provider;
+    // Wave D — provider-specific clarifier explains the downstream
+    // impact of each broken connection. Zoom-only bookings will skip
+    // meeting-link creation but the calendar event still lands on the
+    // staff's Google or Outlook connection.
     const providerSecondary =
       claimed.provider === "microsoft"
         ? "Reconnecting also restores Teams meeting links on new bookings."
         : claimed.provider === "google"
         ? "Reconnecting also restores Google Meet links on new bookings."
+        : claimed.provider === "zoom"
+        ? "Reconnecting also restores Zoom meeting links on new bookings (your calendar sync isn't affected)."
         : "";
     const firstName = staff.name?.split(/\s+/)[0] ?? "there";
 

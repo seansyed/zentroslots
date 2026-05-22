@@ -366,6 +366,25 @@ export const bookings = pgTable(
     // bookings; new code writes to both for now.
     externalEventId: varchar("external_event_id", { length: 255 }),
     externalEventProvider: varchar("external_event_provider", { length: 20 }),
+    // Wave D — side-car meeting provider columns.
+    //
+    // For Google Meet + Microsoft Teams bookings these stay null:
+    // the meeting URL is embedded in the calendar event itself and
+    // the calendar provider's event id is the only thing we need to
+    // track for the meeting lifecycle.
+    //
+    // For Zoom bookings these capture the SEPARATE meeting resource
+    // that lives outside the calendar event:
+    //   • meetingProvider          — provider id ("zoom" today)
+    //   • meetingProviderEventId  — Zoom's meeting id (numeric, but
+    //                                stored as varchar for symmetry
+    //                                with the existing external_event_id)
+    // The calendar event itself (if any) is still referenced via
+    // externalEventId + externalEventProvider, and meet_link holds
+    // the Zoom join URL — same column the rest of the app already
+    // reads. (Migration 0047.)
+    meetingProvider: varchar("meeting_provider", { length: 20 }),
+    meetingProviderEventId: varchar("meeting_provider_event_id", { length: 255 }),
     meetLink: text("meet_link"),
     notes: text("notes"),
 

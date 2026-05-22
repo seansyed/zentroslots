@@ -126,8 +126,8 @@ export const PROVIDER_CATALOG: Record<ProviderId, ProviderCatalogEntry> = {
   zoom: {
     id: "zoom",
     name: "Zoom",
-    description: "Auto-generate Zoom links on confirmed bookings. Coming soon.",
-    wired: false,
+    description: "Per-staff Zoom OAuth connection that auto-creates meetings on confirmed bookings. Rides alongside the staff's calendar connection (Google or Outlook).",
+    wired: true, // Wave D — Zoom adapter shipped
     category: "video",
   },
   teams: {

@@ -3473,14 +3473,15 @@ function ConnectButton({
   disabled?: boolean;
   label?: string;
 }) {
-  // Wave C — both Google Calendar AND Outlook (Microsoft Graph) have
-  // working OAuth flows now. Teams piggybacks on the Outlook flow so
-  // a separate connect button isn't shown; it's wired automatically.
-  // Cross-user connect (admin OAuth-on-behalf) is still not supported
-  // for either provider — staff must initiate the flow themselves.
+  // Wave C/D — Google Calendar, Outlook, and Zoom all have working
+  // OAuth flows. Teams piggybacks on the Outlook flow so a separate
+  // connect button isn't shown for it. Cross-user connect (admin
+  // OAuth-on-behalf) is still not supported for any provider — staff
+  // must initiate the flow themselves.
   let href: string | null = null;
   if (providerCatalogId === "google_calendar") href = "/api/calendar/google/connect";
   else if (providerCatalogId === "outlook") href = "/api/calendar/microsoft/connect";
+  else if (providerCatalogId === "zoom") href = "/api/calendar/zoom/connect";
   if (!href) {
     return (
       <Button type="button" variant="ghost" size="sm" disabled>

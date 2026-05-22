@@ -108,15 +108,18 @@ const DEFAULT_COLORS = [
   "#db2777", "#65a30d", "#0891b2", "#c026d3",
 ];
 
-// Wave C — Teams is now LIVE. The Microsoft Graph adapter creates a
-// Teams online meeting alongside the Outlook event in a single Graph
-// call; the join URL is stored on the booking like a Meet link.
-// Zoom remains disabled (no Zoom adapter yet — would silently fail).
+// Wave D — Zoom is now LIVE. Like Teams and Meet, the staff connects
+// once via OAuth and the orchestrator auto-creates a meeting on every
+// new booking. Unlike Teams/Meet, Zoom is a SIDE-CAR meeting provider
+// — it rides alongside the staff's Google or Outlook calendar
+// connection rather than hosting the calendar event itself. From the
+// user's perspective the experience is identical: pick Zoom in the
+// service, get a Zoom URL on every booking.
 const PROVIDERS = [
-  { id: "google_meet", label: "Google Meet",     note: "Auto-creates a Meet link via the staff's Google connection",       disabled: false },
-  { id: "teams",       label: "Microsoft Teams", note: "Auto-creates a Teams meeting via the staff's Microsoft connection", disabled: false },
-  { id: "zoom",        label: "Zoom",            note: "Coming soon · native OAuth integration in progress",                disabled: true  },
-  { id: "none",        label: "No video",        note: "In-person or phone",                                                  disabled: false },
+  { id: "google_meet", label: "Google Meet",     note: "Auto-creates a Meet link via the staff's Google connection",                                disabled: false },
+  { id: "teams",       label: "Microsoft Teams", note: "Auto-creates a Teams meeting via the staff's Microsoft connection",                          disabled: false },
+  { id: "zoom",        label: "Zoom",            note: "Auto-creates a Zoom meeting via the staff's Zoom connection; rides alongside the calendar", disabled: false },
+  { id: "none",        label: "No video",        note: "In-person or phone",                                                                          disabled: false },
 ] as const;
 
 const DELIVERY_MODE_OPTIONS = [

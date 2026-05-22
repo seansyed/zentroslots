@@ -17,16 +17,16 @@ export const loginSchema = z.object({
   password: z.string().min(1),
 });
 
-// Wave A consolidation removed `zoom` and `teams` because neither had a
-// working backend integration — silent meet-link failures resulted.
+// Wave A removed `zoom` + `teams` because neither had a working
+// backend integration. Wave C re-enabled `teams` via the Microsoft
+// Graph adapter. Wave D re-enables `zoom` via the side-car meeting
+// dispatch in lib/calendar/sync.ts — Zoom doesn't host the calendar
+// event itself, but a Zoom meeting URL is wired into the staff's
+// Google or Microsoft calendar event.
 //
-// Wave C re-enables `teams`: the Microsoft Graph adapter now creates
-// Teams online meetings as part of event creation. `zoom` stays
-// excluded — no Zoom API integration yet.
-//
-// Read paths still tolerate legacy stored values (we never migrate or
-// rewrite the column); only NEW writes are constrained.
-const videoProviderSchema = z.enum(["google_meet", "teams", "none"]);
+// Read paths still tolerate legacy stored values (we never migrate
+// or rewrite the column); only NEW writes are constrained.
+const videoProviderSchema = z.enum(["google_meet", "teams", "zoom", "none"]);
 
 export const serviceSchema = z.object({
   name: z.string().min(1).max(120),

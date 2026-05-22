@@ -203,9 +203,9 @@ const PROVIDER_CATALOG: Array<{
     id: "zoom",
     name: "Zoom",
     kind: "conferencing",
-    live: false,
+    live: true, // Wave D — Zoom adapter shipped
     brandColor: "#2D8CFF",
-    rationale: "OAuth + meeting auto-create on the roadmap.",
+    rationale: "Auto-creates a Zoom meeting per booking. Rides alongside Google or Outlook for the calendar event.",
   },
 ];
 

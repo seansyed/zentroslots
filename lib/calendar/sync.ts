@@ -102,6 +102,15 @@ import {
   refreshAccessToken as microsoftRefreshAccessToken,
   updateEvent as microsoftUpdateEvent,
 } from "./microsoft";
+import {
+  classifyError as zoomClassifyError,
+  createEvent as zoomCreateEvent,
+  deleteEvent as zoomDeleteEvent,
+  describeError as zoomDescribeError,
+  errorMessage as zoomErrorMessage,
+  refreshAccessToken as zoomRefreshAccessToken,
+  updateEvent as zoomUpdateEvent,
+} from "./zoom";
 import { notifyReconnectRequired } from "./notifyReconnect";
 
 // ─── Retry policy ──────────────────────────────────────────────────────
@@ -128,21 +137,28 @@ function sleep(ms: number): Promise<void> {
 // right one based on which adapter raised the error.
 
 function classifyError(provider: CalendarProvider, err: unknown): ErrorClass {
-  return provider === "google" ? googleClassifyError(err) : microsoftClassifyError(err);
+  if (provider === "google") return googleClassifyError(err);
+  if (provider === "microsoft") return microsoftClassifyError(err);
+  return zoomClassifyError(err);
 }
 
 function errorMessage(provider: CalendarProvider, err: unknown): string {
-  return provider === "google" ? googleErrorMessage(err) : microsoftErrorMessage(err);
+  if (provider === "google") return googleErrorMessage(err);
+  if (provider === "microsoft") return microsoftErrorMessage(err);
+  return zoomErrorMessage(err);
 }
 
 /**
  * Wave C.1 — turn an error into a human-readable description for
  * `connection.last_error` + the reconnect email body. Microsoft has
- * a rich AADSTS catalog we can mine for actionable copy; Google's
- * errors are already digestible so we just return the raw message.
+ * a rich AADSTS catalog we can mine for actionable copy; Wave D adds
+ * a parallel Zoom translator. Google's errors are already digestible
+ * so we just return the raw message.
  */
 function describeError(provider: CalendarProvider, err: unknown): string {
-  return provider === "microsoft" ? microsoftDescribeError(err) : errorMessage(provider, err);
+  if (provider === "microsoft") return microsoftDescribeError(err);
+  if (provider === "zoom") return zoomDescribeError(err);
+  return errorMessage(provider, err);
 }
 
 /**
@@ -232,6 +248,52 @@ async function getMicrosoftAccessToken(
   return refreshed.accessToken;
 }
 
+/**
+ * Wave D — Zoom access-token cache. Same shape as the Microsoft helper
+ * above: read the cached access token, refresh if expired (with a 60s
+ * safety margin), persist the new pair (Zoom uses rolling refresh too).
+ *
+ * Zoom access tokens live ~1h; refresh tokens have a 15-year lifetime
+ * but rotate on every refresh call, so persisting the new refresh
+ * token is non-negotiable. A persist failure is logged but doesn't
+ * fail the current call — we just refresh again next time.
+ */
+async function getZoomAccessToken(
+  conn: typeof calendarConnections.$inferSelect,
+): Promise<string | null> {
+  if (
+    conn.accessTokenEncrypted &&
+    conn.accessTokenExpiresAt &&
+    conn.accessTokenExpiresAt.getTime() - Date.now() > TOKEN_REFRESH_SAFETY_MS
+  ) {
+    const cached = safeDecrypt(conn.accessTokenEncrypted);
+    if (cached) return cached;
+  }
+
+  const refreshToken = safeDecrypt(conn.refreshTokenEncrypted);
+  if (!refreshToken) return null;
+
+  const refreshed = await zoomRefreshAccessToken(refreshToken);
+
+  try {
+    const newRefreshEnc = encryptSecret(refreshed.refreshToken)!;
+    const newAccessEnc = encryptSecret(refreshed.accessToken);
+    await db
+      .update(calendarConnections)
+      .set({
+        refreshTokenEncrypted: newRefreshEnc,
+        accessTokenEncrypted: newAccessEnc,
+        accessTokenExpiresAt: refreshed.expiresAt,
+        updatedAt: new Date(),
+      })
+      .where(eq(calendarConnections.id, conn.id));
+  } catch (e) {
+    console.error("[calendar/sync] zoom token persist failed (non-fatal):", e);
+  }
+
+  return refreshed.accessToken;
+}
+
 // ─── Public result type ────────────────────────────────────────────────
 
 export type SyncResult =
@@ -278,7 +340,12 @@ export async function getAllNonDisconnectedConnections(
 
 /**
  * Wave C — pick the connection to USE for a booking write (create /
- * update / delete).
+ * update / delete) on the CALENDAR side.
+ *
+ * Wave D — explicit restriction: only calendar-host providers (google,
+ * microsoft) can be returned here. Zoom is meeting-only and is never
+ * a viable target for calendar event CRUD; `pickMeetingProvider` below
+ * handles the side-car meeting selection independently.
  *
  * Priority order:
  *   1. If the booking already has an externalEventProvider, honor it —
@@ -286,13 +353,13 @@ export async function getAllNonDisconnectedConnections(
  *      created the event originally, never accidentally switching
  *      providers mid-lifecycle.
  *   2. Otherwise prefer the provider matching the service's
- *      `videoProvider` hint: `google_meet` → google, `teams` →
- *      microsoft. (For "none" we just pick whichever connection
- *      exists.)
- *   3. Fall back to the first active connection found, preferring
- *      google for backward-compatibility with pre-Wave-C bookings.
+ *      `videoProvider` hint where the hint corresponds to a calendar
+ *      host (google_meet → google, teams → microsoft). `zoom` doesn't
+ *      pin a calendar provider — falls through to step 3.
+ *   3. Fall back to the first active CALENDAR-HOST connection found,
+ *      preferring google for backward-compat with pre-Wave-C bookings.
  *
- * Returns null if the user has no usable active connection.
+ * Returns null if the user has no usable active calendar connection.
  */
 export async function pickConnectionForWrite(args: {
   userId: string;
@@ -301,11 +368,15 @@ export async function pickConnectionForWrite(args: {
   /** service-level video hint — set on create */
   videoProviderHint?: string | null;
 }): Promise<typeof calendarConnections.$inferSelect | null> {
-  // Honor existing provider locked-in by a prior create.
-  if (args.existingProvider) {
+  // Honor existing provider locked-in by a prior create — but ignore
+  // it if it's somehow zoom (would be a bug; zoom should never have
+  // been written here in the first place).
+  if (args.existingProvider && args.existingProvider !== "zoom") {
     return await getActiveConnection(args.userId, args.existingProvider);
   }
-  // Resolve preferred provider from video hint.
+  // Resolve preferred CALENDAR provider from video hint. Zoom hint
+  // doesn't pin a calendar — staff can use Zoom with EITHER Google or
+  // Microsoft for the calendar event.
   let preferred: CalendarProvider | null = null;
   if (args.videoProviderHint === "google_meet") preferred = "google";
   else if (args.videoProviderHint === "teams") preferred = "microsoft";
@@ -313,14 +384,38 @@ export async function pickConnectionForWrite(args: {
     const match = await getActiveConnection(args.userId, preferred);
     if (match && match.status === "active") return match;
   }
-  // Fall back to ANY active connection; prefer google so existing
-  // bookings on tenants that haven't connected Microsoft yet behave
-  // exactly as before.
+  // Fall back to ANY active CALENDAR-HOST connection. Zoom is
+  // explicitly excluded.
   const google = await getActiveConnection(args.userId, "google");
   if (google && google.status === "active") return google;
   const microsoft = await getActiveConnection(args.userId, "microsoft");
   if (microsoft && microsoft.status === "active") return microsoft;
   return null;
+}
+
+/**
+ * Wave D — pick the side-car MEETING provider for a booking.
+ *
+ * Today this only ever returns the user's Zoom connection (or null).
+ * For Google Meet / Teams bookings the meeting URL is embedded in the
+ * calendar event itself, so there's no side-car to dispatch — those
+ * paths return null here and the orchestrator uses the calendar
+ * provider's bundled videoConference flag instead.
+ *
+ *   • videoProviderHint = "zoom" → look up the user's active Zoom
+ *     connection. Returns null if they don't have one (orchestrator
+ *     falls back to "host will share the link" trust copy from
+ *     Wave A).
+ *   • Any other hint → null. Embedded meeting providers don't need
+ *     a side-car.
+ */
+export async function pickMeetingProvider(args: {
+  userId: string;
+  videoProviderHint?: string | null;
+}): Promise<typeof calendarConnections.$inferSelect | null> {
+  if (args.videoProviderHint !== "zoom") return null;
+  const zoom = await getActiveConnection(args.userId, "zoom");
+  return zoom && zoom.status === "active" ? zoom : null;
 }
 
 /** Look up by tenant + connection id, with tenant-isolation enforced.
@@ -598,6 +693,94 @@ export async function upsertMicrosoftConnection(args: {
   return connectionId;
 }
 
+/**
+ * Wave D — upsert a Zoom connection after a successful OAuth exchange.
+ * Same shape as the Google/Microsoft upserts; only the persisted
+ * `provider` value and the absence of a calendarId concept differ
+ * (Zoom doesn't have multiple calendars — meetings are owned by the
+ * authenticated user).
+ *
+ * Like Microsoft, Zoom uses rolling refresh tokens so we ALWAYS
+ * persist the access token + expiry on insert; the orchestrator's
+ * `getZoomAccessToken` honors the cache to avoid an extra round-trip
+ * to Zoom's token endpoint on every Zoom meeting CRUD call.
+ */
+export async function upsertZoomConnection(args: {
+  tenantId: string;
+  userId: string;
+  refreshTokenPlain: string;
+  accessTokenPlain: string | null;
+  accessTokenExpiresAt: Date | null;
+  accountEmail: string | null;
+  scopes: string[];
+}): Promise<string> {
+  const refreshEnc = encryptSecret(args.refreshTokenPlain)!;
+  const accessEnc = encryptSecret(args.accessTokenPlain);
+
+  const existing = await db.query.calendarConnections.findFirst({
+    where: and(
+      eq(calendarConnections.userId, args.userId),
+      eq(calendarConnections.provider, "zoom"),
+    ),
+  });
+
+  let connectionId: string;
+  if (existing) {
+    await db
+      .update(calendarConnections)
+      .set({
+        tenantId: args.tenantId,
+        status: "active",
+        refreshTokenEncrypted: refreshEnc,
+        accessTokenEncrypted: accessEnc,
+        accessTokenExpiresAt: args.accessTokenExpiresAt,
+        accountEmail: args.accountEmail,
+        scopes: args.scopes,
+        // Zoom doesn't have a calendar id concept — we still need to
+        // satisfy the NOT NULL constraint on the column, so set the
+        // canonical "primary" string used by Google. It's not read
+        // anywhere in the Zoom code path.
+        calendarId: existing.calendarId ?? "primary",
+        lastError: null,
+        lastErrorAt: null,
+        lastSyncedAt: new Date(),
+        consecutiveFailures: 0,
+        updatedAt: new Date(),
+      })
+      .where(eq(calendarConnections.id, existing.id));
+    connectionId = existing.id;
+  } else {
+    const [row] = await db
+      .insert(calendarConnections)
+      .values({
+        tenantId: args.tenantId,
+        userId: args.userId,
+        provider: "zoom",
+        status: "active",
+        refreshTokenEncrypted: refreshEnc,
+        accessTokenEncrypted: accessEnc,
+        accessTokenExpiresAt: args.accessTokenExpiresAt,
+        accountEmail: args.accountEmail,
+        scopes: args.scopes,
+        calendarId: "primary",
+        lastSyncedAt: new Date(),
+      })
+      .returning({ id: calendarConnections.id });
+    connectionId = row.id;
+  }
+
+  await writeSyncLog({
+    tenantId: args.tenantId,
+    connectionId,
+    userId: args.userId,
+    provider: "zoom",
+    kind: "connect",
+    status: "ok",
+  });
+
+  return connectionId;
+}
+
 // ─── Booking lifecycle ─────────────────────────────────────────────────
 
 export async function onBookingCreated(args: {
@@ -610,13 +793,103 @@ export async function onBookingCreated(args: {
    *  `videoConference`. */
   videoProviderHint?: string | null;
 }): Promise<SyncResult> {
-  // Wave C — pick provider based on the service's video hint. Falls
-  // back to whichever provider is connected if no preference is set.
+  // Wave D — pick the CALENDAR host (google or microsoft); zoom never
+  // returned here. The result.provider will be whichever of those
+  // owns the calendar event for this booking.
   const conn = await pickConnectionForWrite({
     userId: args.staff.id,
     videoProviderHint: args.videoProviderHint ?? null,
   });
+
+  // Wave D — independently pick the SIDE-CAR meeting provider. Today
+  // only Zoom, only when videoProviderHint === "zoom". Other video
+  // hints embed the meeting URL in the calendar provider's API call,
+  // so meetingConn is null for those.
+  const meetingConn = await pickMeetingProvider({
+    userId: args.staff.id,
+    videoProviderHint: args.videoProviderHint ?? null,
+  });
+
+  // If neither a calendar host NOR a meeting side-car is available,
+  // the orchestrator has nothing to do.
+  if (!conn && !meetingConn) {
+    return { status: "skipped", reason: "no_connection" };
+  }
+
+  // ── Side-car meeting first (Zoom) ──────────────────────────────
+  // We create the Zoom meeting BEFORE the calendar event so the
+  // calendar event description can include the Zoom join URL. If
+  // the Zoom create fails, we still try to create the calendar
+  // event without the URL — better to have a calendar event the
+  // host can manually add a link to than no event at all.
+  let meetingResult: { provider: CalendarProvider; eventId: string; meetLink: string | null } | null =
+    null;
+  if (meetingConn && args.videoConference) {
+    try {
+      const sideCarOp = async (): Promise<ExternalEventResult> => {
+        const accessToken = await getZoomAccessToken(meetingConn);
+        if (!accessToken) {
+          await markNeedsReconnect(meetingConn.id, "Zoom token refresh failed");
+          throw makeAuthError("token_refresh_failed");
+        }
+        return zoomCreateEvent({
+          accessToken,
+          draft: buildDraft({
+            booking: args.booking,
+            staff: args.staff,
+            serviceName: args.serviceName,
+            videoConference: true,
+          }),
+        });
+      };
+      const sideCar = await runWithLog({
+        tenantId: args.booking.tenantId,
+        connectionId: meetingConn.id,
+        provider: "zoom",
+        userId: args.staff.id,
+        bookingId: args.booking.id,
+        kind: "create",
+        op: sideCarOp,
+        // No onOk here — we persist meetingProvider* alongside the
+        // calendar event id below in a single bookings.update.
+      });
+      if (sideCar.status === "ok" && sideCar.eventId) {
+        meetingResult = {
+          provider: "zoom",
+          eventId: sideCar.eventId,
+          meetLink: sideCar.meetLink ?? null,
+        };
+      }
+    } catch (e) {
+      // runWithLog never throws — defense in depth.
+      console.error("[calendar/sync] zoom side-car create failed (non-fatal):", e);
+    }
+  }
+
+  // ── Calendar event (existing path) ─────────────────────────────
+  // If we have a meeting URL from the side-car, inject it into the
+  // calendar event's description AND set videoConference=false so
+  // the calendar provider doesn't auto-create its own Meet/Teams link
+  // on top (which would give the customer two different URLs).
   if (!conn) {
+    // No calendar host but Zoom succeeded: persist the meeting-only
+    // state on the booking and return.
+    if (meetingResult) {
+      await db
+        .update(bookings)
+        .set({
+          meetingProvider: meetingResult.provider,
+          meetingProviderEventId: meetingResult.eventId,
+          meetLink: meetingResult.meetLink,
+        })
+        .where(eq(bookings.id, args.booking.id));
+      return {
+        status: "ok",
+        provider: meetingResult.provider,
+        eventId: meetingResult.eventId,
+        meetLink: meetingResult.meetLink,
+      };
+    }
     return { status: "skipped", reason: "no_connection" };
   }
   if (conn.status !== "active") {
@@ -624,11 +897,16 @@ export async function onBookingCreated(args: {
   }
   const provider = conn.provider as CalendarProvider;
 
+  const sideCarLink = meetingResult?.meetLink ?? null;
   const draft = buildDraft({
     booking: args.booking,
     staff: args.staff,
     serviceName: args.serviceName,
-    videoConference: args.videoConference,
+    // If a side-car meeting URL exists, the calendar provider must
+    // NOT auto-create its own — that would double up. Otherwise
+    // honor the caller's videoConference flag (Meet / Teams cases).
+    videoConference: meetingResult ? false : args.videoConference,
+    sideCarMeetingUrl: sideCarLink,
   });
 
   // Provider-specific call wrapped inside runWithLog so retries +
@@ -665,19 +943,22 @@ export async function onBookingCreated(args: {
     op,
     onOk: async (result) => {
       // Persist the provider event id on the booking so future updates
-      // can target it. `externalEventProvider` records WHICH provider
-      // owns the event so reschedule/cancel route back to the same
-      // adapter. `googleEventId` stays populated for Google rows so
-      // pre-Wave-C readers keep working; for Microsoft rows it's
-      // intentionally left null and the new `externalEventId` is the
-      // source of truth.
+      // can target it. Wave D — also persist the side-car meeting ids
+      // when present so reschedule/cancel can update/delete the Zoom
+      // meeting independently of the calendar event.
+      //
+      // meetLink precedence: side-car Zoom URL wins if present;
+      // otherwise the calendar provider's bundled Meet/Teams URL.
+      const finalMeetLink = meetingResult?.meetLink ?? result.meetLink ?? null;
       await db
         .update(bookings)
         .set({
           googleEventId: provider === "google" ? result.eventId : null,
           externalEventId: result.eventId,
           externalEventProvider: provider,
-          meetLink: result.meetLink,
+          meetingProvider: meetingResult?.provider ?? null,
+          meetingProviderEventId: meetingResult?.eventId ?? null,
+          meetLink: finalMeetLink,
         })
         .where(eq(bookings.id, args.booking.id));
       await markActive(conn.id);
@@ -698,8 +979,19 @@ export async function onBookingRescheduled(args: {
     userId: args.staff.id,
     existingProvider: lockedProvider ?? "google",
   });
+  // Wave D — side-car meeting update runs INDEPENDENTLY of the
+  // calendar event update. A booking might have only a side-car
+  // meeting (no calendar event), only a calendar event (no side-car),
+  // or both. We try whichever applies.
+  await updateSideCarMeeting(args);
+
   if (!conn) {
-    return { status: "skipped", reason: "no_connection" };
+    // No calendar event to update — side-car update may have run
+    // above. Report ok if there was a side-car meeting; skipped
+    // otherwise.
+    return args.booking.meetingProvider
+      ? { status: "ok", provider: args.booking.meetingProvider as CalendarProvider, eventId: args.booking.meetingProviderEventId ?? "" }
+      : { status: "skipped", reason: "no_connection" };
   }
   if (conn.status !== "active") {
     return { status: "skipped", reason: `connection_${conn.status}` };
@@ -762,10 +1054,70 @@ export async function onBookingRescheduled(args: {
   });
 }
 
+/**
+ * Wave D — update the side-car meeting (today: Zoom) when a booking
+ * is rescheduled. Reads `meetingProvider` + `meetingProviderEventId`
+ * off the booking row; if either is missing the booking has no
+ * side-car, nothing to do.
+ *
+ * Never throws. The Zoom join URL is stable across PATCH so the
+ * customer's existing email link keeps working — we only update the
+ * start time + duration so the meeting card in the Zoom app reflects
+ * the new schedule.
+ */
+async function updateSideCarMeeting(args: {
+  booking: typeof bookings.$inferSelect;
+  staff: User;
+  serviceName: string;
+}): Promise<void> {
+  const meetingProvider = args.booking.meetingProvider as CalendarProvider | null;
+  const meetingEventId = args.booking.meetingProviderEventId;
+  if (!meetingProvider || !meetingEventId) return;
+  if (meetingProvider !== "zoom") return; // only provider supported today
+
+  const meetingConn = await getActiveConnection(args.staff.id, "zoom");
+  if (!meetingConn || meetingConn.status !== "active") return;
+
+  try {
+    await runWithLog({
+      tenantId: args.booking.tenantId,
+      connectionId: meetingConn.id,
+      provider: "zoom",
+      userId: args.staff.id,
+      bookingId: args.booking.id,
+      kind: "update",
+      op: async () => {
+        const accessToken = await getZoomAccessToken(meetingConn);
+        if (!accessToken) {
+          await markNeedsReconnect(meetingConn.id, "Zoom token refresh failed");
+          throw makeAuthError("token_refresh_failed");
+        }
+        await zoomUpdateEvent({
+          accessToken,
+          eventId: meetingEventId,
+          startAt: args.booking.startAt,
+          endAt: args.booking.endAt,
+          summary: `${args.serviceName} with ${args.booking.clientName}`,
+        });
+        return { eventId: meetingEventId, meetLink: null };
+      },
+    });
+  } catch (e) {
+    console.error("[calendar/sync] zoom side-car update failed (non-fatal):", e);
+  }
+}
+
 export async function onBookingCancelled(args: {
   booking: typeof bookings.$inferSelect;
   staff: User;
 }): Promise<SyncResult> {
+  // Wave D — delete the side-car meeting FIRST, then the calendar
+  // event. Order doesn't strictly matter because both are idempotent
+  // (404 = success), but doing side-car first means if the calendar
+  // delete fails we've still cleaned up the Zoom resource and won't
+  // leave a phantom meeting on the staff's Zoom dashboard.
+  await deleteSideCarMeeting(args);
+
   // Same provider-locking logic as reschedule — cancel must talk to
   // the provider that owns the event.
   const lockedProvider = (args.booking.externalEventProvider as CalendarProvider | null) ?? null;
@@ -774,7 +1126,9 @@ export async function onBookingCancelled(args: {
     existingProvider: lockedProvider ?? "google",
   });
   if (!conn) {
-    return { status: "skipped", reason: "no_connection" };
+    return args.booking.meetingProvider
+      ? { status: "ok", provider: args.booking.meetingProvider as CalendarProvider, eventId: args.booking.meetingProviderEventId ?? "" }
+      : { status: "skipped", reason: "no_connection" };
   }
   if (conn.status !== "active") {
     return { status: "skipped", reason: `connection_${conn.status}` };
@@ -816,18 +1170,67 @@ export async function onBookingCancelled(args: {
     kind: "delete",
     op,
     onOk: async () => {
-      // Clear the external id on the booking — it's gone server-side.
+      // Clear the external id + side-car ids on the booking — both
+      // resources are gone server-side. Keep meetLink for archival
+      // (it's already invalid; clearing it would make historical
+      // exports lose the original URL).
       await db
         .update(bookings)
         .set({
           googleEventId: null,
           externalEventId: null,
           externalEventProvider: null,
+          meetingProvider: null,
+          meetingProviderEventId: null,
         })
         .where(eq(bookings.id, args.booking.id));
       await markActive(conn.id);
     },
   });
+}
+
+/**
+ * Wave D — delete the side-car meeting (today: Zoom) on cancel.
+ * Symmetric to `updateSideCarMeeting`. 404 treated as success by the
+ * Zoom adapter's deleteEvent — idempotent contract.
+ *
+ * Never throws. If Zoom delete fails we log + move on; the calendar
+ * delete still runs and the user can clean up the phantom meeting
+ * manually if needed.
+ */
+async function deleteSideCarMeeting(args: {
+  booking: typeof bookings.$inferSelect;
+  staff: User;
+}): Promise<void> {
+  const meetingProvider = args.booking.meetingProvider as CalendarProvider | null;
+  const meetingEventId = args.booking.meetingProviderEventId;
+  if (!meetingProvider || !meetingEventId) return;
+  if (meetingProvider !== "zoom") return;
+
+  const meetingConn = await getActiveConnection(args.staff.id, "zoom");
+  if (!meetingConn || meetingConn.status !== "active") return;
+
+  try {
+    await runWithLog({
+      tenantId: args.booking.tenantId,
+      connectionId: meetingConn.id,
+      provider: "zoom",
+      userId: args.staff.id,
+      bookingId: args.booking.id,
+      kind: "delete",
+      op: async () => {
+        const accessToken = await getZoomAccessToken(meetingConn);
+        if (!accessToken) {
+          await markNeedsReconnect(meetingConn.id, "Zoom token refresh failed");
+          throw makeAuthError("token_refresh_failed");
+        }
+        await zoomDeleteEvent({ accessToken, eventId: meetingEventId });
+        return { eventId: meetingEventId, meetLink: null };
+      },
+    });
+  } catch (e) {
+    console.error("[calendar/sync] zoom side-car delete failed (non-fatal):", e);
+  }
 }
 
 /**
@@ -895,6 +1298,12 @@ async function readBusyForConnection(
   windowEnd: Date,
 ): Promise<BusyInterval[]> {
   const provider = conn.provider as CalendarProvider;
+
+  // Wave D — Zoom has no freebusy API; skip silently. The staff
+  // member's busy time comes from their calendar host (Google or
+  // Microsoft), which is queried independently in the same Promise.all.
+  if (provider === "zoom") return [];
+
   const startedAt = Date.now();
   let lastErr: unknown = null;
   let lastCls: ErrorClass = "unknown";
@@ -988,10 +1397,23 @@ function buildDraft(args: {
   staff: User;
   serviceName: string;
   videoConference: boolean;
+  /** Wave D — when set, the calendar event description gets a
+   *  "Join: <url>" line so the staff member can click straight from
+   *  their Outlook / Google Calendar entry. Passed for Zoom side-car
+   *  bookings; null for Meet / Teams where the URL is embedded
+   *  natively in the event. */
+  sideCarMeetingUrl?: string | null;
 }): ExternalEventDraft {
+  const baseDescription = args.booking.notes ?? "";
+  // Prepend the meeting URL to the description body — most calendar
+  // apps render URLs as clickable links inside the description, and
+  // putting it FIRST makes it visually unmissable.
+  const description = args.sideCarMeetingUrl
+    ? `Join: ${args.sideCarMeetingUrl}${baseDescription ? `\n\n${baseDescription}` : ""}`
+    : baseDescription;
   return {
     summary: `${args.serviceName} with ${args.booking.clientName}`,
-    description: args.booking.notes ?? "",
+    description,
     startAt: args.booking.startAt,
     endAt: args.booking.endAt,
     organizerEmail: args.staff.email,

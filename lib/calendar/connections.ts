@@ -54,6 +54,11 @@ export async function isMicrosoftConnected(userId: string): Promise<boolean> {
   return isProviderConnected(userId, "microsoft");
 }
 
+/** Convenience shorthand — Zoom (Wave D). */
+export async function isZoomConnected(userId: string): Promise<boolean> {
+  return isProviderConnected(userId, "zoom");
+}
+
 /**
  * Wave C — true if the user has any active provider connection.
  * Useful for the "your calendar is connected" trust signal on the
