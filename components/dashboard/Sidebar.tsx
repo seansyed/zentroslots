@@ -38,6 +38,7 @@ import {
 
 import { Avatar, Badge } from "@/components/ui/primitives";
 import { cn } from "@/lib/cn";
+import { meetsPlan, type PlanId } from "@/lib/plans";
 
 type Role = "admin" | "manager" | "staff" | "client";
 
@@ -65,7 +66,19 @@ export type SidebarTenant = {
 };
 
 type LucideIcon = React.ComponentType<{ className?: string; strokeWidth?: number }>;
-type Item = { label: string; href: string; icon: LucideIcon; soon?: boolean };
+type Item = {
+  label: string;
+  href: string;
+  icon: LucideIcon;
+  soon?: boolean;
+  /** Phase 6 — UI lockdown. When true, render a "Pro" badge next to
+   *  the label so users know the destination is a paid feature. The
+   *  link still navigates (the destination page shows its own locked
+   *  state); we don't hide the item entirely because Free tenants
+   *  with grandfathered rows still need to reach the page to view
+   *  their existing data read-only. */
+  premium?: boolean;
+};
 type Group = {
   /** Stable id used as the localStorage key for collapsed state. */
   id: string;
@@ -80,8 +93,18 @@ type Group = {
 function buildNav(
   variant: SidebarVariant,
   role: Role,
-  permissions?: SidebarUser["permissions"]
+  permissions?: SidebarUser["permissions"],
+  /** Phase 6 — UI lockdown. Used to mark plan-gated nav items with a
+   *  "Pro" badge so users see the tier requirement before clicking.
+   *  When undefined, nothing is marked premium (back-compat).
+   *  Strings outside the PlanId union are treated as "free" for the
+   *  purpose of the comparison — fail-safe (badge shown). */
+  plan?: string,
 ): Group[] {
+  const planAsId = (plan ?? "free") as PlanId;
+  // True when the tenant's plan does NOT meet Pro — used to mark
+  // recurring_series, automation_rules, routing_rules, etc.
+  const needsProUpgrade = !meetsPlan(planAsId, "pro");
   const flagOrRoleDefault = (
     flag: keyof NonNullable<SidebarUser["permissions"]>,
     fallback: boolean
@@ -180,7 +203,7 @@ function buildNav(
           { label: "Staff routing",          href: "/dashboard/settings/routing",         icon: GitBranch },
           { label: "Booking rules",          href: "/dashboard/settings/booking-rules",   icon: Clock },
           { label: "Waitlists",              href: "/dashboard/settings/waitlists",       icon: Users },
-          { label: "Recurring bookings",     href: "/dashboard/settings/recurring",       icon: Repeat },
+          { label: "Recurring bookings",     href: "/dashboard/settings/recurring",       icon: Repeat,    premium: needsProUpgrade },
         ]
       : []),
     ...(flagOrRoleDefault("canManageAutomation", roleDefaults.canManageAutomation)
@@ -282,7 +305,7 @@ export default function Sidebar({
   onToggleCollapsed?: () => void;
 }) {
   const pathname = usePathname();
-  const groups = buildNav(variant, user.role, user.permissions);
+  const groups = buildNav(variant, user.role, user.permissions, tenant?.plan);
 
   return (
     <div className="flex h-full flex-col bg-surface">
@@ -483,6 +506,14 @@ function NavGroup({
                       {it.soon && (
                         <span className="rounded bg-surface-inset px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-ink-subtle">
                           Soon
+                        </span>
+                      )}
+                      {it.premium && (
+                        <span
+                          className="rounded bg-amber-50 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-amber-700 ring-1 ring-amber-200/60"
+                          title="Pro feature — upgrade required"
+                        >
+                          Pro
                         </span>
                       )}
                     </>

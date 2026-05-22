@@ -27,6 +27,10 @@ import {
 } from "lucide-react";
 
 import { Badge, Button, Card, Skeleton, toast } from "@/components/ui/primitives";
+import { useCapability } from "@/components/billing/CapabilityProvider";
+import { LockedFeatureCard } from "@/components/billing/LockedFeatureCard";
+import Link from "next/link";
+import { Lock } from "lucide-react";
 
 // ─── Types (unchanged contract with /api/tenant/booking-series) ───────
 
@@ -156,15 +160,56 @@ export default function RecurringClient() {
     return rows;
   }, [data, filter, serviceFilter, staffFilter, cadenceFilter, search]);
 
+  // ── Plan capability gate (Phase 6 — Free-plan UI lockdown) ──────────
+  // Three render branches:
+  //   1. cap.allowed → normal premium UX
+  //   2. !cap.allowed AND no grandfathered series → full locked page
+  //   3. !cap.allowed AND grandfathered series exist → series visible
+  //      read-only with banner; ALL mutation surfaces disabled.
+  // The backend already 402s every mutation route — the UI mirroring
+  // is purely about not letting the operator find a button that will
+  // fail. Grandfather semantics preserved (existing rows continue to
+  // materialize via the cron until enforcement orchestrator pauses).
+  const cap = useCapability("recurring_series");
+  const seriesCount = data?.series.length ?? 0;
+  const actionsDisabled = !cap.allowed;
+
+  // Branch 2 — full locked page state for Free tenants with nothing
+  // grandfathered. Render the LockedFeatureCard primitive instead of
+  // the operational dashboard.
+  if (!cap.allowed && !loading && seriesCount === 0) {
+    return (
+      <div className="mt-6 space-y-6 pb-12">
+        <LockedRecurringPage cap={cap} />
+      </div>
+    );
+  }
+
   return (
     <div className="mt-6 space-y-6 pb-12">
-      <Hero metrics={metrics} onCreate={() => setCreating(true)} loading={loading} onRefresh={refresh} />
+      {/* Grandfather banner — branch 3 only. Appears above the page
+          chrome so admins immediately understand WHY their action
+          buttons are disabled before they try to click. */}
+      {!cap.allowed && seriesCount > 0 && (
+        <GrandfatherBanner cap={cap} count={seriesCount} />
+      )}
+
+      <Hero
+        metrics={metrics}
+        onCreate={() => setCreating(true)}
+        loading={loading}
+        onRefresh={refresh}
+        actionsDisabled={actionsDisabled}
+      />
 
       <KpiStrip metrics={metrics} loading={loading} />
 
       <EngineBehaviorCard />
 
-      {creating && data && (
+      {/* CreateSeriesCard mount is hard-gated: even if a future code
+          path flipped `creating=true` (e.g., a stale local-storage
+          flag), capability-denied tenants never see the form. */}
+      {creating && data && cap.allowed && (
         <CreateSeriesCard
           services={data.services}
           staff={data.staff}
@@ -198,6 +243,7 @@ export default function RecurringClient() {
         onAction={actionSeries}
         onRefresh={refresh}
         onCreate={() => setCreating(true)}
+        actionsDisabled={actionsDisabled}
       />
     </div>
   );
@@ -210,11 +256,13 @@ function Hero({
   onCreate,
   loading,
   onRefresh,
+  actionsDisabled,
 }: {
   metrics: Metrics;
   onCreate: () => void;
   loading: boolean;
   onRefresh: () => void;
+  actionsDisabled?: boolean;
 }) {
   const engineActive = metrics.counts.active > 0;
   return (
@@ -270,9 +318,19 @@ function Hero({
               <Cog className={"h-3.5 w-3.5 " + (loading ? "animate-spin" : "")} />
               Refresh
             </button>
-            <Button onClick={onCreate}>
-              <Plus className="mr-1 h-3.5 w-3.5" /> New series
-            </Button>
+            {actionsDisabled ? (
+              <Link
+                href="/dashboard/billing"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-800 hover:bg-amber-100"
+                title="Upgrade to Pro to create recurring series"
+              >
+                <Lock className="h-3.5 w-3.5" /> Upgrade to create
+              </Link>
+            ) : (
+              <Button onClick={onCreate}>
+                <Plus className="mr-1 h-3.5 w-3.5" /> New series
+              </Button>
+            )}
           </div>
         </div>
       </div>
@@ -641,6 +699,7 @@ function SeriesListSection({
   onAction,
   onRefresh,
   onCreate,
+  actionsDisabled,
 }: {
   series: Series[];
   totalSeries: number;
@@ -650,6 +709,7 @@ function SeriesListSection({
   onAction: (id: string, action: "pause" | "resume" | "cancel") => void;
   onRefresh: () => void;
   onCreate: () => void;
+  actionsDisabled?: boolean;
 }) {
   return (
     <section className="space-y-3">
@@ -668,6 +728,9 @@ function SeriesListSection({
           <Skeleton className="h-24 rounded-xl" />
         </div>
       ) : totalSeries === 0 ? (
+        // EmptyState is unreachable when actionsDisabled — the root
+        // component routes to LockedRecurringPage before this branch.
+        // Kept as a safe fallback in case actionsDisabled is false.
         <EmptyState onCreate={onCreate} />
       ) : series.length === 0 ? (
         <Card className="p-6 text-center text-sm text-ink-muted">
@@ -683,6 +746,7 @@ function SeriesListSection({
               onToggle={() => setOpenSeriesId(openSeriesId === s.id ? null : s.id)}
               onAction={onAction}
               onRefresh={onRefresh}
+              actionsDisabled={actionsDisabled}
             />
           ))}
         </ul>
@@ -740,12 +804,14 @@ function SeriesCard({
   onToggle,
   onAction,
   onRefresh,
+  actionsDisabled,
 }: {
   series: Series;
   expanded: boolean;
   onToggle: () => void;
   onAction: (id: string, action: "pause" | "resume" | "cancel") => void;
   onRefresh: () => void;
+  actionsDisabled?: boolean;
 }) {
   const statusMeta = SERIES_STATUS_META[series.status] ?? SERIES_STATUS_META.completed;
   const humanized = humanizeRule(series.recurrenceRule, series.startLocal, series.endDate, series.occurrenceCount);
@@ -804,7 +870,11 @@ function SeriesCard({
           </div>
           <div className="flex shrink-0 flex-col items-end gap-1.5">
             <div className="flex gap-1.5">
-              {series.status === "active" && (
+              {/* All three mutation buttons are HIDDEN (not just
+                  disabled) when the capability is locked — keeps the
+                  grandfathered series visible read-only without
+                  tempting the operator with affordances that 402. */}
+              {!actionsDisabled && series.status === "active" && (
                 <button
                   onClick={() => onAction(series.id, "pause")}
                   className="inline-flex items-center gap-1 rounded-md border border-border bg-surface px-2.5 py-1 text-[11px] text-ink-muted hover:bg-surface-muted hover:text-ink"
@@ -813,7 +883,7 @@ function SeriesCard({
                   <PauseCircle className="h-3 w-3" /> Pause
                 </button>
               )}
-              {series.status === "paused" && (
+              {!actionsDisabled && series.status === "paused" && (
                 <button
                   onClick={() => onAction(series.id, "resume")}
                   className="inline-flex items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-medium text-emerald-700 hover:bg-emerald-100"
@@ -822,7 +892,7 @@ function SeriesCard({
                   <Play className="h-3 w-3" /> Resume
                 </button>
               )}
-              {(series.status === "active" || series.status === "paused") && (
+              {!actionsDisabled && (series.status === "active" || series.status === "paused") && (
                 <button
                   onClick={() => onAction(series.id, "cancel")}
                   className="inline-flex items-center gap-1 rounded-md border border-rose-200 bg-surface px-2.5 py-1 text-[11px] text-rose-700 hover:bg-rose-50"
@@ -830,6 +900,14 @@ function SeriesCard({
                 >
                   <Trash2 className="h-3 w-3" /> Cancel
                 </button>
+              )}
+              {actionsDisabled && (
+                <span
+                  className="inline-flex items-center gap-1 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-amber-800"
+                  title="Grandfathered — upgrade to manage this series"
+                >
+                  <Lock className="h-3 w-3" /> Grandfathered
+                </span>
               )}
             </div>
             <button
@@ -851,7 +929,11 @@ function SeriesCard({
         </div>
         {expanded && (
           <div className="border-t border-border/60 bg-surface-muted/30 p-4">
-            <OccurrencesPanel seriesId={series.id} onChanged={onRefresh} />
+            <OccurrencesPanel
+              seriesId={series.id}
+              onChanged={onRefresh}
+              actionsDisabled={actionsDisabled}
+            />
           </div>
         )}
       </Card>
@@ -882,7 +964,15 @@ function CustomerAvatar({ name, initials }: { name: string; initials: string }) 
 
 // ─── Occurrences panel ───────────────────────────────────────────────
 
-function OccurrencesPanel({ seriesId, onChanged }: { seriesId: string; onChanged: () => void }) {
+function OccurrencesPanel({
+  seriesId,
+  onChanged,
+  actionsDisabled,
+}: {
+  seriesId: string;
+  onChanged: () => void;
+  actionsDisabled?: boolean;
+}) {
   const [occs, setOccs] = React.useState<Occurrence[] | null>(null);
 
   const load = React.useCallback(async () => {
@@ -978,7 +1068,13 @@ function OccurrencesPanel({ seriesId, onChanged }: { seriesId: string; onChanged
                         : "—"}
                   </td>
                   <td className="px-3 py-2 text-right">
-                    {o.status === "scheduled" && !o.bookingId && (
+                    {/* Occurrence-level actions follow the same lock
+                        contract as series-level: hidden, not disabled,
+                        when capability is locked. The row remains
+                        visible (read-only) so the operator can SEE
+                        what's been generated under their previous
+                        subscription. */}
+                    {!actionsDisabled && o.status === "scheduled" && !o.bookingId && (
                       <div className="inline-flex items-center gap-2">
                         <button
                           onClick={() => action(o.id, "skip")}
@@ -1618,4 +1714,72 @@ function addMonths(d: Date, n: number): Date {
   const out = new Date(d);
   out.setMonth(out.getMonth() + n);
   return out;
+}
+
+// ─── Free-plan locked surfaces (Phase 6 — UI lockdown) ──────────────
+//
+// Two components render when the recurring_series capability is locked:
+//
+//   GrandfatherBanner — for tenants WITH existing series (read-only mode).
+//     Inline strip at the top of the page that explains why action
+//     buttons are missing + offers upgrade.
+//
+//   LockedRecurringPage — for tenants WITHOUT any series (full lock).
+//     Premium upgrade hero replacing the operational dashboard.
+
+function GrandfatherBanner({
+  cap,
+  count,
+}: {
+  cap: { reason: string };
+  count: number;
+}) {
+  return (
+    <div className="rounded-xl border border-amber-200/70 bg-gradient-to-r from-amber-50 via-surface to-surface p-4 shadow-sm">
+      <div className="flex items-start gap-3">
+        <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-amber-100 text-amber-700">
+          <Sparkles className="h-4 w-4" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold text-ink">
+            {count} recurring{" "}
+            {count === 1 ? "series is" : "series are"} grandfathered from your
+            previous subscription
+          </p>
+          <p className="mt-0.5 text-[12px] leading-relaxed text-ink-muted">
+            Your existing {count === 1 ? "series continues" : "series continue"}{" "}
+            to materialize bookings automatically. Upgrade to Pro to create new
+            series, edit existing ones, or pause / resume execution.
+          </p>
+          <div className="mt-2 text-[11px] text-ink-subtle">{cap.reason}</div>
+        </div>
+        <Link
+          href="/dashboard/billing"
+          className="shrink-0 rounded-md bg-brand-accent px-3 py-1.5 text-[12px] font-semibold text-white shadow-sm hover:bg-brand-accent/90"
+        >
+          See plans
+        </Link>
+      </div>
+    </div>
+  );
+}
+
+function LockedRecurringPage({ cap }: { cap: { reason: string } }) {
+  // Use the centralized LockedFeatureCard primitive (Phase 3) so the
+  // visual treatment is consistent with every other locked feature.
+  // The primitive accepts a capability + title + description; passing
+  // the same `cap` value reads the reason from the provider.
+  void cap; // referenced via the hook inside LockedFeatureCard
+  return (
+    <LockedFeatureCard
+      cap="recurring_series"
+      title="Recurring scheduling"
+      description="Automate weekly, monthly, and subscription-based appointments. Each occurrence becomes a real booking on the calendar — validated against every workspace rule, eligible for the same routing and reminders as direct bookings."
+    >
+      {/* This `children` slot is never rendered when the capability
+          is locked (the primitive short-circuits). When the tenant
+          upgrades, the operational dashboard re-mounts. */}
+      <></>
+    </LockedFeatureCard>
+  );
 }
