@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import { bookings, tenants } from "@/db/schema";
-import { getStripe, isStripeConfigured } from "@/lib/stripe";
+import { getStripe, isStripeConfigured, planFromStripePriceId } from "@/lib/stripe";
 import { recordBillingEvent } from "@/lib/billing/recordBillingEvent";
 import {
   autoRefundCharge,
@@ -12,16 +12,22 @@ import {
   markBookingRefunded,
 } from "@/lib/billing/paymentLifecycle";
 import { runPostConfirmationHooks } from "@/lib/billing/postBookingHooks";
+import { tryClaimStripeEvent } from "@/lib/billing/webhookIdempotency";
+import { applyTenantBillingMutation } from "@/lib/billing/planTransitions";
 
 // Use Node runtime so we can read the raw body for signature verification.
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+// Phase 16B — delegated to lib/stripe.ts so the mapping stays in sync
+// with the plan catalog. Returns plan + interval (interval currently
+// informational; reserved for future per-interval analytics). When a
+// Stripe Price ID isn't recognized (e.g. a brand-new product not yet
+// wired in env), this returns null and the webhook leaves
+// `tenants.currentPlan` UNCHANGED — never clobbers with a wrong
+// value or a `free` default.
 function planFromPriceId(priceId: string | null | undefined): string | null {
-  if (!priceId) return null;
-  if (process.env.STRIPE_PRICE_PRO && priceId === process.env.STRIPE_PRICE_PRO) return "pro";
-  if (process.env.STRIPE_PRICE_TEAM && priceId === process.env.STRIPE_PRICE_TEAM) return "team";
-  return null;
+  return planFromStripePriceId(priceId)?.plan ?? null;
 }
 
 export async function POST(req: NextRequest) {
@@ -45,6 +51,29 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     console.error("Stripe webhook signature verification failed:", err);
     return NextResponse.json({ error: "Invalid signature" }, { status: 400 });
+  }
+
+  // ─── Webhook idempotency claim (Phase 4 hardening) ──────────────
+  // Stripe retries failed deliveries for up to 3 days. The signature
+  // stays valid across retries, so a duplicate event would re-execute
+  // the tenants.update and emit a duplicate transition audit if we
+  // don't dedupe. INSERT ... ON CONFLICT DO NOTHING is the atomic
+  // primitive — concurrent workers cannot both report `fresh=true`.
+  //
+  // The billing_transactions ledger has its OWN dedup on
+  // stripe_event_id (23505 swallow) — that's belt-and-braces for
+  // financial events. This claim is the canonical webhook gate.
+  const eventTenantId = extractTenantIdFromEvent(event);
+  const claim = await tryClaimStripeEvent({
+    eventId: event.id,
+    eventType: event.type,
+    tenantId: eventTenantId,
+  });
+  if (!claim.fresh) {
+    // Duplicate replay — return 200 immediately, skip processing
+    // entirely. Stripe stops retrying after seeing 2xx.
+    console.log(`[stripe-webhook] duplicate event ${event.id} (${event.type}) — skipped`);
+    return NextResponse.json({ received: true, duplicate: true });
   }
 
   // ─── Billing ledger (additive) ──────────────────────────────────────
@@ -107,20 +136,46 @@ export async function POST(req: NextRequest) {
           break;
         }
 
-        // ── SUBSCRIPTION branch (existing, unchanged) ──
+        // ── SUBSCRIPTION branch (Phase 16B hardening) ──
+        // Recognize ALL 4 paid tiers in metadata. If the value is
+        // missing or unrecognized, we still record the customer +
+        // subscription IDs and mark the subscription active, but
+        // we LEAVE `currentPlan` untouched — the subsequent
+        // `customer.subscription.updated` event (which we always
+        // get for a fresh sub) will derive the plan from the actual
+        // price ID via planFromStripePriceId(). This protects
+        // against any direct-Stripe-API checkouts that don't carry
+        // our metadata.
         const tenantId = (session.metadata?.tenantId as string | undefined) ?? null;
-        const plan = (session.metadata?.plan as string | undefined) ?? null;
+        const planFromMeta = (session.metadata?.plan as string | undefined) ?? null;
+        const validPlans = ["solo", "pro", "team", "enterprise"] as const;
+        const recognizedPlan: (typeof validPlans)[number] | null =
+          planFromMeta && (validPlans as readonly string[]).includes(planFromMeta)
+            ? (planFromMeta as (typeof validPlans)[number])
+            : null;
         if (tenantId) {
-          await db
-            .update(tenants)
-            .set({
-              stripeCustomerId: (session.customer as string) ?? null,
-              stripeSubscriptionId: (session.subscription as string) ?? null,
-              subscriptionStatus: "active",
-              currentPlan: plan ?? "pro",
-              updatedAt: new Date(),
-            })
-            .where(eq(tenants.id, tenantId));
+          // Transition-observed mutation — emits billing.plan_transition
+          // + billing.upgrade_applied audits when the plan actually
+          // changes. Read-before/read-after happens inside the helper.
+          await applyTenantBillingMutation({
+            tenantId,
+            ctx: { stripeEventId: event.id, stripeEventType: event.type },
+            mutation: async (tx) => {
+              await tx
+                .update(tenants)
+                .set({
+                  stripeCustomerId: (session.customer as string) ?? null,
+                  stripeSubscriptionId: (session.subscription as string) ?? null,
+                  subscriptionStatus: "active",
+                  // Only set currentPlan when we recognize the metadata
+                  // value. Drizzle skips `undefined` columns in the SET
+                  // clause — so unknown plans leave the column alone.
+                  currentPlan: recognizedPlan ?? undefined,
+                  updatedAt: new Date(),
+                })
+                .where(eq(tenants.id, tenantId));
+            },
+          });
         }
         break;
       }
@@ -191,31 +246,92 @@ export async function POST(req: NextRequest) {
         const planLabel = planFromPriceId(priceId);
         const trialEnd = sub.trial_end ? new Date(sub.trial_end * 1000) : null;
 
-        await db
-          .update(tenants)
-          .set({
-            stripeSubscriptionId: sub.id,
-            subscriptionStatus: sub.status,
-            currentPlan: planLabel ?? undefined,
-            trialEnd,
-            updatedAt: new Date(),
-          })
-          .where(eq(tenants.stripeCustomerId, customerId));
+        // Resolve tenant by customer id BEFORE the mutation so the
+        // transition helper can read the before-state correctly.
+        // Defensive: if no tenant has this customer id yet (rare
+        // out-of-order delivery where subscription.* arrives before
+        // checkout.session.completed), skip the audit emission but
+        // still attempt the update — it'll be a no-op WHERE-clause
+        // miss and the next event will retry.
+        const tenantRow = await db.query.tenants.findFirst({
+          where: eq(tenants.stripeCustomerId, customerId),
+          columns: { id: true },
+        });
+        if (!tenantRow) {
+          console.warn(`[stripe-webhook] ${event.type} for customer ${customerId} — no tenant match yet; deferring`);
+          // Don't return — fall through to the bare update so we
+          // don't accidentally swallow late-arriving events. The
+          // WHERE clause will match zero rows and that's fine.
+          await db
+            .update(tenants)
+            .set({
+              stripeSubscriptionId: sub.id,
+              subscriptionStatus: sub.status,
+              currentPlan: planLabel ?? undefined,
+              trialEnd,
+              updatedAt: new Date(),
+            })
+            .where(eq(tenants.stripeCustomerId, customerId));
+          break;
+        }
+
+        await applyTenantBillingMutation({
+          tenantId: tenantRow.id,
+          ctx: { stripeEventId: event.id, stripeEventType: event.type },
+          mutation: async (tx) => {
+            await tx
+              .update(tenants)
+              .set({
+                stripeSubscriptionId: sub.id,
+                subscriptionStatus: sub.status,
+                currentPlan: planLabel ?? undefined,
+                trialEnd,
+                updatedAt: new Date(),
+              })
+              .where(eq(tenants.id, tenantRow.id));
+          },
+        });
         break;
       }
 
       case "customer.subscription.deleted": {
         const sub = event.data.object;
         const customerId = typeof sub.customer === "string" ? sub.customer : sub.customer.id;
-        await db
-          .update(tenants)
-          .set({
-            stripeSubscriptionId: null,
-            subscriptionStatus: "canceled",
-            currentPlan: "free",
-            updatedAt: new Date(),
-          })
-          .where(eq(tenants.stripeCustomerId, customerId));
+        // .deleted is the canonical downgrade path — Pro/Team/etc → free.
+        // Resolve tenant first so the helper emits billing.downgrade_applied
+        // with the grandfathered inventory snapshot.
+        const tenantRow = await db.query.tenants.findFirst({
+          where: eq(tenants.stripeCustomerId, customerId),
+          columns: { id: true },
+        });
+        if (!tenantRow) {
+          // Defensive — same posture as the .updated branch above.
+          await db
+            .update(tenants)
+            .set({
+              stripeSubscriptionId: null,
+              subscriptionStatus: "canceled",
+              currentPlan: "free",
+              updatedAt: new Date(),
+            })
+            .where(eq(tenants.stripeCustomerId, customerId));
+          break;
+        }
+        await applyTenantBillingMutation({
+          tenantId: tenantRow.id,
+          ctx: { stripeEventId: event.id, stripeEventType: event.type },
+          mutation: async (tx) => {
+            await tx
+              .update(tenants)
+              .set({
+                stripeSubscriptionId: null,
+                subscriptionStatus: "canceled",
+                currentPlan: "free",
+                updatedAt: new Date(),
+              })
+              .where(eq(tenants.id, tenantRow.id));
+          },
+        });
         break;
       }
 
@@ -228,4 +344,29 @@ export async function POST(req: NextRequest) {
     console.error("Stripe webhook handler error:", err);
     return NextResponse.json({ error: "handler failed" }, { status: 500 });
   }
+}
+
+/**
+ * Best-effort tenant ID extraction for the dedup table's optional
+ * scoping column. Used purely for audit-grep convenience ("show me
+ * every Stripe event for tenant X"); when we can't resolve it we just
+ * store null. NEVER blocks the dedup claim itself.
+ *
+ * Subscription / checkout events embed metadata.tenantId directly.
+ * Charge / payment_intent events embed booking_id + tenant_id in
+ * metadata. Other event types don't carry tenant identity until the
+ * handler resolves them — we return null and the audit grep just
+ * misses those rows, which is fine.
+ */
+function extractTenantIdFromEvent(event: { data: { object: unknown } }): string | null {
+  const obj = event.data.object as { metadata?: Record<string, unknown> } | null | undefined;
+  const meta = obj?.metadata;
+  if (!meta) return null;
+  const candidate =
+    (typeof meta.tenantId === "string" && meta.tenantId) ||
+    (typeof meta.tenant_id === "string" && meta.tenant_id) ||
+    null;
+  // Loose UUID shape check — defense against unrelated metadata keys.
+  if (candidate && /^[0-9a-fA-F-]{36}$/.test(candidate)) return candidate;
+  return null;
 }

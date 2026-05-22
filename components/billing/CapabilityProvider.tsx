@@ -50,6 +50,17 @@ const CapabilityContext = React.createContext<ContextValue | null>(null);
 
 // ─── Provider ────────────────────────────────────────────────────────
 
+/**
+ * Cross-tab refresh signal. When a checkout completes in one tab, the
+ * billing page broadcasts on this channel — every other open tab's
+ * provider hears it and calls `refresh()` so their UI unlocks
+ * immediately without a manual reload.
+ *
+ * Same-origin only (BroadcastChannel is per-origin). Falls back
+ * silently on browsers without BroadcastChannel support (very old).
+ */
+const CAPABILITY_REFRESH_CHANNEL = "zb-capabilities-refresh";
+
 export function CapabilityProvider({
   initial,
   children,
@@ -83,11 +94,49 @@ export function CapabilityProvider({
     }
   }, []);
 
+  // Cross-tab refresh listener (Phase 6 — upgrade immediacy).
+  // When checkout succeeds in one tab, every OTHER tab on the same
+  // origin hears the broadcast and re-fetches capabilities. The
+  // broadcasting tab itself doesn't re-fetch from the channel (it
+  // already calls refresh() directly via PostCheckoutRefresh).
+  React.useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (typeof BroadcastChannel === "undefined") return;
+    const ch = new BroadcastChannel(CAPABILITY_REFRESH_CHANNEL);
+    const onMsg = (ev: MessageEvent) => {
+      if (ev.data === "refresh") {
+        void refresh();
+      }
+    };
+    ch.addEventListener("message", onMsg);
+    return () => {
+      ch.removeEventListener("message", onMsg);
+      ch.close();
+    };
+  }, [refresh]);
+
   // Memoize the context value so consumers don't rerender just because
   // the provider's parent rendered.
   const value = React.useMemo<ContextValue>(() => ({ payload, refresh }), [payload, refresh]);
 
   return <CapabilityContext.Provider value={value}>{children}</CapabilityContext.Provider>;
+}
+
+/**
+ * Broadcast a capability refresh to all OTHER tabs on this origin.
+ * Used by the billing page's PostCheckoutRefresh component after a
+ * successful Stripe upgrade returns. No-op on unsupported browsers.
+ */
+export function broadcastCapabilityRefresh(): void {
+  if (typeof window === "undefined") return;
+  if (typeof BroadcastChannel === "undefined") return;
+  try {
+    const ch = new BroadcastChannel(CAPABILITY_REFRESH_CHANNEL);
+    ch.postMessage("refresh");
+    ch.close();
+  } catch {
+    // Some environments restrict BroadcastChannel — silent fail.
+  }
 }
 
 // ─── Hooks ───────────────────────────────────────────────────────────

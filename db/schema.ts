@@ -998,6 +998,31 @@ export const billingTransactions = pgTable(
   })
 );
 
+// ─── Stripe webhook idempotency dedup table ─────────────────────────────
+// Phase 4 of billing enforcement. The webhook handler INSERTs each
+// event_id at the top; ON CONFLICT DO NOTHING + a returned-rows check
+// tells us whether this is a fresh event or a retry. Retries return
+// 200 immediately and skip the switch — protects against re-mutating
+// the tenants row when Stripe replays.
+//
+// The billing_transactions ledger already has its own dedup on
+// stripe_event_id, but it only tracks payment/refund events, NOT
+// subscription.created/updated/deleted. This table covers EVERY
+// event type and is the canonical webhook dedup boundary.
+export const processedStripeEvents = pgTable(
+  "processed_stripe_events",
+  {
+    eventId: varchar("event_id", { length: 120 }).primaryKey(),
+    eventType: varchar("event_type", { length: 120 }).notNull(),
+    tenantId: uuid("tenant_id").references(() => tenants.id, { onDelete: "set null" }),
+    processedAt: timestamp("processed_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    tenantIdx: index("processed_stripe_events_tenant_idx").on(t.tenantId),
+    processedAtIdx: index("processed_stripe_events_processed_at_idx").on(t.processedAt),
+  })
+);
+
 // ─── Analytics daily snapshots ──────────────────────────────────────────
 // One row per (tenant, day). The aggregation worker upserts this table
 // nightly. Without rows, the analytics page falls back to live queries
