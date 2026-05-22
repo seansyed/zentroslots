@@ -10,7 +10,7 @@ import { loadTenantFeatures } from "@/lib/features";
 import { assertResourcesShareTenant } from "@/lib/tenant";
 import { createBookingSchema } from "@/lib/validation";
 import { getAvailableSlots } from "@/lib/availability";
-import { onBookingCreated } from "@/lib/calendar/sync";
+import { onBookingCreated, revalidateBeforeBooking } from "@/lib/calendar/sync";
 import { triggerAutomation } from "@/lib/communications/engine";
 import { validateBookingRules } from "@/lib/booking-rules/validateBookingRules";
 import { assignStaff } from "@/lib/routing/assignStaff";
@@ -345,6 +345,41 @@ export async function POST(req: NextRequest) {
     }
 
     // ─── FREE booking path (unchanged) ────────────────────────────────
+    //
+    // Wave E — pre-commit external-calendar revalidation.
+    //
+    // Closes the race window between the slot grid load (cache-backed
+    // freebusy) and this insert. If an external event was created
+    // between the customer seeing the grid and clicking book, this
+    // fresh provider read catches the conflict and 409s the request.
+    //
+    // Bounded timeout (3s) inside the helper means a slow Graph/Google
+    // response falls back to "permit booking" — protecting the booking
+    // flow from provider hiccups. The Wave A reconnect-email path
+    // catches the rare post-insert conflicts.
+    try {
+      const reval = await revalidateBeforeBooking({
+        userId: staff.id,
+        startAt,
+        endAt,
+      });
+      if (!reval.ok) {
+        return NextResponse.json(
+          {
+            error: "external_conflict",
+            message:
+              "This slot was just booked on the host's calendar. Please pick another time.",
+          },
+          { status: 409 },
+        );
+      }
+    } catch (e) {
+      // Revalidation itself failing is non-fatal — better to let the
+      // booking through than block on a freebusy outage. Same fail-
+      // open philosophy as the existing freebusy fallback.
+      console.error("[bookings] revalidateBeforeBooking failed (continuing):", e);
+    }
+
     let row;
     try {
       [row] = await db

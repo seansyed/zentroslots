@@ -72,9 +72,21 @@ import {
   bookings,
   calendarConnections,
   calendarSyncLogs,
+  webhookChannels,
   type User,
 } from "@/db/schema";
 import { decryptSecret, encryptSecret } from "@/lib/crypto";
+import { getCachedBusy, invalidateConnection, setCachedBusy } from "./freebusyCache";
+import {
+  stopCalendarWatch as googleStopWatch,
+  watchCalendar as googleWatchCalendar,
+} from "./webhooks/google";
+import {
+  renewSubscription as microsoftRenewSubscription,
+  subscribeCalendar as microsoftSubscribeCalendar,
+  unsubscribe as microsoftUnsubscribe,
+} from "./webhooks/microsoft";
+import { randomUUID, randomBytes } from "node:crypto";
 
 import {
   type BusyInterval,
@@ -603,6 +615,16 @@ export async function upsertGoogleConnection(args: {
     status: "ok",
   });
 
+  // Wave E — subscribe to push channel fire-and-forget. The renewal
+  // cron picks up any failure and retries; we don't make OAuth slower
+  // for the success-path user. setImmediate so the OAuth callback
+  // returns before the watch call begins.
+  setImmediate(() => {
+    subscribeConnectionWebhook(connectionId).catch((e) =>
+      console.error("[calendar/sync] post-upsert subscribe failed:", e),
+    );
+  });
+
   return connectionId;
 }
 
@@ -688,6 +710,13 @@ export async function upsertMicrosoftConnection(args: {
     provider: "microsoft",
     kind: "connect",
     status: "ok",
+  });
+
+  // Wave E — subscribe to Graph notifications fire-and-forget.
+  setImmediate(() => {
+    subscribeConnectionWebhook(connectionId).catch((e) =>
+      console.error("[calendar/sync] post-upsert subscribe failed:", e),
+    );
   });
 
   return connectionId;
@@ -1296,6 +1325,7 @@ async function readBusyForConnection(
   conn: typeof calendarConnections.$inferSelect,
   windowStart: Date,
   windowEnd: Date,
+  options?: { bypassCache?: boolean },
 ): Promise<BusyInterval[]> {
   const provider = conn.provider as CalendarProvider;
 
@@ -1303,6 +1333,17 @@ async function readBusyForConnection(
   // member's busy time comes from their calendar host (Google or
   // Microsoft), which is queried independently in the same Promise.all.
   if (provider === "zoom") return [];
+
+  // Wave E — consult the cache before the provider. Pre-commit
+  // revalidation passes `bypassCache: true` to force a fresh fetch.
+  if (!options?.bypassCache) {
+    const cached = await getCachedBusy({
+      connectionId: conn.id,
+      windowStart,
+      windowEnd,
+    });
+    if (cached) return cached;
+  }
 
   const startedAt = Date.now();
   let lastErr: unknown = null;
@@ -1351,6 +1392,19 @@ async function readBusyForConnection(
         retryCount: attempt,
       });
       await markActive(conn.id);
+      // Wave E — populate cache on every successful fetch. Skip when
+      // the caller explicitly bypassed (pre-commit revalidation
+      // doesn't want to poison the cache with a sub-window result).
+      if (!options?.bypassCache) {
+        void setCachedBusy({
+          connectionId: conn.id,
+          tenantId: conn.tenantId,
+          userId: conn.userId,
+          windowStart,
+          windowEnd,
+          busyIntervals: busy,
+        });
+      }
       return busy;
     } catch (err) {
       lastErr = err;
@@ -1609,3 +1663,237 @@ export function isLogStillRelevant(
 
 // Re-exports for callers that prefer a single import.
 export { gte, lt }; // (used by future date-filter helpers)
+
+// ─── Wave E — pre-commit revalidation ──────────────────────────────────
+/**
+ * `revalidateBeforeBooking` — closes the tiny race window between the
+ * slot grid load (cached freebusy read) and the booking insert.
+ *
+ * Scenario it guards against:
+ *   1. Customer loads the slot grid at T=0; cache says 2pm is free.
+ *   2. Staff manually creates an event at 2pm in their Google Calendar
+ *      at T=20s. Cache TTL hasn't expired yet.
+ *   3. Customer clicks "Book 2pm" at T=30s.
+ *   4. Without this guard, we'd insert the booking and only discover
+ *      the conflict when the calendar sync hook tries to push the
+ *      event minutes later.
+ *
+ * This function does ONE fresh provider freebusy read against a TIGHT
+ * window (just the booking's start..end +/- 1 minute of slack) and
+ * returns true if the slot is still free.
+ *
+ * Bounded behaviors:
+ *   • Cache bypass so we always hit the provider.
+ *   • Tight window — Graph/Google freebusy on a 2-minute window is
+ *     fast (typically <300ms).
+ *   • Bounded timeout (3s) — falls back to "permit booking" on
+ *     timeout. Failing closed here would break booking flows during
+ *     any provider hiccup; the existing post-insert calendar sync
+ *     hook + Wave A reconnect emails are the catch-net.
+ *   • Tolerates zero connections (returns true — no calendar host
+ *     means no external busy to check).
+ */
+export type RevalidationResult =
+  | { ok: true; reason?: "no_connections" | "no_conflict" }
+  | { ok: false; reason: "conflict"; conflictWith?: BusyInterval };
+
+export async function revalidateBeforeBooking(args: {
+  userId: string;
+  startAt: Date;
+  endAt: Date;
+  /** Optional override for the freshness timeout (ms). Default 3000. */
+  timeoutMs?: number;
+}): Promise<RevalidationResult> {
+  const timeoutMs = args.timeoutMs ?? 3000;
+  // Pull only ACTIVE calendar-host connections. Zoom doesn't have
+  // freebusy and microsoft/google rows in needs_reconnect can't
+  // produce fresh data; both are skipped via the same filter
+  // getExternalBusyForUser uses.
+  const conns = await db.query.calendarConnections.findMany({
+    where: and(
+      eq(calendarConnections.userId, args.userId),
+      eq(calendarConnections.status, "active"),
+    ),
+  });
+  if (conns.length === 0) {
+    return { ok: true, reason: "no_connections" };
+  }
+
+  // Slack ±1 min on each side so we catch events that touch the
+  // booking boundary even with a tiny clock skew.
+  const slack = 60_000;
+  const windowStart = new Date(args.startAt.getTime() - slack);
+  const windowEnd = new Date(args.endAt.getTime() + slack);
+
+  const work = Promise.all(
+    conns
+      .filter((c) => c.provider !== "zoom")
+      .map((c) => readBusyForConnection(c, windowStart, windowEnd, { bypassCache: true })),
+  );
+  const timeout = new Promise<BusyInterval[][]>((resolve) =>
+    setTimeout(() => resolve([]), timeoutMs),
+  );
+
+  // First-to-finish: actual work OR timeout. On timeout we got [] →
+  // no busy → permit. Fail-OPEN by design (see docstring).
+  const results = await Promise.race([work, timeout]);
+  const allBusy = results.flat();
+
+  // Strict overlap check: any busy interval that overlaps the booking
+  // window at all is a conflict. Touching boundaries (end === start)
+  // are NOT conflicts.
+  for (const b of allBusy) {
+    if (b.start.getTime() < args.endAt.getTime() && b.end.getTime() > args.startAt.getTime()) {
+      return { ok: false, reason: "conflict", conflictWith: b };
+    }
+  }
+  return { ok: true, reason: "no_conflict" };
+}
+
+// ─── Wave E — webhook subscription management ──────────────────────────
+/**
+ * Subscribe a connection to its provider's push channel. Idempotent:
+ * if a row already exists in webhook_channels we leave it alone (the
+ * renewal cron handles extension separately).
+ *
+ * Called fire-and-forget from upsertGoogle/MicrosoftConnection. Never
+ * throws — a subscribe failure is logged and the renewal cron will
+ * retry next pass.
+ *
+ * Zoom connections are skipped: Zoom doesn't have a calendar-changes
+ * webhook for booking sync purposes.
+ */
+export async function subscribeConnectionWebhook(connectionId: string): Promise<void> {
+  try {
+    const conn = await db.query.calendarConnections.findFirst({
+      where: eq(calendarConnections.id, connectionId),
+    });
+    if (!conn || conn.status !== "active") return;
+    if (conn.provider !== "google" && conn.provider !== "microsoft") return;
+
+    // Already subscribed? Leave the existing channel alone.
+    const existing = await db.query.webhookChannels.findFirst({
+      where: eq(webhookChannels.connectionId, connectionId),
+    });
+    if (existing && existing.expiresAt.getTime() > Date.now() + 6 * 60 * 60 * 1000) {
+      return; // healthy channel with >6h left, no work needed
+    }
+
+    const appBase = (process.env.APP_BASE_URL ?? "http://localhost:3001").replace(/\/+$/, "");
+    const clientState = randomBytes(32).toString("hex");
+
+    if (conn.provider === "google") {
+      const refreshToken = safeDecrypt(conn.refreshTokenEncrypted);
+      if (!refreshToken) return;
+      const channelId = randomUUID();
+      const res = await googleWatchCalendar({
+        refreshToken,
+        calendarId: conn.calendarId,
+        address: `${appBase}/api/webhooks/google/calendar`,
+        channelId,
+        token: clientState,
+      });
+      // Stop any prior channel before storing the new one (fire-and-
+      // forget cleanup — Google handles stale channel cleanup itself
+      // after expiry, but stopping explicitly prevents duplicate
+      // notifications during the overlap).
+      if (existing) {
+        void googleStopWatch({
+          refreshToken,
+          channelId: existing.externalChannelId,
+          resourceId: existing.externalResourceId ?? "",
+        }).catch(() => undefined);
+        await db.delete(webhookChannels).where(eq(webhookChannels.id, existing.id));
+      }
+      await db.insert(webhookChannels).values({
+        tenantId: conn.tenantId,
+        connectionId: conn.id,
+        userId: conn.userId,
+        provider: "google",
+        externalChannelId: res.channelId,
+        externalResourceId: res.resourceId,
+        clientState,
+        expiresAt: res.expiresAt,
+      });
+    } else {
+      // microsoft
+      const accessToken = await getMicrosoftAccessToken(conn);
+      if (!accessToken) return;
+      const res = await microsoftSubscribeCalendar({
+        accessToken,
+        notificationUrl: `${appBase}/api/webhooks/microsoft/calendar`,
+        clientState,
+      });
+      if (existing) {
+        void microsoftUnsubscribe({
+          accessToken,
+          subscriptionId: existing.externalChannelId,
+        }).catch(() => undefined);
+        await db.delete(webhookChannels).where(eq(webhookChannels.id, existing.id));
+      }
+      await db.insert(webhookChannels).values({
+        tenantId: conn.tenantId,
+        connectionId: conn.id,
+        userId: conn.userId,
+        provider: "microsoft",
+        externalChannelId: res.subscriptionId,
+        externalResourceId: null,
+        clientState,
+        expiresAt: res.expiresAt,
+      });
+    }
+  } catch (err) {
+    // Best-effort. The renewal cron will pick up the failed state
+    // on its next pass and retry.
+    console.error("[calendar/sync] subscribeConnectionWebhook failed:", err);
+  }
+}
+
+/**
+ * Renew an existing channel. Used by the renewal cron when a channel
+ * is within 6h of expiry.
+ *   • Google: there's no extension API — we have to stop + watch again.
+ *   • Microsoft: PATCH /subscriptions/{id} extends expirationDateTime
+ *     in place, keeping the same id.
+ */
+export async function renewConnectionWebhook(channelId: string): Promise<boolean> {
+  try {
+    const channel = await db.query.webhookChannels.findFirst({
+      where: eq(webhookChannels.id, channelId),
+    });
+    if (!channel) return false;
+    const conn = await db.query.calendarConnections.findFirst({
+      where: eq(calendarConnections.id, channel.connectionId),
+    });
+    if (!conn || conn.status !== "active") return false;
+
+    if (channel.provider === "google") {
+      // Stop + re-subscribe in one go via subscribeConnectionWebhook,
+      // which handles the cleanup of the old row.
+      await subscribeConnectionWebhook(channel.connectionId);
+      return true;
+    }
+    // microsoft — extend in place
+    const accessToken = await getMicrosoftAccessToken(conn);
+    if (!accessToken) return false;
+    const newExpiry = await microsoftRenewSubscription({
+      accessToken,
+      subscriptionId: channel.externalChannelId,
+    });
+    await db
+      .update(webhookChannels)
+      .set({ expiresAt: newExpiry, lastRenewedAt: new Date(), updatedAt: new Date() })
+      .where(eq(webhookChannels.id, channel.id));
+    return true;
+  } catch (err) {
+    console.error("[calendar/sync] renewConnectionWebhook failed:", err);
+    return false;
+  }
+}
+
+/**
+ * Wave E observability — invalidate cache by connection id. Re-export
+ * for callers (e.g. health endpoint) that want to force a refresh
+ * without going through the webhook receiver.
+ */
+export { invalidateConnection as invalidateFreebusyCache };

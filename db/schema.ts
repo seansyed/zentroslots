@@ -957,6 +957,12 @@ export const calendarConnections = pgTable(
     //   once per 24h when their connection flips to needs_reconnect.
     consecutiveFailures: integer("consecutive_failures").notNull().default(0),
     lastReconnectEmailAt: timestamp("last_reconnect_email_at", { withTimezone: true }),
+    // Wave E — multi-calendar foundation. jsonb array of
+    // `{ id: string, summary: string }` objects. NOT YET CONSUMED by
+    // the orchestrator; future wave will read this to aggregate busy
+    // time across secondary calendars (e.g. shared vacations).
+    // Default `[]` preserves all existing behavior.
+    secondaryCalendarIds: jsonb("secondary_calendar_ids").notNull().default([]),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -964,6 +970,97 @@ export const calendarConnections = pgTable(
     tenantIdx: index("calendar_connections_tenant_idx").on(t.tenantId),
     statusIdx: index("calendar_connections_status_idx").on(t.status),
   })
+);
+
+// ─── Wave E — webhook subscriptions ─────────────────────────────────────
+// One row per active provider push subscription. The receiver routes
+// incoming webhooks back to the right (tenant, user, connection) via
+// external_channel_id; the renewal cron extends expiring rows.
+export const webhookChannels = pgTable(
+  "webhook_channels",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    connectionId: uuid("connection_id")
+      .notNull()
+      .references(() => calendarConnections.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    provider: varchar("provider", { length: 20 }).notNull(),
+    externalChannelId: varchar("external_channel_id", { length: 255 }).notNull(),
+    externalResourceId: varchar("external_resource_id", { length: 255 }),
+    clientState: varchar("client_state", { length: 64 }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    lastRenewedAt: timestamp("last_renewed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    connectionUnique: uniqueIndex("webhook_channels_connection_unique").on(t.connectionId),
+    expiresIdx: index("webhook_channels_expires_idx").on(t.expiresAt),
+    externalIdIdx: index("webhook_channels_external_id_idx").on(t.externalChannelId),
+  }),
+);
+
+// ─── Wave E — freebusy cache ───────────────────────────────────────────
+// DB-backed cache keyed on (connection_id, window_start, window_end).
+// Wired into the orchestrator's freebusy reader; invalidated by the
+// webhook receiver on any external event change.
+export const freebusyCache = pgTable(
+  "freebusy_cache",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    connectionId: uuid("connection_id")
+      .notNull()
+      .references(() => calendarConnections.id, { onDelete: "cascade" }),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    windowStart: timestamp("window_start", { withTimezone: true }).notNull(),
+    windowEnd: timestamp("window_end", { withTimezone: true }).notNull(),
+    busyIntervals: jsonb("busy_intervals").notNull().default([]),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    lookupIdx: index("freebusy_cache_lookup_idx").on(t.connectionId, t.windowStart, t.windowEnd),
+    expiresIdx: index("freebusy_cache_expires_idx").on(t.expiresAt),
+    connectionIdx: index("freebusy_cache_connection_idx").on(t.connectionId),
+  }),
+);
+
+// ─── Wave E — sync drift events ────────────────────────────────────────
+// Append-only log of detected drift between our booking state and the
+// provider's state. Detection-only in Wave E; future wave can add
+// auto-repair workflows that read from this table.
+export const syncDriftEvents = pgTable(
+  "sync_drift_events",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    connectionId: uuid("connection_id").references(() => calendarConnections.id, {
+      onDelete: "set null",
+    }),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+    bookingId: uuid("booking_id"),
+    provider: varchar("provider", { length: 20 }).notNull(),
+    kind: varchar("kind", { length: 40 }).notNull(),
+    severity: varchar("severity", { length: 10 }).notNull().default("warn"),
+    details: jsonb("details").notNull().default({}),
+    detectedAt: timestamp("detected_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    tenantIdx: index("sync_drift_tenant_idx").on(t.tenantId, t.detectedAt),
+    kindIdx: index("sync_drift_kind_idx").on(t.kind),
+  }),
 );
 
 export const calendarSyncLogs = pgTable(
