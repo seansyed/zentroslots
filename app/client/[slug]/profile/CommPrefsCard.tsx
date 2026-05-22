@@ -7,6 +7,10 @@ type Prefs = {
   smsEnabled: boolean;
   reminder24hEnabled: boolean;
   reminder1hEnabled: boolean;
+  // Phase 2A — per-event toggles
+  confirmationsEnabled: boolean;
+  cancellationsEnabled: boolean;
+  waitlistEnabled: boolean;
   marketingEnabled: boolean;
 };
 
@@ -90,6 +94,41 @@ export default function CommPrefsCard({
             disabled={!prefs.emailEnabled}
             busy={busy === "reminder1hEnabled"}
             onToggle={() => toggle("reminder1hEnabled")}
+            accent={accent}
+          />
+        </Group>
+
+        {/* Phase 2A — per-event email toggles. Each one is independent of
+            the master switch UI-wise, but the gate respects emailEnabled
+            as the floor regardless. Disabled when emailEnabled is off
+            so the customer sees that turning off the master overrides
+            everything. */}
+        <Group label="Event notifications">
+          <Toggle
+            label="Booking confirmations"
+            hint="Email when a new appointment is booked."
+            checked={prefs.confirmationsEnabled}
+            disabled={!prefs.emailEnabled}
+            busy={busy === "confirmationsEnabled"}
+            onToggle={() => toggle("confirmationsEnabled")}
+            accent={accent}
+          />
+          <Toggle
+            label="Cancellation notices"
+            hint="Email when an appointment is cancelled."
+            checked={prefs.cancellationsEnabled}
+            disabled={!prefs.emailEnabled}
+            busy={busy === "cancellationsEnabled"}
+            onToggle={() => toggle("cancellationsEnabled")}
+            accent={accent}
+          />
+          <Toggle
+            label="Waitlist openings"
+            hint="Email when a slot you're waiting for opens up."
+            checked={prefs.waitlistEnabled}
+            disabled={!prefs.emailEnabled}
+            busy={busy === "waitlistEnabled"}
+            onToggle={() => toggle("waitlistEnabled")}
             accent={accent}
           />
         </Group>

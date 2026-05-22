@@ -16,11 +16,17 @@ import { audit, ipFromHeaders } from "@/lib/audit";
 // so toggles here actually affect outbound mail in production.
 
 const patchSchema = z.object({
-  emailEnabled:       z.boolean().optional(),
-  smsEnabled:         z.boolean().optional(),
-  reminder24hEnabled: z.boolean().optional(),
-  reminder1hEnabled:  z.boolean().optional(),
-  marketingEnabled:   z.boolean().optional(),
+  emailEnabled:         z.boolean().optional(),
+  smsEnabled:           z.boolean().optional(),
+  reminder24hEnabled:   z.boolean().optional(),
+  reminder1hEnabled:    z.boolean().optional(),
+  // Phase 2A — per-event toggles. Defaults true for all pre-existing
+  // customers via normalizePrefs() so behavior is unchanged until
+  // the customer explicitly opts out.
+  confirmationsEnabled: z.boolean().optional(),
+  cancellationsEnabled: z.boolean().optional(),
+  waitlistEnabled:      z.boolean().optional(),
+  marketingEnabled:     z.boolean().optional(),
 });
 
 async function loadContext(slug: string) {

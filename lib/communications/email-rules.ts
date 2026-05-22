@@ -38,7 +38,17 @@ export type SchedulingEmailKind =
 
 export type GateDecision =
   | { allowed: true; reason?: never }
-  | { allowed: false; reason: "email_disabled" | "reminder24h_disabled" | "reminder1h_disabled" };
+  | {
+      allowed: false;
+      reason:
+        | "email_disabled"
+        | "reminder24h_disabled"
+        | "reminder1h_disabled"
+        // Phase 2A — per-event reasons
+        | "confirmations_disabled"
+        | "cancellations_disabled"
+        | "waitlist_disabled";
+    };
 
 /**
  * Decide whether a transactional scheduling email may be delivered to a
@@ -48,9 +58,13 @@ export type GateDecision =
  * Semantics:
  *   - `emailEnabled = false` blocks ALL scheduling email (master switch).
  *   - Reminder kinds additionally require the matching per-window toggle.
- *   - Confirmation/cancellation/reschedule check only the master switch
- *     (operationally important; we still tell the customer their
- *      appointment changed, but only if they want any email at all).
+ *   - Phase 2A: confirmation, cancellation, and waitlist-slot-available
+ *     each gain their own per-event toggle. Defaults to `true` for all
+ *     pre-existing customers (see normalizePrefs) so behavior is
+ *     byte-identical until a customer opts out.
+ *   - Reschedule notices remain governed by the master switch only —
+ *     a reschedule is a substantive state change the customer needs to
+ *     know about; the master switch is the appropriate granularity.
  */
 export function decideSchedulingEmail(
   prefs: ClientCommPrefs,
@@ -58,13 +72,30 @@ export function decideSchedulingEmail(
 ): GateDecision {
   if (!prefs.emailEnabled) return { allowed: false, reason: "email_disabled" };
 
-  if (kind === "appointment_reminder_24h") {
-    if (!prefs.reminder24hEnabled) return { allowed: false, reason: "reminder24h_disabled" };
-  } else if (kind === "appointment_reminder_1h") {
-    if (!prefs.reminder1hEnabled) return { allowed: false, reason: "reminder1h_disabled" };
+  switch (kind) {
+    case "appointment_reminder_24h":
+      if (!prefs.reminder24hEnabled) return { allowed: false, reason: "reminder24h_disabled" };
+      break;
+    case "appointment_reminder_1h":
+      if (!prefs.reminder1hEnabled) return { allowed: false, reason: "reminder1h_disabled" };
+      break;
+    case "appointment_confirmation":
+      if (!prefs.confirmationsEnabled) return { allowed: false, reason: "confirmations_disabled" };
+      break;
+    case "appointment_cancelled":
+      if (!prefs.cancellationsEnabled) return { allowed: false, reason: "cancellations_disabled" };
+      break;
+    case "appointment_waitlist_slot_available":
+      if (!prefs.waitlistEnabled) return { allowed: false, reason: "waitlist_disabled" };
+      break;
+    // Reschedule, completed, no_show, review_request, followup remain
+    // governed by the master `emailEnabled` switch only — they're
+    // either substantive state changes or content the host explicitly
+    // opted into per service (followups + review requests are
+    // tenant-side configured).
+    default:
+      break;
   }
-  // Confirmation / cancellation / reschedule have no per-event toggle
-  // beyond the master switch — they're transactional courtesies.
   return { allowed: true };
 }
 

@@ -403,8 +403,15 @@ function BookingCard({
                 Add to calendar
               </a>
               {booking.rescheduleToken && (
+                // Phase 2A F1 — reschedule stays in-portal now. The
+                // existing public /reschedule/[token] page continues to
+                // work for confirmation-email links, but signed-in
+                // customers get a portal-native flow. Both routes call
+                // lib/reschedule.performReschedule so behavior is
+                // identical. We still gate on `rescheduleToken` because
+                // that's how we surface the tenant feature-flag state.
                 <Link
-                  href={`/reschedule/${encodeURIComponent(booking.rescheduleToken)}`}
+                  href={`/client/${encodeURIComponent(tenantSlug)}/bookings/${encodeURIComponent(booking.id)}/reschedule`}
                   className="inline-flex min-h-[36px] items-center justify-center rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-[12px] font-medium text-slate-700 shadow-sm transition-all hover:-translate-y-0.5 hover:bg-slate-50 hover:shadow-sm"
                 >
                   Reschedule

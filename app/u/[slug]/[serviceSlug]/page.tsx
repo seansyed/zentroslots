@@ -1,9 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { and, eq, isNull, or } from "drizzle-orm";
+import { and, eq, isNull, or, sql } from "drizzle-orm";
 
 import { db } from "@/db/client";
-import { calendarConnections, customers, departments, serviceStaff, services, staffAssignmentRules, tenants, users } from "@/db/schema";
+import { bookings, calendarConnections, customers, departments, serviceStaff, services, staffAssignmentRules, tenants, users } from "@/db/schema";
 import BookingFlow from "@/components/BookingFlow";
 import { resolvePublicProfile } from "@/lib/identity";
 import { getClientSession } from "@/lib/client-auth";
@@ -79,9 +79,64 @@ export default async function PublicServicePage(props: {
     ));
   if (assignments.length === 0) notFound();
 
+  // Phase 2A F2 — preferred staff persistence.
+  //
+  // If the visitor is signed into the portal for THIS tenant AND no
+  // explicit ?staff= was provided AND this service has multiple
+  // eligible staff, default-pin to the staff member this customer
+  // has most often booked for THIS service. Falls back gracefully:
+  //   • Anonymous visitor → assignments[0] (existing behavior)
+  //   • Signed-in but no prior history → assignments[0]
+  //   • Most-booked staff no longer eligible → assignments[0]
+  //   • Single-staff service → assignments[0] (no-op)
+  //
+  // This intentionally only DEFAULTS the selection — it never hard-
+  // locks. Customers can still switch via ?staff= or the future
+  // workforce picker UI.
+  let preferredStaffUserId: string | null = null;
+  if (!sp.staff && assignments.length > 1) {
+    const probeSession = await getClientSession();
+    if (probeSession && probeSession.tenantId === tenant.id) {
+      const probeCustomer = await db.query.customers.findFirst({
+        where: and(eq(customers.id, probeSession.customerId), eq(customers.tenantId, tenant.id)),
+        columns: { email: true },
+      });
+      if (probeCustomer) {
+        const eligibleIds = assignments.map((a) => a.userId);
+        const [top] = await db
+          .select({
+            staffUserId: bookings.staffUserId,
+            count: sql<number>`COUNT(*)::int`,
+          })
+          .from(bookings)
+          .where(
+            and(
+              eq(bookings.tenantId, tenant.id),
+              eq(bookings.serviceId, service.id),
+              sql`lower(${bookings.clientEmail}) = ${probeCustomer.email.toLowerCase()}`,
+              eq(bookings.status, "completed"),
+              // Constrain to staff still assigned to this service.
+              sql`${bookings.staffUserId} = ANY(${eligibleIds})`,
+            ),
+          )
+          .groupBy(bookings.staffUserId)
+          .orderBy(sql`COUNT(*) DESC`)
+          .limit(1);
+        if (top?.staffUserId) {
+          preferredStaffUserId = top.staffUserId;
+        }
+      }
+    }
+  }
+
   const staff = sp.staff
     ? assignments.find((a) => a.userId === sp.staff) ?? assignments[0]
-    : assignments[0];
+    : preferredStaffUserId
+      ? assignments.find((a) => a.userId === preferredStaffUserId) ?? assignments[0]
+      : assignments[0];
+
+  // For the welcome bar copy — let the customer know we remembered.
+  const isPreferredAutoPin = !sp.staff && preferredStaffUserId === staff.userId;
 
   // Routing intent — when a non-manual rule applies to this service
   // or the tenant default is non-manual, the booking is routed at
@@ -293,7 +348,13 @@ export default async function PublicServicePage(props: {
               Welcome back,{" "}
               <span className="font-semibold text-slate-900">{signedInCustomer.firstName}</span>
               <span className="hidden sm:inline">
-                {" "}— your details are pre-filled.
+                {/* Phase 2A F2 — calm continuity hint. If we auto-pinned
+                    the customer's most-booked staff for this service,
+                    surface it transparently. Honest tone — no
+                    recommendation-engine language. */}
+                {isPreferredAutoPin && profile.displayName
+                  ? <> — continuing with <span className="font-medium text-slate-900">{profile.displayName}</span>.</>
+                  : <> — your details are pre-filled.</>}
               </span>
             </div>
             <Link
