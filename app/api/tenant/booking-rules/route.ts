@@ -3,9 +3,11 @@ import { and, asc, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "@/db/client";
-import { bookingRules, services } from "@/db/schema";
+import { bookingRules, services, tenants } from "@/db/schema";
 import { audit, ipFromHeaders } from "@/lib/audit";
 import { errorResponse, HttpError, requireRole } from "@/lib/auth";
+import { assertCanWriteBookingRule } from "@/lib/billing/capabilities";
+import { getPlan } from "@/lib/plans";
 
 // GET /api/tenant/booking-rules
 //
@@ -72,6 +74,29 @@ export async function PUT(req: NextRequest) {
     const admin = await requireRole(["admin", "manager"]);
     const body = putSchema.parse(await req.json());
     const serviceId = body.serviceId ?? null;
+
+    // ── Plan gate (Phase 16K hardening) ──────────────────────────
+    // Booking rules are Pro+. Existing rules continue to enforce —
+    // this blocks NEW writes only.
+    const tenantRow = await db.query.tenants.findFirst({
+      where: eq(tenants.id, admin.tenantId),
+      columns: { currentPlan: true },
+    });
+    const plan = getPlan(tenantRow?.currentPlan);
+    try {
+      assertCanWriteBookingRule(plan);
+    } catch (err) {
+      audit({
+        tenantId: admin.tenantId,
+        action: "billing.enforcement_denied",
+        actorUserId: admin.id,
+        actorLabel: admin.email,
+        entityType: "billing",
+        metadata: { capability: "booking_rules", plan: plan.id, serviceId },
+        ipAddress: ipFromHeaders(req.headers),
+      });
+      throw err;
+    }
 
     if (serviceId) {
       const svc = await db.query.services.findFirst({

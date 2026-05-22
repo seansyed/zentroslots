@@ -7,9 +7,12 @@ import {
   followupAutomationRules,
   reviewRequestRules,
   services,
+  tenants,
 } from "@/db/schema";
 import { audit, ipFromHeaders } from "@/lib/audit";
 import { errorResponse, HttpError } from "@/lib/auth";
+import { assertCanCreateAutomationRule } from "@/lib/billing/capabilities";
+import { getPlan } from "@/lib/plans";
 import { requirePermissionOrRole } from "@/lib/security/permissions";
 import {
   FOLLOWUP_TRIGGER_EVENTS,
@@ -101,6 +104,29 @@ export async function PUT(req: NextRequest) {
       auditPath: "/api/tenant/automations",
     });
     const body = putSchema.parse(await req.json());
+
+    // ── Plan gate (Phase 16K hardening) ──────────────────────────
+    // Workflow automations are Pro+. Existing rules on Free tenants
+    // continue to fire via the cron — this gate only blocks NEW writes.
+    const tenantRow = await db.query.tenants.findFirst({
+      where: eq(tenants.id, admin.tenantId),
+      columns: { currentPlan: true },
+    });
+    const plan = getPlan(tenantRow?.currentPlan);
+    try {
+      assertCanCreateAutomationRule(plan);
+    } catch (err) {
+      audit({
+        tenantId: admin.tenantId,
+        action: "billing.enforcement_denied",
+        actorUserId: admin.id,
+        actorLabel: admin.email,
+        entityType: "billing",
+        metadata: { capability: "automation_rules", plan: plan.id, kind: body.kind },
+        ipAddress: ipFromHeaders(req.headers),
+      });
+      throw err;
+    }
 
     // Validate any referenced serviceId belongs to this tenant.
     if (body.serviceId) {

@@ -2,9 +2,11 @@ import { NextRequest } from "next/server";
 import { and, asc, eq, gte, lte } from "drizzle-orm";
 
 import { db } from "@/db/client";
-import { analyticsDailySnapshots } from "@/db/schema";
+import { analyticsDailySnapshots, tenants } from "@/db/schema";
 import { errorResponse } from "@/lib/auth";
-import { ipFromHeaders } from "@/lib/audit";
+import { audit, ipFromHeaders } from "@/lib/audit";
+import { assertCanExportAnalytics } from "@/lib/billing/capabilities";
+import { getPlan } from "@/lib/plans";
 import { requirePermissionOrRole } from "@/lib/security/permissions";
 import { recordExportAudit } from "@/lib/governance/exportAudit";
 
@@ -23,6 +25,30 @@ export async function GET(req: NextRequest) {
       requirePermission: "canExportReports",
       auditPath: "/api/tenant/analytics/export",
     });
+
+    // ── Plan gate (Phase 16K hardening) ──────────────────────────
+    // Analytics export is Pro+. Existing exports persist in the
+    // governance audit table; this blocks NEW exports only.
+    const tenantRow = await db.query.tenants.findFirst({
+      where: eq(tenants.id, admin.tenantId),
+      columns: { currentPlan: true },
+    });
+    const plan = getPlan(tenantRow?.currentPlan);
+    try {
+      assertCanExportAnalytics(plan);
+    } catch (err) {
+      audit({
+        tenantId: admin.tenantId,
+        action: "billing.enforcement_denied",
+        actorUserId: admin.id,
+        actorLabel: admin.email,
+        entityType: "billing",
+        metadata: { capability: "analytics_export", plan: plan.id },
+        ipAddress: ipFromHeaders(req.headers),
+      });
+      throw err;
+    }
+
     const rangeParam = Number(req.nextUrl.searchParams.get("range") ?? DEFAULT_DAYS);
     const days = Math.max(1, Math.min(MAX_DAYS, isFinite(rangeParam) ? rangeParam : DEFAULT_DAYS));
 

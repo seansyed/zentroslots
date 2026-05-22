@@ -8,10 +8,13 @@ import {
   bookingSeries,
   serviceStaff,
   services,
+  tenants,
   users,
 } from "@/db/schema";
 import { audit, ipFromHeaders } from "@/lib/audit";
 import { errorResponse, HttpError, requireRole } from "@/lib/auth";
+import { assertCanCreateRecurringSeries } from "@/lib/billing/capabilities";
+import { getPlan } from "@/lib/plans";
 import { validateRecurrenceRuleString } from "@/lib/recurrence/validateRecurrence";
 
 // GET /api/tenant/booking-series
@@ -89,6 +92,33 @@ export async function POST(req: NextRequest) {
   try {
     const admin = await requireRole(["admin", "manager"]);
     const body = createSchema.parse(await req.json());
+
+    // ── Plan gate (Phase 16K hardening) ──────────────────────────
+    // Recurring scheduling is Pro+. Free tenants who already saved
+    // a series before enforcement landed keep that row + the cron
+    // continues to materialize it; NEW writes are blocked here with
+    // a 402 carrying an honest upgrade message.
+    const tenantRow = await db.query.tenants.findFirst({
+      where: eq(tenants.id, admin.tenantId),
+      columns: { currentPlan: true },
+    });
+    const plan = getPlan(tenantRow?.currentPlan);
+    try {
+      assertCanCreateRecurringSeries(plan);
+    } catch (err) {
+      // Audit the blocked attempt so admins see the upgrade-pathway
+      // pressure honestly + ops can debug billing disputes.
+      audit({
+        tenantId: admin.tenantId,
+        action: "billing.enforcement_denied",
+        actorUserId: admin.id,
+        actorLabel: admin.email,
+        entityType: "billing",
+        metadata: { capability: "recurring_series", plan: plan.id },
+        ipAddress: ipFromHeaders(req.headers),
+      });
+      throw err;
+    }
 
     // Validate the recurrence rule.
     const ruleResult = validateRecurrenceRuleString(body.recurrenceRule);

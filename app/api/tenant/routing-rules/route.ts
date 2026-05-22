@@ -6,10 +6,13 @@ import { db } from "@/db/client";
 import {
   services,
   staffAssignmentRules,
+  tenants,
   users,
 } from "@/db/schema";
 import { audit, ipFromHeaders } from "@/lib/audit";
 import { errorResponse, HttpError, requireRole } from "@/lib/auth";
+import { assertCanWriteRoutingRule } from "@/lib/billing/capabilities";
+import { getPlan } from "@/lib/plans";
 import { ROUTING_MODES, type RoutingMode } from "@/lib/routing/types";
 
 // GET /api/tenant/routing-rules
@@ -68,6 +71,29 @@ export async function PUT(req: NextRequest) {
     const admin = await requireRole(["admin", "manager"]);
     const body = putSchema.parse(await req.json());
     const serviceId = body.serviceId ?? null;
+
+    // ── Plan gate (Phase 16K hardening) ──────────────────────────
+    // Staff routing rules are Pro+. Existing rules continue to run
+    // via the engine — this blocks NEW writes only.
+    const tenantRow = await db.query.tenants.findFirst({
+      where: eq(tenants.id, admin.tenantId),
+      columns: { currentPlan: true },
+    });
+    const plan = getPlan(tenantRow?.currentPlan);
+    try {
+      assertCanWriteRoutingRule(plan);
+    } catch (err) {
+      audit({
+        tenantId: admin.tenantId,
+        action: "billing.enforcement_denied",
+        actorUserId: admin.id,
+        actorLabel: admin.email,
+        entityType: "billing",
+        metadata: { capability: "routing_rules", plan: plan.id, mode: body.mode, serviceId },
+        ipAddress: ipFromHeaders(req.headers),
+      });
+      throw err;
+    }
 
     // If serviceId set, validate it belongs to this tenant. Cross-tenant
     // service ids return 404.
