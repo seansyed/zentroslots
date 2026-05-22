@@ -273,6 +273,16 @@ type CapacityRow = {
   windowStart: string | null;
   windowEnd: string | null;
 };
+type HourlyBin = {
+  hour: number;
+  bookings: number;
+  isPeak: boolean;
+};
+type CapacityInsight = {
+  kind: "overloaded_staff" | "high_utilization" | "peak_window" | "balanced" | "no_schedule";
+  severity: "ok" | "elevated" | "critical";
+  text: string;
+};
 type CapacitySummary = {
   rows: CapacityRow[];
   totalRemainingHours: number;
@@ -280,6 +290,8 @@ type CapacitySummary = {
   closedCount: number;
   earliestWindowStart: string | null;
   latestWindowEnd: string | null;
+  hourlyDensity?: HourlyBin[];
+  insights?: CapacityInsight[];
 };
 
 // ─── Root component ───────────────────────────────────────────────────
@@ -379,6 +391,7 @@ export default function RoutingClient({ bootstrap }: { bootstrap: RoutingPageBoo
         staff={staff}
         onSaved={refresh}
         bootstrap={bootstrap}
+        fairness={fairness}
       />
 
       <StaffStatsTable stats={stats} loading={loading} />
@@ -1373,6 +1386,15 @@ function DriftBar({ actual, target }: { actual: number; target: number }) {
 
 // ─── Decisions feed ───────────────────────────────────────────────────
 
+type DecisionFilter =
+  | "all"
+  | "round_robin"
+  | "weighted"
+  | "priority"
+  | "least_busy"
+  | "fallback"
+  | "failed";
+
 function DecisionsSection({
   decisions,
   loading,
@@ -1380,6 +1402,58 @@ function DecisionsSection({
   decisions: DecisionsResp | null;
   loading: boolean;
 }) {
+  const [filter, setFilter] = React.useState<DecisionFilter>("all");
+
+  // Phase 15I — client-side filter. Categories derived from real
+  // metadata on each decision row; no fake buckets.
+  const filtered = React.useMemo(() => {
+    if (!decisions) return [] as DecisionRow[];
+    const all = decisions.decisions;
+    switch (filter) {
+      case "all":
+        return all;
+      case "round_robin":
+        return all.filter((d) => d.routingMode === "round_robin");
+      case "weighted":
+        return all.filter((d) => d.routingMode === "weighted");
+      case "priority":
+        return all.filter((d) => d.routingMode === "priority");
+      case "least_busy":
+        return all.filter((d) => d.routingMode === "least_busy");
+      case "fallback":
+        // Legacy round-robin fallback fires when no rule applies or
+        // the rule is disabled. Booking POST stamps that exact label.
+        return all.filter((d) => d.routingMode === "legacy_round_robin");
+      case "failed":
+        // The decisions feed only contains successful bookings (the
+        // engine returned ok). Failed routing manifests as deleted
+        // bookings (cancelled later) or reason codes that hint at
+        // partial failure — surface those here.
+        return all.filter(
+          (d) =>
+            d.bookingStatus !== "confirmed" ||
+            (d.routingReason ?? "").startsWith("no_"),
+        );
+    }
+  }, [decisions, filter]);
+
+  const filterCounts: Record<DecisionFilter, number> = React.useMemo(() => {
+    const all = decisions?.decisions ?? [];
+    return {
+      all: all.length,
+      round_robin: all.filter((d) => d.routingMode === "round_robin").length,
+      weighted: all.filter((d) => d.routingMode === "weighted").length,
+      priority: all.filter((d) => d.routingMode === "priority").length,
+      least_busy: all.filter((d) => d.routingMode === "least_busy").length,
+      fallback: all.filter((d) => d.routingMode === "legacy_round_robin").length,
+      failed: all.filter(
+        (d) =>
+          d.bookingStatus !== "confirmed" ||
+          (d.routingReason ?? "").startsWith("no_"),
+      ).length,
+    };
+  }, [decisions]);
+
   return (
     <section className="space-y-3">
       <SectionHeader
@@ -1387,6 +1461,18 @@ function DecisionsSection({
         title="Recent routing decisions"
         subtitle="The last engine-driven assignments. Customer-picked bookings are excluded — this feed only shows what the routing engine itself decided."
       />
+
+      {/* Phase 15I — filter chips */}
+      <div className="flex flex-wrap items-center gap-1.5 px-1">
+        <FilterChip label="All" count={filterCounts.all} active={filter === "all"} onClick={() => setFilter("all")} />
+        <FilterChip label="Round robin" count={filterCounts.round_robin} active={filter === "round_robin"} onClick={() => setFilter("round_robin")} hideIfZero />
+        <FilterChip label="Weighted" count={filterCounts.weighted} active={filter === "weighted"} onClick={() => setFilter("weighted")} hideIfZero />
+        <FilterChip label="Priority" count={filterCounts.priority} active={filter === "priority"} onClick={() => setFilter("priority")} hideIfZero />
+        <FilterChip label="Least busy" count={filterCounts.least_busy} active={filter === "least_busy"} onClick={() => setFilter("least_busy")} hideIfZero />
+        <FilterChip label="Fallback" count={filterCounts.fallback} active={filter === "fallback"} onClick={() => setFilter("fallback")} hideIfZero tone="amber" />
+        <FilterChip label="Failed" count={filterCounts.failed} active={filter === "failed"} onClick={() => setFilter("failed")} hideIfZero tone="rose" />
+      </div>
+
       <Card className="overflow-hidden p-0">
         {loading ? (
           <div className="p-5"><Skeleton className="h-32 w-full rounded-md" /></div>
@@ -1394,15 +1480,66 @@ function DecisionsSection({
           <div className="p-6 text-center text-sm text-ink-muted">
             No engine decisions yet. Once a booking is auto-assigned, it will appear here.
           </div>
+        ) : filtered.length === 0 ? (
+          <div className="p-6 text-center text-sm text-ink-muted">
+            No decisions match this filter.
+          </div>
         ) : (
           <ul className="divide-y divide-border/60">
-            {decisions.decisions.map((d) => (
+            {filtered.map((d) => (
               <DecisionRowCard key={d.id} decision={d} />
             ))}
           </ul>
         )}
       </Card>
     </section>
+  );
+}
+
+function FilterChip({
+  label,
+  count,
+  active,
+  onClick,
+  hideIfZero,
+  tone = "default",
+}: {
+  label: string;
+  count: number;
+  active: boolean;
+  onClick: () => void;
+  hideIfZero?: boolean;
+  tone?: "default" | "amber" | "rose";
+}) {
+  if (hideIfZero && count === 0) return null;
+  const baseTone =
+    tone === "amber"
+      ? "border-amber-200 bg-amber-50 text-amber-800"
+      : tone === "rose"
+        ? "border-rose-200 bg-rose-50 text-rose-700"
+        : "border-border bg-surface text-ink-muted";
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={
+        "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors " +
+        (active
+          ? "border-brand-accent bg-brand-accent text-white"
+          : baseTone + " hover:bg-surface-muted")
+      }
+    >
+      <span>{label}</span>
+      <span
+        className={
+          "rounded-full px-1.5 text-[10px] tabular-nums " +
+          (active ? "bg-white/20" : "bg-slate-100 text-slate-600")
+        }
+      >
+        {count}
+      </span>
+    </button>
   );
 }
 
@@ -1711,6 +1848,7 @@ function RuleEditor({
   staff,
   onSaved,
   bootstrap,
+  fairness,
 }: {
   scope: "tenant" | "service";
   serviceId: string | null;
@@ -1719,6 +1857,7 @@ function RuleEditor({
   staff: Staff[];
   onSaved: () => void;
   bootstrap: RoutingPageBootstrap;
+  fairness: FairnessSummary | null;
 }) {
   const [mode, setMode] = React.useState<Mode>(rule?.mode ?? "manual");
   const [enabled, setEnabled] = React.useState<boolean>(rule?.enabled ?? true);
@@ -1927,6 +2066,7 @@ function RuleEditor({
             weightSum={weightSum}
             normalized={normalizedWeights}
             onNormalize={normalizeWeightsTo100}
+            fairness={fairness}
           />
         )}
 
@@ -2021,6 +2161,7 @@ function WeightedEditor({
   weightSum,
   normalized,
   onNormalize,
+  fairness,
 }: {
   eligibleStaff: Staff[];
   weights: Record<string, number>;
@@ -2028,22 +2169,55 @@ function WeightedEditor({
   weightSum: number;
   normalized: Array<{ staffId: string; pct: number; name: string }>;
   onNormalize: () => void;
+  fairness: FairnessSummary | null;
 }) {
+  // Index fairness rows by staffId so we can render the per-staff
+  // actual share + drift inline next to each slider when there's
+  // engine-driven history. When no history, those columns simply
+  // don't render — no fake numbers.
+  const fairnessByStaff = React.useMemo(() => {
+    const m = new Map<string, FairnessRow>();
+    if (fairness?.hasHistory) {
+      for (const r of fairness.rows) m.set(r.staffId, r);
+    }
+    return m;
+  }, [fairness]);
+
   return (
     <div className="mt-5 space-y-4">
       <div>
         <div className="text-[10px] font-semibold uppercase tracking-wide text-ink-subtle">Weighted distribution</div>
         <p className="mt-1 text-[11px] text-ink-muted">
-          Long-term share per staff. Sum doesn&apos;t have to equal 100 — the engine
-          normalizes. Deficit-correction keeps actual shares close to target over time.
+          Long-term share per staff. Engine uses deficit-correction to keep
+          actual shares close to target across bookings. Actual % + drift
+          shown when engine history exists.
         </p>
       </div>
       <ul className="space-y-2">
         {eligibleStaff.map((s) => {
           const value = weights[s.id] ?? 0;
+          const fair = fairnessByStaff.get(s.id);
           return (
-            <li key={s.id} className="flex items-center gap-3 rounded-lg border border-border bg-surface px-3 py-2 text-sm">
-              <span className="flex-1 truncate">{s.name}</span>
+            <li
+              key={s.id}
+              className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-surface px-3 py-2.5 text-sm"
+            >
+              <StaffAvatar name={s.name} />
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-ink">{s.name}</div>
+                {fair && fair.actualSharePct !== null && fair.driftPct !== null && (
+                  <div className="mt-0.5 flex items-center gap-2 text-[10px] text-ink-subtle">
+                    <span>
+                      Actual:{" "}
+                      <span className="font-medium tabular-nums text-ink-muted">
+                        {fair.actualSharePct.toFixed(1)}%
+                      </span>
+                    </span>
+                    <span>·</span>
+                    <DriftPill drift={fair.driftPct} />
+                  </div>
+                )}
+              </div>
               <input
                 type="range"
                 min={0}
@@ -2051,7 +2225,8 @@ function WeightedEditor({
                 step={5}
                 value={value}
                 onChange={(e) => setWeight(s.id, Number(e.target.value))}
-                className="h-1.5 w-40 cursor-pointer accent-brand-accent"
+                className="h-1.5 w-32 cursor-pointer accent-brand-accent sm:w-40"
+                aria-label={`Weight for ${s.name}`}
               />
               <input
                 type="number"
@@ -2060,6 +2235,7 @@ function WeightedEditor({
                 value={value}
                 onChange={(e) => setWeight(s.id, Number(e.target.value))}
                 className="w-16 rounded-md border border-border px-2 py-1 text-right text-sm tabular-nums"
+                aria-label={`Numeric weight for ${s.name}`}
               />
               <span className="text-xs text-ink-muted">%</span>
             </li>
@@ -2234,6 +2410,35 @@ function CapacityForecastSection({
               tone="muted"
             />
           </div>
+
+          {/* Phase 15I — deterministic operational insights from real metrics */}
+          {capacity.insights && capacity.insights.length > 0 && (
+            <Card className="p-4">
+              <div className="text-[10px] font-semibold uppercase tracking-wide text-ink-subtle">
+                Operational insights
+              </div>
+              <ul className="mt-2 space-y-1.5 text-sm">
+                {capacity.insights.map((ins, i) => (
+                  <InsightLine key={i} insight={ins} />
+                ))}
+              </ul>
+            </Card>
+          )}
+
+          {/* Phase 15I — hourly booking density (UTC). Real bookings binned by hour. */}
+          {capacity.hourlyDensity && capacity.hourlyDensity.some((b) => b.bookings > 0) && (
+            <Card className="p-4">
+              <div className="flex items-center justify-between">
+                <div className="text-[10px] font-semibold uppercase tracking-wide text-ink-subtle">
+                  Booking density · today (UTC)
+                </div>
+                <div className="text-[10px] text-ink-subtle">
+                  Peak hours highlighted
+                </div>
+              </div>
+              <HourlyDensityChart bins={capacity.hourlyDensity} />
+            </Card>
+          )}
           <Card className="overflow-hidden p-0">
             <table className="w-full text-sm">
               <thead className="bg-surface-muted text-left text-[10px] font-semibold uppercase tracking-wide text-ink-subtle">
@@ -2432,6 +2637,63 @@ function FallbackPolicySection({
   );
 }
 
+// ─── Capacity insight + hourly density ───────────────────────────────
+
+function InsightLine({ insight }: { insight: CapacityInsight }) {
+  const styles =
+    insight.severity === "critical"
+      ? { dot: "bg-rose-500", text: "text-rose-800" }
+      : insight.severity === "elevated"
+        ? { dot: "bg-amber-500", text: "text-amber-900" }
+        : { dot: "bg-emerald-500", text: "text-ink" };
+  return (
+    <li className="flex items-start gap-2">
+      <span className={"mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full " + styles.dot} />
+      <span className={"text-xs leading-relaxed " + styles.text}>{insight.text}</span>
+    </li>
+  );
+}
+
+function HourlyDensityChart({ bins }: { bins: HourlyBin[] }) {
+  const max = bins.reduce((m, b) => Math.max(m, b.bookings), 0);
+  // Tight 24-hour strip — each bar height = bookings / max.
+  return (
+    <div className="mt-3">
+      <div className="flex h-16 items-end gap-0.5">
+        {bins.map((b) => {
+          const heightPct = max > 0 ? (b.bookings / max) * 100 : 0;
+          return (
+            <div
+              key={b.hour}
+              className="flex flex-1 flex-col items-center justify-end"
+              title={`${b.bookings} booking${b.bookings === 1 ? "" : "s"} at ${b.hour}:00 UTC`}
+            >
+              {b.bookings > 0 ? (
+                <div
+                  className={
+                    "w-full rounded-t transition-all " +
+                    (b.isPeak ? "bg-brand-accent" : "bg-brand-accent/40")
+                  }
+                  style={{ height: `${Math.max(8, heightPct)}%` }}
+                />
+              ) : (
+                <div className="h-1 w-full rounded-full bg-surface-muted" />
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <div className="mt-1 flex justify-between text-[9px] text-ink-subtle">
+        <span>00</span>
+        <span>06</span>
+        <span>12</span>
+        <span>18</span>
+        <span>23 UTC</span>
+      </div>
+    </div>
+  );
+}
+
 // ─── Plan-locked inline notice ───────────────────────────────────────
 
 function PlanLockedNotice({
@@ -2477,6 +2739,58 @@ function PlanLockedNotice({
         </Link>
       </div>
     </div>
+  );
+}
+
+// ─── Avatar + drift pill (Phase 15I) ──────────────────────────────────
+
+function StaffAvatar({ name }: { name: string }) {
+  const initials = name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w[0]?.toUpperCase() ?? "")
+    .join("") || "?";
+  // Deterministic color from name hash — same staff always gets the
+  // same swatch. No randomness, no localStorage.
+  const palette = [
+    "bg-violet-100 text-violet-700",
+    "bg-emerald-100 text-emerald-700",
+    "bg-amber-100 text-amber-700",
+    "bg-sky-100 text-sky-700",
+    "bg-rose-100 text-rose-700",
+  ];
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) | 0;
+  const swatch = palette[Math.abs(h) % palette.length];
+  return (
+    <span
+      className={
+        "grid h-7 w-7 shrink-0 place-items-center rounded-full text-[10px] font-semibold " +
+        swatch
+      }
+      aria-hidden="true"
+    >
+      {initials}
+    </span>
+  );
+}
+
+function DriftPill({ drift }: { drift: number }) {
+  const tone =
+    Math.abs(drift) <= 5
+      ? "bg-emerald-50 text-emerald-700"
+      : Math.abs(drift) <= 15
+        ? "bg-amber-50 text-amber-800"
+        : "bg-rose-50 text-rose-700";
+  return (
+    <span
+      className={"inline-flex items-center gap-0.5 rounded-full px-1.5 py-0 text-[10px] font-medium " + tone}
+      title="Actual share minus target share"
+    >
+      {drift > 0 ? "+" : ""}
+      {drift.toFixed(1)}% drift
+    </span>
   );
 }
 

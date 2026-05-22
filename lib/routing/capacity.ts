@@ -54,6 +54,30 @@ export type CapacityRow = {
   windowEnd: string | null;
 };
 
+/**
+ * Phase 15I — hourly density for today. Each bin is one local-hour
+ * (UTC) showing how many CONFIRMED bookings overlap that hour. Peak
+ * windows are the bins whose count equals the daily max. Sourced
+ * from real booking rows — no model.
+ */
+export type HourlyBin = {
+  /** Hour-of-day (0..23) in UTC. */
+  hour: number;
+  /** Count of confirmed bookings overlapping this hour bin. */
+  bookings: number;
+  /** True when this bin equals the daily max (peak window). */
+  isPeak: boolean;
+};
+
+export type CapacityInsight = {
+  /** One of a small fixed taxonomy — UI maps to icon + color. */
+  kind: "overloaded_staff" | "high_utilization" | "peak_window" | "balanced" | "no_schedule";
+  severity: "ok" | "elevated" | "critical";
+  /** Deterministic operational sentence. Built from real metrics
+   *  only — no LLM, no synthesized language. */
+  text: string;
+};
+
 export type CapacitySummary = {
   /** Per-staff rows, sorted by remainingHours descending so the most
    *  available staff surface first. */
@@ -69,6 +93,11 @@ export type CapacitySummary = {
   earliestWindowStart: string | null;
   /** ISO of "today's window closes". */
   latestWindowEnd: string | null;
+  /** Phase 15I — hourly booking density across today (UTC). */
+  hourlyDensity: HourlyBin[];
+  /** Phase 15I — deterministic operational insights. Order matters:
+   *  the UI renders the first 3-4 most relevant. */
+  insights: CapacityInsight[];
 };
 
 export async function computeCapacity(tenantId: string): Promise<CapacitySummary> {
@@ -92,6 +121,8 @@ export async function computeCapacity(tenantId: string): Promise<CapacitySummary
       closedCount: 0,
       earliestWindowStart: null,
       latestWindowEnd: null,
+      hourlyDensity: [],
+      insights: [],
     };
   }
 
@@ -197,6 +228,22 @@ export async function computeCapacity(tenantId: string): Promise<CapacitySummary
     .map((r) => r.windowEnd!)
     .sort();
 
+  // ── 7. Hourly density (UTC). Bin every confirmed booking that
+  // touches today's UTC calendar day into hour buckets. Peak = bins
+  // tied with the daily max count.
+  const hourlyDensity = computeHourlyDensity(bookingRows, dayStart, dayEnd);
+
+  // ── 8. Deterministic operational insights. Built from the metrics
+  // computed above — no LLM, no synthesized language.
+  const insights = computeInsights({
+    rows,
+    overloadedCount,
+    closedCount,
+    totalRemainingHours,
+    hourlyDensity,
+    staffCount: staff.length,
+  });
+
   return {
     rows,
     totalRemainingHours,
@@ -204,7 +251,124 @@ export async function computeCapacity(tenantId: string): Promise<CapacitySummary
     closedCount,
     earliestWindowStart: windowStarts[0] ?? null,
     latestWindowEnd: windowEnds[windowEnds.length - 1] ?? null,
+    hourlyDensity,
+    insights,
   };
+}
+
+function computeHourlyDensity(
+  bookings: Array<{ startAt: Date; endAt: Date }>,
+  dayStart: Date,
+  dayEnd: Date,
+): HourlyBin[] {
+  // 24 bins anchored at dayStart (UTC midnight today). Count how many
+  // bookings overlap each one-hour window.
+  const bins: HourlyBin[] = Array.from({ length: 24 }, (_, h) => ({
+    hour: h,
+    bookings: 0,
+    isPeak: false,
+  }));
+  for (const b of bookings) {
+    if (b.endAt <= dayStart || b.startAt >= dayEnd) continue;
+    for (let h = 0; h < 24; h++) {
+      const binStart = new Date(dayStart.getTime() + h * 3_600_000);
+      const binEnd = new Date(binStart.getTime() + 3_600_000);
+      if (b.startAt < binEnd && b.endAt > binStart) {
+        bins[h].bookings += 1;
+      }
+    }
+  }
+  const max = bins.reduce((m, b) => Math.max(m, b.bookings), 0);
+  if (max > 0) {
+    for (const b of bins) {
+      if (b.bookings === max) b.isPeak = true;
+    }
+  }
+  return bins;
+}
+
+function computeInsights(args: {
+  rows: CapacityRow[];
+  overloadedCount: number;
+  closedCount: number;
+  totalRemainingHours: number;
+  hourlyDensity: HourlyBin[];
+  staffCount: number;
+}): CapacityInsight[] {
+  const out: CapacityInsight[] = [];
+  const { rows, overloadedCount, closedCount, totalRemainingHours, hourlyDensity, staffCount } = args;
+
+  // 1. Per-staff overload — name the actual staff.
+  const overloaded = rows.filter((r) => r.overloaded);
+  for (const r of overloaded.slice(0, 3)) {
+    const pct = r.utilization === null ? 0 : Math.round(r.utilization * 100);
+    out.push({
+      kind: "overloaded_staff",
+      severity: "critical",
+      text: `${r.staffName} is at ${pct}% routing utilization today`,
+    });
+  }
+
+  // 2. High-utilization but not yet overloaded (70-89%).
+  const highUtil = rows.filter(
+    (r) => !r.overloaded && r.utilization !== null && r.utilization >= 0.7,
+  );
+  for (const r of highUtil.slice(0, 2)) {
+    const pct = Math.round((r.utilization ?? 0) * 100);
+    out.push({
+      kind: "high_utilization",
+      severity: "elevated",
+      text: `${r.staffName} approaching capacity (${pct}% utilization)`,
+    });
+  }
+
+  // 3. Peak windows — engine-observable booking density.
+  const peakBins = hourlyDensity.filter((b) => b.isPeak && b.bookings > 1);
+  if (peakBins.length > 0 && peakBins.length <= 4) {
+    const labels = peakBins
+      .map((b) => formatHourLabel(b.hour))
+      .join(", ");
+    out.push({
+      kind: "peak_window",
+      severity: peakBins[0].bookings >= 3 ? "elevated" : "ok",
+      text: `Peak booking window${peakBins.length === 1 ? "" : "s"} today: ${labels} (${peakBins[0].bookings} concurrent bookings)`,
+    });
+  }
+
+  // 4. Closed-today staff.
+  if (closedCount > 0 && closedCount < staffCount) {
+    out.push({
+      kind: "no_schedule",
+      severity: "ok",
+      text: `${closedCount} staff ${closedCount === 1 ? "has" : "have"} no schedule for today`,
+    });
+  } else if (closedCount === staffCount) {
+    out.push({
+      kind: "no_schedule",
+      severity: "elevated",
+      text: "All staff are closed today — no routing capacity available",
+    });
+  }
+
+  // 5. Balanced state — only when nothing else applies and there is
+  // actual capacity to report on.
+  if (out.length === 0 && totalRemainingHours > 0) {
+    out.push({
+      kind: "balanced",
+      severity: "ok",
+      text: `${totalRemainingHours.toFixed(1)}h of routing capacity remaining across ${staffCount - closedCount} staff today`,
+    });
+  }
+
+  return out;
+}
+
+function formatHourLabel(hour: number): string {
+  // UTC hour → friendly label. We deliberately keep this UTC since the
+  // density is UTC-binned; admin's tz preference is a future polish.
+  const period = hour < 12 ? "AM" : "PM";
+  const h12 = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour;
+  return `${h12}:00 ${period} UTC`;
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────────
