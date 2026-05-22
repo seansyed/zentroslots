@@ -28,9 +28,12 @@ import {
 
 import { Badge, Button, Card, Skeleton, toast } from "@/components/ui/primitives";
 import { useCapability } from "@/components/billing/CapabilityProvider";
-import { LockedFeatureCard } from "@/components/billing/LockedFeatureCard";
+import {
+  PremiumLockedExperience,
+  RecurringSchedulingPreview,
+} from "@/components/billing/PremiumLockedExperience";
 import Link from "next/link";
-import { Lock } from "lucide-react";
+import { Lock, TrendingUp, Heart, Zap } from "lucide-react";
 
 // ─── Types (unchanged contract with /api/tenant/booking-series) ───────
 
@@ -1767,21 +1770,75 @@ function GrandfatherBanner({
 }
 
 function LockedRecurringPage({ cap }: { cap: { reason: string } }) {
-  // Use the centralized LockedFeatureCard primitive (Phase 3) so the
-  // visual treatment is consistent with every other locked feature.
-  // The primitive accepts a capability + title + description; passing
-  // the same `cap` value reads the reason from the provider.
-  void cap; // referenced via the hook inside LockedFeatureCard
+  // Premium locked experience — fills the canvas with feature
+  // visualization + outcomes + use cases + Free-vs-Pro comparison.
+  // No business/capability logic here; that's all in the parent
+  // (cap.allowed check before this component mounts).
+  void cap; // reason is read from the provider inside the primitive
   return (
-    <LockedFeatureCard
+    <PremiumLockedExperience
       cap="recurring_series"
-      title="Recurring scheduling"
-      description="Automate weekly, monthly, and subscription-based appointments. Each occurrence becomes a real booking on the calendar — validated against every workspace rule, eligible for the same routing and reminders as direct bookings."
-    >
-      {/* This `children` slot is never rendered when the capability
-          is locked (the primitive short-circuits). When the tenant
-          upgrades, the operational dashboard re-mounts. */}
-      <></>
-    </LockedFeatureCard>
+      eyebrow="Subscription scheduling"
+      title="Recurring scheduling, fully automated"
+      tagline="Set the cadence once. The engine handles every occurrence — bookings, reminders, calendar sync, routing — without lifting a finger."
+      description="Each occurrence becomes a real booking that flows through the same validation, routing, and notifications as a direct booking. Cancel a single occurrence, pause the series, or let it run forever — your call."
+      primaryCta={{ label: "Unlock recurring scheduling", href: "/dashboard/billing" }}
+      secondaryCta={{ label: "Compare plans", href: "/pricing" }}
+      visualization={<RecurringSchedulingPreview />}
+      outcomes={[
+        {
+          icon: Zap,
+          title: "Reduce manual scheduling overhead",
+          body: "Stop rebooking the same customer every week. Set it once and the engine materializes occurrences ahead of time.",
+        },
+        {
+          icon: TrendingUp,
+          title: "Predictable revenue, automated",
+          body: "Subscription-style appointments lift retention and create a steady operational rhythm your team can plan around.",
+        },
+        {
+          icon: Heart,
+          title: "Better customer experience",
+          body: "Customers know exactly when their next appointment is — no back-and-forth, no missed bookings, no awkward reminders.",
+        },
+      ]}
+      useCases={[
+        "Therapy sessions",
+        "Coaching retainers",
+        "Monthly tax planning",
+        "Weekly payroll meetings",
+        "Personal training",
+        "Recurring grooming",
+      ]}
+      comparison={{
+        free: ["One-time bookings", "Public booking page", "Basic reminders", "Booking lifecycle hooks"],
+        pro: [
+          "Recurring scheduling (weekly / monthly / custom RRULE)",
+          "Automation workflows + review campaigns",
+          "Waitlists with auto-fill",
+          "Advanced staff routing modes",
+          "Custom branded domain",
+          "Analytics + CSV export",
+        ],
+      }}
+      faqItems={[
+        {
+          q: "Does each occurrence respect my booking rules?",
+          a: "Yes. Every materialized occurrence runs through validateBookingRules — same notice, advance, cap, and blackout checks as a direct booking.",
+        },
+        {
+          q: "What happens if I cancel my Pro subscription?",
+          a: "Existing recurring series are grandfathered — the cron keeps materializing them. You just can't create or edit new series until you re-upgrade.",
+        },
+        {
+          q: "Can customers reschedule individual occurrences?",
+          a: "Yes. Each occurrence becomes a real booking row with its own reschedule + cancel flow, independent of the series.",
+        },
+        {
+          q: "How are conflicts handled?",
+          a: "If a slot is taken or a rule rejects the occurrence, that specific occurrence is marked failed with a reason. The series continues — no auto-shift surprises.",
+        },
+      ]}
+    />
   );
 }

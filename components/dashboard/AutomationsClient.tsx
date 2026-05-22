@@ -2,11 +2,14 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { Lock, Sparkles } from "lucide-react";
+import { Lock, Sparkles, Heart, TrendingUp, Zap } from "lucide-react";
 
 import { Badge, Button, Card, Skeleton, toast } from "@/components/ui/primitives";
 import { useCapability } from "@/components/billing/CapabilityProvider";
-import { LockedFeatureCard } from "@/components/billing/LockedFeatureCard";
+import {
+  PremiumLockedExperience,
+  AutomationWorkflowPreview,
+} from "@/components/billing/PremiumLockedExperience";
 
 type ReviewRule = {
   id: string;
@@ -96,19 +99,76 @@ export default function AutomationsClient() {
     );
   }
 
-  // Branch 2 — Free tenant with no grandfathered rules. Render the
-  // LockedFeatureCard instead of the operational dashboard. Operational
-  // sections never mount.
+  // Branch 2 — Free tenant with no grandfathered rules. Premium locked
+  // experience fills the canvas with feature visualization + outcomes +
+  // use cases + Free-vs-Pro comparison. Operational sections never mount.
   if (!cap.allowed && grandfatheredCount === 0) {
     return (
       <div className="mt-6 space-y-6 pb-12">
-        <LockedFeatureCard
+        <PremiumLockedExperience
           cap="automation_rules"
-          title="Customer follow-up automation"
-          description="Automatically engage customers after appointments, cancellations, no-shows, and completed services. Set review requests, rebooking nudges, and post-visit follow-ups that fire on real booking lifecycle events."
-        >
-          <></>
-        </LockedFeatureCard>
+          eyebrow="Customer engagement"
+          title="Follow-up automation, on every booking"
+          tagline="Set the triggers once. The workflow engine sends review requests, rebooking nudges, and follow-ups at exactly the right moment — without lifting a finger."
+          description="Automations fire on real booking lifecycle events: completed, cancelled, no-show, first-visit. Each one runs through your suppression rules, fires through your templates, and writes to the same audit log as any other communication."
+          primaryCta={{ label: "Unlock automation workflows", href: "/dashboard/billing" }}
+          secondaryCta={{ label: "Compare plans", href: "/pricing" }}
+          visualization={<AutomationWorkflowPreview />}
+          outcomes={[
+            {
+              icon: Zap,
+              title: "Recover no-shows automatically",
+              body: "A rebooking nudge fires 24 hours after a no-show — customers who'd otherwise churn rebook themselves.",
+            },
+            {
+              icon: TrendingUp,
+              title: "Lift review volume + ranking",
+              body: "Targeted review requests sent at peak conversion windows (2h after completion) consistently outperform manual asks.",
+            },
+            {
+              icon: Heart,
+              title: "Improve retention without spam",
+              body: "Per-rule suppression on cancelled / no-show ensures customers only get messages that match their actual journey.",
+            },
+          ]}
+          useCases={[
+            "Review requests",
+            "Rebooking nudges",
+            "Cancellation recovery",
+            "First-visit welcome",
+            "Loyalty re-engagement",
+            "Post-service follow-ups",
+          ]}
+          comparison={{
+            free: ["Booking confirmations", "Basic reminders", "Manual customer outreach", "Cancellation emails"],
+            pro: [
+              "Review request automation (Google / Yelp / custom)",
+              "Per-trigger follow-up rules",
+              "Conditional suppression (first-time, payment, status)",
+              "Per-service rule overrides",
+              "Recurring scheduling + waitlists",
+              "Analytics + CSV export",
+            ],
+          }}
+          faqItems={[
+            {
+              q: "Does each automation respect my customer preferences?",
+              a: "Yes. Suppress on cancelled + suppress on no-show flags filter out customers whose journey doesn't warrant the message. No customer gets a review request after a cancellation.",
+            },
+            {
+              q: "When exactly do automations fire?",
+              a: "The cron runs every 10–15 minutes. Pending rows include the trigger time + delay; the worker re-evaluates conditions at execution time to avoid stale sends.",
+            },
+            {
+              q: "What happens to existing rules if I downgrade?",
+              a: "Existing rules are grandfathered — the cron keeps firing them. You just can't create new rules or edit existing ones until you re-upgrade.",
+            },
+            {
+              q: "Can I test a rule before turning it on?",
+              a: "Yes. Each rule has an enabled toggle. Configure the trigger + template, leave enabled off, send a test booking through, then flip enabled on once you're happy.",
+            },
+          ]}
+        />
       </div>
     );
   }
