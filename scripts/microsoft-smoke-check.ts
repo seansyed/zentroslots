@@ -24,6 +24,12 @@
  *   npx tsx scripts/microsoft-smoke-check.ts
  *   APP_BASE_URL=http://127.0.0.1:3001 npx tsx scripts/microsoft-smoke-check.ts
  */
+// Load .env BEFORE importing @/db/client so DATABASE_URL is populated
+// when the connection module evaluates. Without this the script
+// crashes immediately on the live server because tsx (unlike `next`
+// or `pm2 start`) doesn't auto-load .env.
+import "dotenv/config";
+
 import { sql } from "drizzle-orm";
 
 import { db } from "@/db/client";
