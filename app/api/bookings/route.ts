@@ -14,6 +14,7 @@ import { onBookingCreated } from "@/lib/calendar/sync";
 import { triggerAutomation } from "@/lib/communications/engine";
 import { validateBookingRules } from "@/lib/booking-rules/validateBookingRules";
 import { assignStaff } from "@/lib/routing/assignStaff";
+import { simulateAssignment } from "@/lib/routing/simulate";
 import { recordAssignment } from "@/lib/routing/recordAssignment";
 import { assertCanCreateBooking } from "@/lib/quotas";
 import { audit, ipFromHeaders } from "@/lib/audit";
@@ -480,6 +481,53 @@ export async function POST(req: NextRequest) {
       },
       ipAddress: ip === "anon" ? null : ip,
     });
+
+    // Phase 15H — fire-and-forget candidate-pool capture for engine-
+    // driven assignments. Runs simulate against the same window to
+    // record the full eligibility breakdown (eligible/skipped + per-
+    // candidate reason). The simulate call is read-only and the
+    // catch swallows any failure — the booking is already inserted
+    // and audited, so this is pure observability for the Routing
+    // Intelligence Center's decisions feed. Doubles routing work
+    // per auto-booking; acceptable given typical volumes (<100/day
+    // for most tenants).
+    if (body.staffUserId === "auto" && routingMode && routingMode !== "legacy_round_robin") {
+      void (async () => {
+        try {
+          const sim = await simulateAssignment({
+            tenantId,
+            serviceId: service.id,
+            startAt: row.startAt,
+            endAt: row.endAt,
+          });
+          audit({
+            tenantId,
+            action: "routing.decision_detail",
+            entityType: "booking",
+            entityId: row.id,
+            actorLabel: `${row.clientName} <${row.clientEmail}>`,
+            metadata: {
+              bookingId: row.id,
+              serviceId: service.id,
+              startAt: row.startAt.toISOString(),
+              routingMode: routingMode,
+              pickedStaffId: staff.id,
+              // Compact projection — only the fields the decisions
+              // feed renders. Keeps audit_logs.metadata lean.
+              candidates: sim.candidates.map((c) => ({
+                staffId: c.staffId,
+                staffName: c.staffName,
+                status: c.status,
+                reasonCode: c.reasonCode,
+              })),
+            },
+            ipAddress: ip === "anon" ? null : ip,
+          });
+        } catch (rErr) {
+          console.error("Routing decision_detail capture failed (booking kept):", rErr);
+        }
+      })();
+    }
 
     return NextResponse.json(row);
   } catch (err) {

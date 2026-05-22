@@ -63,6 +63,9 @@ const MODE_META: Record<
     behavior: string;
     example: string;
     fallback: string;
+    /** Phase 15H — operational guidance for the "When should I use
+     *  this?" expander. Concise. No marketing fluff. */
+    bestFor: string;
     icon: React.ComponentType<{ className?: string }>;
   }
 > = {
@@ -72,6 +75,8 @@ const MODE_META: Record<
     behavior: "The engine does not auto-assign. The booking page shows a staff picker.",
     example: "Customer selects Sarah → booking lands on Sarah.",
     fallback: "n/a — the customer is the picker.",
+    bestFor:
+      "High-touch consulting or partner-specific scheduling, where the customer needs to choose their specialist.",
     icon: Users,
   },
   least_busy: {
@@ -82,6 +87,8 @@ const MODE_META: Record<
     example:
       "Among Sarah (3 today), Mike (1 today), Anna (1 today, last assigned 9am) → assigns Mike (newer last-assign).",
     fallback: "If no eligible staff, the booking fails with no_available_staff.",
+    bestFor:
+      "Fastest-response scheduling environments where the goal is to balance load so nobody is overwhelmed today.",
     icon: Scale,
   },
   round_robin: {
@@ -91,6 +98,8 @@ const MODE_META: Record<
       "Stable order: oldest lastAssignedAt first; ties by id ascending. Persistent across reschedules.",
     example: "Sarah was last assigned 11am, Mike 9am, Anna 8am → assigns Anna.",
     fallback: "Falls back to legacy round-robin if no rule is configured.",
+    bestFor:
+      "Equal lead distribution across teams over time. Fairest mode when every staff is equally qualified.",
     icon: Shuffle,
   },
   priority: {
@@ -100,6 +109,8 @@ const MODE_META: Record<
       "Eligibility (working hours + freebusy + service pool) still applies — unavailable staff are skipped, not blocked.",
     example: "Priority list [Sarah, Mike, Anna]. Sarah busy, Mike free → assigns Mike.",
     fallback: "If everyone in the priority list is busy, falls through to no_pick_in_pool.",
+    bestFor:
+      "VIP handling, escalation queues, or any case where one staff member should always get first crack.",
     icon: ListChecks,
   },
   weighted: {
@@ -109,6 +120,8 @@ const MODE_META: Record<
       "Deficit-correction algorithm: picks the staff most under-served vs. their target share. Tolerant of paused weights.",
     example: "Sarah 50%, Mike 30%, Anna 20%. Across 100 bookings → ~50/30/20 split.",
     fallback: "If all weighted staff are busy, falls through to no_available_staff.",
+    bestFor:
+      "Senior/junior balancing, controlled workload ratios, or onboarding new staff at a deliberately reduced share.",
     icon: Workflow,
   },
 };
@@ -164,6 +177,11 @@ type FairnessSummary = {
   hasHistory: boolean;
 };
 
+type SkippedCandidate = {
+  staffId: string;
+  staffName: string;
+  reasonCode: string;
+};
 type DecisionRow = {
   id: string;
   at: string;
@@ -177,6 +195,12 @@ type DecisionRow = {
   startAt: string | null;
   routingMode: string | null;
   routingReason: string | null;
+  /** Phase 15H — populated when booking POST captured the candidate
+   *  pool. Empty for historical decisions made before this feature
+   *  shipped. */
+  skippedCandidates?: SkippedCandidate[];
+  candidatePoolSize?: number;
+  captured?: boolean;
 };
 type DecisionsResp = { decisions: DecisionRow[]; todayCount: number; totalCount: number };
 
@@ -416,11 +440,17 @@ function Hero({
               icon={Users}
               value={String(h.eligibleStaffCount)}
               label="Eligible hosts"
+              tooltip={`${h.eligibleStaffCount} staff in the workspace are eligible for engine assignment via working hours + service pool. Connecting a calendar is optional — staff stay eligible using workspace availability alone.`}
             />
             <HeroStat
               icon={CalendarCheck2}
               value={`${h.calendarConnectedStaff}`}
               label="Calendars connected"
+              tooltip={
+                h.calendarConnectedStaff === 0
+                  ? "No staff have connected an external calendar. Routing still works using workspace working hours — but external busy time isn't subtracted from availability."
+                  : `${h.calendarConnectedStaff} of ${h.eligibleStaffCount} staff have a connected calendar. External busy events are honored in eligibility for those staff.`
+              }
             />
             <HeroStat
               icon={Target}
@@ -553,11 +583,13 @@ function HeroStat({
   value,
   label,
   accent = "default",
+  tooltip,
 }: {
   icon: React.ComponentType<{ className?: string }>;
   value: string;
   label: string;
   accent?: "default" | "rose" | "amber" | "emerald" | "muted";
+  tooltip?: string;
 }) {
   const valueClass =
     accent === "rose"
@@ -570,7 +602,10 @@ function HeroStat({
             ? "text-ink-subtle"
             : "text-ink";
   return (
-    <div className="min-w-[88px] rounded-xl border border-border bg-surface px-2.5 py-2 text-left">
+    <div
+      className="min-w-[88px] rounded-xl border border-border bg-surface px-2.5 py-2 text-left"
+      title={tooltip}
+    >
       <div className="flex items-center gap-1.5">
         <Icon className="h-3 w-3 text-ink-subtle" />
         <span className={"text-[15px] font-semibold tabular-nums " + valueClass}>{value}</span>
@@ -689,6 +724,7 @@ function RoutingModesOverview({ bootstrap }: { bootstrap: RoutingPageBootstrap }
                       <span className="font-medium text-ink-muted">Fallback:</span> {meta.fallback}
                     </p>
                   </div>
+                  <BestForExpander bestFor={meta.bestFor} />
                 </div>
               </div>
             </Card>
@@ -696,6 +732,28 @@ function RoutingModesOverview({ bootstrap }: { bootstrap: RoutingPageBootstrap }
         })}
       </div>
     </section>
+  );
+}
+
+function BestForExpander({ bestFor }: { bestFor: string }) {
+  const [open, setOpen] = React.useState(false);
+  return (
+    <div className="mt-3 border-t border-border/60 pt-2">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className="flex w-full items-center justify-between text-[11px] font-semibold uppercase tracking-wide text-ink-subtle hover:text-ink"
+      >
+        <span>When should I use this?</span>
+        <span className={"transition-transform " + (open ? "rotate-90" : "")}>›</span>
+      </button>
+      {open && (
+        <p className="mt-2 rounded-md bg-surface-muted/60 px-2 py-1.5 text-[11px] leading-relaxed text-ink-muted">
+          {bestFor}
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -840,16 +898,10 @@ function SimulationResultPane({ result }: { result: SimulationResp }) {
         ruleScope={result.rule.scope}
       />
 
-      {/* Counts strip — explicit per-reason categories */}
-      <div className="flex flex-wrap gap-2 text-[11px]">
-        <CountChip label="In pool" value={result.counts.inPool} />
-        <CountChip label="Eligible" value={result.counts.eligible} tone="emerald" />
-        <CountChip label="PTO override" value={result.counts.skippedByPto} tone="violet" />
-        <CountChip label="Outside working hours" value={result.counts.skippedByWorkingHours} tone="muted" />
-        <CountChip label="Internal conflict" value={result.counts.skippedByInternalConflict} tone="muted" />
-        <CountChip label="Calendar conflict" value={result.counts.skippedByExternalBusy} tone="muted" />
-        <CountChip label="Not in rule pool" value={result.counts.skippedByRulePool} tone="muted" />
-      </div>
+      {/* Phase 15H — counts strip. Always show In pool + Eligible.
+          Hide zero-count skip categories so the strip doesn't shout
+          "0 0 0 0 0" when nothing was filtered. */}
+      <CountChipsStrip counts={result.counts} />
 
       {/* Candidate list with rich reason badges */}
       <div className="overflow-hidden rounded-xl border border-border">
@@ -1085,6 +1137,41 @@ const REASON_META: Record<
   },
 };
 
+function CountChipsStrip({
+  counts,
+}: {
+  counts: SimulationResp["counts"];
+}) {
+  // Always show "In pool" + "Eligible" — they anchor the strip even
+  // when zero. Skip categories appear only when count > 0 so the
+  // strip stays informational, not noisy.
+  type Skip = { label: string; value: number; tone: "violet" | "muted" };
+  const skips: Skip[] = (
+    [
+      { label: "PTO override", value: counts.skippedByPto, tone: "violet" },
+      { label: "Outside working hours", value: counts.skippedByWorkingHours, tone: "muted" },
+      { label: "Internal conflict", value: counts.skippedByInternalConflict, tone: "muted" },
+      { label: "Calendar conflict", value: counts.skippedByExternalBusy, tone: "muted" },
+      { label: "Not in rule pool", value: counts.skippedByRulePool, tone: "muted" },
+    ] as Skip[]
+  ).filter((s) => s.value > 0);
+
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-[11px]">
+      <CountChip label="In pool" value={counts.inPool} />
+      <CountChip label="Eligible" value={counts.eligible} tone="emerald" />
+      {skips.map((s) => (
+        <CountChip key={s.label} label={s.label} value={s.value} tone={s.tone} />
+      ))}
+      {skips.length === 0 && counts.inPool > 0 && counts.inPool === counts.eligible && (
+        <span className="text-[11px] text-ink-subtle">
+          No staff filtered — every candidate in the pool was eligible.
+        </span>
+      )}
+    </div>
+  );
+}
+
 function CountChip({
   label,
   value,
@@ -1310,37 +1397,80 @@ function DecisionsSection({
         ) : (
           <ul className="divide-y divide-border/60">
             {decisions.decisions.map((d) => (
-              <li key={d.id} className="flex items-start gap-3 p-4 text-sm">
-                <div className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-brand-accent/10 text-brand-accent">
-                  <ArrowRight className="h-4 w-4" />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="text-ink">
-                    Assigned <span className="font-semibold">{d.staffName ?? "(deleted)"}</span>
-                    {" "}via{" "}
-                    <span className="font-medium">{modeLabelShort(d.routingMode ?? "—")}</span>
-                    {d.routingReason && (
-                      <span className="text-ink-muted"> — {d.routingReason}</span>
-                    )}
-                  </p>
-                  <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-ink-subtle">
-                    <span>{d.serviceName ?? "(unknown service)"}</span>
-                    {d.startAt && <span>· {new Date(d.startAt).toLocaleString()}</span>}
-                    {d.clientLabel && <span>· {d.clientLabel}</span>}
-                    {d.bookingStatus !== "confirmed" && (
-                      <span className="rounded-full bg-slate-100 px-1.5 py-0.5 font-medium text-slate-600">
-                        {d.bookingStatus}
-                      </span>
-                    )}
-                  </div>
-                </div>
-                <div className="text-right text-[11px] text-ink-subtle">{timeAgo(d.at)}</div>
-              </li>
+              <DecisionRowCard key={d.id} decision={d} />
             ))}
           </ul>
         )}
       </Card>
     </section>
+  );
+}
+
+function DecisionRowCard({ decision: d }: { decision: DecisionRow }) {
+  const skipped = d.skippedCandidates ?? [];
+  const reasonLabel = (code: string): string => {
+    switch (code) {
+      case "pto_override": return "PTO override";
+      case "outside_working_hours": return "outside hours";
+      case "no_schedule": return "no schedule";
+      case "internal_conflict": return "internal conflict";
+      case "calendar_conflict": return "calendar conflict";
+      case "not_in_rule_pool": return "not in rule pool";
+      case "not_picked": return "not picked";
+      default: return code;
+    }
+  };
+  return (
+    <li className="flex items-start gap-3 p-4 text-sm">
+      <div className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-brand-accent/10 text-brand-accent">
+        <ArrowRight className="h-4 w-4" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="text-ink">
+          Assigned <span className="font-semibold">{d.staffName ?? "(deleted)"}</span>
+          {" "}via{" "}
+          <span className="font-medium">{modeLabelShort(d.routingMode ?? "—")}</span>
+          {d.routingReason && (
+            <span className="text-ink-muted"> — {d.routingReason}</span>
+          )}
+        </p>
+        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-ink-subtle">
+          <span>{d.serviceName ?? "(unknown service)"}</span>
+          {d.startAt && <span>· {new Date(d.startAt).toLocaleString()}</span>}
+          {d.clientLabel && <span>· {d.clientLabel}</span>}
+          {d.bookingStatus !== "confirmed" && (
+            <span className="rounded-full bg-slate-100 px-1.5 py-0.5 font-medium text-slate-600">
+              {d.bookingStatus}
+            </span>
+          )}
+        </div>
+        {/* Phase 15H — skipped staff list. Populated for decisions
+            made AFTER the candidate-pool capture feature shipped;
+            absent for historical decisions. */}
+        {skipped.length > 0 && (
+          <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md bg-surface-muted/60 px-2 py-1.5 text-[11px] text-ink-muted">
+            <span className="font-semibold text-ink-subtle">Skipped:</span>
+            {skipped.map((s) => (
+              <span
+                key={s.staffId}
+                className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-surface px-1.5 py-0.5"
+                title={`Reason: ${reasonLabel(s.reasonCode)}`}
+              >
+                <XCircle className="h-2.5 w-2.5 text-slate-400" />
+                {s.staffName}
+                <span className="text-[10px] text-ink-subtle">· {reasonLabel(s.reasonCode)}</span>
+              </span>
+            ))}
+          </div>
+        )}
+        {!d.captured && (d.candidatePoolSize === undefined || d.candidatePoolSize === 0) && (
+          <div className="mt-2 text-[11px] text-ink-subtle">
+            (candidate pool not captured for this booking)
+          </div>
+        )}
+      </div>
+      <div className="text-right text-[11px] text-ink-subtle">{timeAgo(d.at)}</div>
+    </li>
   );
 }
 

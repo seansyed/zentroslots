@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import { auditLogs, bookings, services, users } from "@/db/schema";
@@ -21,10 +21,14 @@ export async function GET() {
   try {
     const admin = await requireRole(["admin", "manager"]);
 
-    // Pull recent booking.create audit rows for this tenant.
+    // Pull recent booking.create + routing.decision_detail audit rows.
+    // The first carries the assignment summary; the second carries the
+    // full candidate breakdown (Phase 15H). We join them in-memory by
+    // bookingId.
     const rows = await db
       .select({
         id: auditLogs.id,
+        action: auditLogs.action,
         createdAt: auditLogs.createdAt,
         entityId: auditLogs.entityId,
         actorLabel: auditLogs.actorLabel,
@@ -34,26 +38,49 @@ export async function GET() {
       .where(
         and(
           eq(auditLogs.tenantId, admin.tenantId),
-          eq(auditLogs.action, "booking.create"),
+          or(
+            eq(auditLogs.action, "booking.create"),
+            eq(auditLogs.action, "routing.decision_detail"),
+          ),
         ),
       )
       .orderBy(desc(auditLogs.createdAt))
-      .limit(200);
+      .limit(400);
 
     // Filter to rows that record an engine decision. The booking POST
     // writes routingMode "direct" for customer-picked staff — those
     // aren't routing decisions, so we drop them.
+    type CandidateProj = {
+      staffId: string;
+      staffName: string;
+      status: "eligible" | "skipped" | "picked";
+      reasonCode: string;
+    };
     type Meta = {
       routingMode?: string;
       routingReason?: string | null;
       staffId?: string;
       serviceId?: string;
       startAt?: string;
+      candidates?: CandidateProj[];
+      bookingId?: string;
     };
-    const engineRows = rows.filter((r) => {
+    const createRows = rows.filter((r) => {
+      if (r.action !== "booking.create") return false;
       const m = (r.metadata as Meta) ?? {};
       return m.routingMode && m.routingMode !== "direct";
     });
+    const detailRows = rows.filter((r) => r.action === "routing.decision_detail");
+
+    // Index detail rows by bookingId for in-memory join.
+    const detailByBookingId = new Map<string, Meta>();
+    for (const d of detailRows) {
+      const meta = (d.metadata as Meta) ?? {};
+      const bId = meta.bookingId ?? d.entityId;
+      if (bId) detailByBookingId.set(bId, meta);
+    }
+
+    const engineRows = createRows;
 
     // Bulk-resolve service + staff names (single query each).
     const staffIds = Array.from(
@@ -103,11 +130,15 @@ export async function GET() {
 
     const decisions = engineRows.slice(0, 30).map((r) => {
       const m = (r.metadata as Meta) ?? {};
+      const bId = r.entityId;
+      const detail = bId ? detailByBookingId.get(bId) : undefined;
+      const allCandidates = detail?.candidates ?? [];
+      const skipped = allCandidates.filter((c) => c.status === "skipped");
       return {
         id: r.id,
         at: r.createdAt.toISOString(),
-        bookingId: r.entityId,
-        bookingStatus: r.entityId ? stillLiveStatusById.get(r.entityId) ?? "deleted" : "deleted",
+        bookingId: bId,
+        bookingStatus: bId ? stillLiveStatusById.get(bId) ?? "deleted" : "deleted",
         clientLabel: r.actorLabel ?? null,
         serviceId: m.serviceId ?? null,
         serviceName: m.serviceId ? serviceById.get(m.serviceId) ?? null : null,
@@ -116,6 +147,16 @@ export async function GET() {
         startAt: m.startAt ?? null,
         routingMode: m.routingMode ?? null,
         routingReason: m.routingReason ?? null,
+        // Phase 15H — candidate pool, when captured at booking time.
+        // Missing for historical bookings made before this feature
+        // shipped; UI hides the "considered" line in that case.
+        skippedCandidates: skipped.map((c) => ({
+          staffId: c.staffId,
+          staffName: c.staffName,
+          reasonCode: c.reasonCode,
+        })),
+        candidatePoolSize: allCandidates.length,
+        captured: allCandidates.length > 0,
       };
     });
 
