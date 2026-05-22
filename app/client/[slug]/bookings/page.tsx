@@ -1,8 +1,8 @@
 import Link from "next/link";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 
 import { db } from "@/db/client";
-import { bookings, services, users } from "@/db/schema";
+import { billingTransactions, bookings, services, users } from "@/db/schema";
 import ClientPortalShell from "@/components/client/ClientPortalShell";
 import { TimeText } from "@/components/client/TimeText";
 import { loadTenantFeatures } from "@/lib/features";
@@ -60,6 +60,65 @@ export default async function ClientBookingsPage(props: {
     }))
   );
 
+  // F8 — Receipts & payments. Query billing_transactions matched either
+  // by direct customer_id link (newer transactions set this) OR by
+  // booking_id within this customer's bookings (older / booking-only
+  // transactions). Both paths are tenant-scoped. Capped at 20 rows.
+  const txRows = await db.execute<{
+    id: string;
+    amount_cents: string | number;
+    currency: string;
+    transaction_type: string;
+    status: string;
+    paid_at: Date | null;
+    refunded_at: Date | null;
+    created_at: Date;
+    stripe_payment_intent_id: string | null;
+    stripe_invoice_id: string | null;
+    metadata: Record<string, unknown> | null;
+    booking_id: string | null;
+  }>(sql`
+    SELECT id,
+           amount_cents,
+           currency,
+           transaction_type,
+           status,
+           paid_at,
+           refunded_at,
+           created_at,
+           stripe_payment_intent_id,
+           stripe_invoice_id,
+           metadata,
+           booking_id
+      FROM ${billingTransactions}
+     WHERE ${billingTransactions.tenantId} = ${tenant.id}
+       AND (
+         ${billingTransactions.customerId} = ${customer.id}
+         OR ${billingTransactions.bookingId} IN (
+           SELECT id FROM ${bookings}
+            WHERE ${bookings.tenantId} = ${tenant.id}
+              AND lower(${bookings.clientEmail}) = ${customer.email.toLowerCase()}
+         )
+       )
+     ORDER BY COALESCE(paid_at, created_at) DESC
+     LIMIT 20
+  `);
+  const transactions = Array.from(txRows).map((t) => ({
+    id: String(t.id),
+    amountCents: Number(t.amount_cents),
+    currency: String(t.currency || "usd"),
+    transactionType: String(t.transaction_type || "payment"),
+    status: String(t.status || ""),
+    paidAt: t.paid_at,
+    refundedAt: t.refunded_at,
+    createdAt: t.created_at,
+    bookingId: t.booking_id as string | null,
+    // Stripe persists a receipt_url on the metadata bag when the
+    // webhook captured it. Optional — surfaces a "View receipt" link
+    // when present, otherwise the row is read-only.
+    receiptUrl: extractReceiptUrl(t.metadata),
+  }));
+
   return (
     <ClientPortalShell
       tenant={{
@@ -100,6 +159,29 @@ export default async function ClientBookingsPage(props: {
           </ul>
         )}
       </section>
+
+      {/* F8 — Receipts & payments. Only renders when the customer has
+          at least one transaction. Zero-state hides the section so
+          customers of free-only workspaces don't see a stub. */}
+      {transactions.length > 0 && (
+        <section className="mt-8 space-y-4">
+          <SectionHeader label="Receipts & payments" count={transactions.length} />
+          <ul className="space-y-2">
+            {transactions.map((t) => (
+              <ReceiptRow
+                key={t.id}
+                tx={{
+                  ...t,
+                  paidAt: t.paidAt ? t.paidAt.toISOString() : null,
+                  refundedAt: t.refundedAt ? t.refundedAt.toISOString() : null,
+                  createdAt: t.createdAt.toISOString(),
+                }}
+                accent={tenant.primaryColor}
+              />
+            ))}
+          </ul>
+        </section>
+      )}
 
       <section className="mt-8 space-y-4">
         <SectionHeader label="Past" count={past.length} />
@@ -324,6 +406,172 @@ function BookingCard({
         </div>
       </div>
     </li>
+  );
+}
+
+/**
+ * Looks for a Stripe-style receipt URL inside the metadata bag.
+ * The Stripe webhook stores `charges.data[0].receipt_url` and/or
+ * `hosted_invoice_url` in metadata when available. Both are
+ * customer-facing URLs Stripe hosts; safe to link externally.
+ * Returns null when neither is present (no link rendered).
+ */
+function extractReceiptUrl(metadata: Record<string, unknown> | null): string | null {
+  if (!metadata || typeof metadata !== "object") return null;
+  const m = metadata as Record<string, unknown>;
+  const candidates = [m.receipt_url, m.receiptUrl, m.hosted_invoice_url, m.hostedInvoiceUrl];
+  for (const c of candidates) {
+    if (typeof c === "string" && (c.startsWith("https://") || c.startsWith("http://"))) {
+      return c;
+    }
+  }
+  return null;
+}
+
+function formatMoney(cents: number, currency: string): string {
+  // Use Intl.NumberFormat for locale + currency-symbol correctness.
+  // Stripe stores zero-decimal currencies (JPY, KRW) as integer units;
+  // since we don't know in advance, treat amount as cents always.
+  try {
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: currency.toUpperCase(),
+    }).format(cents / 100);
+  } catch {
+    return `${(cents / 100).toFixed(2)} ${currency.toUpperCase()}`;
+  }
+}
+
+function prettyTxType(t: string): string {
+  switch (t) {
+    case "booking_payment":     return "Booking payment";
+    case "subscription_payment": return "Subscription";
+    case "subscription_renewal": return "Subscription renewal";
+    case "refund":               return "Refund";
+    case "deposit":              return "Deposit";
+    default:                     return capitalize(t.replace(/_/g, " "));
+  }
+}
+
+function capitalize(s: string): string {
+  if (!s) return s;
+  return s[0].toUpperCase() + s.slice(1);
+}
+
+function ReceiptRow({
+  tx,
+  accent,
+}: {
+  tx: {
+    id: string;
+    amountCents: number;
+    currency: string;
+    transactionType: string;
+    status: string;
+    paidAt: string | null;
+    refundedAt: string | null;
+    createdAt: string;
+    receiptUrl: string | null;
+  };
+  accent: string;
+}) {
+  const tone = receiptTone(tx.status, tx.transactionType);
+  const isRefund = tx.transactionType === "refund" || tx.status === "refunded";
+  // Use refundedAt for refunds, paidAt for charges, created_at as a
+  // last-resort fallback so even pending rows render a date.
+  const whenIso = isRefund && tx.refundedAt
+    ? tx.refundedAt
+    : tx.paidAt ?? tx.createdAt;
+
+  return (
+    <li className="relative overflow-hidden rounded-xl border border-slate-200 bg-white p-3 shadow-sm transition-shadow hover:shadow-md">
+      <div className="flex items-center gap-3">
+        <div
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg"
+          style={{ backgroundColor: tone.iconBg, color: tone.iconColor }}
+          aria-hidden
+        >
+          {isRefund ? (
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4">
+              <path d="M3 12a9 9 0 1 0 3-6.7M3 3v6h6" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          ) : (
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4">
+              <rect x="2" y="6" width="20" height="12" rx="2" />
+              <path d="M2 10h20M7 14h4" strokeLinecap="round" />
+            </svg>
+          )}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <div className="min-w-0">
+              <div className="truncate text-[13.5px] font-semibold tracking-tight text-slate-900">
+                {prettyTxType(tx.transactionType)}
+              </div>
+              <div className="text-[11.5px] text-slate-500">
+                <TimeText iso={whenIso} format="MMM d, yyyy · h:mm a" />
+              </div>
+            </div>
+            <div className="text-right">
+              <div className="text-[13.5px] font-semibold tabular-nums text-slate-900">
+                {isRefund ? "−" : ""}{formatMoney(tx.amountCents, tx.currency)}
+              </div>
+              <ReceiptStatusBadge status={tx.status} isRefund={isRefund} />
+            </div>
+          </div>
+          {tx.receiptUrl && (
+            <div className="mt-2">
+              <a
+                href={tx.receiptUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-[11.5px] font-medium transition-colors"
+                style={{ color: accent }}
+              >
+                View receipt
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-3 w-3" aria-hidden>
+                  <path d="M7 17l10-10M7 7h10v10" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </a>
+            </div>
+          )}
+        </div>
+      </div>
+    </li>
+  );
+}
+
+function receiptTone(status: string, type: string): { iconBg: string; iconColor: string } {
+  if (type === "refund" || status === "refunded") {
+    return { iconBg: "#fef2f2", iconColor: "#b91c1c" };
+  }
+  if (status === "succeeded" || status === "paid") {
+    return { iconBg: "#ecfdf5", iconColor: "#047857" };
+  }
+  if (status === "pending") {
+    return { iconBg: "#fffbeb", iconColor: "#b45309" };
+  }
+  if (status === "failed") {
+    return { iconBg: "#fef2f2", iconColor: "#b91c1c" };
+  }
+  return { iconBg: "#f1f5f9", iconColor: "#475569" };
+}
+
+function ReceiptStatusBadge({ status, isRefund }: { status: string; isRefund: boolean }) {
+  const labelMap: Record<string, { label: string; bg: string; text: string; dot: string }> = {
+    succeeded: { label: "Paid",      bg: "bg-emerald-50", text: "text-emerald-700", dot: "bg-emerald-500" },
+    paid:      { label: "Paid",      bg: "bg-emerald-50", text: "text-emerald-700", dot: "bg-emerald-500" },
+    refunded:  { label: "Refunded",  bg: "bg-rose-50",    text: "text-rose-700",    dot: "bg-rose-500" },
+    failed:    { label: "Failed",    bg: "bg-rose-50",    text: "text-rose-700",    dot: "bg-rose-500" },
+    pending:   { label: "Pending",   bg: "bg-amber-50",   text: "text-amber-700",   dot: "bg-amber-500" },
+  };
+  const fallback = { label: capitalize(status || "unknown"), bg: "bg-slate-100", text: "text-slate-700", dot: "bg-slate-400" };
+  const s = isRefund && !labelMap[status] ? labelMap.refunded : (labelMap[status] ?? fallback);
+  return (
+    <span className={`mt-0.5 inline-flex items-center gap-1.5 rounded-full ${s.bg} px-2 py-0.5 text-[10px] font-medium ${s.text}`}>
+      <span aria-hidden className={`h-1.5 w-1.5 rounded-full ${s.dot}`} />
+      {s.label}
+    </span>
   );
 }
 

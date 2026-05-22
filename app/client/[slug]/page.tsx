@@ -150,6 +150,66 @@ export default async function ClientHomePage(props: {
     }),
   );
 
+  // ── F12 History intelligence ─────────────────────────────────────
+  // Single aggregate over the customer's lifetime bookings. Counts +
+  // total minutes-actually-attended (completed only — no_show + cancel
+  // didn't consume any time). The attendance rate excludes cancellations
+  // since those were never expected to happen — it's the conventional
+  // "show-up rate" = completed / (completed + no_show).
+  const [historyRow] = await db.execute<{
+    completed: number;
+    no_show: number;
+    cancelled: number;
+    total_minutes: number;
+  }>(sql`
+    SELECT
+      COUNT(*) FILTER (WHERE ${bookings.status} = 'completed')::int AS completed,
+      COUNT(*) FILTER (WHERE ${bookings.status} = 'no_show')::int   AS no_show,
+      COUNT(*) FILTER (WHERE ${bookings.status} = 'cancelled')::int AS cancelled,
+      COALESCE(
+        SUM(EXTRACT(EPOCH FROM (${bookings.endAt} - ${bookings.startAt})) / 60)
+          FILTER (WHERE ${bookings.status} = 'completed'),
+        0
+      )::int AS total_minutes
+    FROM ${bookings}
+    WHERE ${bookings.tenantId} = ${tenant.id}
+      AND lower(${bookings.clientEmail}) = ${customer.email.toLowerCase()}
+  `);
+
+  const historyCompleted = Number(historyRow?.completed ?? 0);
+  const historyNoShow = Number(historyRow?.no_show ?? 0);
+  const historyMinutes = Number(historyRow?.total_minutes ?? 0);
+  const historyShowDenominator = historyCompleted + historyNoShow;
+  const historyAttendancePct = historyShowDenominator > 0
+    ? Math.round((historyCompleted / historyShowDenominator) * 100)
+    : null;
+
+  // Most-booked service (lifetime, completed status). Skipped when
+  // history is empty — the whole F12 section hides in that case.
+  let mostBookedService: { name: string; count: number } | null = null;
+  if (historyCompleted > 0) {
+    const top = await db
+      .select({
+        name: services.name,
+        count: sql<number>`COUNT(*)::int`,
+      })
+      .from(bookings)
+      .innerJoin(services, eq(services.id, bookings.serviceId))
+      .where(
+        and(
+          eq(bookings.tenantId, tenant.id),
+          sql`lower(${bookings.clientEmail}) = ${customer.email.toLowerCase()}`,
+          eq(bookings.status, "completed"),
+        ),
+      )
+      .groupBy(services.id, services.name)
+      .orderBy(sql`COUNT(*) DESC`)
+      .limit(1);
+    if (top.length > 0) {
+      mostBookedService = { name: top[0].name, count: Number(top[0].count) };
+    }
+  }
+
   const firstName = customer.name.split(" ")[0] || "there";
 
   return (
@@ -367,6 +427,48 @@ export default async function ClientHomePage(props: {
         </Link>
       </section>
 
+      {/* F12 — History intelligence. Lifetime stats card rendered only
+          when the customer has at least one completed booking. Pure
+          aggregate over existing bookings — no schema, no new state. */}
+      {historyCompleted > 0 && (
+        <section className="relative mt-5 overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <span
+            aria-hidden
+            className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-slate-200 to-transparent"
+          />
+          <div className="text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-500">
+            Your history with {tenant.name}
+          </div>
+          <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
+            <HistoryStat
+              label="Sessions completed"
+              value={historyCompleted.toLocaleString()}
+              accent={tenant.primaryColor}
+            />
+            <HistoryStat
+              label="Time with us"
+              value={formatDurationMinutes(historyMinutes)}
+              accent={tenant.primaryColor}
+            />
+            {historyAttendancePct !== null && (
+              <HistoryStat
+                label="Attendance"
+                value={`${historyAttendancePct}%`}
+                accent={tenant.primaryColor}
+              />
+            )}
+          </div>
+          {mostBookedService && (
+            <div className="mt-3 text-[11.5px] text-slate-500">
+              Most-booked service:{" "}
+              <span className="font-medium text-slate-700">{mostBookedService.name}</span>
+              {" · "}
+              <span className="tabular-nums">{mostBookedService.count}×</span>
+            </div>
+          )}
+        </section>
+      )}
+
       {/* Recent activity */}
       <section className="relative mt-5 overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <span
@@ -498,6 +600,45 @@ function PortalEmptyCard({
       </Link>
     </div>
   );
+}
+
+function HistoryStat({
+  label,
+  value,
+  accent,
+}: {
+  label: string;
+  value: string;
+  accent: string;
+}) {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-gradient-to-br from-slate-50/70 to-white p-3">
+      <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-500">
+        {label}
+      </div>
+      <div
+        className="mt-1 text-[20px] font-semibold leading-none tracking-tight tabular-nums"
+        style={{ color: accent }}
+      >
+        {value}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Formats a minute count as a calm, customer-facing duration string.
+ *   < 60 min  → "45 min"
+ *   < 24 hr   → "3h 15m" / "3h"
+ *   ≥ 24 hr   → "12h 30m" (we don't bucket into days — "1d 3h" reads
+ *                          less naturally for "time spent with a host")
+ */
+function formatDurationMinutes(min: number): string {
+  if (min < 60) return `${min} min`;
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  if (m === 0) return `${h}h`;
+  return `${h}h ${m}m`;
 }
 
 function StatusBadge({ status }: { status: string }) {
