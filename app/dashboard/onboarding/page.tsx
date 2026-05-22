@@ -7,6 +7,7 @@ import OnboardingWizard from "@/components/OnboardingWizard";
 import { loadOnboardingProgress } from "@/lib/onboarding/state";
 import { recordOnboardingEvent } from "@/lib/onboarding/telemetry";
 import { ONBOARDING_EVENTS } from "@/lib/onboarding/types";
+import { isGoogleConnected } from "@/lib/calendar/connections";
 
 export const dynamic = "force-dynamic";
 
@@ -37,6 +38,15 @@ export default async function OnboardingPage() {
     metadata: { resumeStep },
   });
 
+  // Wave A — encrypted-connection-table is the source of truth. The
+  // wizard's "Connect Google" tile rendered checked off this flag, so
+  // it has to flip immediately after the OAuth round-trip. The
+  // orchestrator writes to calendar_connections atomically, so
+  // re-rendering this page right after `/api/calendar/google/callback`
+  // returns will show the tile as complete (same observable behavior
+  // as before, just sourced differently).
+  const hasGoogleConnected = await isGoogleConnected(user.id);
+
   return (
     <OnboardingWizard
       defaultTimezone={user.timezone}
@@ -47,7 +57,7 @@ export default async function OnboardingPage() {
       userName={user.name}
       initialStep={resumeStep}
       initialProgress={initialProgress}
-      hasGoogleConnected={Boolean(user.googleRefreshToken)}
+      hasGoogleConnected={hasGoogleConnected}
     />
   );
 }

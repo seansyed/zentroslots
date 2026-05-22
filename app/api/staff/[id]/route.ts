@@ -19,6 +19,7 @@ import {
   type DeliveryMode,
   type LocationType,
 } from "@/lib/workforce-location";
+import { isGoogleConnected } from "@/lib/calendar/connections";
 
 // Accept either a full http(s) URL OR a local upload path served by
 // Next out of /public — see /api/users/[id]/avatar (multipart upload
@@ -71,7 +72,11 @@ export async function GET(
     });
     if (!staff) throw new HttpError(404, "Staff not found");
 
-    const [assignedServices, weeklyRules, completed30, cancelled30, upcoming, locationRows] = await Promise.all([
+    // Wave A — `googleConnected` flag now reads from the encrypted
+    // `calendar_connections` table, not the legacy plaintext column.
+    // Run it in parallel with the existing five queries to avoid
+    // adding a serial round-trip.
+    const [assignedServices, weeklyRules, completed30, cancelled30, upcoming, locationRows, googleConnected] = await Promise.all([
       db
         .select({ id: services.id, name: services.name, durationMinutes: services.durationMinutes, color: services.color })
         .from(serviceStaff)
@@ -148,6 +153,9 @@ export async function GET(
             eq(staffLocationAssignments.tenantId, caller.tenantId),
           ),
         ),
+      // Wave A — encrypted-connection-table source of truth for the
+      // Google-connected flag. See lib/calendar/connections.ts.
+      isGoogleConnected(id),
     ]);
 
     return NextResponse.json({
@@ -165,7 +173,7 @@ export async function GET(
         publicTitle: staff.publicTitle,
         primaryLocationId: staff.primaryLocationId,
         departmentId: staff.departmentId,
-        googleConnected: Boolean(staff.googleRefreshToken),
+        googleConnected,
         // Workforce delivery mode (migration 0037). Defaults to
         // 'hybrid' for any staff predating the migration — most
         // permissive setting, no observable booking change.

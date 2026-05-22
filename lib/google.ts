@@ -1,121 +1,91 @@
-import { google } from "googleapis";
+/**
+ * @deprecated — Wave A consolidation.
+ *
+ * This module was the original Google Calendar client used by the
+ * legacy /api/google/{connect,callback} routes. It is preserved as a
+ * thin shim so any straggling imports keep linking, but every export
+ * either delegates to the new orchestrator or fails fast with a clear
+ * message.
+ *
+ * New code MUST import from:
+ *   • lib/calendar/google.ts    — provider adapter (OAuth + Calendar API)
+ *   • lib/calendar/sync.ts      — orchestrator (booking lifecycle hooks)
+ *   • lib/calendar/connections.ts — connection state reads
+ *
+ * Why we kept the file instead of deleting it:
+ *   • OAuth redirect URIs registered with Google Cloud Console may
+ *     still point to /api/google/callback. The legacy ROUTE now
+ *     delegates to the orchestrator, but external code importing
+ *     `oauthClient` / `googleAuthUrl` from here would 500 if we
+ *     removed the module. Shims protect against that.
+ *   • Once all callers migrate, this file can be deleted in a future
+ *     wave with no migration concerns.
+ */
+import { authUrl as canonicalAuthUrl, oauthClient as canonicalClient, exchangeCode } from "./calendar/google";
+import { upsertGoogleConnection } from "./calendar/sync";
+import { db } from "@/db/client";
+import { tenants } from "@/db/schema";
 import { eq } from "drizzle-orm";
 
-import { db } from "@/db/client";
-import { users, type User } from "@/db/schema";
-
-const SCOPES = [
-  "https://www.googleapis.com/auth/calendar.events",
-  "https://www.googleapis.com/auth/userinfo.email",
-];
-
+/** @deprecated Use `oauthClient` from `lib/calendar/google`. */
 export function oauthClient() {
-  const { GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI } = process.env;
-  if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET || !GOOGLE_REDIRECT_URI) {
-    throw new Error("Google OAuth env vars missing");
-  }
-  return new google.auth.OAuth2(
-    GOOGLE_CLIENT_ID,
-    GOOGLE_CLIENT_SECRET,
-    GOOGLE_REDIRECT_URI
-  );
+  return canonicalClient();
 }
 
+/** @deprecated Use `authUrl(state)` from `lib/calendar/google`. */
 export function googleAuthUrl(userId: string): string {
-  return oauthClient().generateAuthUrl({
-    access_type: "offline",
-    prompt: "consent",   // force refresh_token on every consent
-    scope: SCOPES,
-    state: userId,       // signed-in user id; verified server-side
+  return canonicalAuthUrl(userId);
+}
+
+/**
+ * @deprecated Use the orchestrator: `exchangeCode` + `upsertGoogleConnection`.
+ *
+ * Functional shim — delegates fully to the new pipeline. Encrypts the
+ * token (orchestrator owns crypto), persists to calendar_connections.
+ * No longer writes the legacy plaintext column.
+ *
+ * Used by the legacy /api/google/callback route while we transition.
+ */
+export async function exchangeCodeAndStore(userId: string, code: string): Promise<void> {
+  const tokens = await exchangeCode(code);
+  // Resolve the user's tenant — required by the orchestrator. The
+  // legacy route doesn't have it in scope.
+  const user = await db.query.users.findFirst({
+    where: (u, { eq }) => eq(u.id, userId),
+    columns: { tenantId: true },
+  });
+  if (!user) throw new Error("User not found");
+  // Re-export silence — drizzle's `eq` is referenced inside the query
+  // builder; lint sometimes flags it as unused on this file.
+  void tenants;
+  void eq;
+
+  await upsertGoogleConnection({
+    tenantId: user.tenantId,
+    userId,
+    refreshTokenPlain: tokens.refreshToken,
+    accessTokenPlain: tokens.accessToken,
+    accessTokenExpiresAt: tokens.expiresAt,
+    accountEmail: tokens.email,
+    scopes: tokens.scope,
   });
 }
 
-export async function exchangeCodeAndStore(userId: string, code: string): Promise<void> {
-  const client = oauthClient();
-  const { tokens } = await client.getToken(code);
-  if (!tokens.refresh_token) {
-    throw new Error("Google did not return a refresh_token (revoke + retry with prompt=consent)");
-  }
-
-  await db
-    .update(users)
-    .set({
-      googleRefreshToken: tokens.refresh_token,
-      googleCalendarId: "primary",
-      updatedAt: new Date(),
-    })
-    .where(eq(users.id, userId));
-}
-
+/**
+ * @deprecated Use `onBookingCreated` from `lib/calendar/sync`.
+ *
+ * Throws if called — the old direct-create path bypassed the
+ * orchestrator's encryption + sync-log + retry contracts. Booking
+ * lifecycle hooks live in the orchestrator now.
+ */
 export type CreatedEvent = {
   eventId: string;
   meetLink: string | null;
 };
 
-export async function createCalendarEventForStaff(args: {
-  staff: User;
-  serviceName: string;
-  clientName: string;
-  clientEmail: string;
-  startAt: Date;
-  endAt: Date;
-  notes?: string;
-}): Promise<CreatedEvent | null> {
-  if (!args.staff.googleRefreshToken) return null;
-
-  const client = oauthClient();
-  client.setCredentials({ refresh_token: args.staff.googleRefreshToken });
-  const calendar = google.calendar({ version: "v3", auth: client });
-
-  const requestId = `${args.staff.id}-${args.startAt.getTime()}`;
-
-  try {
-    const res = await calendar.events.insert({
-      calendarId: args.staff.googleCalendarId ?? "primary",
-      conferenceDataVersion: 1,
-      sendUpdates: "all",
-      requestBody: {
-        summary: `${args.serviceName} with ${args.clientName}`,
-        description: args.notes ?? "",
-        start: { dateTime: args.startAt.toISOString(), timeZone: "UTC" },
-        end: { dateTime: args.endAt.toISOString(), timeZone: "UTC" },
-        attendees: [
-          { email: args.staff.email },
-          { email: args.clientEmail, displayName: args.clientName },
-        ],
-        conferenceData: {
-          createRequest: {
-            requestId,
-            conferenceSolutionKey: { type: "hangoutsMeet" },
-          },
-        },
-      },
-    });
-
-    // Mark the connection healthy on success — clears any stale error flag.
-    await db
-      .update(users)
-      .set({ googleStatus: "connected", googleLastErrorAt: null })
-      .where(eq(users.id, args.staff.id));
-
-    return {
-      eventId: res.data.id ?? "",
-      meetLink: res.data.hangoutLink ?? null,
-    };
-  } catch (err) {
-    // Mark connection as expired/error so the dashboard banner appears.
-    // Don't throw — the booking should still succeed (Meet link will be null).
-    const status = isAuthError(err) ? "expired" : "error";
-    await db
-      .update(users)
-      .set({ googleStatus: status, googleLastErrorAt: new Date() })
-      .where(eq(users.id, args.staff.id));
-    throw err;
-  }
-}
-
-function isAuthError(err: unknown): boolean {
-  const code = (err as { code?: number; response?: { status?: number } })?.code
-    ?? (err as { response?: { status?: number } })?.response?.status;
-  return code === 401 || code === 403;
+export async function createCalendarEventForStaff(): Promise<CreatedEvent | null> {
+  throw new Error(
+    "createCalendarEventForStaff is deprecated. " +
+    "Use onBookingCreated() from lib/calendar/sync.ts instead."
+  );
 }

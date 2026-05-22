@@ -255,6 +255,12 @@ export async function triggerAutomation(args: TriggerArgs): Promise<TriggerResul
       tenantName: tenant.name,
       cancelToken,
       rescheduleToken,
+      // Wave A — customer trust safety. Pass the service's configured
+      // video provider so the renderer can decide between (a) showing
+      // a real meet link, (b) showing an honest "your host will share
+      // the link" fallback for video-services that didn't get a link,
+      // and (c) omitting the row entirely for non-video services.
+      videoProvider: service.videoProvider ?? null,
     };
 
     const baseContext: TemplateContext = buildContext({

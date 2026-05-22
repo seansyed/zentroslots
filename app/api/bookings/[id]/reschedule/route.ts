@@ -179,6 +179,10 @@ export async function POST(
           tenantName: tenant?.name ?? "",
           cancelToken,
           rescheduleToken,
+          // Wave A — pass through so reschedule emails fall back to
+          // honest copy when a video service didn't regenerate a meet
+          // link on reschedule (e.g. host connection stale).
+          videoProvider: service.videoProvider ?? null,
         };
         const tpl = renderReschedule(payload);
         await sendEmail({ to: updated.clientEmail, ...tpl });

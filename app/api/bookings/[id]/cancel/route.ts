@@ -127,6 +127,8 @@ export async function POST(
             clientTimezone: staff.timezone,
             meetLink: updated.meetLink,
             tenantName: tenant.name,
+            // Wave A — consistent hint across all email touchpoints.
+            videoProvider: svc.videoProvider ?? null,
           };
           const tpl = renderCancellation(payload);
           await sendEmail({ to: updated.clientEmail, ...tpl });

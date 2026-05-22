@@ -17,7 +17,17 @@ export const loginSchema = z.object({
   password: z.string().min(1),
 });
 
-const videoProviderSchema = z.enum(["google_meet", "zoom", "teams", "none"]);
+// Wave A consolidation: `zoom` and `teams` are intentionally removed from
+// the WRITE schema. The orchestrator has no integration for either, so
+// previously a service flagged `videoProvider="zoom"` (or `"teams"`) would
+// accept bookings, send a confirmation email, and silently produce NO
+// meeting link — confusing both the host and the customer.
+//
+// Read paths still tolerate legacy stored values (we do NOT migrate the
+// column or rewrite existing rows); only NEW writes are constrained. UI
+// should hide/disable the unsupported options. Coming-soon copy lives in
+// the service settings page, not here.
+const videoProviderSchema = z.enum(["google_meet", "none"]);
 
 export const serviceSchema = z.object({
   name: z.string().min(1).max(120),

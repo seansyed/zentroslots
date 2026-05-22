@@ -4,6 +4,7 @@ import { and, count, desc, eq, gte, inArray, lt, or, sql } from "drizzle-orm";
 import { db } from "@/db/client";
 import { announcements, availability, bookings, services, tasks, tenants, users } from "@/db/schema";
 import { getSession, isManagerial } from "@/lib/auth";
+import { getGoogleHealth } from "@/lib/calendar/connections";
 import DashboardBookings from "@/components/DashboardBookings";
 import Shell from "@/components/dashboard/Shell";
 import OnboardingChecklist, { type ChecklistItem } from "@/components/dashboard/OnboardingChecklist";
@@ -246,21 +247,30 @@ export default async function DashboardPage(props: {
   // Onboarding checklist (only shown when something is incomplete).
   // Consolidated to ONE round-trip via lib/onboarding/integrity.ts —
   // EXISTS short-circuits on first row, unlike the two COUNT(*) scans
-  // we used before. `googleRefreshToken`, `logoUrl`, and `tagline` are
-  // already loaded into `user` / `tenant`, so no extra query is needed
-  // for those checklist items.
+  // we used before. Wave A: Google connectivity is now resolved via
+  // `getGoogleHealth` against the encrypted connections table (see
+  // below). `logoUrl` and `tagline` are already loaded into
+  // `user` / `tenant`, so no extra query is needed for those.
   const checklistSummary = await getDashboardChecklistSummary(user.tenantId, user.id);
+  // Wave A — `users.google_refresh_token` is being phased out (migration
+  // 0044). The encrypted `calendar_connections` table is now canonical.
+  // `getGoogleHealth` returns `{ connected, status, needsReconnect }`
+  // — one query, used by both the checklist tile and the reconnect
+  // banner below so we don't double-fetch.
+  const googleHealth = await getGoogleHealth(user.id);
   const checklistItems: ChecklistItem[] = [
-    { id: "google",   label: "Connect Google Calendar",          href: "/dashboard/settings/integrations", done: Boolean(user.googleRefreshToken) },
+    { id: "google",   label: "Connect Google Calendar",          href: "/dashboard/settings/integrations", done: googleHealth.connected },
     { id: "service",  label: "Add at least one service",         href: "/dashboard/services",              done: checklistSummary.hasServices },
     { id: "hours",    label: "Set your weekly working hours",    href: "/dashboard/availability",          done: checklistSummary.hasAvailability },
     { id: "booking",  label: "Receive your first booking",       href: "/dashboard/calendar",              done: bookingCount > 0 },
     { id: "branding", label: "Customize your booking page",      href: "/dashboard/settings/branding",     done: Boolean(tenant?.logoUrl || tenant?.tagline) },
   ];
 
-  // Google reconnect banner — appears when a previous booking attempt
-  // detected an expired token.
-  const showGoogleReconnect = user.googleStatus === "expired" || user.googleStatus === "error";
+  // Google reconnect banner — appears when the orchestrator flipped
+  // the encrypted connection into `needs_reconnect`. Sourced from the
+  // single `getGoogleHealth()` call above (avoids reading from the
+  // legacy `users.googleStatus` column that we no longer write).
+  const showGoogleReconnect = googleHealth.needsReconnect;
 
   return (
     <Shell
@@ -300,7 +310,7 @@ export default async function DashboardPage(props: {
           todayCount={Number(todayCount?.n ?? 0)}
           weekCount={Number(weekCount?.n ?? 0)}
           utilizationPct={utilizationPct}
-          showGoogleConnect={!user.googleRefreshToken && (user.role === "admin" || user.role === "staff")}
+          showGoogleConnect={!googleHealth.connected && (user.role === "admin" || user.role === "staff")}
           miniSchedule={
             <MiniSchedule rows={todayRows} timezone={user.timezone} />
           }

@@ -152,6 +152,11 @@ export async function POST(
             clientTimezone: staff.timezone,
             meetLink: updated.meetLink,
             tenantName: tenant.name,
+            // Wave A — pass through for renderer trust copy. Cancellation
+            // emails rarely need a meet link row, but keeping the hint
+            // consistent avoids surprising regressions if the renderer
+            // is updated later.
+            videoProvider: svc.videoProvider ?? null,
           };
           const tpl = renderCancellation(ep);
           await sendEmail({ to: updated.clientEmail, ...tpl });

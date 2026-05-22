@@ -386,6 +386,22 @@ type BookingForEmail = {
   tenantName: string;
   cancelToken?: string;
   rescheduleToken?: string;
+  /**
+   * Wave A — customer trust safety.
+   *
+   * The service-level video setting (`google_meet`, `zoom`, `teams`,
+   * `none`, etc.). When the booking is for a video service but the
+   * orchestrator failed to provision a link (auth-broken connection,
+   * Google transient outage, recurring rollover that hadn't synced),
+   * we render an honest fallback message instead of silently dropping
+   * the "Meet link" row. Pre-Wave-A, customers would receive a
+   * confirmation with NO link and no indication anything was wrong.
+   *
+   * Optional + nullable — older callers still work; in that case we
+   * fall back to the prior "show link if present, omit otherwise"
+   * behavior so we don't regress non-video appointments.
+   */
+  videoProvider?: string | null;
 };
 
 function fmt(d: Date, tz: string): string {
@@ -412,13 +428,45 @@ function shell(body: string): string {
 <div class="footer">ZentroMeet · automated message, please do not reply</div></div></body></html>`;
 }
 
+/**
+ * Decide which video-link row (if any) to render for a booking.
+ *
+ * Three cases:
+ *   1. There's a real meet link → render it as a clickable URL.
+ *   2. Service is configured for video (Meet/Zoom/Teams) but no link
+ *      was produced → render an honest "your host will share the link
+ *      separately" row. NEVER silently drop the row, NEVER print
+ *      something misleading like "Meet link: (none)".
+ *   3. Service is not a video service (or videoProvider hint absent) →
+ *      omit the row entirely. Preserves prior behavior for in-person
+ *      / phone appointments.
+ *
+ * Pure string return (no side effects, safe at module scope).
+ */
+function videoLinkRow(b: BookingForEmail): string {
+  if (b.meetLink) {
+    return `<div class="row"><span class="label">Meet link:</span> <a href="${escape(b.meetLink)}">${escape(b.meetLink)}</a></div>`;
+  }
+  const provider = (b.videoProvider ?? "").toLowerCase();
+  const isVideoService = provider === "google_meet" || provider === "zoom" || provider === "teams";
+  if (!isVideoService) return "";
+  // Video service expected a link but doesn't have one. Customer must
+  // know SOMETHING is missing so they can ask, instead of arriving at
+  // the appointment with nothing to click. Phrase it without alarming
+  // the customer (this can be a transient sync delay, not a hard fail).
+  return `<div class="row" style="background:#fef9c3;border-radius:6px;padding:10px 12px;border:1px solid #fde68a;">
+    <span class="label" style="color:#92400e;">Video link:</span>
+    <span style="color:#78350f;">Your host will share the meeting link with you before the appointment. If you don't receive it, please reply to this confirmation.</span>
+  </div>`;
+}
+
 function rows(b: BookingForEmail, tz: string): string {
   const when = fmt(b.startAt, tz);
   return `
     <div class="row"><span class="label">When:</span> ${escape(when)}</div>
     <div class="row"><span class="label">Service:</span> ${escape(b.serviceName)} (${escape(b.staffName)})</div>
     <div class="row"><span class="label">Workspace:</span> ${escape(b.tenantName)}</div>
-    ${b.meetLink ? `<div class="row"><span class="label">Meet link:</span> <a href="${escape(b.meetLink)}">${escape(b.meetLink)}</a></div>` : ""}
+    ${videoLinkRow(b)}
   `;
 }
 
@@ -441,6 +489,19 @@ function actionButtons(b: BookingForEmail): string {
   return parts.length ? `<div style="margin-top:20px;">${parts.join(" &nbsp; ")}</div>` : "";
 }
 
+/**
+ * Build the plain-text "video line" for the bottom of an email body
+ * using the same three cases as the HTML version (real link / video
+ * service with missing link / non-video).
+ */
+function videoLineText(b: BookingForEmail): string {
+  if (b.meetLink) return `Meet: ${b.meetLink}\n`;
+  const provider = (b.videoProvider ?? "").toLowerCase();
+  const isVideoService = provider === "google_meet" || provider === "zoom" || provider === "teams";
+  if (!isVideoService) return "";
+  return "Your host will share the meeting link with you before the appointment. If you don't receive it, please reply to this confirmation.\n";
+}
+
 export function renderConfirmation(b: BookingForEmail): { html: string; text: string; subject: string } {
   const tz = b.clientTimezone ?? "UTC";
   const subject = `Confirmed: ${b.serviceName} on ${formatInTimeZone(b.startAt, tz, "MMM d 'at' h:mm a")}`;
@@ -450,7 +511,7 @@ export function renderConfirmation(b: BookingForEmail): { html: string; text: st
     ${rows(b, tz)}
     ${actionButtons(b)}
   `);
-  const text = `You're confirmed.\n\n${b.serviceName} with ${b.staffName}\n${fmt(b.startAt, tz)}\n${b.meetLink ? "Meet: " + b.meetLink + "\n" : ""}`;
+  const text = `You're confirmed.\n\n${b.serviceName} with ${b.staffName}\n${fmt(b.startAt, tz)}\n${videoLineText(b)}`;
   return { html, text, subject };
 }
 

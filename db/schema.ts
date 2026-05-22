@@ -929,6 +929,15 @@ export const calendarConnections = pgTable(
     lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
     lastError: text("last_error"),
     lastErrorAt: timestamp("last_error_at", { withTimezone: true }),
+    // Wave A — connection health foundation (migration 0044).
+    // consecutiveFailures: incremented on every sync-call failure,
+    //   reset to 0 on success. Used by the future health-check cron to
+    //   surface "5+ failures in a row" before the staff member discovers
+    //   the broken connection via a missing Meet link.
+    // lastReconnectEmailAt: dedupe marker so we email the staff at most
+    //   once per 24h when their connection flips to needs_reconnect.
+    consecutiveFailures: integer("consecutive_failures").notNull().default(0),
+    lastReconnectEmailAt: timestamp("last_reconnect_email_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -957,6 +966,11 @@ export const calendarSyncLogs = pgTable(
     errorMessage: text("error_message"),
     externalEventId: varchar("external_event_id", { length: 255 }),
     latencyMs: integer("latency_ms"),
+    // Wave A — number of retries attempted before this final outcome.
+    // 0 = succeeded on first try. >0 = retried N times. Visible in the
+    // sync-log surface so admins can see "succeeded after 2 retries"
+    // vs "failed after 3 retries". (migration 0044)
+    retryCount: integer("retry_count").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({

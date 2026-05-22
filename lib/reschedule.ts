@@ -228,6 +228,11 @@ export async function performReschedule(args: RescheduleArgs): Promise<Reschedul
         tenantName: tenant?.name ?? "",
         cancelToken,
         rescheduleToken,
+        // Wave A — pass the service's video setting so the renderer
+        // can fall back to honest copy if the reschedule didn't
+        // produce a meet link (e.g. host's connection went stale
+        // between the original booking and the reschedule).
+        videoProvider: service.videoProvider ?? null,
       };
       const tpl = renderReschedule(ep);
       await sendEmail({ to: updated.clientEmail, ...tpl });

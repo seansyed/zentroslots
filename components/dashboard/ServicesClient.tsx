@@ -108,11 +108,17 @@ const DEFAULT_COLORS = [
   "#db2777", "#65a30d", "#0891b2", "#c026d3",
 ];
 
+// Wave A consolidation: Zoom/Teams are flagged `disabled: true` until the
+// orchestrator ships native integration. Showing them clickable in
+// previous releases caused silent meet-link failures — services would
+// accept bookings but generate no link, customers and hosts both
+// confused. Now disabled with a clear "Coming soon" label; the API
+// also rejects writes (see lib/validation.ts).
 const PROVIDERS = [
-  { id: "google_meet", label: "Google Meet",     note: "Auto-creates a Meet link" },
-  { id: "zoom",        label: "Zoom",            note: "Manual link · OAuth in a future release" },
-  { id: "teams",       label: "Microsoft Teams", note: "Manual link · OAuth in a future release" },
-  { id: "none",        label: "No video",        note: "In-person or phone" },
+  { id: "google_meet", label: "Google Meet",     note: "Auto-creates a Meet link",                            disabled: false },
+  { id: "zoom",        label: "Zoom",            note: "Coming soon · native OAuth integration in progress",  disabled: true  },
+  { id: "teams",       label: "Microsoft Teams", note: "Coming soon · native OAuth integration in progress",  disabled: true  },
+  { id: "none",        label: "No video",        note: "In-person or phone",                                   disabled: false },
 ] as const;
 
 const DELIVERY_MODE_OPTIONS = [
@@ -2257,19 +2263,41 @@ function ServiceDrawer({
             <div className="space-y-1.5">
               {PROVIDERS.map((p) => {
                 const on = videoProvider === p.id;
+                // Wave A: zoom/teams options are disabled at the UI
+                // layer in addition to the API. Even a legacy service
+                // that's already on zoom/teams must not be editable
+                // INTO another unsupported value, but we DO let the
+                // selection stay visible (so admins see the current
+                // state and can switch off it).
+                const isDisabledOption = p.disabled && !on;
+                const optionDisabled = !isAdmin || isDisabledOption;
                 return (
-                  <label key={p.id} className={"flex cursor-pointer items-start gap-2 rounded-md border border-border bg-surface px-3 py-2 text-sm " + (on ? "ring-1 ring-brand-accent/30" : "")}>
+                  <label
+                    key={p.id}
+                    className={
+                      "flex items-start gap-2 rounded-md border border-border bg-surface px-3 py-2 text-sm " +
+                      (on ? "ring-1 ring-brand-accent/30 " : "") +
+                      (optionDisabled ? "cursor-not-allowed opacity-60" : "cursor-pointer")
+                    }
+                  >
                     <input
                       type="radio"
                       name="videoProvider"
                       value={p.id}
                       checked={on}
-                      disabled={!isAdmin}
+                      disabled={optionDisabled}
                       onChange={() => setVideoProvider(p.id)}
                       className="mt-0.5 h-4 w-4 accent-brand-accent"
                     />
                     <span className="flex-1">
-                      <span className="block text-ink">{p.label}</span>
+                      <span className="flex items-center gap-1.5 text-ink">
+                        {p.label}
+                        {p.disabled ? (
+                          <span className="rounded-full bg-ink-subtle/10 px-1.5 py-[1px] text-[10px] font-medium uppercase tracking-wide text-ink-subtle">
+                            Soon
+                          </span>
+                        ) : null}
+                      </span>
                       <span className="block text-[11px] text-ink-subtle">{p.note}</span>
                     </span>
                   </label>

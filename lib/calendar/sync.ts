@@ -65,14 +65,13 @@
  * they can ignore on failure (booking still commits). This is the
  * "additive" rule: a failing sync NEVER blocks a booking action.
  */
-import { and, desc, eq, gte, lt } from "drizzle-orm";
+import { and, desc, eq, gte, lt, sql } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import {
   bookings,
   calendarConnections,
   calendarSyncLogs,
-  users,
   type User,
 } from "@/db/schema";
 import { decryptSecret, encryptSecret } from "@/lib/crypto";
@@ -93,6 +92,24 @@ import {
   getBusy as googleGetBusy,
   updateEvent as googleUpdateEvent,
 } from "./google";
+import { notifyReconnectRequired } from "./notifyReconnect";
+
+// ─── Retry policy ──────────────────────────────────────────────────────
+// Wave A — retry-with-backoff for transient + rate_limit failures.
+// Idempotency is guaranteed by:
+//   • createEvent: stable Google requestId (organizer + startMs)
+//   • updateEvent: PATCH is idempotent server-side
+//   • deleteEvent: 404 already treated as success
+//   • freebusy: pure read
+// So retrying is always safe. Hard caps protect against retry storms.
+const RETRY_DELAYS_MS = [250, 1000, 2500]; // 3 retries → 4 total attempts
+const FREEBUSY_RETRY_DELAYS_MS = [200, 600]; // 2 retries → 3 total attempts
+                                              // (cheaper read; tighter budget)
+const RETRYABLE_CLASSES: readonly ErrorClass[] = ["transient", "rate_limit"];
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((res) => setTimeout(res, ms));
+}
 
 // ─── Public result type ────────────────────────────────────────────────
 
@@ -134,7 +151,13 @@ export async function getConnectionForTenant(
 }
 
 /** Mark a connection as needing reconnect (auth failure). Records the
- *  error message so the dashboard can show "Token revoked — reconnect". */
+ *  error message so the dashboard can show "Token revoked — reconnect".
+ *
+ *  Wave A: also triggers an at-most-once-per-24h email to the staff
+ *  member so they learn about the broken connection before the next
+ *  booking arrives. Email send is fire-and-forget; the state transition
+ *  is the source of truth either way.
+ */
 export async function markNeedsReconnect(
   connectionId: string,
   message: string
@@ -148,10 +171,19 @@ export async function markNeedsReconnect(
       updatedAt: new Date(),
     })
     .where(eq(calendarConnections.id, connectionId));
+
+  // Fire-and-forget. Dedupe-aware (24h window via
+  // last_reconnect_email_at). Never throws.
+  void notifyReconnectRequired({
+    connectionId,
+    reason: message.slice(0, 200),
+  });
 }
 
 /** Mark a connection as healthy. Used opportunistically after a
- *  successful sync — clears any stale error. */
+ *  successful sync — clears any stale error and resets the
+ *  consecutive-failures counter (Wave A health foundation).
+ */
 export async function markActive(
   connectionId: string,
   accountEmail?: string | null
@@ -163,7 +195,23 @@ export async function markActive(
       lastError: null,
       lastErrorAt: null,
       lastSyncedAt: new Date(),
+      consecutiveFailures: 0,
       ...(accountEmail ? { accountEmail } : {}),
+      updatedAt: new Date(),
+    })
+    .where(eq(calendarConnections.id, connectionId));
+}
+
+/** Increment the consecutive-failures counter on a connection.
+ *  Used by runWithLog + getExternalBusyForUser when an attempt fails
+ *  without being a permanent auth break. Future health-check cron
+ *  will surface high counts as "degraded" before they break entirely.
+ */
+async function incrementFailureCount(connectionId: string): Promise<void> {
+  await db
+    .update(calendarConnections)
+    .set({
+      consecutiveFailures: sql`${calendarConnections.consecutiveFailures} + 1`,
       updatedAt: new Date(),
     })
     .where(eq(calendarConnections.id, connectionId));
@@ -255,17 +303,13 @@ export async function upsertGoogleConnection(args: {
     connectionId = row.id;
   }
 
-  // Backwards-compat with legacy lib/google.ts which reads from users
-  // columns. Keep both rails populated until that file is removed.
-  await db
-    .update(users)
-    .set({
-      googleRefreshToken: args.refreshTokenPlain, // legacy plaintext column
-      googleCalendarId: args.calendarId ?? "primary",
-      googleStatus: "connected",
-      googleLastErrorAt: null,
-    })
-    .where(eq(users.id, args.userId));
+  // Wave A — stopped dual-writing the plaintext refresh token to
+  // users.google_refresh_token. Reads of "is Google connected" now
+  // flow through lib/calendar/connections.ts which queries the
+  // encrypted source of truth (calendar_connections). Legacy
+  // plaintext column is left in place but is NEVER written; migration
+  // 0044 NULLs it for users with an active encrypted row, and a
+  // future migration can drop the column entirely.
 
   await writeSyncLog({
     tenantId: args.tenantId,
@@ -454,45 +498,69 @@ export async function getExternalBusyForUser(
   }
 
   const startedAt = Date.now();
-  try {
-    const busy = await googleGetBusy({
-      refreshToken,
-      calendarId: conn.calendarId,
-      windowStart,
-      windowEnd,
-    });
-    await writeSyncLog({
-      tenantId: conn.tenantId,
-      connectionId: conn.id,
-      userId,
-      provider: "google",
-      kind: "freebusy",
-      status: "ok",
-      latencyMs: Date.now() - startedAt,
-    });
-    await markActive(conn.id);
-    return busy;
-  } catch (err) {
-    const cls = classifyError(err);
-    const msg = errorMessage(err);
-    await writeSyncLog({
-      tenantId: conn.tenantId,
-      connectionId: conn.id,
-      userId,
-      provider: "google",
-      kind: "freebusy",
-      status: "failed",
-      errorClass: cls,
-      errorMessage: msg,
-      latencyMs: Date.now() - startedAt,
-    });
-    if (cls === "auth") await markNeedsReconnect(conn.id, msg);
-    // Fall back to "no external busy" — better to allow a slot that
-    // turns out to be double-booked (rare, manual reschedule available)
-    // than to fail closed on a transient freebusy error and refuse
-    // every booking.
-    return [];
+  let lastErr: unknown = null;
+  let lastCls: ErrorClass = "unknown";
+  let lastMsg = "";
+
+  // Wave A — retry transient/rate-limit failures on freebusy. Tighter
+  // budget than event-mutating calls because freebusy sits in the slot-
+  // computation hot path; we'd rather show "no external busy" than
+  // make the customer wait 4+ seconds for the slot grid to load.
+  for (let attempt = 0; attempt <= FREEBUSY_RETRY_DELAYS_MS.length; attempt++) {
+    try {
+      const busy = await googleGetBusy({
+        refreshToken,
+        calendarId: conn.calendarId,
+        windowStart,
+        windowEnd,
+      });
+      await writeSyncLog({
+        tenantId: conn.tenantId,
+        connectionId: conn.id,
+        userId,
+        provider: "google",
+        kind: "freebusy",
+        status: "ok",
+        latencyMs: Date.now() - startedAt,
+        retryCount: attempt,
+      });
+      await markActive(conn.id);
+      return busy;
+    } catch (err) {
+      lastErr = err;
+      lastCls = classifyError(err);
+      lastMsg = errorMessage(err);
+      const canRetry =
+        RETRYABLE_CLASSES.includes(lastCls) && attempt < FREEBUSY_RETRY_DELAYS_MS.length;
+      if (canRetry) {
+        await sleep(FREEBUSY_RETRY_DELAYS_MS[attempt]);
+        continue;
+      }
+      break;
+    }
   }
+
+  await writeSyncLog({
+    tenantId: conn.tenantId,
+    connectionId: conn.id,
+    userId,
+    provider: "google",
+    kind: "freebusy",
+    status: "failed",
+    errorClass: lastCls,
+    errorMessage: lastMsg,
+    latencyMs: Date.now() - startedAt,
+    retryCount: FREEBUSY_RETRY_DELAYS_MS.length,
+  });
+  if (lastCls === "auth") await markNeedsReconnect(conn.id, lastMsg);
+  else await incrementFailureCount(conn.id);
+  void lastErr;
+
+  // Fall back to "no external busy" — better to allow a slot that
+  // turns out to be double-booked (rare, manual reschedule available)
+  // than to fail closed on a transient freebusy error and refuse
+  // every booking.
+  return [];
 }
 
 // ─── Internals ─────────────────────────────────────────────────────────
@@ -531,8 +599,21 @@ function safeDecrypt(envelope: string | null | undefined): string | null {
 }
 
 /**
- * Wraps a provider call with timing + sync-log insertion + automatic
- * status flip on auth failure. NEVER throws.
+ * Wraps a provider call with timing + sync-log insertion + retry +
+ * automatic status flip on auth failure. NEVER throws.
+ *
+ * Wave A retry policy:
+ *   - transient (5xx) and rate_limit (429): retried up to 3 times with
+ *     exponential backoff (250ms / 1000ms / 2500ms). Idempotency keys
+ *     and PATCH semantics make every retry safe.
+ *   - auth (401/403): no retry; token won't fix itself. Flip status to
+ *     needs_reconnect + fire dedupe-aware staff email.
+ *   - not_found (404/410): no retry; idempotent success (delete/update
+ *     on a deleted event already converges).
+ *   - config / unknown: no retry; caller's bug or unexpected shape.
+ *
+ * The final retry count is recorded in the sync log so admins can
+ * tell "succeeded after 2 retries" from "succeeded on first try."
  */
 async function runWithLog(args: {
   tenantId: string;
@@ -544,51 +625,77 @@ async function runWithLog(args: {
   onOk?: (result: ExternalEventResult) => Promise<void>;
 }): Promise<SyncResult> {
   const startedAt = Date.now();
-  try {
-    const result = await args.op();
-    await args.onOk?.(result);
-    await writeSyncLog({
-      tenantId: args.tenantId,
-      connectionId: args.connectionId,
-      userId: args.userId,
-      bookingId: args.bookingId,
-      provider: "google",
-      kind: args.kind,
-      status: "ok",
-      externalEventId: result.eventId || undefined,
-      latencyMs: Date.now() - startedAt,
-    });
-    return {
-      status: "ok",
-      provider: "google",
-      eventId: result.eventId,
-      meetLink: result.meetLink,
-    };
-  } catch (err) {
-    const cls = classifyError(err);
-    const msg = errorMessage(err);
-    await writeSyncLog({
-      tenantId: args.tenantId,
-      connectionId: args.connectionId,
-      userId: args.userId,
-      bookingId: args.bookingId,
-      provider: "google",
-      kind: args.kind,
-      status: cls === "not_found" ? "ok" : "failed",
-      errorClass: cls === "not_found" ? undefined : cls,
-      errorMessage: cls === "not_found" ? undefined : msg,
-      latencyMs: Date.now() - startedAt,
-    });
-    if (cls === "auth") {
-      await markNeedsReconnect(args.connectionId, msg);
+  let lastErr: unknown = null;
+  let lastCls: ErrorClass = "unknown";
+  let lastMsg = "";
+
+  for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
+    try {
+      const result = await args.op();
+      await args.onOk?.(result);
+      await writeSyncLog({
+        tenantId: args.tenantId,
+        connectionId: args.connectionId,
+        userId: args.userId,
+        bookingId: args.bookingId,
+        provider: "google",
+        kind: args.kind,
+        status: "ok",
+        externalEventId: result.eventId || undefined,
+        latencyMs: Date.now() - startedAt,
+        retryCount: attempt,
+      });
+      return {
+        status: "ok",
+        provider: "google",
+        eventId: result.eventId,
+        meetLink: result.meetLink,
+      };
+    } catch (err) {
+      lastErr = err;
+      lastCls = classifyError(err);
+      lastMsg = errorMessage(err);
+
+      // Retryable? If so, sleep then loop.
+      const canRetry =
+        RETRYABLE_CLASSES.includes(lastCls) && attempt < RETRY_DELAYS_MS.length;
+      if (canRetry) {
+        await sleep(RETRY_DELAYS_MS[attempt]);
+        continue;
+      }
+      // No retry — break out and log the final outcome below.
+      break;
     }
-    if (cls === "not_found") {
-      // For delete: success. For update: the orchestrator caller decides
-      // whether to recreate (currently no — we just log).
-      return { status: "ok", provider: "google", eventId: "" };
-    }
-    return { status: "failed", errorClass: cls, message: msg };
   }
+
+  // Final outcome path (failed or terminal-success-like not_found).
+  await writeSyncLog({
+    tenantId: args.tenantId,
+    connectionId: args.connectionId,
+    userId: args.userId,
+    bookingId: args.bookingId,
+    provider: "google",
+    kind: args.kind,
+    status: lastCls === "not_found" ? "ok" : "failed",
+    errorClass: lastCls === "not_found" ? undefined : lastCls,
+    errorMessage: lastCls === "not_found" ? undefined : lastMsg,
+    latencyMs: Date.now() - startedAt,
+    retryCount: RETRY_DELAYS_MS.length, // exhausted retries
+  });
+  if (lastCls === "auth") {
+    await markNeedsReconnect(args.connectionId, lastMsg);
+  } else if (lastCls !== "not_found") {
+    // Transient/rate-limit exhausted, or unknown/config — bump the
+    // consecutive-failures counter so a future health-check cron can
+    // surface a degraded connection before it breaks outright.
+    await incrementFailureCount(args.connectionId);
+  }
+  if (lastCls === "not_found") {
+    return { status: "ok", provider: "google", eventId: "" };
+  }
+  // Type-narrow lastErr usage (it's tracked for symmetry / future logging)
+  void lastErr;
+  return { status: "failed", errorClass: lastCls, message: lastMsg };
 }
 
 async function writeSyncLog(row: {
@@ -603,6 +710,9 @@ async function writeSyncLog(row: {
   errorMessage?: string;
   externalEventId?: string;
   latencyMs?: number;
+  /** Wave A — number of retries attempted before this outcome.
+   *  0 = first-attempt success or single-attempt failure. */
+  retryCount?: number;
 }): Promise<void> {
   try {
     await db.insert(calendarSyncLogs).values({
@@ -617,6 +727,7 @@ async function writeSyncLog(row: {
       errorMessage: row.errorMessage ?? null,
       externalEventId: row.externalEventId ?? null,
       latencyMs: row.latencyMs ?? null,
+      retryCount: row.retryCount ?? 0,
     });
   } catch (e) {
     // Never throw from sync logging — defense in depth.
