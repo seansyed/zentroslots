@@ -31,7 +31,7 @@
  */
 
 import "dotenv/config";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 
 import { db } from "../db/client";
 import { bookingSeries, tenants } from "../db/schema";
@@ -56,10 +56,18 @@ const CAPABILITY = "recurring_series" as const;
     const materializeHorizon = new Date(now.getTime() + MATERIALIZE_HORIZON_HOURS * 60 * 60_000);
 
     // PHASE A — generate future occurrence rows for active series.
+    // Skip series that the downgrade orchestrator paused (Phase 5).
+    // The IS NULL predicate is cheap (partial index on enforcement_event_id)
+    // and means an enforcement pause stops generation immediately.
     const activeSeries = await db
       .select()
       .from(bookingSeries)
-      .where(eq(bookingSeries.status, "active"));
+      .where(
+        and(
+          eq(bookingSeries.status, "active"),
+          isNull(bookingSeries.enforcementPausedAt),
+        ),
+      );
 
     // ── Plan-aware execution (Phase 2 billing hardening) ──────────
     // Build a single per-tenant decision map. We hit the tenants table

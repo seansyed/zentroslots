@@ -148,6 +148,23 @@ async function processOne(
     return "skipped";
   }
 
+  // Phase 5 — downgrade enforcement. If the orchestrator paused this
+  // series after the occurrence was generated, halt materialization.
+  // Mark the occurrence as skipped with an enforcement-specific reason
+  // so an admin reading the failure log knows WHY (vs the user-pause
+  // path above). Restoring the series via the recovery executor clears
+  // `enforcement_paused_at` and future occurrences resume.
+  if (series.enforcementPausedAt) {
+    await db
+      .update(bookingOccurrences)
+      .set({
+        status: "skipped",
+        failureReason: `enforcement_paused:${series.enforcementPausedReason ?? "unknown"}`,
+      })
+      .where(eq(bookingOccurrences.id, occ.id));
+    return "skipped";
+  }
+
   const effective = applyOverride({
     seriesStartAt: occ.occurrenceStartAt,
     seriesStaffUserId: series.staffUserId,

@@ -1091,12 +1091,47 @@ export const bookingSeries = pgTable(
     status: varchar("status", { length: 20 }).notNull().default("active"),
     lastMaterializedIndex: integer("last_materialized_index").notNull().default(-1),
     notes: text("notes"),
+    // Phase 5 — downgrade enforcement orchestrator. enforcement_paused_at
+    // is the canonical "paused by orchestrator" marker. Cleared on
+    // reactivation. Independent of the user-set `status` column —
+    // user-pause and enforcement-pause are two separate axes.
+    enforcementPausedAt: timestamp("enforcement_paused_at", { withTimezone: true }),
+    enforcementPausedReason: varchar("enforcement_paused_reason", { length: 60 }),
+    enforcementEventId: varchar("enforcement_event_id", { length: 120 }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
     tenantIdx: index("booking_series_tenant_idx").on(t.tenantId),
     statusIdx: index("booking_series_status_idx").on(t.status),
+    enforcementEventIdx: index("booking_series_enforcement_event_idx").on(t.enforcementEventId),
+  })
+);
+
+// ─── Tenant enforcement overrides ───────────────────────────────────────
+// Operator-controlled per-(tenant, capability) policy override (Phase 5).
+// Default policy resolution lives in lib/billing/enforcement/policies.ts;
+// rows here override the default for a specific tenant + capability.
+// `expires_at` supports time-bounded grace periods (set on
+// support/sales escalations); NULL = no expiry.
+export const tenantEnforcementOverrides = pgTable(
+  "tenant_enforcement_overrides",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    capability: varchar("capability", { length: 60 }).notNull(),
+    mode: varchar("mode", { length: 20 }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    grantedBy: varchar("granted_by", { length: 120 }),
+    reason: text("reason"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    uniq: uniqueIndex("tenant_enforcement_overrides_unique").on(t.tenantId, t.capability),
+    tenantIdx: index("tenant_enforcement_overrides_tenant_idx").on(t.tenantId),
   })
 );
 
