@@ -378,20 +378,33 @@ export async function POST(req: NextRequest) {
     // ALWAYS best-effort — wrapped in try/catch so the booking commits
     // regardless of the calendar provider's state. Meet link gating
     // applies only when the service is video-enabled.
-    const wantMeet = service.videoProvider === "google_meet" && features.googleMeet;
+    // Wave C — Teams meeting support. A service flagged
+    // `videoProvider === "teams"` requests a Teams join URL from
+    // Microsoft Graph alongside the Outlook event; orchestrator
+    // routes to the staff's Microsoft connection if one exists.
+    // `googleMeet` feature flag still gates Meet specifically because
+    // a workspace may want to allow video bookings overall but disable
+    // Meet auto-creation; Teams reuses the same flag since both are
+    // tenant-level "auto-create video link" toggles.
+    const wantVideo =
+      (service.videoProvider === "google_meet" || service.videoProvider === "teams") &&
+      features.googleMeet;
     try {
       const result = await onBookingCreated({
         booking: row,
         staff,
         serviceName: service.name,
-        videoConference: wantMeet,
+        videoConference: wantVideo,
+        videoProviderHint: service.videoProvider,
       });
       if (result.status === "ok" && result.eventId) {
         // Reflect orchestrator's writes back onto the in-memory row so
-        // the response carries them.
-        row.googleEventId = result.eventId;
+        // the response carries them. `externalEventProvider` mirrors
+        // whichever adapter actually serviced the create — could be
+        // google or microsoft.
         row.externalEventId = result.eventId;
-        row.externalEventProvider = "google";
+        row.externalEventProvider = result.provider;
+        if (result.provider === "google") row.googleEventId = result.eventId;
         if (result.meetLink) row.meetLink = result.meetLink;
       }
     } catch (gErr) {

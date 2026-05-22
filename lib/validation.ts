@@ -17,17 +17,16 @@ export const loginSchema = z.object({
   password: z.string().min(1),
 });
 
-// Wave A consolidation: `zoom` and `teams` are intentionally removed from
-// the WRITE schema. The orchestrator has no integration for either, so
-// previously a service flagged `videoProvider="zoom"` (or `"teams"`) would
-// accept bookings, send a confirmation email, and silently produce NO
-// meeting link — confusing both the host and the customer.
+// Wave A consolidation removed `zoom` and `teams` because neither had a
+// working backend integration — silent meet-link failures resulted.
 //
-// Read paths still tolerate legacy stored values (we do NOT migrate the
-// column or rewrite existing rows); only NEW writes are constrained. UI
-// should hide/disable the unsupported options. Coming-soon copy lives in
-// the service settings page, not here.
-const videoProviderSchema = z.enum(["google_meet", "none"]);
+// Wave C re-enables `teams`: the Microsoft Graph adapter now creates
+// Teams online meetings as part of event creation. `zoom` stays
+// excluded — no Zoom API integration yet.
+//
+// Read paths still tolerate legacy stored values (we never migrate or
+// rewrite the column); only NEW writes are constrained.
+const videoProviderSchema = z.enum(["google_meet", "teams", "none"]);
 
 export const serviceSchema = z.object({
   name: z.string().min(1).max(120),

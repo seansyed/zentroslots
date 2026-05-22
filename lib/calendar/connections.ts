@@ -44,9 +44,30 @@ export async function isProviderConnected(
   return Boolean(row);
 }
 
-/** Convenience shorthand for the only wired provider today. */
+/** Convenience shorthand — Google. */
 export async function isGoogleConnected(userId: string): Promise<boolean> {
   return isProviderConnected(userId, "google");
+}
+
+/** Convenience shorthand — Microsoft (Wave C). */
+export async function isMicrosoftConnected(userId: string): Promise<boolean> {
+  return isProviderConnected(userId, "microsoft");
+}
+
+/**
+ * Wave C — true if the user has any active provider connection.
+ * Useful for the "your calendar is connected" trust signal on the
+ * dashboard, where we don't care WHICH provider the staff chose.
+ */
+export async function isAnyCalendarConnected(userId: string): Promise<boolean> {
+  const row = await db.query.calendarConnections.findFirst({
+    where: and(
+      eq(calendarConnections.userId, userId),
+      eq(calendarConnections.status, "active"),
+    ),
+    columns: { id: true },
+  });
+  return Boolean(row);
 }
 
 /**
@@ -110,4 +131,9 @@ export async function getProviderHealth(
 
 export async function getGoogleHealth(userId: string): Promise<ConnectionHealthSummary> {
   return getProviderHealth(userId, "google");
+}
+
+/** Wave C — same shape, but for the Microsoft connection. */
+export async function getMicrosoftHealth(userId: string): Promise<ConnectionHealthSummary> {
+  return getProviderHealth(userId, "microsoft");
 }

@@ -108,17 +108,15 @@ const DEFAULT_COLORS = [
   "#db2777", "#65a30d", "#0891b2", "#c026d3",
 ];
 
-// Wave A consolidation: Zoom/Teams are flagged `disabled: true` until the
-// orchestrator ships native integration. Showing them clickable in
-// previous releases caused silent meet-link failures — services would
-// accept bookings but generate no link, customers and hosts both
-// confused. Now disabled with a clear "Coming soon" label; the API
-// also rejects writes (see lib/validation.ts).
+// Wave C — Teams is now LIVE. The Microsoft Graph adapter creates a
+// Teams online meeting alongside the Outlook event in a single Graph
+// call; the join URL is stored on the booking like a Meet link.
+// Zoom remains disabled (no Zoom adapter yet — would silently fail).
 const PROVIDERS = [
-  { id: "google_meet", label: "Google Meet",     note: "Auto-creates a Meet link",                            disabled: false },
-  { id: "zoom",        label: "Zoom",            note: "Coming soon · native OAuth integration in progress",  disabled: true  },
-  { id: "teams",       label: "Microsoft Teams", note: "Coming soon · native OAuth integration in progress",  disabled: true  },
-  { id: "none",        label: "No video",        note: "In-person or phone",                                   disabled: false },
+  { id: "google_meet", label: "Google Meet",     note: "Auto-creates a Meet link via the staff's Google connection",       disabled: false },
+  { id: "teams",       label: "Microsoft Teams", note: "Auto-creates a Teams meeting via the staff's Microsoft connection", disabled: false },
+  { id: "zoom",        label: "Zoom",            note: "Coming soon · native OAuth integration in progress",                disabled: true  },
+  { id: "none",        label: "No video",        note: "In-person or phone",                                                  disabled: false },
 ] as const;
 
 const DELIVERY_MODE_OPTIONS = [

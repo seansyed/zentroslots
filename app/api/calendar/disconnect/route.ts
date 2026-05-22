@@ -37,16 +37,20 @@ export async function POST(req: NextRequest) {
 
     await disconnect(conn.id);
 
-    // Also clear the legacy users.google_* columns so the old
-    // IntegrationsClient stops showing "connected" for this user.
-    await db
-      .update(users)
-      .set({
-        googleRefreshToken: null,
-        googleStatus: null,
-        googleLastErrorAt: null,
-      })
-      .where(and(eq(users.id, conn.userId), eq(users.tenantId, caller.tenantId)));
+    // Wave C — legacy users.google_* cleanup only applies when the row
+    // being disconnected is the Google one. A Microsoft disconnect
+    // must not touch the Google legacy columns (the user may still
+    // have a Google connection that we'd silently break).
+    if (conn.provider === "google") {
+      await db
+        .update(users)
+        .set({
+          googleRefreshToken: null,
+          googleStatus: null,
+          googleLastErrorAt: null,
+        })
+        .where(and(eq(users.id, conn.userId), eq(users.tenantId, caller.tenantId)));
+    }
 
     audit({
       tenantId: caller.tenantId,

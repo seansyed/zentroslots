@@ -5,12 +5,23 @@
  * lib/calendar/sync.ts (the orchestrator) and implementing the
  * CalendarProviderAdapter interface in a new module. The DB stores
  * provider as varchar so future additions don't need migrations.
+ *
+ * Wave C — `microsoft` joined the union. Conceptually it covers both
+ * Outlook calendar reads/writes AND Teams online-meeting links: a
+ * single Graph API call creates an event with `isOnlineMeeting: true`
+ * and gets back the Teams join URL alongside the event id. So one
+ * connection (and one provider row in calendar_connections) services
+ * both responsibilities — no separate "teams" provider entry needed.
  */
 
-export type CalendarProvider = "google";
-// Future: | "outlook" | "office365"
+export type CalendarProvider = "google" | "microsoft";
 
-export const CALENDAR_PROVIDERS: readonly CalendarProvider[] = ["google"] as const;
+export const CALENDAR_PROVIDERS: readonly CalendarProvider[] = ["google", "microsoft"] as const;
+
+/** Type guard for runtime values arriving from DB or URL params. */
+export function isCalendarProvider(v: unknown): v is CalendarProvider {
+  return v === "google" || v === "microsoft";
+}
 
 export type ConnectionStatus =
   | "active"

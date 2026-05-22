@@ -445,7 +445,15 @@ function shell(body: string): string {
  */
 function videoLinkRow(b: BookingForEmail): string {
   if (b.meetLink) {
-    return `<div class="row"><span class="label">Meet link:</span> <a href="${escape(b.meetLink)}">${escape(b.meetLink)}</a></div>`;
+    // Wave C — label changes per provider so a Teams link reads as
+    // "Teams link" instead of the legacy "Meet link" (which made
+    // every video meeting feel like a Google Meet).
+    const provider = (b.videoProvider ?? "").toLowerCase();
+    const label =
+      provider === "teams" ? "Teams link" :
+      provider === "zoom" ? "Zoom link" :
+      "Meet link";
+    return `<div class="row"><span class="label">${label}:</span> <a href="${escape(b.meetLink)}">${escape(b.meetLink)}</a></div>`;
   }
   const provider = (b.videoProvider ?? "").toLowerCase();
   const isVideoService = provider === "google_meet" || provider === "zoom" || provider === "teams";
@@ -495,7 +503,11 @@ function actionButtons(b: BookingForEmail): string {
  * service with missing link / non-video).
  */
 function videoLineText(b: BookingForEmail): string {
-  if (b.meetLink) return `Meet: ${b.meetLink}\n`;
+  if (b.meetLink) {
+    const provider = (b.videoProvider ?? "").toLowerCase();
+    const label = provider === "teams" ? "Teams" : provider === "zoom" ? "Zoom" : "Meet";
+    return `${label}: ${b.meetLink}\n`;
+  }
   const provider = (b.videoProvider ?? "").toLowerCase();
   const isVideoService = provider === "google_meet" || provider === "zoom" || provider === "teams";
   if (!isVideoService) return "";

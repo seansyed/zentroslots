@@ -18,11 +18,11 @@ const patchSchema = z.object({
   bufferAfter: z.number().int().min(0).max(240).optional(),
   color: z.string().regex(/^#[0-9a-fA-F]{6}$/).nullable().optional(),
   isActive: z.union([z.number().int().min(0).max(1), z.boolean()]).optional(),
-  // Wave A: `zoom` and `teams` removed — orchestrator has no integration
-  // for either provider, so accepting them caused silent meet-link
-  // failures at booking time. See lib/validation.ts for the full note.
-  // Legacy stored values still read fine; only new writes are constrained.
-  videoProvider: z.enum(["google_meet", "none"]).optional(),
+  // Wave A removed zoom + teams because both silently failed.
+  // Wave C re-enabled teams — Microsoft Graph adapter creates Teams
+  // online meetings as part of event creation. Zoom remains out
+  // until a Zoom adapter ships.
+  videoProvider: z.enum(["google_meet", "teams", "none"]).optional(),
   staffUserIds: z.array(z.string().uuid()).optional(),
   // Direct department ownership (migration 0032). Pass `null` to
   // clear the assignment, a uuid to assign, or omit to leave the

@@ -113,9 +113,10 @@ function prettyProvider(p: string): string {
   switch (p) {
     case "google":
       return "Google Calendar";
+    case "microsoft":  // Wave C — canonical provider id in calendar_connections
     case "outlook":
     case "office365":
-      return "Outlook";
+      return "Microsoft Outlook";
     case "apple":
       return "iCloud";
     case "teams":
@@ -129,7 +130,7 @@ function prettyProvider(p: string): string {
 
 function providerConferencing(p: string): string {
   if (p === "google") return "Google Meet";
-  if (p === "outlook" || p === "office365") return "Teams";
+  if (p === "microsoft" || p === "outlook" || p === "office365") return "Microsoft Teams";
   return "—";
 }
 
@@ -138,7 +139,8 @@ function providerConferencing(p: string): string {
  *  + table row labels where we want a calm wrapper around the icon. */
 function providerTone(p: string): string {
   if (p === "google") return "bg-sky-50 text-sky-700 ring-sky-200/60";
-  if (p === "outlook" || p === "office365") return "bg-indigo-50 text-indigo-700 ring-indigo-200/60";
+  if (p === "microsoft" || p === "outlook" || p === "office365")
+    return "bg-indigo-50 text-indigo-700 ring-indigo-200/60";
   if (p === "teams") return "bg-violet-50 text-violet-700 ring-violet-200/60";
   if (p === "zoom") return "bg-sky-50 text-sky-700 ring-sky-200/60";
   if (p === "apple") return "bg-rose-50 text-rose-700 ring-rose-200/60";
@@ -152,6 +154,10 @@ function providerTone(p: string): string {
 // providers render in monochrome ("we know about it, not yet
 // integrated") while connected providers paint in brand color.
 
+// Wave C — `microsoft` is the canonical provider id stored in
+// calendar_connections.provider. `outlook` is kept as a UI catalog
+// entry for visual symmetry; it points to the same connection model
+// under the hood.
 type ProviderId = "google" | "outlook" | "teams" | "zoom";
 type ProviderKind = "calendar" | "conferencing";
 type ProviderTone = "color" | "mono";
@@ -176,17 +182,17 @@ const PROVIDER_CATALOG: Array<{
     id: "outlook",
     name: "Outlook Calendar",
     kind: "calendar",
-    live: false,
+    live: true, // Wave C — Microsoft Graph adapter shipped
     brandColor: "#0078D4",
-    rationale: "Microsoft Graph adapter on the roadmap.",
+    rationale: "Two-way sync via Microsoft Graph + Teams meeting links.",
   },
   {
     id: "teams",
     name: "Microsoft Teams",
     kind: "conferencing",
-    live: false,
+    live: true, // Wave C — rides on the Outlook connection
     brandColor: "#6264A7",
-    rationale: "Conferencing channel; lands with the Outlook adapter.",
+    rationale: "Auto-created when a service uses the Teams video provider; piggybacks on the staff's Outlook connection.",
   },
   {
     id: "zoom",
@@ -209,10 +215,15 @@ function ProviderIcon({
 }) {
   // Color resolves from catalog when available; falls back to
   // ink-subtle for unknown providers we still want to render.
-  const meta = PROVIDER_CATALOG.find((p) => p.id === id);
+  //
+  // Wave C — `microsoft` (the DB provider id) is aliased to `outlook`
+  // for icon lookup so connection rows persisted with `provider="microsoft"`
+  // render the Outlook glyph + Microsoft blue.
+  const lookupId = id === "microsoft" ? "outlook" : id;
+  const meta = PROVIDER_CATALOG.find((p) => p.id === lookupId);
   const fill = tone === "color" ? meta?.brandColor ?? "#94a3b8" : "#94a3b8";
   const common = { className: cn("inline-block", className), fill };
-  switch (id) {
+  switch (lookupId) {
     case "google":
       return (
         <svg viewBox="0 0 24 24" {...common}>

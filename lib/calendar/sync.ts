@@ -65,7 +65,7 @@
  * they can ignore on failure (booking still commits). This is the
  * "additive" rule: a failing sync NEVER blocks a booking action.
  */
-import { and, desc, eq, gte, lt, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, lt, sql } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import {
@@ -85,13 +85,22 @@ import {
   type SyncKind,
 } from "./types";
 import {
-  classifyError,
+  classifyError as googleClassifyError,
   createEvent as googleCreateEvent,
   deleteEvent as googleDeleteEvent,
-  errorMessage,
+  errorMessage as googleErrorMessage,
   getBusy as googleGetBusy,
   updateEvent as googleUpdateEvent,
 } from "./google";
+import {
+  classifyError as microsoftClassifyError,
+  createEvent as microsoftCreateEvent,
+  deleteEvent as microsoftDeleteEvent,
+  errorMessage as microsoftErrorMessage,
+  getBusy as microsoftGetBusy,
+  refreshAccessToken as microsoftRefreshAccessToken,
+  updateEvent as microsoftUpdateEvent,
+} from "./microsoft";
 import { notifyReconnectRequired } from "./notifyReconnect";
 
 // ─── Retry policy ──────────────────────────────────────────────────────
@@ -109,6 +118,85 @@ const RETRYABLE_CLASSES: readonly ErrorClass[] = ["transient", "rate_limit"];
 
 function sleep(ms: number): Promise<void> {
   return new Promise((res) => setTimeout(res, ms));
+}
+
+// ─── Provider-aware error helpers ──────────────────────────────────────
+// Both adapters expose `classifyError` and `errorMessage` with identical
+// signatures but each understands its own provider's quirks (Google's
+// `invalid_grant` vs. Microsoft's `AADSTS70008`, etc). We pick the
+// right one based on which adapter raised the error.
+
+function classifyError(provider: CalendarProvider, err: unknown): ErrorClass {
+  return provider === "google" ? googleClassifyError(err) : microsoftClassifyError(err);
+}
+
+function errorMessage(provider: CalendarProvider, err: unknown): string {
+  return provider === "google" ? googleErrorMessage(err) : microsoftErrorMessage(err);
+}
+
+// ─── Microsoft access-token cache ──────────────────────────────────────
+// Microsoft tokens are bearer tokens with a ~1h lifetime. Refreshing on
+// every call is correct but slow (an extra round-trip to login.micro
+// soft.com on each Graph operation). To keep the freebusy hot path
+// reasonable we cache the access token on the calendar_connections row
+// itself (already has accessTokenEncrypted + accessTokenExpiresAt
+// columns from migration 0019). The cache logic:
+//
+//   1. Read the row. If accessTokenEncrypted is present AND
+//      accessTokenExpiresAt is > 60s from now, use it directly.
+//   2. Otherwise refresh: decrypt the refresh token, call
+//      refreshAccessToken(), encrypt + persist BOTH new tokens
+//      (Microsoft rolling-refresh rotates the refresh token too).
+//   3. Return the access token.
+//
+// The 60s safety margin protects against clock skew + in-flight calls
+// that might take a few seconds to reach Graph after our local check.
+//
+// Failure handling is BEST EFFORT: if the persist step fails we still
+// return the fresh token so the current operation succeeds; the next
+// call just refreshes again (slightly more load on login endpoint,
+// but no functional break).
+const TOKEN_REFRESH_SAFETY_MS = 60_000;
+
+async function getMicrosoftAccessToken(
+  conn: typeof calendarConnections.$inferSelect,
+): Promise<string | null> {
+  // Fast path: usable cached access token.
+  if (
+    conn.accessTokenEncrypted &&
+    conn.accessTokenExpiresAt &&
+    conn.accessTokenExpiresAt.getTime() - Date.now() > TOKEN_REFRESH_SAFETY_MS
+  ) {
+    const cached = safeDecrypt(conn.accessTokenEncrypted);
+    if (cached) return cached;
+    // Fall through to refresh if the cache is corrupt.
+  }
+
+  const refreshToken = safeDecrypt(conn.refreshTokenEncrypted);
+  if (!refreshToken) return null;
+
+  const refreshed = await microsoftRefreshAccessToken(refreshToken);
+
+  // Persist the new pair. Microsoft rolling-refresh means the refresh
+  // token itself may have rotated — we MUST store the new one or the
+  // chain breaks 24h later.
+  try {
+    const newRefreshEnc = encryptSecret(refreshed.refreshToken)!;
+    const newAccessEnc = encryptSecret(refreshed.accessToken);
+    await db
+      .update(calendarConnections)
+      .set({
+        refreshTokenEncrypted: newRefreshEnc,
+        accessTokenEncrypted: newAccessEnc,
+        accessTokenExpiresAt: refreshed.expiresAt,
+        updatedAt: new Date(),
+      })
+      .where(eq(calendarConnections.id, conn.id));
+  } catch (e) {
+    console.error("[calendar/sync] microsoft token persist failed (non-fatal):", e);
+  }
+
+  return refreshed.accessToken;
 }
 
 // ─── Public result type ────────────────────────────────────────────────
@@ -133,6 +221,73 @@ export async function getActiveConnection(
   if (!row) return null;
   if (row.status === "disconnected") return null;
   return row;
+}
+
+/**
+ * Wave C — return all non-disconnected connections for a user across
+ * every provider. Used by `getExternalBusyForUser` so a staff member
+ * with both a Google and a Microsoft calendar gets busy-time from
+ * both subtracted from their bookable window. Returns active +
+ * needs_reconnect rows; the freebusy code path skips needs_reconnect
+ * defensively but they're still returned here for callers (e.g. UI)
+ * that want to display the full set.
+ */
+export async function getAllNonDisconnectedConnections(
+  userId: string,
+): Promise<(typeof calendarConnections.$inferSelect)[]> {
+  return await db.query.calendarConnections.findMany({
+    where: and(
+      eq(calendarConnections.userId, userId),
+      inArray(calendarConnections.status, ["active", "needs_reconnect"] as const),
+    ),
+  });
+}
+
+/**
+ * Wave C — pick the connection to USE for a booking write (create /
+ * update / delete).
+ *
+ * Priority order:
+ *   1. If the booking already has an externalEventProvider, honor it —
+ *      this ensures a reschedule talks to the SAME provider that
+ *      created the event originally, never accidentally switching
+ *      providers mid-lifecycle.
+ *   2. Otherwise prefer the provider matching the service's
+ *      `videoProvider` hint: `google_meet` → google, `teams` →
+ *      microsoft. (For "none" we just pick whichever connection
+ *      exists.)
+ *   3. Fall back to the first active connection found, preferring
+ *      google for backward-compatibility with pre-Wave-C bookings.
+ *
+ * Returns null if the user has no usable active connection.
+ */
+export async function pickConnectionForWrite(args: {
+  userId: string;
+  /** existing booking column — set on reschedule/cancel */
+  existingProvider?: CalendarProvider | null;
+  /** service-level video hint — set on create */
+  videoProviderHint?: string | null;
+}): Promise<typeof calendarConnections.$inferSelect | null> {
+  // Honor existing provider locked-in by a prior create.
+  if (args.existingProvider) {
+    return await getActiveConnection(args.userId, args.existingProvider);
+  }
+  // Resolve preferred provider from video hint.
+  let preferred: CalendarProvider | null = null;
+  if (args.videoProviderHint === "google_meet") preferred = "google";
+  else if (args.videoProviderHint === "teams") preferred = "microsoft";
+  if (preferred) {
+    const match = await getActiveConnection(args.userId, preferred);
+    if (match && match.status === "active") return match;
+  }
+  // Fall back to ANY active connection; prefer google so existing
+  // bookings on tenants that haven't connected Microsoft yet behave
+  // exactly as before.
+  const google = await getActiveConnection(args.userId, "google");
+  if (google && google.status === "active") return google;
+  const microsoft = await getActiveConnection(args.userId, "microsoft");
+  if (microsoft && microsoft.status === "active") return microsoft;
+  return null;
 }
 
 /** Look up by tenant + connection id, with tenant-isolation enforced.
@@ -323,6 +478,93 @@ export async function upsertGoogleConnection(args: {
   return connectionId;
 }
 
+/**
+ * Wave C — upsert a Microsoft connection after a successful OAuth
+ * exchange. Same shape as `upsertGoogleConnection` so the callback
+ * route can be a near-mirror; only the persisted `provider` value
+ * and the absence of legacy-column dual-writes differ.
+ *
+ * Microsoft tokens require explicit accessTokenEncrypted caching
+ * (Google's SDK manages this internally; for Graph we own it). So
+ * we ALWAYS persist the access token alongside the refresh token —
+ * the orchestrator's `getMicrosoftAccessToken` honors the cache to
+ * skip refresh round-trips on the freebusy hot path.
+ */
+export async function upsertMicrosoftConnection(args: {
+  tenantId: string;
+  userId: string;
+  refreshTokenPlain: string;
+  accessTokenPlain: string | null;
+  accessTokenExpiresAt: Date | null;
+  accountEmail: string | null;
+  scopes: string[];
+  /** Microsoft's calendar identifier — we use the canonical "primary"
+   *  alias which Graph resolves to the user's default calendar. */
+  calendarId?: string;
+}): Promise<string> {
+  const refreshEnc = encryptSecret(args.refreshTokenPlain)!;
+  const accessEnc = encryptSecret(args.accessTokenPlain);
+
+  const existing = await db.query.calendarConnections.findFirst({
+    where: and(
+      eq(calendarConnections.userId, args.userId),
+      eq(calendarConnections.provider, "microsoft"),
+    ),
+  });
+
+  let connectionId: string;
+  if (existing) {
+    await db
+      .update(calendarConnections)
+      .set({
+        tenantId: args.tenantId,
+        status: "active",
+        refreshTokenEncrypted: refreshEnc,
+        accessTokenEncrypted: accessEnc,
+        accessTokenExpiresAt: args.accessTokenExpiresAt,
+        accountEmail: args.accountEmail,
+        scopes: args.scopes,
+        calendarId: args.calendarId ?? existing.calendarId ?? "primary",
+        lastError: null,
+        lastErrorAt: null,
+        lastSyncedAt: new Date(),
+        consecutiveFailures: 0,
+        updatedAt: new Date(),
+      })
+      .where(eq(calendarConnections.id, existing.id));
+    connectionId = existing.id;
+  } else {
+    const [row] = await db
+      .insert(calendarConnections)
+      .values({
+        tenantId: args.tenantId,
+        userId: args.userId,
+        provider: "microsoft",
+        status: "active",
+        refreshTokenEncrypted: refreshEnc,
+        accessTokenEncrypted: accessEnc,
+        accessTokenExpiresAt: args.accessTokenExpiresAt,
+        accountEmail: args.accountEmail,
+        scopes: args.scopes,
+        calendarId: args.calendarId ?? "primary",
+        lastSyncedAt: new Date(),
+      })
+      .returning({ id: calendarConnections.id });
+    connectionId = row.id;
+  }
+
+  await writeSyncLog({
+    tenantId: args.tenantId,
+    connectionId,
+    userId: args.userId,
+    provider: "microsoft",
+    kind: "connect",
+    status: "ok",
+  });
+
+  return connectionId;
+}
+
 // ─── Booking lifecycle ─────────────────────────────────────────────────
 
 export async function onBookingCreated(args: {
@@ -330,23 +572,24 @@ export async function onBookingCreated(args: {
   staff: User;
   serviceName: string;
   videoConference: boolean;
+  /** Wave C — service-level video hint used to pick the provider.
+   *  Optional for backward compat with callers that only set
+   *  `videoConference`. */
+  videoProviderHint?: string | null;
 }): Promise<SyncResult> {
-  const conn = await getActiveConnection(args.staff.id, "google");
-  if (!conn || conn.status !== "active") {
-    return { status: "skipped", reason: conn ? `connection_${conn.status}` : "no_connection" };
+  // Wave C — pick provider based on the service's video hint. Falls
+  // back to whichever provider is connected if no preference is set.
+  const conn = await pickConnectionForWrite({
+    userId: args.staff.id,
+    videoProviderHint: args.videoProviderHint ?? null,
+  });
+  if (!conn) {
+    return { status: "skipped", reason: "no_connection" };
   }
-
-  const refreshToken = safeDecrypt(conn.refreshTokenEncrypted);
-  if (!refreshToken) {
-    // Legacy plaintext or malformed envelope — flip to reconnect.
-    await markNeedsReconnect(conn.id, "Stored credential could not be decrypted");
-    await writeSyncLog({
-      tenantId: args.booking.tenantId, connectionId: conn.id, userId: args.staff.id,
-      bookingId: args.booking.id, provider: "google", kind: "create",
-      status: "failed", errorClass: "auth", errorMessage: "decrypt_failed",
-    });
-    return { status: "failed", errorClass: "auth", message: "decrypt_failed" };
+  if (conn.status !== "active") {
+    return { status: "skipped", reason: `connection_${conn.status}` };
   }
+  const provider = conn.provider as CalendarProvider;
 
   const draft = buildDraft({
     booking: args.booking,
@@ -355,27 +598,52 @@ export async function onBookingCreated(args: {
     videoConference: args.videoConference,
   });
 
-  return await runWithLog({
-    tenantId: args.booking.tenantId,
-    connectionId: conn.id,
-    userId: args.staff.id,
-    bookingId: args.booking.id,
-    kind: "create",
-    op: () =>
-      googleCreateEvent({
+  // Provider-specific call wrapped inside runWithLog so retries +
+  // logging + status flip all behave identically across providers.
+  const op = async (): Promise<ExternalEventResult> => {
+    if (provider === "google") {
+      const refreshToken = safeDecrypt(conn.refreshTokenEncrypted);
+      if (!refreshToken) {
+        await markNeedsReconnect(conn.id, "Stored credential could not be decrypted");
+        throw makeAuthError("decrypt_failed");
+      }
+      return googleCreateEvent({
         refreshToken,
         calendarId: conn.calendarId,
         draft,
-      }),
+      });
+    }
+    // microsoft
+    const accessToken = await getMicrosoftAccessToken(conn);
+    if (!accessToken) {
+      await markNeedsReconnect(conn.id, "Microsoft token refresh failed");
+      throw makeAuthError("token_refresh_failed");
+    }
+    return microsoftCreateEvent({ accessToken, draft });
+  };
+
+  return await runWithLog({
+    tenantId: args.booking.tenantId,
+    connectionId: conn.id,
+    provider,
+    userId: args.staff.id,
+    bookingId: args.booking.id,
+    kind: "create",
+    op,
     onOk: async (result) => {
       // Persist the provider event id on the booking so future updates
-      // can target it. Keep googleEventId populated for backward compat.
+      // can target it. `externalEventProvider` records WHICH provider
+      // owns the event so reschedule/cancel route back to the same
+      // adapter. `googleEventId` stays populated for Google rows so
+      // pre-Wave-C readers keep working; for Microsoft rows it's
+      // intentionally left null and the new `externalEventId` is the
+      // source of truth.
       await db
         .update(bookings)
         .set({
-          googleEventId: result.eventId,
+          googleEventId: provider === "google" ? result.eventId : null,
           externalEventId: result.eventId,
-          externalEventProvider: "google",
+          externalEventProvider: provider,
           meetLink: result.meetLink,
         })
         .where(eq(bookings.id, args.booking.id));
@@ -389,10 +657,21 @@ export async function onBookingRescheduled(args: {
   staff: User;
   serviceName: string;
 }): Promise<SyncResult> {
-  const conn = await getActiveConnection(args.staff.id, "google");
-  if (!conn || conn.status !== "active") {
-    return { status: "skipped", reason: conn ? `connection_${conn.status}` : "no_connection" };
+  // Wave C — reschedule must hit the SAME provider that created the
+  // event. Honor externalEventProvider; fall back to "google" for
+  // pre-Wave-C bookings where the column is null.
+  const lockedProvider = (args.booking.externalEventProvider as CalendarProvider | null) ?? null;
+  const conn = await pickConnectionForWrite({
+    userId: args.staff.id,
+    existingProvider: lockedProvider ?? "google",
+  });
+  if (!conn) {
+    return { status: "skipped", reason: "no_connection" };
   }
+  if (conn.status !== "active") {
+    return { status: "skipped", reason: `connection_${conn.status}` };
+  }
+  const provider = conn.provider as CalendarProvider;
 
   // External event id may live in either column (legacy googleEventId
   // or new externalEventId). Try new first, fall back to legacy.
@@ -401,29 +680,49 @@ export async function onBookingRescheduled(args: {
     return { status: "skipped", reason: "no_external_event" };
   }
 
-  const refreshToken = safeDecrypt(conn.refreshTokenEncrypted);
-  if (!refreshToken) {
-    await markNeedsReconnect(conn.id, "Stored credential could not be decrypted");
-    return { status: "failed", errorClass: "auth", message: "decrypt_failed" };
-  }
-
-  return await runWithLog({
-    tenantId: args.booking.tenantId,
-    connectionId: conn.id,
-    userId: args.staff.id,
-    bookingId: args.booking.id,
-    kind: "update",
-    op: async () => {
+  const op = async (): Promise<ExternalEventResult> => {
+    const summary = `${args.serviceName} with ${args.booking.clientName}`;
+    if (provider === "google") {
+      const refreshToken = safeDecrypt(conn.refreshTokenEncrypted);
+      if (!refreshToken) {
+        await markNeedsReconnect(conn.id, "Stored credential could not be decrypted");
+        throw makeAuthError("decrypt_failed");
+      }
       await googleUpdateEvent({
         refreshToken,
         calendarId: conn.calendarId,
         eventId,
         startAt: args.booking.startAt,
         endAt: args.booking.endAt,
-        summary: `${args.serviceName} with ${args.booking.clientName}`,
+        summary,
       });
-      return { eventId, meetLink: null } satisfies ExternalEventResult;
-    },
+      return { eventId, meetLink: null };
+    }
+    // microsoft — PATCH /me/events/{id}. Teams meeting URL stays
+    // attached to the event server-side; we don't touch isOnlineMeeting.
+    const accessToken = await getMicrosoftAccessToken(conn);
+    if (!accessToken) {
+      await markNeedsReconnect(conn.id, "Microsoft token refresh failed");
+      throw makeAuthError("token_refresh_failed");
+    }
+    await microsoftUpdateEvent({
+      accessToken,
+      eventId,
+      startAt: args.booking.startAt,
+      endAt: args.booking.endAt,
+      summary,
+    });
+    return { eventId, meetLink: null };
+  };
+
+  return await runWithLog({
+    tenantId: args.booking.tenantId,
+    connectionId: conn.id,
+    provider,
+    userId: args.staff.id,
+    bookingId: args.booking.id,
+    kind: "update",
+    op,
     onOk: async () => {
       await markActive(conn.id);
     },
@@ -434,34 +733,55 @@ export async function onBookingCancelled(args: {
   booking: typeof bookings.$inferSelect;
   staff: User;
 }): Promise<SyncResult> {
-  const conn = await getActiveConnection(args.staff.id, "google");
-  if (!conn || conn.status !== "active") {
-    return { status: "skipped", reason: conn ? `connection_${conn.status}` : "no_connection" };
+  // Same provider-locking logic as reschedule — cancel must talk to
+  // the provider that owns the event.
+  const lockedProvider = (args.booking.externalEventProvider as CalendarProvider | null) ?? null;
+  const conn = await pickConnectionForWrite({
+    userId: args.staff.id,
+    existingProvider: lockedProvider ?? "google",
+  });
+  if (!conn) {
+    return { status: "skipped", reason: "no_connection" };
   }
+  if (conn.status !== "active") {
+    return { status: "skipped", reason: `connection_${conn.status}` };
+  }
+  const provider = conn.provider as CalendarProvider;
 
   const eventId = args.booking.externalEventId ?? args.booking.googleEventId;
   if (!eventId) return { status: "skipped", reason: "no_external_event" };
 
-  const refreshToken = safeDecrypt(conn.refreshTokenEncrypted);
-  if (!refreshToken) {
-    await markNeedsReconnect(conn.id, "Stored credential could not be decrypted");
-    return { status: "failed", errorClass: "auth", message: "decrypt_failed" };
-  }
-
-  return await runWithLog({
-    tenantId: args.booking.tenantId,
-    connectionId: conn.id,
-    userId: args.staff.id,
-    bookingId: args.booking.id,
-    kind: "delete",
-    op: async () => {
+  const op = async (): Promise<ExternalEventResult> => {
+    if (provider === "google") {
+      const refreshToken = safeDecrypt(conn.refreshTokenEncrypted);
+      if (!refreshToken) {
+        await markNeedsReconnect(conn.id, "Stored credential could not be decrypted");
+        throw makeAuthError("decrypt_failed");
+      }
       await googleDeleteEvent({
         refreshToken,
         calendarId: conn.calendarId,
         eventId,
       });
-      return { eventId, meetLink: null } satisfies ExternalEventResult;
-    },
+      return { eventId, meetLink: null };
+    }
+    const accessToken = await getMicrosoftAccessToken(conn);
+    if (!accessToken) {
+      await markNeedsReconnect(conn.id, "Microsoft token refresh failed");
+      throw makeAuthError("token_refresh_failed");
+    }
+    await microsoftDeleteEvent({ accessToken, eventId });
+    return { eventId, meetLink: null };
+  };
+
+  return await runWithLog({
+    tenantId: args.booking.tenantId,
+    connectionId: conn.id,
+    provider,
+    userId: args.staff.id,
+    bookingId: args.booking.id,
+    kind: "delete",
+    op,
     onOk: async () => {
       // Clear the external id on the booking — it's gone server-side.
       await db
@@ -478,47 +798,111 @@ export async function onBookingCancelled(args: {
 }
 
 /**
- * Fetch external busy intervals for a user in a window. Used by
- * lib/availability.ts to subtract conflicting slots before returning
- * availability. Returns [] for users with no active connection or on
- * any error — fallback behavior preserves pre-feature availability.
+ * Synthesize a fake "auth" error so the decrypt/refresh-failure paths
+ * inside the `op` closures get classified consistently when they
+ * bubble up to `runWithLog`. The orchestrator will still flip the
+ * connection to needs_reconnect — these helpers above just trigger it
+ * via the standard error-classification pipeline.
+ */
+function makeAuthError(reason: string): Error {
+  const e = new Error(reason);
+  (e as { status?: number }).status = 401;
+  return e;
+}
+
+/**
+ * Fetch external busy intervals for a user in a window.
+ *
+ * Wave C — aggregates busy time across ALL of the staff's active
+ * provider connections. A staff member with both a Google and a
+ * Microsoft account gets the UNION of their busy intervals subtracted
+ * from bookable availability; we never let an event on one calendar
+ * silently allow a double-book on the other.
+ *
+ * Used by lib/availability.ts to subtract conflicts before returning
+ * available slots. Returns [] for users with no active connections or
+ * when every provider fails — fallback behavior preserves pre-feature
+ * availability rather than failing closed.
+ *
+ * Each provider runs INDEPENDENTLY: a freebusy failure on Microsoft
+ * doesn't block Google's results and vice versa. Failures are logged
+ * per-provider via writeSyncLog so admins can diagnose which side is
+ * broken.
  */
 export async function getExternalBusyForUser(
   userId: string,
   windowStart: Date,
-  windowEnd: Date
+  windowEnd: Date,
 ): Promise<BusyInterval[]> {
-  const conn = await getActiveConnection(userId, "google");
-  if (!conn || conn.status !== "active") return [];
+  // Only consider ACTIVE connections — a needs_reconnect connection
+  // is by definition unable to fetch fresh busy data, and we don't
+  // want to hammer the API just to log more failures.
+  const conns = await db.query.calendarConnections.findMany({
+    where: and(
+      eq(calendarConnections.userId, userId),
+      eq(calendarConnections.status, "active"),
+    ),
+  });
+  if (conns.length === 0) return [];
 
-  const refreshToken = safeDecrypt(conn.refreshTokenEncrypted);
-  if (!refreshToken) {
-    await markNeedsReconnect(conn.id, "Stored credential could not be decrypted");
-    return [];
-  }
+  const results = await Promise.all(
+    conns.map((conn) => readBusyForConnection(conn, windowStart, windowEnd)),
+  );
+  return results.flat();
+}
 
+/**
+ * Read busy intervals from a single provider connection. Owns its own
+ * retry loop + sync-log writes. Returns [] on failure (caller's fault
+ * tolerance is "use whatever we can get, drop the rest").
+ */
+async function readBusyForConnection(
+  conn: typeof calendarConnections.$inferSelect,
+  windowStart: Date,
+  windowEnd: Date,
+): Promise<BusyInterval[]> {
+  const provider = conn.provider as CalendarProvider;
   const startedAt = Date.now();
   let lastErr: unknown = null;
   let lastCls: ErrorClass = "unknown";
   let lastMsg = "";
 
-  // Wave A — retry transient/rate-limit failures on freebusy. Tighter
-  // budget than event-mutating calls because freebusy sits in the slot-
-  // computation hot path; we'd rather show "no external busy" than
-  // make the customer wait 4+ seconds for the slot grid to load.
+  // Wave A retry budget on the freebusy hot path — tighter than
+  // event-mutation retries because slot-grid latency is user-visible.
   for (let attempt = 0; attempt <= FREEBUSY_RETRY_DELAYS_MS.length; attempt++) {
     try {
-      const busy = await googleGetBusy({
-        refreshToken,
-        calendarId: conn.calendarId,
-        windowStart,
-        windowEnd,
-      });
+      let busy: BusyInterval[];
+      if (provider === "google") {
+        const refreshToken = safeDecrypt(conn.refreshTokenEncrypted);
+        if (!refreshToken) {
+          await markNeedsReconnect(conn.id, "Stored credential could not be decrypted");
+          return [];
+        }
+        busy = await googleGetBusy({
+          refreshToken,
+          calendarId: conn.calendarId,
+          windowStart,
+          windowEnd,
+        });
+      } else {
+        // microsoft
+        const accessToken = await getMicrosoftAccessToken(conn);
+        if (!accessToken) {
+          await markNeedsReconnect(conn.id, "Microsoft token refresh failed");
+          return [];
+        }
+        busy = await microsoftGetBusy({
+          accessToken,
+          accountEmail: conn.accountEmail ?? "",
+          windowStart,
+          windowEnd,
+        });
+      }
       await writeSyncLog({
         tenantId: conn.tenantId,
         connectionId: conn.id,
-        userId,
-        provider: "google",
+        userId: conn.userId,
+        provider,
         kind: "freebusy",
         status: "ok",
         latencyMs: Date.now() - startedAt,
@@ -528,8 +912,8 @@ export async function getExternalBusyForUser(
       return busy;
     } catch (err) {
       lastErr = err;
-      lastCls = classifyError(err);
-      lastMsg = errorMessage(err);
+      lastCls = classifyError(provider, err);
+      lastMsg = errorMessage(provider, err);
       const canRetry =
         RETRYABLE_CLASSES.includes(lastCls) && attempt < FREEBUSY_RETRY_DELAYS_MS.length;
       if (canRetry) {
@@ -543,8 +927,8 @@ export async function getExternalBusyForUser(
   await writeSyncLog({
     tenantId: conn.tenantId,
     connectionId: conn.id,
-    userId,
-    provider: "google",
+    userId: conn.userId,
+    provider,
     kind: "freebusy",
     status: "failed",
     errorClass: lastCls,
@@ -555,11 +939,6 @@ export async function getExternalBusyForUser(
   if (lastCls === "auth") await markNeedsReconnect(conn.id, lastMsg);
   else await incrementFailureCount(conn.id);
   void lastErr;
-
-  // Fall back to "no external busy" — better to allow a slot that
-  // turns out to be double-booked (rare, manual reschedule available)
-  // than to fail closed on a transient freebusy error and refuse
-  // every booking.
   return [];
 }
 
@@ -618,6 +997,9 @@ function safeDecrypt(envelope: string | null | undefined): string | null {
 async function runWithLog(args: {
   tenantId: string;
   connectionId: string;
+  /** Wave C — provider tag drives both the sync-log row's `provider`
+   *  column AND which adapter's classifyError/errorMessage we use. */
+  provider: CalendarProvider;
   userId: string;
   bookingId?: string;
   kind: SyncKind;
@@ -638,7 +1020,7 @@ async function runWithLog(args: {
         connectionId: args.connectionId,
         userId: args.userId,
         bookingId: args.bookingId,
-        provider: "google",
+        provider: args.provider,
         kind: args.kind,
         status: "ok",
         externalEventId: result.eventId || undefined,
@@ -647,14 +1029,14 @@ async function runWithLog(args: {
       });
       return {
         status: "ok",
-        provider: "google",
+        provider: args.provider,
         eventId: result.eventId,
         meetLink: result.meetLink,
       };
     } catch (err) {
       lastErr = err;
-      lastCls = classifyError(err);
-      lastMsg = errorMessage(err);
+      lastCls = classifyError(args.provider, err);
+      lastMsg = errorMessage(args.provider, err);
 
       // Retryable? If so, sleep then loop.
       const canRetry =
@@ -663,7 +1045,6 @@ async function runWithLog(args: {
         await sleep(RETRY_DELAYS_MS[attempt]);
         continue;
       }
-      // No retry — break out and log the final outcome below.
       break;
     }
   }
@@ -674,26 +1055,22 @@ async function runWithLog(args: {
     connectionId: args.connectionId,
     userId: args.userId,
     bookingId: args.bookingId,
-    provider: "google",
+    provider: args.provider,
     kind: args.kind,
     status: lastCls === "not_found" ? "ok" : "failed",
     errorClass: lastCls === "not_found" ? undefined : lastCls,
     errorMessage: lastCls === "not_found" ? undefined : lastMsg,
     latencyMs: Date.now() - startedAt,
-    retryCount: RETRY_DELAYS_MS.length, // exhausted retries
+    retryCount: RETRY_DELAYS_MS.length,
   });
   if (lastCls === "auth") {
     await markNeedsReconnect(args.connectionId, lastMsg);
   } else if (lastCls !== "not_found") {
-    // Transient/rate-limit exhausted, or unknown/config — bump the
-    // consecutive-failures counter so a future health-check cron can
-    // surface a degraded connection before it breaks outright.
     await incrementFailureCount(args.connectionId);
   }
   if (lastCls === "not_found") {
-    return { status: "ok", provider: "google", eventId: "" };
+    return { status: "ok", provider: args.provider, eventId: "" };
   }
-  // Type-narrow lastErr usage (it's tracked for symmetry / future logging)
   void lastErr;
   return { status: "failed", errorClass: lastCls, message: lastMsg };
 }

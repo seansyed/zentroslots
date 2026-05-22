@@ -119,8 +119,8 @@ export const PROVIDER_CATALOG: Record<ProviderId, ProviderCatalogEntry> = {
   outlook: {
     id: "outlook",
     name: "Microsoft Outlook",
-    description: "Per-staff Outlook / Exchange calendar sync. Coming soon — backend not yet wired.",
-    wired: false,
+    description: "Per-staff Outlook calendar sync via Microsoft Graph. Includes Teams meeting auto-creation.",
+    wired: true, // Wave C — Graph adapter shipped
     category: "calendar",
   },
   zoom: {
@@ -133,8 +133,8 @@ export const PROVIDER_CATALOG: Record<ProviderId, ProviderCatalogEntry> = {
   teams: {
     id: "teams",
     name: "Microsoft Teams",
-    description: "Auto-generate Teams meeting links on confirmed bookings. Coming soon.",
-    wired: false,
+    description: "Auto-generated when a service uses the Teams video provider; piggybacks on the Outlook connection. No separate setup.",
+    wired: true, // Wave C — Teams meetings ride on the Microsoft connection
     category: "video",
   },
   slack: {
