@@ -202,7 +202,20 @@ export async function getBusy(args: {
       items: [{ id: args.calendarId || "primary" }],
     },
   });
-  const busy = res.data.calendars?.[args.calendarId || "primary"]?.busy ?? [];
+  // Wave F — Google's freebusy.query does NOT consistently echo the
+  // request `id` back as the response key. For `items: [{id:"primary"}]`
+  // Google commonly substitutes the canonical calendar id (the user's
+  // email address) as the response key. The previous keyed lookup
+  // `res.data.calendars?.["primary"]?.busy` then returned undefined →
+  // `?? []` → empty busy → slots silently bookable during real events.
+  //
+  // Fix: ignore the key entirely and iterate every returned calendar,
+  // unioning their busy arrays. We requested exactly one calendar, so
+  // this can't over-include anything; if Google ever splits busy
+  // across multiple keys for the same logical calendar (against spec)
+  // we'd still produce the semantically correct union.
+  const allCalendars = Object.values(res.data.calendars ?? {});
+  const busy = allCalendars.flatMap((c) => c?.busy ?? []);
   return busy.flatMap((b) => {
     if (!b.start || !b.end) return [];
     const start = new Date(b.start);
