@@ -160,26 +160,18 @@ export default async function SecurityPage() {
         plan: tenant.currentPlan,
         logoUrl: tenant.logoUrl,
       }}
-      title="Security"
+      title="Security Center"
       crumbs={[
         { label: "Dashboard", href: "/dashboard" },
         { label: "Settings" },
-        { label: "Security" },
+        { label: "Security Center" },
       ]}
     >
-      <h1 className="text-heading font-semibold text-ink">Security</h1>
-      <p className="mt-1 max-w-2xl text-sm text-ink-muted">
-        Active sessions, recent logins, and audit events for{" "}
-        <span className="font-medium">{user.email}</span>.
-        {canManage ? null : (
-          <span className="ml-1 text-amber-600">
-            (You have read-only access. Ask an admin to grant
-            canManageSecurity for revoke actions.)
-          </span>
-        )}
-      </p>
-
+      {/* Page title + subtitle are rendered inside the SecurityClient
+          hero so the layout can react to live posture (badges, counts)
+          without server re-renders. */}
       <SecurityClient
+        userEmail={user.email}
         canManage={canManage}
         permissions={permissions}
         permissionFlags={[...PERMISSION_FLAGS]}
