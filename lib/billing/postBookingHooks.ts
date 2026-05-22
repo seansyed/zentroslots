@@ -45,24 +45,35 @@ export async function runPostConfirmationHooks(args: {
   if (!service || !staff) return;
 
   const features = await loadTenantFeatures(args.tenantId).catch(() => null);
-  const wantMeet =
-    service.videoProvider === "google_meet" && features?.googleMeet === true;
+  // Wave C.1 — Teams services share the `googleMeet` tenant feature
+  // flag (which is really "auto-create a video link"). Both providers
+  // are video; the flag name is a Wave A artifact we can rename in a
+  // future cleanup wave.
+  const wantVideo =
+    (service.videoProvider === "google_meet" || service.videoProvider === "teams") &&
+    features?.googleMeet === true;
 
   // ── Calendar sync ─────────────────────────────────────────────
+  // Wave C.1 — orchestrator now returns the provider it actually
+  // dispatched to; we mirror that onto the booking row instead of
+  // hardcoding "google". `googleEventId` only populates for Google
+  // events so legacy readers keep working; for Microsoft events the
+  // canonical id lives on `externalEventId` + `externalEventProvider`.
   try {
     const result = await onBookingCreated({
       booking: row,
       staff,
       serviceName: service.name,
-      videoConference: wantMeet,
+      videoConference: wantVideo,
+      videoProviderHint: service.videoProvider,
     });
     if (result.status === "ok" && result.eventId) {
       await db
         .update(bookings)
         .set({
-          googleEventId: result.eventId,
+          googleEventId: result.provider === "google" ? result.eventId : null,
           externalEventId: result.eventId,
-          externalEventProvider: "google",
+          externalEventProvider: result.provider,
           meetLink: result.meetLink ?? row.meetLink,
         })
         .where(eq(bookings.id, row.id));

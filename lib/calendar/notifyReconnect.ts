@@ -75,7 +75,20 @@ export async function notifyReconnectRequired(args: {
     const reconnectUrl = `${appBase}/dashboard/settings/calendar`;
     const tenantName = tenant?.name ?? "your workspace";
     const accent = tenant?.primaryColor ?? "#359df3";
-    const providerLabel = claimed.provider === "google" ? "Google Calendar" : claimed.provider;
+    // Wave C.1 — Microsoft connections double as the Teams meeting
+    // source, so when an Outlook connection breaks the staff member
+    // also loses Teams auto-creation. Label accordingly so the email
+    // explains BOTH consequences.
+    const providerLabel =
+      claimed.provider === "google" ? "Google Calendar" :
+      claimed.provider === "microsoft" ? "Microsoft Outlook" :
+      claimed.provider;
+    const providerSecondary =
+      claimed.provider === "microsoft"
+        ? "Reconnecting also restores Teams meeting links on new bookings."
+        : claimed.provider === "google"
+        ? "Reconnecting also restores Google Meet links on new bookings."
+        : "";
     const firstName = staff.name?.split(/\s+/)[0] ?? "there";
 
     await sendEmail({
@@ -85,6 +98,7 @@ export async function notifyReconnectRequired(args: {
         firstName,
         tenantName,
         providerLabel,
+        providerSecondary,
         reconnectUrl,
         accent,
         reason: args.reason,
@@ -94,6 +108,7 @@ export async function notifyReconnectRequired(args: {
         firstName,
         tenantName,
         providerLabel,
+        providerSecondary,
         reconnectUrl,
         reason: args.reason,
       }),
@@ -120,19 +135,31 @@ function renderHtml(args: {
   firstName: string;
   tenantName: string;
   providerLabel: string;
+  /** Wave C.1 — provider-specific clarifier (e.g. "Reconnecting
+   *  also restores Teams meeting links"). Empty string when not
+   *  applicable. */
+  providerSecondary: string;
   reconnectUrl: string;
   accent: string;
   reason: string;
   accountEmail: string | null;
 }): string {
+  // Wave C.1 — if we have an actionable reason (AADSTS-translated
+  // human copy from microsoftDescribeError), surface it directly so
+  // the staff knows EXACTLY what to do. Falls back to the generic
+  // explanation when reason is empty/generic.
+  const reasonBlock = args.reason && args.reason.length > 8
+    ? `<p style="font-size:13px;color:#0f172a;margin:0 0 16px;line-height:1.5;background:#fef9c3;border-left:3px solid #f59e0b;padding:10px 12px;border-radius:4px">${escapeHtml(args.reason)}</p>`
+    : "";
   return `<div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;max-width:520px;margin:0 auto;padding:24px;color:#0f172a">
   <h1 style="font-size:18px;margin:0 0 8px">Hi ${escapeHtml(args.firstName)},</h1>
   <p style="font-size:14px;color:#475569;margin:0 0 16px;line-height:1.55">
     Your ${escapeHtml(args.providerLabel)} connection for
     <strong style="color:#0f172a">${escapeHtml(args.tenantName)}</strong>
     needs to be reconnected. Until you do, new bookings won&rsquo;t create
-    calendar events or video links for you.
+    calendar events or video links for you.${args.providerSecondary ? ` ${escapeHtml(args.providerSecondary)}` : ""}
   </p>
+  ${reasonBlock}
   ${args.accountEmail ? `<p style="font-size:13px;color:#64748b;margin:0 0 16px">Account: <code style="background:#f1f5f9;padding:2px 6px;border-radius:4px">${escapeHtml(args.accountEmail)}</code></p>` : ""}
   <p style="margin:20px 0 24px">
     <a href="${escapeHtml(args.reconnectUrl)}" style="display:inline-block;background:${escapeHtml(args.accent)};color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;font-weight:600;font-size:14px">Reconnect ${escapeHtml(args.providerLabel)}</a>
@@ -152,8 +179,9 @@ function renderText(args: {
   firstName: string;
   tenantName: string;
   providerLabel: string;
+  providerSecondary: string;
   reconnectUrl: string;
   reason: string;
 }): string {
-  return `Hi ${args.firstName},\n\nYour ${args.providerLabel} connection for ${args.tenantName} needs to be reconnected. Until you do, new bookings won't create calendar events or video links for you.\n\nReconnect: ${args.reconnectUrl}\n\nReason: ${args.reason}\n\nYou'll only get one of these per day per connection.`;
+  return `Hi ${args.firstName},\n\nYour ${args.providerLabel} connection for ${args.tenantName} needs to be reconnected. Until you do, new bookings won't create calendar events or video links for you.${args.providerSecondary ? " " + args.providerSecondary : ""}\n\nReconnect: ${args.reconnectUrl}\n\nReason: ${args.reason}\n\nYou'll only get one of these per day per connection.`;
 }

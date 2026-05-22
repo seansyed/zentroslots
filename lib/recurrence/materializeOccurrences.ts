@@ -274,12 +274,23 @@ async function processOne(
 
   // Fire downstream automations. Best-effort — never affects the
   // materialize result.
+  //
+  // Wave C.1 — both `google_meet` AND `teams` are video providers
+  // that get an auto-generated meeting link from the orchestrator.
+  // Previously this hardcoded `google_meet` only, so Teams recurring
+  // bookings silently created Outlook events with NO Teams link —
+  // exactly the silent-failure pattern Wave A guarded against, just
+  // hidden on the recurring path. `videoProviderHint` lets the
+  // orchestrator route to the staff's Microsoft connection when the
+  // service is Teams-flavored.
   try {
     await onBookingCreated({
       booking: bookingRow,
       staff,
       serviceName: service.name,
-      videoConference: service.videoProvider === "google_meet",
+      videoConference:
+        service.videoProvider === "google_meet" || service.videoProvider === "teams",
+      videoProviderHint: service.videoProvider,
     });
   } catch (e) {
     console.error(`[recurring] calendar sync after materialize failed:`, e);

@@ -62,6 +62,11 @@ export type ConnectionRow = {
   lastSuccessfulSyncAt: string | null;
   lastError: string | null;
   lastErrorAt: string | null;
+  /** Wave C.1 — consecutive non-auth failure counter. Drives the
+   *  "degraded" health state independently of lastError (the latter
+   *  is cleared on the next success; this counter is only cleared
+   *  by an `ok` outcome). */
+  consecutiveFailures: number;
   createdAt: string;
   updatedAt: string;
   userName: string | null;
@@ -275,8 +280,9 @@ function ProviderIcon({
 }
 
 // Operational health derivation. Honest combination of the
-// connection.status + recent lastError signal. Never fabricated.
-type HealthState = "healthy" | "warning" | "reconnect" | "disconnected" | "error";
+// connection.status + recent lastError + consecutiveFailures signals.
+// Never fabricated.
+type HealthState = "healthy" | "warning" | "degraded" | "reconnect" | "disconnected" | "error";
 function deriveHealth(c: ConnectionRow): {
   state: HealthState;
   label: string;
@@ -291,11 +297,36 @@ function deriveHealth(c: ConnectionRow): {
     };
   }
   if (c.status === "needs_reconnect") {
+    // Wave C.1 — provider-specific reconnect copy. Microsoft connections
+    // are particularly important because they also produce Teams meeting
+    // links; staff need to know that BOTH calendar sync AND Teams
+    // generation are paused until they reconnect.
+    const providerHint =
+      c.provider === "microsoft" || c.provider === "outlook"
+        ? "Reconnect Outlook to resume Outlook sync + Teams meeting links."
+        : c.provider === "google"
+        ? "Reconnect Google Calendar to resume sync + Google Meet links."
+        : null;
     return {
       state: "reconnect",
       label: "Reconnect required",
       tone: "bg-amber-50 text-amber-700 ring-amber-200/40",
-      hint: c.lastError ?? "Token expired or revoked",
+      hint: c.lastError ?? providerHint ?? "Token expired or revoked",
+    };
+  }
+  // Wave C.1 — `degraded` (active but >=1 consecutive non-auth failure)
+  // is a softer signal than `warning` (lastError still trailing). Both
+  // are non-blocking; degraded means "we retried and recovered" while
+  // warning means "the last attempt errored." Surface both so admins
+  // can spot intermittent Graph/Google issues before they cascade.
+  if (c.consecutiveFailures > 0 && !c.lastError) {
+    return {
+      state: "degraded",
+      label: c.consecutiveFailures === 1
+        ? "1 transient failure recovered"
+        : `${c.consecutiveFailures} transient failures recovered`,
+      tone: "bg-sky-50 text-sky-700 ring-sky-200/40",
+      hint: "Calendar sync recovered automatically. No action needed.",
     };
   }
   if (c.lastError) {

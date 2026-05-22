@@ -116,6 +116,10 @@ export default async function CalendarInfrastructurePage(props: {
       lastSyncedAt: calendarConnections.lastSyncedAt,
       lastError: calendarConnections.lastError,
       lastErrorAt: calendarConnections.lastErrorAt,
+      // Wave C.1 — surface the consecutive-failure counter so the
+      // dashboard can show "X transient failures recovered" without
+      // a second query.
+      consecutiveFailures: calendarConnections.consecutiveFailures,
       createdAt: calendarConnections.createdAt,
       updatedAt: calendarConnections.updatedAt,
       userName: users.name,
@@ -317,6 +321,7 @@ export default async function CalendarInfrastructurePage(props: {
     lastSuccessfulSyncAt: lastSuccessByConnection.get(c.id) ?? null,
     lastError: c.lastError ?? null,
     lastErrorAt: c.lastErrorAt?.toISOString() ?? null,
+    consecutiveFailures: c.consecutiveFailures ?? 0,
     createdAt: c.createdAt.toISOString(),
     updatedAt: c.updatedAt.toISOString(),
     userName: c.userName ?? null,

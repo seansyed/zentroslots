@@ -96,6 +96,7 @@ import {
   classifyError as microsoftClassifyError,
   createEvent as microsoftCreateEvent,
   deleteEvent as microsoftDeleteEvent,
+  describeError as microsoftDescribeError,
   errorMessage as microsoftErrorMessage,
   getBusy as microsoftGetBusy,
   refreshAccessToken as microsoftRefreshAccessToken,
@@ -132,6 +133,38 @@ function classifyError(provider: CalendarProvider, err: unknown): ErrorClass {
 
 function errorMessage(provider: CalendarProvider, err: unknown): string {
   return provider === "google" ? googleErrorMessage(err) : microsoftErrorMessage(err);
+}
+
+/**
+ * Wave C.1 — turn an error into a human-readable description for
+ * `connection.last_error` + the reconnect email body. Microsoft has
+ * a rich AADSTS catalog we can mine for actionable copy; Google's
+ * errors are already digestible so we just return the raw message.
+ */
+function describeError(provider: CalendarProvider, err: unknown): string {
+  return provider === "microsoft" ? microsoftDescribeError(err) : errorMessage(provider, err);
+}
+
+/**
+ * Wave C.1 — honor server Retry-After hints when retrying rate-limit
+ * failures. Graph 429 responses carry `retry-after` (seconds); we
+ * sleep at least that long before the next attempt. Falls back to the
+ * configured backoff for transient (non-rate-limit) retries.
+ *
+ * Clamped to [50ms, 60s] so a bogus header can neither vanish the
+ * delay nor pin the worker indefinitely.
+ */
+function retryDelayForAttempt(
+  cls: ErrorClass,
+  err: unknown,
+  defaultMs: number,
+): number {
+  if (cls !== "rate_limit") return defaultMs;
+  const hint = (err as { retryAfterSec?: number })?.retryAfterSec;
+  if (typeof hint === "number" && hint > 0) {
+    return Math.min(60_000, Math.max(50, hint * 1000));
+  }
+  return defaultMs;
 }
 
 // ─── Microsoft access-token cache ──────────────────────────────────────
@@ -917,7 +950,12 @@ async function readBusyForConnection(
       const canRetry =
         RETRYABLE_CLASSES.includes(lastCls) && attempt < FREEBUSY_RETRY_DELAYS_MS.length;
       if (canRetry) {
-        await sleep(FREEBUSY_RETRY_DELAYS_MS[attempt]);
+        // Wave C.1 — honor Retry-After hints on freebusy too. Graph
+        // throttles at the same tenant level whether we're reading or
+        // writing, so respecting the hint here protects all callers
+        // including the booking POST that fires later in the request.
+        const delay = retryDelayForAttempt(lastCls, err, FREEBUSY_RETRY_DELAYS_MS[attempt]);
+        await sleep(delay);
         continue;
       }
       break;
@@ -936,8 +974,9 @@ async function readBusyForConnection(
     latencyMs: Date.now() - startedAt,
     retryCount: FREEBUSY_RETRY_DELAYS_MS.length,
   });
-  if (lastCls === "auth") await markNeedsReconnect(conn.id, lastMsg);
-  else await incrementFailureCount(conn.id);
+  if (lastCls === "auth") {
+    await markNeedsReconnect(conn.id, describeError(provider, lastErr));
+  } else await incrementFailureCount(conn.id);
   void lastErr;
   return [];
 }
@@ -1038,11 +1077,13 @@ async function runWithLog(args: {
       lastCls = classifyError(args.provider, err);
       lastMsg = errorMessage(args.provider, err);
 
-      // Retryable? If so, sleep then loop.
+      // Retryable? If so, sleep then loop. Wave C.1 — honor any
+      // server-supplied Retry-After hint on rate-limit failures.
       const canRetry =
         RETRYABLE_CLASSES.includes(lastCls) && attempt < RETRY_DELAYS_MS.length;
       if (canRetry) {
-        await sleep(RETRY_DELAYS_MS[attempt]);
+        const delay = retryDelayForAttempt(lastCls, err, RETRY_DELAYS_MS[attempt]);
+        await sleep(delay);
         continue;
       }
       break;
@@ -1064,7 +1105,10 @@ async function runWithLog(args: {
     retryCount: RETRY_DELAYS_MS.length,
   });
   if (lastCls === "auth") {
-    await markNeedsReconnect(args.connectionId, lastMsg);
+    // Wave C.1 — pass the human-readable description (actionable copy
+    // mined from AADSTS / Graph error codes) as the reconnect reason
+    // so the dashboard banner + email body both communicate clearly.
+    await markNeedsReconnect(args.connectionId, describeError(args.provider, lastErr));
   } else if (lastCls !== "not_found") {
     await incrementFailureCount(args.connectionId);
   }

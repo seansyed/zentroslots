@@ -274,16 +274,60 @@ export async function refreshAccessToken(refreshTokenIn: string): Promise<Exchan
 
 // ─── Graph HTTP helper ─────────────────────────────────────────────────
 
+/**
+ * Errors thrown by `graph()` carry these optional fields so the
+ * orchestrator's retry loop can:
+ *   - read the HTTP status (classifyError mapping)
+ *   - honor Graph's Retry-After header on 429 / 503 instead of using
+ *     our generic backoff schedule (Wave C.1 throttling hardening)
+ *   - surface the upstream Graph error code (e.g. "ErrorAccessDenied",
+ *     "ResourceNotFound") in sync logs alongside the AADSTS code
+ */
+export type GraphError = Error & {
+  status?: number;
+  /** Honored by the orchestrator's retry sleep; in seconds. */
+  retryAfterSec?: number;
+  /** Graph's machine-readable error.code field, if present. */
+  graphCode?: string;
+};
+
+/**
+ * Parse Graph's Retry-After header. Microsoft sends EITHER a number
+ * of seconds OR an HTTP-date; we handle both. Clamp to a sane range
+ * (1s..60s) so a misbehaving Graph response can't pin us at a
+ * 30-minute sleep on a hot booking path.
+ */
+function parseRetryAfter(value: string | null): number | undefined {
+  if (!value) return undefined;
+  // Numeric seconds path (Graph's normal response).
+  const n = Number(value);
+  if (Number.isFinite(n) && n > 0) return Math.min(60, Math.max(1, Math.round(n)));
+  // HTTP-date fallback. Rare from Graph but spec-allowed.
+  const d = new Date(value).getTime();
+  if (!Number.isNaN(d)) {
+    const sec = Math.round((d - Date.now()) / 1000);
+    if (sec > 0) return Math.min(60, sec);
+  }
+  return undefined;
+}
+
 async function graph(
   accessToken: string,
   path: string,
-  init: { method?: string; body?: unknown } = {},
+  init: { method?: string; body?: unknown; clientRequestId?: string } = {},
 ): Promise<unknown> {
   const method = init.method ?? "GET";
   const headers: Record<string, string> = {
     Authorization: `Bearer ${accessToken}`,
     Accept: "application/json",
   };
+  // Wave C.1 — `client-request-id` is Graph's idempotency hint. When
+  // the same id arrives on a POST that already succeeded, Graph
+  // collapses the second call to the first response (in most
+  // situations). Best practice for mutating calls; harmless on reads.
+  if (init.clientRequestId) {
+    headers["client-request-id"] = init.clientRequestId;
+  }
   let body: string | undefined;
   if (init.body !== undefined) {
     headers["Content-Type"] = "application/json";
@@ -296,12 +340,28 @@ async function graph(
 
   const text = await res.text();
   if (!res.ok) {
-    // Attach status so classifyError() can read it. Graph returns a
-    // JSON body with { error: { code, message } } for errors; surface
-    // a truncated message to avoid leaking entire response payloads
-    // into logs.
-    const err = new Error(`Graph ${method} ${path} failed (${res.status}): ${text.slice(0, 300)}`);
-    (err as { status?: number }).status = res.status;
+    // Try to pull Graph's structured error code out of the response
+    // body. Graph's error envelope is always `{ error: { code, message } }`
+    // so we parse defensively and ignore non-JSON bodies (some
+    // gateway 5xxs come back as plain HTML).
+    let graphCode: string | undefined;
+    try {
+      if (text.trim().startsWith("{")) {
+        const parsed = JSON.parse(text) as { error?: { code?: string } };
+        graphCode = parsed?.error?.code;
+      }
+    } catch {
+      graphCode = undefined;
+    }
+
+    const err: GraphError = Object.assign(
+      new Error(`Graph ${method} ${path} failed (${res.status}): ${text.slice(0, 300)}`),
+      {
+        status: res.status,
+        graphCode,
+        retryAfterSec: parseRetryAfter(res.headers.get("retry-after")),
+      },
+    );
     throw err;
   }
   return text ? JSON.parse(text) : null;
@@ -357,9 +417,29 @@ export async function createEvent(args: {
     body.onlineMeetingProvider = "teamsForBusiness";
   }
 
+  // Wave C.1 — idempotency on retries.
+  //
+  // The orchestrator retries on transient/rate_limit failures. If a
+  // retry happens AFTER Graph actually created the event but BEFORE
+  // we received the response (TCP reset / our timeout), a naive retry
+  // would create a duplicate Outlook event AND a duplicate Teams
+  // meeting URL. We stabilize the `client-request-id` per (organizer,
+  // attendee, startMs) so Graph collapses duplicate POSTs from the
+  // same logical create into a single event. The same key is stable
+  // across our internal retries but unique across distinct bookings.
+  //
+  // Note: Graph's idempotency window is ~24h; longer than our retry
+  // budget (max ~4s) by orders of magnitude. Safe.
+  const requestId = stableRequestId(
+    args.draft.organizerEmail,
+    args.draft.attendeeEmail,
+    args.draft.startAt.getTime(),
+  );
+
   const res = (await graph(args.accessToken, "/me/events", {
     method: "POST",
     body,
+    clientRequestId: requestId,
   })) as {
     id?: string;
     onlineMeeting?: { joinUrl?: string };
@@ -378,6 +458,30 @@ export async function createEvent(args: {
     eventId: res?.id ?? "",
     meetLink: args.draft.videoConference ? joinUrl : null,
   };
+}
+
+/**
+ * Stable per-booking request id used as `client-request-id` so Graph
+ * can dedupe our retries. UUID-shaped (Graph rejects arbitrary
+ * strings) — we hash the (organizer, attendee, startMs) triple into a
+ * deterministic 8-4-4-4-12 grouping.
+ *
+ * Hash uses Node's crypto via `globalThis.crypto.subtle` would be
+ * async; we use a simpler djb2 expansion that produces a v4-shaped
+ * hex string. Collision risk is irrelevant for our purposes — we
+ * only need stability inside a single booking's retry window.
+ */
+function stableRequestId(organizer: string, attendee: string, startMs: number): string {
+  const input = `${organizer.toLowerCase()}|${attendee.toLowerCase()}|${startMs}`;
+  let h1 = 5381;
+  let h2 = 52711;
+  for (let i = 0; i < input.length; i++) {
+    const c = input.charCodeAt(i);
+    h1 = ((h1 << 5) + h1 + c) >>> 0; // djb2
+    h2 = ((h2 << 5) - h2 + c) >>> 0; // sdbm
+  }
+  const hex = (h1.toString(16).padStart(8, "0") + h2.toString(16).padStart(8, "0")).slice(0, 32);
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-a${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
 }
 
 /**
@@ -475,6 +579,19 @@ export async function getBusy(args: {
     // Skip explicit "free" entries. Treat unknown defensively as busy
     // so we never silently widen availability based on Graph's
     // ambiguous classifications.
+    //
+    // Wave C.1 — explicit pass list documents which Graph statuses
+    // count as busy:
+    //   - busy            : event with no special status
+    //   - tentative       : "maybe" event; conservative inclusion so
+    //                       we don't book over a soft hold
+    //   - oof             : out of office
+    //   - workingElsewhere: working but not at desk; still busy from
+    //                       the staff's perspective
+    //   - unknown         : Graph couldn't classify; conservative
+    //                       inclusion to avoid silent double-bookings
+    // anything else (including future Graph values we don't recognize)
+    // is treated as busy via the default branch below.
     if (it.status === "free") continue;
     // Graph returns naive ISO strings without timezone offset; assume
     // UTC since that's what we requested. (Graph honors the timeZone
@@ -482,6 +599,15 @@ export async function getBusy(args: {
     const start = parseGraphDate(it.start.dateTime, it.start.timeZone);
     const end = parseGraphDate(it.end.dateTime, it.end.timeZone);
     if (!start || !end) continue;
+    // Defensive clamps:
+    //   • drop zero-width / inverted ranges (Graph occasionally emits
+    //     end===start for cancelled-but-still-listed all-day events)
+    //   • clamp obviously-bogus intervals (>30 days) so a malformed
+    //     all-day-event-without-end never blanks out an entire month
+    //     of bookable time
+    if (end.getTime() <= start.getTime()) continue;
+    const widthMs = end.getTime() - start.getTime();
+    if (widthMs > 30 * 24 * 60 * 60 * 1000) continue;
     out.push({ start, end });
   }
   return out;
@@ -511,14 +637,77 @@ function parseGraphDate(dt: string, tz: string | undefined): Date | null {
 // ─── Error classification ──────────────────────────────────────────────
 
 /**
+ * AADSTS codes that mean "the refresh token can't be used anymore —
+ * the user must re-consent." Treated as `auth` so the orchestrator
+ * flips the connection to `needs_reconnect` and fires the dedupe-aware
+ * staff email instead of retrying forever.
+ *
+ * Reference: https://learn.microsoft.com/azure/active-directory/develop/reference-error-codes
+ *
+ * Wave C.1 — expanded from the Wave C trio to cover the realistic
+ * spread of "user must take action" scenarios we'd otherwise misclassify
+ * as `unknown` and bury in retry storms.
+ */
+const AADSTS_AUTH_CODES = [
+  "AADSTS50020",   // user from a tenant without access to the resource (guest issue)
+  "AADSTS50034",   // user account does not exist in the tenant
+  "AADSTS50057",   // user account is disabled
+  "AADSTS50105",   // user not assigned to the application
+  "AADSTS50173",   // password recently changed; re-consent required
+  "AADSTS65001",   // app needs admin consent — actionable by a tenant admin
+  "AADSTS65004",   // user declined consent
+  "AADSTS70008",   // refresh token expired or revoked
+  "AADSTS700082",  // refresh token inactive >90 days
+  "AADSTS700084",  // refresh token revoked because user signed out
+  "AADSTS50076",   // MFA required for the operation
+  "AADSTS50079",   // MFA enrollment required
+  "AADSTS90072",   // user account in another tenant; user must add the app
+];
+
+/**
+ * AADSTS codes that mean "config problem on OUR side" — wrong client
+ * id, wrong redirect uri, app not approved. Bucketed as `config` so
+ * the orchestrator doesn't flip the user's connection — the fix is
+ * an admin/ops change, not a staff reconnect.
+ */
+const AADSTS_CONFIG_CODES = [
+  "AADSTS700016", // invalid client id / app not found in directory
+  "AADSTS50011",  // redirect uri mismatch
+  "AADSTS7000218", // missing client secret in token request
+  "AADSTS7000215", // invalid client secret
+  "AADSTS900971", // no reply address provided
+];
+
+/**
+ * Graph error codes (from `error.code` in the response body) that
+ * correspond to "auth" without surfacing through the HTTP status.
+ * Graph sometimes returns 400 with a body code that's effectively
+ * an auth break — classify accordingly.
+ */
+const GRAPH_AUTH_CODES = new Set([
+  "InvalidAuthenticationToken",
+  "AccessDenied",
+  "AuthenticationFailure",
+  "Forbidden",
+  "TokenExpired",
+]);
+
+/**
  * Map a thrown error to one of our closed ErrorClass values. Mirrors
  * the Google adapter so the orchestrator can treat both providers
  * uniformly.
+ *
+ * Wave C.1 — significantly widened to handle the full AADSTS + Graph
+ * error-code surface. The classifier is now conservative-first:
+ * "auth" only fires when we're confident the user's connection needs
+ * attention; transient/rate-limit defaults preserve retry safety;
+ * everything else falls through to `unknown` which the orchestrator
+ * records but doesn't act on.
  */
 export function classifyError(err: unknown): ErrorClass {
   if (err instanceof ConfigError) return "config";
 
-  const e = err as { status?: number; code?: string | number; message?: string };
+  const e = err as { status?: number; code?: string | number; message?: string; graphCode?: string };
   const status =
     typeof e?.status === "number"
       ? e.status
@@ -526,32 +715,94 @@ export function classifyError(err: unknown): ErrorClass {
       ? e.code
       : undefined;
 
+  // Graph response body codes can disambiguate ambiguous HTTP statuses
+  // (a 400 with "InvalidAuthenticationToken" is actually auth, not
+  // a malformed request). Check before the HTTP-status branch.
+  if (e?.graphCode) {
+    if (GRAPH_AUTH_CODES.has(e.graphCode)) return "auth";
+    if (e.graphCode === "TooManyRequests") return "rate_limit";
+    if (e.graphCode === "ServiceNotAvailable" || e.graphCode === "GatewayTimeout") {
+      return "transient";
+    }
+    if (e.graphCode === "ResourceNotFound" || e.graphCode === "ErrorItemNotFound") {
+      return "not_found";
+    }
+  }
+
   if (status === 401 || status === 403) return "auth";
   if (status === 404 || status === 410) return "not_found";
   if (status === 429) return "rate_limit";
   if (typeof status === "number" && status >= 500) return "transient";
 
   if (typeof e?.code === "string") {
-    if (["ECONNRESET", "ETIMEDOUT", "ECONNREFUSED", "EAI_AGAIN"].includes(e.code)) {
+    if (["ECONNRESET", "ETIMEDOUT", "ECONNREFUSED", "EAI_AGAIN", "UND_ERR_SOCKET"].includes(e.code)) {
       return "transient";
     }
   }
 
-  // Microsoft's AADSTS70008 ("token expired or revoked") + invalid_grant
-  // both surface only in the message string when the refresh token is
-  // dead. Treat as auth so the orchestrator flips to needs_reconnect.
   const msg = e?.message ?? "";
+
+  // Token-refresh failures bubble up as plain Error objects (not
+  // GraphError) with the AADSTS code embedded in the message. Match
+  // the full known set to avoid the "everything-AADSTS-is-auth"
+  // sledgehammer that misclassifies admin-consent issues.
+  for (const code of AADSTS_AUTH_CODES) {
+    if (msg.includes(code)) return "auth";
+  }
+  for (const code of AADSTS_CONFIG_CODES) {
+    if (msg.includes(code)) return "config";
+  }
+
   if (
     msg.includes("invalid_grant") ||
-    msg.includes("AADSTS70008") ||
-    msg.includes("AADSTS50173") || // password changed → forces re-consent
-    msg.includes("AADSTS700082") || // refresh token inactive >90 days
-    msg.includes("interaction_required")
+    msg.includes("interaction_required") ||
+    msg.includes("consent_required")
   ) {
     return "auth";
   }
+  if (msg.includes("temporarily_unavailable") || msg.includes("server_error")) {
+    return "transient";
+  }
 
   return "unknown";
+}
+
+/**
+ * Translate raw error text into a human-readable description for
+ * `calendar_connections.last_error` + the reconnect email. Stored as
+ * the staff-facing reason. We keep the underlying technical message
+ * accessible via the full sync log row.
+ *
+ * The mapping prioritizes ACTIONABILITY: the staff member needs to
+ * know whether they should reconnect, ask their admin, or just wait.
+ */
+export function describeError(err: unknown): string {
+  const msg = (err as { message?: string })?.message ?? String(err);
+
+  if (msg.includes("AADSTS65001"))
+    return "Your Microsoft tenant requires an admin to grant ZentroMeet access. Ask your IT admin to approve the integration.";
+  if (msg.includes("AADSTS50057"))
+    return "Your Microsoft account is disabled. Contact your IT admin.";
+  if (msg.includes("AADSTS50105"))
+    return "Your account isn't assigned to the ZentroMeet app in your Microsoft tenant. Contact your IT admin.";
+  if (msg.includes("AADSTS50076") || msg.includes("AADSTS50079"))
+    return "Microsoft requires multi-factor authentication to sync your calendar. Reconnect and complete MFA.";
+  if (msg.includes("AADSTS50173"))
+    return "Your Microsoft password was recently changed. Reconnect Outlook to refresh the connection.";
+  if (msg.includes("AADSTS70008") || msg.includes("AADSTS700082") || msg.includes("AADSTS700084"))
+    return "Your Microsoft sign-in expired (90-day refresh window). Reconnect Outlook to resume calendar sync.";
+  if (msg.includes("AADSTS65004"))
+    return "Microsoft consent was declined. Reconnect Outlook and accept the requested permissions.";
+  if (msg.includes("invalid_grant"))
+    return "Your Microsoft session is no longer valid. Reconnect Outlook to resume calendar sync.";
+  if (msg.includes("AADSTS700016") || msg.includes("AADSTS50011"))
+    return "ZentroMeet's Microsoft integration is misconfigured. Contact support — no action needed from you.";
+  if (msg.includes("TooManyRequests") || msg.includes("AADSTS90") || msg.includes("rate"))
+    return "Microsoft Graph is rate-limiting requests. Sync will resume automatically.";
+
+  // Fallback: surface a short summary but never the full body (may
+  // contain sensitive Graph payloads).
+  return msg.length > 160 ? `${msg.slice(0, 157)}…` : msg;
 }
 
 /** Short, safe-to-log error message. */
