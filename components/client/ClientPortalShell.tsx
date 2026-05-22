@@ -1,8 +1,29 @@
 "use client";
 
+/**
+ * ClientPortalShell — Phase 18 polish pass.
+ *
+ * Same structural contract as before (header + desktop sidebar + mobile
+ * bottom-nav). Three trust-and-usability fixes shipped here:
+ *
+ *   1. The "Messages" tab is GONE from the navigation. It was a
+ *      "Coming soon" stub and eroded trust on a customer-facing surface.
+ *      The /messages page itself now redirects to the portal home so
+ *      bookmarks don't 404.
+ *   2. The "Sign out" button is now visible on mobile too. Previously
+ *      it was hidden behind `sm:inline-flex`, and the desktop sidebar
+ *      copy was hidden behind `lg:block`, leaving mobile visitors with
+ *      no visible sign-out path. The mobile variant uses a compact
+ *      icon-only button to fit the header without crowding the avatar.
+ *   3. A subtle gradient backdrop + ambient glow accents now match the
+ *      premium tone of the rest of ZentroMeet (dashboard, governance,
+ *      onboarding). No structural change — just calmer depth.
+ */
+
 import * as React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { Home, Calendar, Bell, User, LogOut } from "lucide-react";
 
 type ShellProps = {
   tenant: { slug: string; name: string; logoUrl: string | null; primaryColor: string; hidePoweredBy: boolean };
@@ -16,66 +37,40 @@ type NavItem = {
   label: string;
   href: (slug: string) => string;
   matches: (pathname: string, slug: string) => boolean;
-  icon: React.ReactNode;
+  Icon: React.ComponentType<{ className?: string; strokeWidth?: number }>;
 };
 
+// Note: "Messages" was removed in Phase 18. The route still exists but
+// is a redirect → home; it's no longer surfaced as a tab so customers
+// don't see a Coming Soon stub. Restore here once messaging ships.
 const NAV: NavItem[] = [
   {
     key: "home",
     label: "Home",
     href: (s) => `/client/${s}`,
     matches: (p, s) => p === `/client/${s}` || p === `/client/${s}/`,
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5" aria-hidden>
-        <path d="M3 12l9-9 9 9M5 10v10h14V10" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-    ),
+    Icon: Home,
   },
   {
     key: "bookings",
     label: "Bookings",
     href: (s) => `/client/${s}/bookings`,
     matches: (p, s) => p.startsWith(`/client/${s}/bookings`),
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5" aria-hidden>
-        <rect x="3" y="4" width="18" height="18" rx="2" />
-        <path d="M16 2v4M8 2v4M3 10h18" strokeLinecap="round" />
-      </svg>
-    ),
-  },
-  {
-    key: "messages",
-    label: "Messages",
-    href: (s) => `/client/${s}/messages`,
-    matches: (p, s) => p.startsWith(`/client/${s}/messages`),
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5" aria-hidden>
-        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-    ),
+    Icon: Calendar,
   },
   {
     key: "notifications",
     label: "Alerts",
     href: (s) => `/client/${s}/notifications`,
     matches: (p, s) => p.startsWith(`/client/${s}/notifications`),
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5" aria-hidden>
-        <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M13.7 21a2 2 0 0 1-3.4 0" strokeLinecap="round" />
-      </svg>
-    ),
+    Icon: Bell,
   },
   {
     key: "profile",
     label: "Profile",
     href: (s) => `/client/${s}/profile`,
     matches: (p, s) => p.startsWith(`/client/${s}/profile`),
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5" aria-hidden>
-        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" strokeLinecap="round" />
-        <circle cx="12" cy="7" r="4" />
-      </svg>
-    ),
+    Icon: User,
   },
 ];
 
@@ -90,20 +85,33 @@ export default function ClientPortalShell({ tenant, customer, title, children }:
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-slate-50 to-white pb-20 lg:pb-0">
+    <div className="relative min-h-screen overflow-hidden bg-gradient-to-b from-slate-50 via-white to-white pb-24 lg:pb-0">
+      {/* Phase 18 — ambient depth (extremely subtle). Matches the
+          treatment used on the dashboard / governance / onboarding
+          surfaces so the portal stops feeling visually disconnected. */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute -left-40 top-32 -z-10 h-[28rem] w-[28rem] rounded-full opacity-50 blur-[120px]"
+        style={{ backgroundColor: accent, opacity: 0.06 }}
+      />
+      <div
+        aria-hidden
+        className="pointer-events-none absolute -right-40 top-[28rem] -z-10 h-[24rem] w-[24rem] rounded-full bg-emerald-300/[0.04] blur-[120px]"
+      />
+
       {/* Top bar (mobile + desktop) */}
       <header
-        className="sticky top-0 z-30 border-b border-slate-200 bg-white/90 backdrop-blur"
-        style={{ borderTop: `4px solid ${accent}` }}
+        className="sticky top-0 z-30 border-b border-slate-200 bg-white/85 backdrop-blur-md"
+        style={{ borderTop: `3px solid ${accent}` }}
       >
-        <div className="mx-auto flex max-w-5xl items-center justify-between gap-4 px-4 py-3 lg:px-6">
+        <div className="mx-auto flex max-w-5xl items-center justify-between gap-3 px-4 py-3 lg:px-6">
           <div className="flex min-w-0 items-center gap-3">
             {tenant.logoUrl ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img src={tenant.logoUrl} alt="" className="h-8 w-8 rounded-md object-contain" />
             ) : (
               <div
-                className="flex h-8 w-8 items-center justify-center rounded-md text-sm font-semibold text-white"
+                className="flex h-8 w-8 items-center justify-center rounded-md text-sm font-semibold text-white shadow-sm"
                 style={{ backgroundColor: accent }}
                 aria-hidden
               >
@@ -112,7 +120,7 @@ export default function ClientPortalShell({ tenant, customer, title, children }:
             )}
             <div className="min-w-0">
               <div className="truncate text-sm font-semibold text-slate-900">{tenant.name}</div>
-              <div className="truncate text-[11px] text-slate-500">Client portal</div>
+              <div className="truncate text-[11px] text-slate-500">Secure client portal</div>
             </div>
           </div>
 
@@ -122,23 +130,37 @@ export default function ClientPortalShell({ tenant, customer, title, children }:
               <div className="text-slate-500">{customer.email}</div>
             </div>
             <div
-              className="flex h-8 w-8 items-center justify-center rounded-full text-xs font-semibold text-white"
+              className="flex h-8 w-8 items-center justify-center rounded-full text-xs font-semibold text-white shadow-sm"
               style={{ backgroundColor: accent }}
               aria-hidden
             >
               {initial}
             </div>
+
+            {/* Sign-out — visible on every viewport.
+                Desktop/tablet shows the text label; phone shows an
+                icon-only button so the header doesn't crowd. */}
             <button
+              type="button"
               onClick={logout}
-              className="ml-1 hidden rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 transition hover:bg-slate-50 sm:inline-flex"
+              aria-label="Sign out"
+              className="ml-1 hidden rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 shadow-sm transition hover:-translate-y-0.5 hover:bg-slate-50 hover:shadow sm:inline-flex"
             >
               Sign out
+            </button>
+            <button
+              type="button"
+              onClick={logout}
+              aria-label="Sign out"
+              className="ml-1 inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-600 shadow-sm transition active:scale-95 sm:hidden"
+            >
+              <LogOut className="h-4 w-4" strokeWidth={2} />
             </button>
           </div>
         </div>
       </header>
 
-      <div className="mx-auto flex max-w-5xl gap-6 px-4 py-6 lg:px-6">
+      <div className="relative mx-auto flex max-w-5xl gap-6 px-4 py-6 lg:px-6">
         {/* Desktop sidebar */}
         <aside className="hidden w-56 shrink-0 lg:block">
           <nav className="sticky top-24 space-y-1" aria-label="Portal">
@@ -156,18 +178,20 @@ export default function ClientPortalShell({ tenant, customer, title, children }:
                   }
                   style={active ? { color: accent } : undefined}
                 >
-                  <span style={active ? { color: accent } : undefined}>{item.icon}</span>
+                  <item.Icon
+                    className="h-5 w-5"
+                    strokeWidth={1.75}
+                  />
                   <span>{item.label}</span>
                 </Link>
               );
             })}
             <button
+              type="button"
               onClick={logout}
               className="mt-3 flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-slate-500 transition hover:bg-white hover:text-slate-900"
             >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5" aria-hidden>
-                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
+              <LogOut className="h-5 w-5" strokeWidth={1.75} />
               Sign out
             </button>
           </nav>
@@ -180,16 +204,17 @@ export default function ClientPortalShell({ tenant, customer, title, children }:
 
           {!tenant.hidePoweredBy && (
             <footer className="mt-12 border-t border-slate-200 pt-4 text-center text-[11px] text-slate-400">
-              Powered by ZentroMeet
+              Secure scheduling · Powered by ZentroMeet
             </footer>
           )}
         </main>
       </div>
 
-      {/* Mobile bottom nav */}
+      {/* Mobile bottom nav — 4 tabs since Messages removed. */}
       <nav
         className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200 bg-white/95 backdrop-blur lg:hidden"
         aria-label="Portal"
+        style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
       >
         <div className="mx-auto flex max-w-md items-stretch justify-around">
           {NAV.map((item) => {
@@ -198,10 +223,11 @@ export default function ClientPortalShell({ tenant, customer, title, children }:
               <Link
                 key={item.key}
                 href={item.href(tenant.slug)}
+                aria-current={active ? "page" : undefined}
                 className="flex flex-1 flex-col items-center justify-center gap-0.5 px-1 py-2.5 text-[10px] font-medium transition"
                 style={{ color: active ? accent : "#64748b" }}
               >
-                <span>{item.icon}</span>
+                <item.Icon className="h-5 w-5" strokeWidth={active ? 2.25 : 1.75} />
                 <span>{item.label}</span>
               </Link>
             );

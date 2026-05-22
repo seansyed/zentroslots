@@ -1,4 +1,5 @@
 import ClientPortalShell from "@/components/client/ClientPortalShell";
+import { TimeText } from "@/components/client/TimeText";
 import ProfileForm from "./ProfileForm";
 import CommPrefsCard from "./CommPrefsCard";
 import { normalizePrefs } from "@/lib/client-prefs";
@@ -41,8 +42,9 @@ export default async function ClientProfilePage(props: {
         <CommPrefsCard slug={tenant.slug} accent={tenant.primaryColor} initial={prefs} />
       </div>
 
-      <div className="mt-3 text-[11px] text-slate-400">
-        Member since {customer.createdAt.toISOString().slice(0, 10)}
+      <div className="mt-4 text-[11px] text-slate-400">
+        Member since{" "}
+        <TimeText iso={customer.createdAt.toISOString()} format="MMMM yyyy" />
       </div>
     </ClientPortalShell>
   );
