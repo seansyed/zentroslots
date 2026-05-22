@@ -68,7 +68,11 @@ export default function BookingFlow({
   // returns no slots, a background scan iterates the next 7 days
   // through the existing /api/slots endpoint and surfaces the next
   // available date + first slot so the customer doesn't bounce.
+  // Phase 17C — the same scan now also tallies the COUNT of days in
+  // the next-7-day window that have any openings, surfaced as a
+  // "X openings this week" pill above the recovery tile.
   const [nextAvailable, setNextAvailable] = useState<{ date: string; slotIso: string } | null>(null);
+  const [weekOpenings, setWeekOpenings] = useState<number>(0);
   const [scanningNext, setScanningNext] = useState(false);
 
   const [step, setStep] = useState<Step>("pick-time");
@@ -77,6 +81,11 @@ export default function BookingFlow({
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Phase 17C — when the POST returns 409 (slot just taken by someone
+  // else), surface a "Pick another time" recovery button that bumps
+  // the slots-tick so the grid re-fetches authoritative state.
+  const [slotConflict, setSlotConflict] = useState(false);
+  const [slotsTick, setSlotsTick] = useState(0);
   const [confirmedMeetLink, setConfirmedMeetLink] = useState<string | null>(null);
 
   // Date strip — next 14 days starting from today (visitor's TZ). Cheap
@@ -132,7 +141,9 @@ export default function BookingFlow({
     let cancelled = false;
     setLoadingSlots(true);
     setSelectedSlot(null);
-    setNextAvailable(null); // reset recovery state when date changes
+    setNextAvailable(null);  // reset recovery state when date changes
+    setWeekOpenings(0);       // reset count alongside
+    setSlotConflict(false);   // any prior 409 is stale once date/tick changes
 
     const url = new URL("/api/slots", window.location.origin);
     url.searchParams.set("serviceId", serviceId);
@@ -150,12 +161,18 @@ export default function BookingFlow({
       .finally(() => !cancelled && setLoadingSlots(false));
 
     return () => { cancelled = true; };
-  }, [serviceId, staffId, date, tz]);
+    // slotsTick lets external recovery flows (e.g. 409 conflict, manual
+    // "Change time" with possibly-stale availability) force a refetch
+    // without changing the date.
+  }, [serviceId, staffId, date, tz, slotsTick]);
 
   // Empty-availability recovery scan. Runs only when the current day
-  // came back with 0 slots; iterates the next 7 days serially and
-  // stops at the first non-empty result. Honors the same date-disable
-  // rules so we don't suggest a blackout date.
+  // came back with 0 slots; iterates the next 7 days serially. The
+  // first non-empty day populates `nextAvailable` (used by the
+  // recovery tile). The scan continues past the first hit to count
+  // total open days in the window — surfaced as a "X openings this
+  // week" confidence pill. Honors the same date-disable rules so we
+  // don't suggest a blackout date.
   useEffect(() => {
     if (loadingSlots) return;
     if (slots.length > 0) return;
@@ -164,12 +181,15 @@ export default function BookingFlow({
 
     let cancelled = false;
     setScanningNext(true);
+    setWeekOpenings(0);
 
     (async () => {
       const isoFmt = new Intl.DateTimeFormat("en-CA", {
         timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit",
       });
       const baseDate = new Date(date + "T12:00:00");
+      let firstHit: { date: string; slotIso: string } | null = null;
+      let count = 0;
       for (let i = 1; i <= 7; i++) {
         if (cancelled) return;
         const probe = new Date(baseDate);
@@ -188,16 +208,19 @@ export default function BookingFlow({
           const data = await res.json();
           const next: string[] = Array.isArray(data.slots) ? data.slots : [];
           if (next.length > 0) {
-            if (!cancelled) {
-              setNextAvailable({ date: iso, slotIso: next[0] });
+            count++;
+            if (!cancelled) setWeekOpenings(count);
+            if (!firstHit) {
+              firstHit = { date: iso, slotIso: next[0] };
+              if (!cancelled) setNextAvailable(firstHit);
             }
-            return;
+            // Don't break — keep scanning to finish the weekly tally.
           }
         } catch {
           /* swallow — continue probing */
         }
       }
-      if (!cancelled) setNextAvailable(null);
+      if (!cancelled && !firstHit) setNextAvailable(null);
     })().finally(() => { if (!cancelled) setScanningNext(false); });
 
     return () => { cancelled = true; };
@@ -209,9 +232,14 @@ export default function BookingFlow({
   }, [loadingSlots, slots.length, serviceId, staffId, date, tz, scanningNext, nextAvailable]);
 
   async function submit() {
-    if (!selectedSlot) return;
+    // Idempotency: if the form is mid-flight, ignore double-clicks.
+    // React's button `disabled` flag is set on the next render, but
+    // a fast double-tap could fire two `submit()` calls before either
+    // disables. This guard is the floor.
+    if (!selectedSlot || submitting) return;
     setSubmitting(true);
     setError(null);
+    setSlotConflict(false);
     try {
       const res = await fetch("/api/bookings", {
         method: "POST",
@@ -229,7 +257,18 @@ export default function BookingFlow({
         }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data?.error ?? "Booking failed");
+      if (!res.ok) {
+        // 409 = slot was taken between pick and confirm. Surface a
+        // dedicated recovery affordance ("Pick another time") instead
+        // of leaving the user stuck on a doomed slot.
+        if (res.status === 409) {
+          setSlotConflict(true);
+          throw new Error(
+            (data?.error as string) ?? "That time was just booked — please choose another."
+          );
+        }
+        throw new Error(data?.error ?? "Booking failed");
+      }
       setConfirmedMeetLink(data.meetLink ?? null);
       setStep("done");
       toast("Booked. A confirmation is on its way.", "success");
@@ -238,6 +277,16 @@ export default function BookingFlow({
     } finally {
       setSubmitting(false);
     }
+  }
+
+  // Recovery handler — fires from the 409 error or the "Change time"
+  // link. Forces a slot refetch so the user doesn't see stale state.
+  function backToPickTime() {
+    setSlotConflict(false);
+    setError(null);
+    setSelectedSlot(null);
+    setStep("pick-time");
+    setSlotsTick((t) => t + 1);
   }
 
   // ─── DONE ─────────────────────────────────────────────────────────────
@@ -572,8 +621,26 @@ export default function BookingFlow({
                 </div>
                 <div className="text-[13px] font-medium text-slate-700">No times available on this day</div>
                 <div className="mt-1 text-[12px] text-slate-500">
-                  Try another date above &mdash; or jump to the next opening below.
+                  {weekOpenings > 0
+                    ? <>Other days this week have openings &mdash; see them below.</>
+                    : <>Try another date above &mdash; or jump to the next opening below.</>}
                 </div>
+                {/* Phase 17C — confidence pill: encourages staying in
+                    the flow instead of bouncing. Only shows once the
+                    background scan has confirmed at least one open
+                    day. Subtle pulse dot ties it to the live signal
+                    used elsewhere on the page. */}
+                {weekOpenings > 0 && (
+                  <div className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-emerald-50/70 px-2.5 py-1 text-[11px] font-medium text-emerald-700 ring-1 ring-emerald-200/50">
+                    <span aria-hidden className="relative inline-flex h-1.5 w-1.5">
+                      <span className="absolute inset-0 animate-ping rounded-full bg-emerald-400/55" />
+                      <span className="relative h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                    </span>
+                    <span className="tabular-nums font-semibold">{weekOpenings}</span>
+                    {" "}
+                    {weekOpenings === 1 ? "opening" : "openings"} this week
+                  </div>
+                )}
               </div>
 
               {/* Next available recovery — surfaces the next non-empty
@@ -621,7 +688,7 @@ export default function BookingFlow({
 
           <div className="relative">
             <button
-              onClick={() => setStep("pick-time")}
+              onClick={backToPickTime}
               className="inline-flex items-center gap-1 text-[12px] text-slate-500 transition-colors hover:text-slate-900"
             >
               <span aria-hidden>←</span> Change time
@@ -706,8 +773,26 @@ export default function BookingFlow({
             </div>
 
             {error && (
-              <div className="mt-3 rounded-xl border border-red-200 bg-red-50 p-3 text-[13px] text-red-700">
-                {error}
+              <div
+                className="mt-3 rounded-xl border border-red-200 bg-red-50 p-3 text-[13px] text-red-700"
+                role="alert"
+              >
+                <div>{error}</div>
+                {/* Phase 17C — 409 conflict recovery. When the chosen
+                    slot was taken between pick and confirm, surface a
+                    one-tap path back to the slot grid (the
+                    backToPickTime helper bumps slotsTick so the grid
+                    re-fetches authoritative state). */}
+                {slotConflict && (
+                  <button
+                    type="button"
+                    onClick={backToPickTime}
+                    className="mt-2 inline-flex items-center gap-1 rounded-lg border border-red-300 bg-white px-2.5 py-1 text-[12px] font-semibold text-red-700 transition-all hover:-translate-y-0.5 hover:bg-red-50 hover:shadow-sm"
+                  >
+                    Pick another time
+                    <span aria-hidden>→</span>
+                  </button>
+                )}
               </div>
             )}
 
@@ -1158,13 +1243,49 @@ function WaitlistJoinTile({
   }
 
   if (!open) {
+    // Phase 17C — premium waitlist surface. The plain button under-
+    // performed because it didn't communicate the value (instant
+    // notification) or the realistic likelihood of a spot opening
+    // (people do reschedule). Both messages are honest — the
+    // waitlist engine genuinely emails the moment a slot frees.
     return (
       <button
         onClick={() => setOpen(true)}
-        className="block w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-center text-[13px] font-medium text-slate-700 transition-all duration-[180ms] hover:-translate-y-0.5 hover:border-slate-400 hover:bg-slate-50 hover:shadow-[0_4px_12px_rgba(15,23,42,0.06)]"
+        className="group relative block w-full overflow-hidden rounded-2xl border border-slate-200 bg-white p-4 text-left transition-all duration-[180ms] hover:-translate-y-0.5 hover:border-slate-300 hover:bg-slate-50/60 hover:shadow-[0_4px_14px_rgba(15,23,42,0.06)]"
         style={{ transitionTimingFunction: MOTION_CURVE }}
+        aria-label="Join the waitlist for this date"
       >
-        Join the waitlist for this date
+        <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-slate-200 to-transparent" />
+        <div className="flex items-center gap-3">
+          <div
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-white shadow-[0_4px_12px_rgba(15,23,42,0.12)] transition-transform duration-[180ms] group-hover:scale-105"
+            style={{ backgroundColor: accent, transitionTimingFunction: MOTION_CURVE }}
+            aria-hidden
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4.5 w-4.5" aria-hidden>
+              <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M13.73 21a2 2 0 0 1-3.46 0" strokeLinecap="round" />
+            </svg>
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="text-[10px] font-semibold uppercase tracking-[0.10em] text-slate-500">
+              Waitlist
+            </div>
+            <div className="mt-0.5 text-[13.5px] font-semibold tracking-tight text-slate-900">
+              Get notified instantly if this time opens
+            </div>
+            <div className="mt-0.5 text-[11.5px] text-slate-500">
+              People often reschedule within 24 hours.
+            </div>
+          </div>
+          <span
+            aria-hidden
+            className="hidden shrink-0 text-[12px] font-semibold transition-colors sm:inline group-hover:text-slate-700"
+            style={{ color: accent }}
+          >
+            Join →
+          </span>
+        </div>
       </button>
     );
   }

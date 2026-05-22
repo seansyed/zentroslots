@@ -245,6 +245,13 @@ export default async function PublicServicePage(props: {
               <GlobeGlyph />
               Timezone auto-adjusted
             </span>
+            {/* Phase 17C — flexibility signal. Removes a real conversion
+                barrier for hesitant bookers: every booking is reschedule-
+                able via the link in the confirmation email. */}
+            <span className="inline-flex items-center gap-2" title="Reschedule from the link in your confirmation email">
+              <CheckGlyph />
+              Reschedule any time
+            </span>
           </div>
         </div>
       </header>
@@ -277,13 +284,38 @@ export default async function PublicServicePage(props: {
         />
 
         {showPoweredBy && (
-          // Phase 17B footer micro-polish:
-          //   - gap-1.5 → gap-2.5 between mark/text (cleaner rhythm)
-          //   - eyebrow opacity rebalanced to feel intentional
-          //   - mark gets a faint rounded shadow on hover for depth
-          //   - typography weights stay subtle but consistent
-          //   - vertical spacing pt-5 → pt-6 for a touch more air
+          // Phase 17C footer micro-polish:
+          //   - Adds a subtle two-pill trust strip above the powered-by
+          //     line (Secure booking · Encrypted in transit) so the
+          //     footer carries one last conversion-relevant signal
+          //     without becoming a marketing block. The pills are
+          //     muted — they pick up on hover but don't compete with
+          //     the booking content above.
           <footer className="mt-10 border-t border-slate-200/70 pt-6">
+            <div className="mb-3 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[10.5px] font-medium text-slate-400">
+              <span className="inline-flex items-center gap-1.5">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-3 w-3" aria-hidden>
+                  <path d="M12 2l8 4v6c0 5-3.5 9-8 10-4.5-1-8-5-8-10V6l8-4z" strokeLinejoin="round" />
+                  <path d="M9 12l2 2 4-4" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                Secure booking
+              </span>
+              <span aria-hidden className="text-slate-300">·</span>
+              <span className="inline-flex items-center gap-1.5">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-3 w-3" aria-hidden>
+                  <rect x="3" y="11" width="18" height="10" rx="2" />
+                  <path d="M7 11V7a5 5 0 0 1 10 0v4" strokeLinecap="round" />
+                </svg>
+                Encrypted in transit
+              </span>
+              <span aria-hidden className="text-slate-300">·</span>
+              <span className="inline-flex items-center gap-1.5">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-3 w-3" aria-hidden>
+                  <path d="M5 13l4 4L19 7" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                Accessible &amp; keyboard-friendly
+              </span>
+            </div>
             <a
               href="https://app.zentromeet.com"
               target="_blank"
