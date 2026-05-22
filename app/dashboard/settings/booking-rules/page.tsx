@@ -29,14 +29,9 @@ export default async function BookingRulesPage() {
         { label: "Booking rules" },
       ]}
     >
-      <h1 className="text-heading font-semibold text-ink">Booking rules</h1>
-      <p className="mt-1 max-w-2xl text-sm text-ink-muted">
-        Notice / advance windows, daily caps, cooldowns, blackouts, and
-        business-hours enforcement — per service or as a tenant default.
-        Without a rule, behavior is unchanged from before this feature
-        shipped.
-      </p>
-
+      {/* Hero + page chrome live in the client now (Phase 15-BR
+          refinement) — gives a single source of truth for the
+          policy-page header + scope badge + insights strip. */}
       <BookingRulesClient />
     </Shell>
   );
