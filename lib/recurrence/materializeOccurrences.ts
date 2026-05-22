@@ -34,6 +34,7 @@ import { onBookingCreated } from "@/lib/calendar/sync";
 
 import { applyOverride } from "./exceptions";
 import type { OccurrenceOverride } from "./types";
+import { shouldExecute, type CronDecision } from "@/lib/billing/cronGuards";
 
 export type MaterializeInput = {
   /** Don't try to materialize anything starting after this horizon
@@ -42,6 +43,13 @@ export type MaterializeInput = {
   horizon: Date;
   /** Max occurrences per worker run. */
   batchSize?: number;
+  /** Optional per-tenant billing decision map (Phase 2 hardening).
+   *  When provided, occurrences whose tenant resolves to a "skip"
+   *  decision are marked skipped without being materialized. When
+   *  absent, all occurrences are processed (backwards-compatible —
+   *  the API surface this lib serves doesn't pass this; only the
+   *  cron does). */
+  tenantDecisions?: Map<string, CronDecision>;
 };
 
 export type MaterializeResult = {
@@ -75,6 +83,28 @@ export async function materializeOccurrences(input: MaterializeInput): Promise<M
   let skipped = 0;
 
   for (const occ of filtered) {
+    // Phase 2 billing guard — skip occurrences whose tenant has been
+    // marked inactive or whose subscription is in a terminal failure
+    // state. Grandfathered tenants ("grandfather" mode) still execute
+    // — we only short-circuit on explicit skip. Record the reason on
+    // the row so admins can see WHY a series stopped firing without
+    // grepping logs.
+    if (input.tenantDecisions) {
+      const decision = input.tenantDecisions.get(occ.tenantId);
+      if (decision && !shouldExecute(decision)) {
+        await db
+          .update(bookingOccurrences)
+          .set({
+            status: "skipped",
+            failureReason: `billing_guard:${decision.reason}`,
+            updatedAt: new Date(),
+          })
+          .where(eq(bookingOccurrences.id, occ.id));
+        skipped++;
+        continue;
+      }
+    }
+
     try {
       const result = await processOne(occ);
       if (result === "materialized") materialized++;

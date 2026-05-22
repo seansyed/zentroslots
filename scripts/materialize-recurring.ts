@@ -16,18 +16,38 @@
  * never crashes the batch — per-row try/catch.
  *
  *   Linux cron:  *​/15 * * * *  (cd /app && npm run recurring:materialize)
+ *
+ * Plan enforcement (Phase 2 of billing hardening):
+ *   Recurring series is a Pro+ capability. We honor the grandfather
+ *   policy: existing series on Free tenants continue to materialize
+ *   (the Phase 1 write-gate blocks new bypass attempts at API time).
+ *   We DO skip:
+ *     - tenants whose `active` flag is false (offboarded)
+ *     - tenants whose Stripe subscriptionStatus is canceled / unpaid /
+ *       incomplete_expired (premium retention not warranted after a
+ *       billing failure beyond the retry window)
+ *   Decisions are batched: one tenant lookup per cron run, not per
+ *   series, so a 1000-series tenant stays a 1-query lookup.
  */
 
 import "dotenv/config";
 import { eq } from "drizzle-orm";
 
 import { db } from "../db/client";
-import { bookingSeries } from "../db/schema";
+import { bookingSeries, tenants } from "../db/schema";
 import { generateOccurrences } from "../lib/recurrence/generateOccurrences";
 import { materializeOccurrences } from "../lib/recurrence/materializeOccurrences";
+import {
+  auditCategoryFor,
+  buildBatchDecisionMap,
+  shouldExecute,
+  type CronDecision,
+} from "../lib/billing/cronGuards";
+import { audit } from "../lib/audit";
 
 const GENERATE_HORIZON_DAYS = 30;
 const MATERIALIZE_HORIZON_HOURS = 24;
+const CAPABILITY = "recurring_series" as const;
 
 (async () => {
   try {
@@ -41,8 +61,30 @@ const MATERIALIZE_HORIZON_HOURS = 24;
       .from(bookingSeries)
       .where(eq(bookingSeries.status, "active"));
 
+    // ── Plan-aware execution (Phase 2 billing hardening) ──────────
+    // Build a single per-tenant decision map. We hit the tenants table
+    // once with `inArray()` instead of per-series. The decision tells
+    // us whether to process / grandfather / skip for each tenant.
+    const tenantIds = Array.from(new Set(activeSeries.map((s) => s.tenantId)));
+    const decisions = await buildBatchDecisionMap({
+      db,
+      tenantsTable: tenants,
+      tenantIds,
+      capability: CAPABILITY,
+    });
+
+    // Emit batch-level audit logs ONCE per (tenant, decision-mode) —
+    // never per row, never per series. Crons are noisy enough.
+    await emitBatchAudits(decisions);
+
     let totalGenerated = 0;
+    let skipped = 0;
     for (const s of activeSeries) {
+      const decision = decisions.get(s.tenantId) ?? { mode: "skip", reason: "tenant_missing" } satisfies CronDecision;
+      if (!shouldExecute(decision)) {
+        skipped++;
+        continue;
+      }
       try {
         const r = await generateOccurrences({ series: s, windowEnd: generateWindow });
         totalGenerated += r.created;
@@ -51,11 +93,18 @@ const MATERIALIZE_HORIZON_HOURS = 24;
       }
     }
     console.log(
-      `[recurring] generated ${totalGenerated} new occurrences across ${activeSeries.length} active series`
+      `[recurring] generated ${totalGenerated} new occurrences across ${activeSeries.length - skipped}/${activeSeries.length} eligible series (${skipped} skipped by billing guard)`
     );
 
     // PHASE B — materialize due occurrences into real bookings.
-    const matResult = await materializeOccurrences({ horizon: materializeHorizon });
+    // The materializer iterates its own work queue (scheduled occurrence
+    // rows) rather than series, so we pass the decision map in so it
+    // can honor the same per-tenant guards. Existing-row grandfathering
+    // means rows from previously-allowed series keep firing.
+    const matResult = await materializeOccurrences({
+      horizon: materializeHorizon,
+      tenantDecisions: decisions,
+    });
     console.log(
       `[recurring] scanned=${matResult.scanned} materialized=${matResult.materialized} failed=${matResult.failed} skipped=${matResult.skipped}`
     );
@@ -65,3 +114,30 @@ const MATERIALIZE_HORIZON_HOURS = 24;
     process.exit(1);
   }
 })();
+
+/**
+ * Emit one audit row per (tenant, non-process decision). Logging is
+ * fire-and-forget — never blocks the batch.
+ */
+async function emitBatchAudits(decisions: Map<string, CronDecision>) {
+  for (const [tenantId, decision] of decisions) {
+    const category = auditCategoryFor(decision);
+    if (!category) continue;
+    try {
+      audit({
+        tenantId,
+        action: category,
+        actorLabel: "system:cron:materialize-recurring",
+        entityType: "billing",
+        metadata: {
+          capability: CAPABILITY,
+          decision_mode: decision.mode,
+          reason: decision.reason,
+        },
+      });
+    } catch (e) {
+      // Audit failure NEVER breaks a cron — we already log it elsewhere.
+      console.warn(`[recurring] audit emit failed for tenant ${tenantId}:`, e);
+    }
+  }
+}

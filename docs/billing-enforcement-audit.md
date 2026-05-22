@@ -10,7 +10,7 @@
 | Total `app/api/` routes | 121 | 121 |
 | Routes using `requireUser` / `requireRole` / `requirePermission` | 80 (66%) | 80 (66%) |
 | Routes with explicit plan enforcement | 10 (8%) | **15 (12%)** |
-| Cron scripts that skip free-plan tenants | 0 of 10 | 0 of 10 (deferred) |
+| Cron scripts that skip free-plan tenants | 0 of 10 | 0 of 10 (deferred — **shipped in Phase 2: see [cron-hardening-audit.md](./cron-hardening-audit.md)**) |
 | Tenant-isolation compliance (sampled) | 100% | 100% |
 | Cross-tenant data leaks detected | 0 | 0 |
 
@@ -98,16 +98,16 @@ Every blocked write writes a `billing.enforcement_denied` audit row with `{ capa
 | `PATCH /api/tenant/integrations` for webhook URL | Phase 16K labeled webhooks as Pro+ in UI; gate requires careful scoping (the route also handles other fields) |
 | `PATCH /api/tenant/sms` | No SMS backend exists yet; UI shows locked. Gate is moot until SMS ships |
 | `GET /api/tenant/analytics/executive/export` | Second analytics export endpoint — wire same gate in follow-up |
-| Cron workers don't skip free-plan tenants | Major item, deferred. Existing rows continue running; this is the "grandfather" half of the user's chosen tradeoff. Closes if/when "Hard enforce + cron skip" is selected |
+| ~~Cron workers don't skip free-plan tenants~~ | **Shipped in Phase 2** (`docs/cron-hardening-audit.md`). Inactive + suspended tenants now skipped; grandfathered Free-plan rows still execute per the user's tradeoff; one audit row per (tenant, decision) per cron run. |
 | Stripe webhook downgrade cleanup | On downgrade, no soft-disable of over-cap rows. Existing tenants who downgrade keep using premium features until they edit |
 | Page-level analytics/executive 403 | UI hides the tab from non-permitted users; if they URL-hack directly, the page hits the API which IS gated |
 
 ## Recommended follow-up phases
 
-1. **Cron hardening** — each premium cron loops only tenants whose `currentPlan` meets the capability tier. This is the "hard enforce" half.
-2. **Stripe webhook downgrade flow** — on `customer.subscription.updated` to a lower tier OR `customer.subscription.deleted`, pause active recurring series, disable automation rules, drop custom domains.
+1. ~~**Cron hardening**~~ — **Shipped** in Phase 2 (`cron-hardening-audit.md`). Inactive + suspended tenants skipped; grandfathered free-plan rows continue executing.
+2. **Stripe webhook downgrade flow** — on `customer.subscription.updated` to a lower tier OR `customer.subscription.deleted`, decide whether to pause active recurring series, disable automation rules, drop custom domains. Read-side inventory is now available via `lib/billing/grandfathered.ts` — the mutation half remains a product decision.
 3. **Public waitlist gating** — tile-level "Free workspaces have waitlist on a future plan" message instead of silent backend 402.
-4. **Centralized capability matrix endpoint** — `GET /api/tenant/capabilities` returns `Record<Capability, CapabilityCheck>` for UI consumption. Today UI duplicates the matrix; this would let the client always reflect the server's source of truth.
+4. ~~**Centralized capability matrix endpoint**~~ — **Shipped** in Phase 2: `GET /api/tenant/capabilities`. Frontend refactor to consume it is deferred until a new UI surface needs plan logic.
 5. **RBAC granular permissions** — extend `lib/security/permissions.ts` with `canManageBookingRules`, `canManageRouting`, etc. so non-admin staff can be selectively granted ops surfaces.
 
 ## Tenant isolation: explicit non-findings

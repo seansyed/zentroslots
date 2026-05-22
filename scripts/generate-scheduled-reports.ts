@@ -34,6 +34,15 @@ import {
 } from "../lib/analytics/scheduledReports";
 import { loadRepeatCustomerForComparison } from "../lib/analytics/customerIntelligence";
 import type { DailyAggregate, SnapshotExtras } from "../lib/analytics/types";
+import {
+  auditCategoryFor,
+  buildBatchDecisionMap,
+  shouldExecute,
+  type CronDecision,
+} from "../lib/billing/cronGuards";
+import { audit } from "../lib/audit";
+
+const CAPABILITY = "scheduled_reports" as const;
 
 (async () => {
   try {
@@ -60,9 +69,30 @@ import type { DailyAggregate, SnapshotExtras } from "../lib/analytics/types";
     }
 
     const tenantRows = await db.select({ id: tenants.id, name: tenants.name }).from(tenants);
+
+    // ── Plan-aware execution (Phase 2 billing hardening) ────────────
+    // Scheduled reports is a Pro+ capability. Free / Solo tenants get
+    // skipped entirely — no row is generated for them. Existing rows
+    // already in the table from prior plan tiers are NOT deleted (the
+    // user's grandfather policy preserves them); we simply stop adding
+    // new ones. This matches the recurring-series cron's pattern.
+    const decisions = await buildBatchDecisionMap({
+      db,
+      tenantsTable: tenants,
+      tenantIds: tenantRows.map((t) => t.id),
+      capability: CAPABILITY,
+    });
+    await emitBatchAudits(decisions);
+
     let ok = 0;
     let failed = 0;
+    let skipped = 0;
     for (const t of tenantRows) {
+      const decision = decisions.get(t.id);
+      if (decision && !shouldExecute(decision)) {
+        skipped++;
+        continue;
+      }
       for (const periodType of cadences) {
         const start = Date.now();
         try {
@@ -161,7 +191,7 @@ import type { DailyAggregate, SnapshotExtras } from "../lib/analytics/types";
       }
     }
     console.log(
-      `[reports] tenants=${tenantRows.length} cadences=${cadences.join(",")} ok=${ok} failed=${failed}`
+      `[reports] tenants=${tenantRows.length} cadences=${cadences.join(",")} ok=${ok} failed=${failed} skipped_billing=${skipped}`
     );
     process.exit(0);
   } catch (e) {
@@ -169,3 +199,29 @@ import type { DailyAggregate, SnapshotExtras } from "../lib/analytics/types";
     process.exit(1);
   }
 })();
+
+/**
+ * One audit emission per (tenant, non-process decision) per run.
+ * Audit failures never break the cron.
+ */
+async function emitBatchAudits(decisions: Map<string, CronDecision>) {
+  for (const [tenantId, decision] of decisions) {
+    const category = auditCategoryFor(decision);
+    if (!category) continue;
+    try {
+      audit({
+        tenantId,
+        action: category,
+        actorLabel: "system:cron:generate-scheduled-reports",
+        entityType: "billing",
+        metadata: {
+          capability: CAPABILITY,
+          decision_mode: decision.mode,
+          reason: decision.reason,
+        },
+      });
+    } catch (e) {
+      console.warn(`[reports] audit emit failed for tenant ${tenantId}:`, e);
+    }
+  }
+}

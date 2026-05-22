@@ -31,6 +31,7 @@ import {
   followupAutomationRules,
   pendingAutomations,
   reviewRequestRules,
+  tenants,
 } from "../db/schema";
 import {
   triggerAutomation,
@@ -43,9 +44,17 @@ import {
   type ConditionResult,
 } from "../lib/automations/automationConditions";
 import type { PendingSkipReason } from "../lib/automations/types";
+import {
+  auditCategoryFor,
+  buildBatchDecisionMap,
+  shouldExecute,
+  type CronDecision,
+} from "../lib/billing/cronGuards";
+import { audit } from "../lib/audit";
 
 const BATCH_SIZE = 50;
 const MAX_ATTEMPTS = 3;
+const CAPABILITY = "automation_rules" as const;
 
 async function run() {
   const now = new Date();
@@ -94,13 +103,58 @@ async function run() {
 
   console.log(`[automations] claimed ${claimed.length} due rows at ${now.toISOString()}`);
 
+  // ── Plan-aware guard (Phase 2 billing hardening) ────────────────
+  // Build one per-tenant decision over the claimed batch. Tenants in
+  // "skip" mode get all their claimed rows marked done-skipped without
+  // firing the automation engine. Grandfathered tenants execute as
+  // before — Phase 1 already blocks new bypass attempts at the API.
+  const claimedTenantIds = Array.from(new Set(claimed.map((r) => r.tenantId)));
+  const decisions = await buildBatchDecisionMap({
+    db,
+    tenantsTable: tenants,
+    tenantIds: claimedTenantIds,
+    capability: CAPABILITY,
+  });
+  await emitBatchAudits(decisions);
+
   for (const row of claimed) {
+    const decision = decisions.get(row.tenantId);
+    if (decision && !shouldExecute(decision)) {
+      await markRow(row.id, "skipped", `billing_guard:${decision.reason}`);
+      continue;
+    }
     try {
       await processOne(row);
     } catch (e) {
       // Per-row safety net — keep batch going.
       console.error(`[automations] row ${row.id} crashed:`, e);
       await markRow(row.id, "failed", "unknown");
+    }
+  }
+}
+
+/**
+ * One audit row per (tenant, non-process decision) per cron run.
+ * Never per claimed row — that would spam audit_logs on a busy tenant.
+ */
+async function emitBatchAudits(decisions: Map<string, CronDecision>) {
+  for (const [tenantId, decision] of decisions) {
+    const category = auditCategoryFor(decision);
+    if (!category) continue;
+    try {
+      audit({
+        tenantId,
+        action: category,
+        actorLabel: "system:cron:run-automations",
+        entityType: "billing",
+        metadata: {
+          capability: CAPABILITY,
+          decision_mode: decision.mode,
+          reason: decision.reason,
+        },
+      });
+    } catch (e) {
+      console.warn(`[automations] audit emit failed for tenant ${tenantId}:`, e);
     }
   }
 }
