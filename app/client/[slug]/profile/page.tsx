@@ -11,7 +11,7 @@ export default async function ClientProfilePage(props: {
   params: Promise<{ slug: string }>;
 }) {
   const { slug } = await props.params;
-  const { tenant, customer } = await requireClientPortalContext(slug);
+  const { tenant, customer, hasUnread } = await requireClientPortalContext(slug);
 
   const prefs = normalizePrefs(customer.commPrefs);
 
@@ -26,6 +26,7 @@ export default async function ClientProfilePage(props: {
       }}
       customer={{ name: customer.name, email: customer.email }}
       title="Profile"
+      hasUnread={hasUnread}
     >
       <ProfileForm
         slug={tenant.slug}

@@ -13,7 +13,7 @@ import { renderCancellation, sendEmail, type BookingForEmail } from "@/lib/email
 import { gateSchedulingEmail, logSuppressed } from "@/lib/communications/preferences";
 
 export async function POST(
-  _req: NextRequest,
+  req: NextRequest,
   context: { params: Promise<{ token: string }> }
 ) {
   try {
@@ -21,6 +21,24 @@ export async function POST(
     const payload = await verifyBookingToken(token);
     if (!payload || payload.kind !== "cancel") {
       throw new HttpError(401, "Invalid or expired link");
+    }
+
+    // F30 — optional cancellation reason capture. Best-effort body
+    // parse; pre-Wave-4 clients post no body, which is still valid.
+    // The reason is trimmed + capped at 1000 chars to keep the column
+    // a sensible size and prevent paste-attacks.
+    let cancellationReason: string | null = null;
+    try {
+      const ct = req.headers.get("content-type") ?? "";
+      if (ct.includes("application/json")) {
+        const body = (await req.json()) as { reason?: unknown };
+        if (typeof body?.reason === "string") {
+          const trimmed = body.reason.trim().slice(0, 1000);
+          if (trimmed.length > 0) cancellationReason = trimmed;
+        }
+      }
+    } catch {
+      /* swallow — empty body is fine */
     }
 
     // Tenant feature gate. Token may be valid, but the workspace may
@@ -43,7 +61,12 @@ export async function POST(
 
     const [updated] = await db
       .update(bookings)
-      .set({ status: "cancelled", updatedAt: new Date() })
+      .set({
+        status: "cancelled",
+        // F30 — only overwrite when a reason was actually provided.
+        ...(cancellationReason !== null ? { cancellationReason } : {}),
+        updatedAt: new Date(),
+      })
       .where(
         and(
           eq(bookings.id, payload.bookingId),

@@ -5,6 +5,7 @@ import { db } from "@/db/client";
 import { billingTransactions, bookings, services, users } from "@/db/schema";
 import ClientPortalShell from "@/components/client/ClientPortalShell";
 import { TimeText } from "@/components/client/TimeText";
+import FeedbackChip from "@/components/client/FeedbackChip";
 import { loadTenantFeatures } from "@/lib/features";
 import { signBookingToken } from "@/lib/tokens";
 import { requireClientPortalContext } from "../_lib/guard";
@@ -15,7 +16,7 @@ export default async function ClientBookingsPage(props: {
   params: Promise<{ slug: string }>;
 }) {
   const { slug } = await props.params;
-  const { tenant, customer } = await requireClientPortalContext(slug);
+  const { tenant, customer, hasUnread } = await requireClientPortalContext(slug);
 
   const rows = await db
     .select({
@@ -30,6 +31,9 @@ export default async function ClientBookingsPage(props: {
       durationMinutes: services.durationMinutes,
       staffUserId: users.id,
       staffName: users.name,
+      // F31 — used to decide whether to surface the FeedbackChip on
+      // completed past bookings.
+      feedbackSubmittedAt: bookings.feedbackSubmittedAt,
     })
     .from(bookings)
     .innerJoin(services, eq(services.id, bookings.serviceId))
@@ -119,6 +123,14 @@ export default async function ClientBookingsPage(props: {
     receiptUrl: extractReceiptUrl(t.metadata),
   }));
 
+  // F31 — find the most recent completed booking without feedback yet.
+  // The bookings list is already sorted DESC, so the first match is the
+  // most recent. We surface a single FeedbackChip above Past — not one
+  // per row, to keep visual weight low.
+  const pendingFeedback = past.find(
+    (b) => b.status === "completed" && !b.feedbackSubmittedAt,
+  );
+
   return (
     <ClientPortalShell
       tenant={{
@@ -130,6 +142,7 @@ export default async function ClientBookingsPage(props: {
       }}
       customer={{ name: customer.name, email: customer.email }}
       title="Bookings"
+      hasUnread={hasUnread}
     >
       <section className="space-y-4">
         <SectionHeader label="Upcoming" count={upcomingWithTokens.length} />
@@ -181,6 +194,21 @@ export default async function ClientBookingsPage(props: {
             ))}
           </ul>
         </section>
+      )}
+
+      {/* F31 — Pending feedback prompt. One chip for the most recent
+          completed booking without feedback yet. Sits above Past so
+          customers see it on first arrival on the page. */}
+      {pendingFeedback && (
+        <div className="mt-8">
+          <FeedbackChip
+            tenantSlug={tenant.slug}
+            bookingId={pendingFeedback.id}
+            serviceName={pendingFeedback.serviceName}
+            staffName={pendingFeedback.staffName}
+            accent={tenant.primaryColor}
+          />
+        </div>
       )}
 
       <section className="mt-8 space-y-4">

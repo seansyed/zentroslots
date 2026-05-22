@@ -9,7 +9,7 @@ import {
 } from "lucide-react";
 
 import { db } from "@/db/client";
-import { auditLogs, bookings, services } from "@/db/schema";
+import { auditLogs, bookings, customers, services } from "@/db/schema";
 import ClientPortalShell from "@/components/client/ClientPortalShell";
 import { TimeText } from "@/components/client/TimeText";
 import { requireClientPortalContext } from "../_lib/guard";
@@ -33,7 +33,11 @@ export default async function ClientNotificationsPage(props: {
   params: Promise<{ slug: string }>;
 }) {
   const { slug } = await props.params;
-  const { tenant, customer } = await requireClientPortalContext(slug);
+  // F32 — when the customer visits this page, they're "catching up"
+  // on alerts. We use `hasUnread` from the guard ONLY for surfacing
+  // the dot on OTHER pages; here we read the events and then update
+  // `notifications_last_seen_at` so the next page load is clean.
+  const { tenant, customer, hasUnread } = await requireClientPortalContext(slug);
 
   // Bookings owned by this customer (email-equality is the canonical
   // ownership rule per the existing portal).
@@ -78,6 +82,21 @@ export default async function ClientNotificationsPage(props: {
     }))
   );
 
+  // F32 — mark notifications seen. Awaited so we know it succeeded
+  // before returning the page (the UPDATE is one indexed-by-PK row,
+  // sub-millisecond). Running it AFTER reading events means this
+  // visit's events still count as unread for THIS render — but the
+  // next page load is clean. Wrapped in try/catch so a DB hiccup
+  // never breaks the page render.
+  try {
+    await db
+      .update(customers)
+      .set({ notificationsLastSeenAt: new Date() })
+      .where(eq(customers.id, customer.id));
+  } catch {
+    /* never block the render on a read-state write failure */
+  }
+
   return (
     <ClientPortalShell
       tenant={{
@@ -89,6 +108,7 @@ export default async function ClientNotificationsPage(props: {
       }}
       customer={{ name: customer.name, email: customer.email }}
       title="Notifications"
+      hasUnread={hasUnread}
     >
       {events.length === 0 ? (
         <EmptyState accent={tenant.primaryColor} />

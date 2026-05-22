@@ -30,6 +30,9 @@ type ShellProps = {
   customer: { name: string; email: string };
   title: string;
   children: React.ReactNode;
+  /** Wave 4 F32 — when true, the Alerts nav item shows an unread dot.
+   *  Computed by the guard. Optional so existing callers stay valid. */
+  hasUnread?: boolean;
 };
 
 type NavItem = {
@@ -74,7 +77,7 @@ const NAV: NavItem[] = [
   },
 ];
 
-export default function ClientPortalShell({ tenant, customer, title, children }: ShellProps) {
+export default function ClientPortalShell({ tenant, customer, title, children, hasUnread = false }: ShellProps) {
   const pathname = usePathname();
   const accent = tenant.primaryColor;
   const initial = (customer.name || customer.email || "?").trim().charAt(0).toUpperCase();
@@ -166,6 +169,7 @@ export default function ClientPortalShell({ tenant, customer, title, children }:
           <nav className="sticky top-24 space-y-1" aria-label="Portal">
             {NAV.map((item) => {
               const active = item.matches(pathname, tenant.slug);
+              const showUnread = item.key === "notifications" && hasUnread;
               return (
                 <Link
                   key={item.key}
@@ -178,11 +182,22 @@ export default function ClientPortalShell({ tenant, customer, title, children }:
                   }
                   style={active ? { color: accent } : undefined}
                 >
-                  <item.Icon
-                    className="h-5 w-5"
-                    strokeWidth={1.75}
-                  />
+                  <span className="relative inline-flex">
+                    <item.Icon className="h-5 w-5" strokeWidth={1.75} />
+                    {showUnread && (
+                      <span
+                        aria-hidden
+                        className="absolute -right-0.5 -top-0.5 inline-flex h-2 w-2"
+                      >
+                        <span className="absolute inset-0 animate-ping rounded-full bg-rose-400/60" />
+                        <span className="relative h-2 w-2 rounded-full bg-rose-500 ring-2 ring-white" />
+                      </span>
+                    )}
+                  </span>
                   <span>{item.label}</span>
+                  {showUnread && (
+                    <span className="sr-only"> (unread updates)</span>
+                  )}
                 </Link>
               );
             })}
@@ -219,6 +234,7 @@ export default function ClientPortalShell({ tenant, customer, title, children }:
         <div className="mx-auto flex max-w-md items-stretch justify-around">
           {NAV.map((item) => {
             const active = item.matches(pathname, tenant.slug);
+            const showUnread = item.key === "notifications" && hasUnread;
             return (
               <Link
                 key={item.key}
@@ -227,8 +243,20 @@ export default function ClientPortalShell({ tenant, customer, title, children }:
                 className="flex flex-1 flex-col items-center justify-center gap-0.5 px-1 py-2.5 text-[10px] font-medium transition"
                 style={{ color: active ? accent : "#64748b" }}
               >
-                <item.Icon className="h-5 w-5" strokeWidth={active ? 2.25 : 1.75} />
+                <span className="relative inline-flex">
+                  <item.Icon className="h-5 w-5" strokeWidth={active ? 2.25 : 1.75} />
+                  {showUnread && (
+                    <span
+                      aria-hidden
+                      className="absolute -right-1 -top-0.5 inline-flex h-2 w-2"
+                    >
+                      <span className="absolute inset-0 animate-ping rounded-full bg-rose-400/60" />
+                      <span className="relative h-2 w-2 rounded-full bg-rose-500 ring-2 ring-white" />
+                    </span>
+                  )}
+                </span>
                 <span>{item.label}</span>
+                {showUnread && <span className="sr-only"> (unread updates)</span>}
               </Link>
             );
           })}

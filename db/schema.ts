@@ -398,6 +398,19 @@ export const bookings = pgTable(
     /** Charged cents at confirmation. Source of truth for refunds. */
     amountChargedCents: integer("amount_charged_cents"),
 
+    // ── Customer feedback loop (migration 0043) — additive, nullable ──
+    /** F30: free-text reason captured on /cancel/[token]. NULL when
+     *  unspecified. No PII enforcement — surfaced only in CRM. */
+    cancellationReason: text("cancellation_reason"),
+    /** F31: 1-5 star post-visit rating, set by the customer in portal.
+     *  CHECK constraint in the migration enforces the range. */
+    feedbackRating: smallint("feedback_rating"),
+    /** F31: optional free-text accompanying the rating. */
+    feedbackNote: text("feedback_note"),
+    /** F31: idempotency marker — once set, the portal hides the rating
+     *  prompt for this booking. */
+    feedbackSubmittedAt: timestamp("feedback_submitted_at", { withTimezone: true }),
+
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -571,6 +584,12 @@ export const customers = pgTable(
     // lib/client-prefs.ts so missing keys fall back to sensible defaults.
     commPrefs: jsonb("comm_prefs").notNull().default({}),
     status: varchar("status", { length: 40 }).notNull().default("active"),
+    // F32 — Notification read-state. Updated when the customer visits
+    // /client/[slug]/notifications. The portal shell shows an unread
+    // dot when any audit_log event newer than this exists for one of
+    // this customer's bookings. NULL = never visited (everything
+    // before "now" counts as unread on first visit).
+    notificationsLastSeenAt: timestamp("notifications_last_seen_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

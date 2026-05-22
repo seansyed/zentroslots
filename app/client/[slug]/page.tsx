@@ -14,7 +14,7 @@ export default async function ClientHomePage(props: {
   params: Promise<{ slug: string }>;
 }) {
   const { slug } = await props.params;
-  const { tenant, customer } = await requireClientPortalContext(slug);
+  const { tenant, customer, hasUnread } = await requireClientPortalContext(slug);
 
   const now = new Date();
   // Match bookings to this customer by email-equality fallback — older
@@ -223,6 +223,7 @@ export default async function ClientHomePage(props: {
       }}
       customer={{ name: customer.name, email: customer.email }}
       title={`Welcome back, ${firstName}`}
+      hasUnread={hasUnread}
     >
       {/* Next-up card */}
       <section className="relative overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
