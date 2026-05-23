@@ -68,12 +68,24 @@ export const dynamic = "force-dynamic";
 // cookies, X-Forwarded-* etc.
 const HEADER_PREFIX_WHITELIST = ["stripe-", "paypal-"];
 
+// UUID v4-ish shape check. Postgres throws `invalid input syntax for
+// type uuid` on a non-UUID string — which would surface as a 500.
+// Validate up-front and 404 instead. (Same posture as the public
+// status endpoint.) Loose hex match — accepts any UUID variant.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export async function POST(
   req: NextRequest,
   context: { params: Promise<{ providerId: string }> },
 ): Promise<NextResponse> {
   const startedAt = Date.now();
   const { providerId } = await context.params;
+  if (!providerId || !UUID_RE.test(providerId)) {
+    // Don't 500 on a malformed URL path segment — that would trigger
+    // provider retry storms for attacker traffic. 404 is the right
+    // posture: this endpoint serves no resource for this id.
+    return NextResponse.json({ error: "Unknown provider" }, { status: 404 });
+  }
 
   // ─── Header collection (lowercase keys, prefix-filtered) ─────────────
   // Adapter contract requires lowercase keys. We also store this map on
