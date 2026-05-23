@@ -17,10 +17,10 @@
 
 import Link from "next/link";
 import { eq } from "drizzle-orm";
-import { XCircle, ArrowRight, Home } from "lucide-react";
+import { XCircle, ArrowRight, ArrowLeft } from "lucide-react";
 
 import { db } from "@/db/client";
-import { bookings, services, users } from "@/db/schema";
+import { bookings, services, tenants, users } from "@/db/schema";
 
 export const dynamic = "force-dynamic";
 
@@ -34,6 +34,13 @@ interface BookingSummary {
   serviceName: string;
   serviceSlug: string;
   staffName: string;
+  /** Tenant slug — used for the "View other times" CTA which points
+   *  the customer back to the host's profile (/u/<slug>), not to the
+   *  ZentroMeet marketing root. */
+  tenantSlug: string;
+  /** Tenant display name — used in the CTA label so the customer sees
+   *  "Back to Acme Co." instead of a generic "back" link. */
+  tenantName: string;
 }
 
 async function lookupBooking(bookingId: string): Promise<BookingSummary | null> {
@@ -47,14 +54,26 @@ async function lookupBooking(bookingId: string): Promise<BookingSummary | null> 
       serviceName: services.name,
       serviceSlug: services.slug,
       staffName: users.name,
+      tenantSlug: tenants.slug,
+      tenantName: tenants.name,
     })
     .from(bookings)
     .leftJoin(services, eq(services.id, bookings.serviceId))
     .leftJoin(users, eq(users.id, bookings.staffUserId))
+    .leftJoin(tenants, eq(tenants.id, bookings.tenantId))
     .where(eq(bookings.id, bookingId))
     .limit(1);
   const r = row[0];
-  if (!r || !r.serviceName || !r.serviceSlug || !r.staffName) return null;
+  if (
+    !r ||
+    !r.serviceName ||
+    !r.serviceSlug ||
+    !r.staffName ||
+    !r.tenantSlug ||
+    !r.tenantName
+  ) {
+    return null;
+  }
   return r as BookingSummary;
 }
 
@@ -112,21 +131,39 @@ export default async function PaymentCancelledPage({
 
       <div className="mt-6 flex flex-col sm:flex-row gap-2 w-full">
         {summary && (
+          <>
+            <Link
+              href={`/book/${summary.serviceId}`}
+              className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-slate-800 transition-colors"
+            >
+              Try again
+              <ArrowRight className="h-3.5 w-3.5" />
+            </Link>
+            {/* Secondary CTA points back to the HOST'S profile, not to
+                ZentroMeet's marketing home. The customer never thinks of
+                themselves as "leaving ZentroMeet" — they're booking with
+                a specific person/business. */}
+            <Link
+              href={`/u/${summary.tenantSlug}`}
+              className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors"
+            >
+              <ArrowLeft className="h-3.5 w-3.5" />
+              View other times
+            </Link>
+          </>
+        )}
+        {!summary && (
+          // Fallback when the booking row can't be resolved (deleted
+          // tenant, malformed link, etc.) — at that point we have no
+          // host context to send them to, so the marketing home is the
+          // only meaningful destination.
           <Link
-            href={`/book/${summary.serviceId}`}
-            className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-slate-800 transition-colors"
+            href="/"
+            className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors"
           >
-            Try again
-            <ArrowRight className="h-3.5 w-3.5" />
+            Go to ZentroMeet
           </Link>
         )}
-        <Link
-          href="/"
-          className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors"
-        >
-          <Home className="h-3.5 w-3.5" />
-          Go home
-        </Link>
       </div>
 
       <p className="mt-6 text-xs text-slate-500">
