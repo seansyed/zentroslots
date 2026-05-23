@@ -105,10 +105,20 @@ async function validateCredentials(
     // but the underlying HTTP method `GET /v1/account` requires no
     // arguments and returns the OWN account that the secret key belongs
     // to. The SDK supports this at runtime via the no-arg call; the
-    // type system just doesn't expose that overload. The cast below
-    // is intentional and isolated to this one call.
-    const accountRetrieve = stripe.accounts.retrieve as unknown as () => Promise<Stripe.Account>;
-    const account = await accountRetrieve();
+    // type system just doesn't expose that overload.
+    //
+    // ⚠ Binding note: the resource method uses `this._makeRequest(...)`
+    // internally (see `node_modules/stripe/cjs/resources/Accounts.js`),
+    // so we MUST call it as a method on `stripe.accounts` — extracting
+    // the bare function reference into a local (`const fn = stripe.accounts.retrieve`)
+    // would detach `this`, and the SDK would throw
+    //   "Cannot read properties of undefined (reading '_makeRequest')"
+    // at runtime. We cast the parent resource (not the method) so the
+    // call site stays a method invocation and the binding survives.
+    const accountsResource = stripe.accounts as unknown as {
+      retrieve: () => Promise<Stripe.Account>;
+    };
+    const account = await accountsResource.retrieve();
     const capabilities: ProviderCapabilities = {
       accountId: account.id,
       country: account.country ?? undefined,
