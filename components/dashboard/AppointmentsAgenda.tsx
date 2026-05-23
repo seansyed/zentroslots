@@ -29,6 +29,9 @@ import {
   ExternalLink,
   ArrowRight,
   X,
+  Ban,
+  Building2,
+  Users,
 } from "lucide-react";
 
 import AppointmentDrawer, { type DrawerBooking } from "@/components/dashboard/AppointmentDrawer";
@@ -59,6 +62,20 @@ export type Row = {
   isDemo?: boolean;
 };
 
+/** Phase 17I-2C — operational calendar entries (blocked_time +
+ *  internal_meeting) rendered alongside bookings on the agenda. NEVER
+ *  customer-facing; never opens the booking drawer. */
+export type AgendaCalendarEvent = {
+  id: string;
+  eventType: "blocked_time" | "internal_meeting";
+  title: string;
+  startAt: string;
+  endAt: string;
+  staffName: string;
+  attendeeNames: string[];
+  location?: string | null;
+};
+
 const STATUS_TABS = [
   { value: "",          label: "All" },
   { value: "confirmed", label: "Confirmed" },
@@ -70,6 +87,7 @@ const STATUS_TABS = [
 
 export default function AppointmentsAgenda({
   rows: initialRows,
+  events = [],
   timezone,
   canManage,
   canCancel,
@@ -77,6 +95,10 @@ export default function AppointmentsAgenda({
   nextCursor,
 }: {
   rows: Row[];
+  /** Phase 17I-2C — operational events folded into the same dated
+   *  groups. Optional + defaults to [] for back-compat with call sites
+   *  that don't supply it yet. */
+  events?: AgendaCalendarEvent[];
   timezone: string;
   canManage: boolean;
   canCancel?: boolean;
@@ -159,6 +181,52 @@ export default function AppointmentsAgenda({
 
   // Group rows by date key (YYYY-MM-DD in caller timezone).
   const grouped = React.useMemo(() => groupByDate(rows, timezone), [rows, timezone]);
+
+  // Phase 17I-2C — events bucketed by the same date key so DateSection
+  // can render them inline. Status filter on the controls row still
+  // only filters bookings (events have no booking status); when the
+  // user picks a non-empty filter we hide events entirely so the agenda
+  // honestly reflects "bookings only" mode.
+  const eventsByDate = React.useMemo(() => {
+    if (currentStatus) return new Map<string, AgendaCalendarEvent[]>();
+    const m = new Map<string, AgendaCalendarEvent[]>();
+    for (const e of events) {
+      const k = formatInTimeZone(e.startAt, timezone, "yyyy-MM-dd");
+      const list = m.get(k) ?? [];
+      list.push(e);
+      m.set(k, list);
+    }
+    for (const list of m.values()) list.sort((a, b) => a.startAt.localeCompare(b.startAt));
+    return m;
+  }, [events, timezone, currentStatus]);
+
+  // Merge date keys from BOTH bookings and events so a day that has
+  // only an internal meeting still shows up as its own section. The
+  // existing groupByDate output is the source of truth for booking
+  // rows; we synthesize a tail of event-only sections for any date
+  // keys not already in `grouped`.
+  const groupedKeys = React.useMemo(
+    () => new Set(grouped.map((g) => g.dateKey)),
+    [grouped],
+  );
+  const eventOnlyGroups = React.useMemo(() => {
+    const out: { dateKey: string; dateLabel: string; relativeLabel: string | null; rows: Row[] }[] = [];
+    for (const [dateKey, eventsForDate] of eventsByDate.entries()) {
+      if (groupedKeys.has(dateKey)) continue;
+      if (eventsForDate.length === 0) continue;
+      const ref = new Date(eventsForDate[0].startAt);
+      out.push({
+        dateKey,
+        dateLabel: formatInTimeZone(ref, timezone, "EEE, MMM d"),
+        relativeLabel: dateKey === formatInTimeZone(new Date(), timezone, "yyyy-MM-dd")
+          ? "Today"
+          : null,
+        rows: [],
+      });
+    }
+    return out.sort((a, b) => b.dateKey.localeCompare(a.dateKey));
+  }, [eventsByDate, groupedKeys, timezone]);
+
   const datesWithBookings = React.useMemo(
     () => new Set(grouped.map((g) => g.dateKey)),
     [grouped]
@@ -190,7 +258,7 @@ export default function AppointmentsAgenda({
 
       {/* Agenda */}
       <div className="mt-6">
-        {rows.length === 0 ? (
+        {rows.length === 0 && eventOnlyGroups.length === 0 ? (
           <EmptyAgenda hasFilter={Boolean(currentStatus)} />
         ) : (
           <div className="space-y-7">
@@ -201,6 +269,21 @@ export default function AppointmentsAgenda({
                   dateLabel={g.dateLabel}
                   relativeLabel={g.relativeLabel}
                   rows={g.rows}
+                  events={eventsByDate.get(g.dateKey) ?? []}
+                  timezone={timezone}
+                  onOpen={openRow}
+                  isToday={g.dateKey === todayKey}
+                />
+              </FadeIn>
+            ))}
+            {eventOnlyGroups.map((g, idx) => (
+              <FadeIn key={g.dateKey} delay={grouped.length + idx}>
+                <DateSection
+                  dateKey={g.dateKey}
+                  dateLabel={g.dateLabel}
+                  relativeLabel={g.relativeLabel}
+                  rows={g.rows}
+                  events={eventsByDate.get(g.dateKey) ?? []}
                   timezone={timezone}
                   onOpen={openRow}
                   isToday={g.dateKey === todayKey}
@@ -256,6 +339,7 @@ function DateSection({
   dateLabel,
   relativeLabel,
   rows,
+  events = [],
   timezone,
   onOpen,
   isToday = false,
@@ -264,6 +348,9 @@ function DateSection({
   dateLabel: string;
   relativeLabel: string | null;
   rows: Row[];
+  /** Phase 17I-2C — operational calendar entries painted alongside
+   *  bookings, interleaved chronologically. */
+  events?: AgendaCalendarEvent[];
   timezone: string;
   onOpen: (r: Row) => void;
   isToday?: boolean;
@@ -305,6 +392,11 @@ function DateSection({
         )}
         <span className="ml-1 text-[11px] text-ink-subtle">
           {rows.length} booking{rows.length === 1 ? "" : "s"}
+          {events.length > 0 && (
+            <span className="ml-1.5 text-[11px] text-slate-500">
+              · {events.length} operational
+            </span>
+          )}
         </span>
       </div>
 
@@ -320,8 +412,105 @@ function DateSection({
         ))}
         {/* All-past case: marker below the last row */}
         {isToday && nowInsertAt === -1 && rows.length > 0 && <NowMarker timezone={timezone} />}
+
+        {/* Phase 17I-2C — operational calendar events for this date.
+            Rendered after the booking list, ordered by startAt. Static
+            cards (no drawer). When a status filter is active these
+            are suppressed at the parent level — agenda becomes
+            bookings-only to honor the filter intent. */}
+        {events.map((e) => (
+          <li key={`ev-${e.id}`}>
+            <CalendarEventAgendaCard event={e} timezone={timezone} />
+          </li>
+        ))}
       </ul>
     </section>
+  );
+}
+
+/** Phase 17I-2C — agenda-shaped card for a calendar_events entry.
+ *  Visual sibling of AppointmentCard but read-only (no drawer hook).
+ *  Slate + lock for blocked_time; indigo + team for internal_meeting. */
+function CalendarEventAgendaCard({
+  event,
+  timezone,
+}: {
+  event: AgendaCalendarEvent;
+  timezone: string;
+}) {
+  const isBlocked = event.eventType === "blocked_time";
+  const start = formatInTimeZone(event.startAt, timezone, "h:mm a");
+  const end = formatInTimeZone(event.endAt, timezone, "h:mm a");
+  return (
+    <div
+      className={cn(
+        "flex w-full items-center gap-3 rounded-xl border px-3 py-2.5 shadow-soft transition-colors",
+        isBlocked
+          ? "border-slate-200 bg-slate-50/70"
+          : "border-indigo-200 bg-indigo-50/40",
+      )}
+      title={
+        event.attendeeNames.length > 0
+          ? `${event.title} · Attendees: ${event.attendeeNames.join(", ")}`
+          : event.title
+      }
+    >
+      <span
+        aria-hidden
+        className={cn(
+          "h-9 w-1 shrink-0 rounded-full",
+          isBlocked ? "bg-slate-400" : "bg-indigo-500",
+        )}
+      />
+      <div className="w-32 shrink-0">
+        <div
+          className={cn(
+            "text-[12px] font-semibold tabular-nums",
+            isBlocked ? "text-slate-800" : "text-indigo-900",
+          )}
+        >
+          {start}
+        </div>
+        <div className="text-[10px] text-ink-muted">{end}</div>
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-1.5">
+          <span
+            className={cn(
+              "rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider",
+              isBlocked ? "bg-slate-700/90 text-white" : "bg-indigo-600 text-white",
+            )}
+          >
+            {isBlocked ? "Blocked" : "Internal"}
+          </span>
+          <span
+            className={cn(
+              "truncate text-[13px] font-semibold",
+              isBlocked ? "text-slate-800" : "text-indigo-900",
+            )}
+          >
+            {event.title}
+          </span>
+        </div>
+        <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[11px] text-ink-muted">
+          <span className="truncate">{event.staffName}</span>
+          {!isBlocked && event.attendeeNames.length > 0 && (
+            <span className="inline-flex items-center gap-1">
+              <Users className="h-3 w-3" strokeWidth={1.75} />
+              {event.attendeeNames.length === 1
+                ? event.attendeeNames[0]
+                : `${event.attendeeNames.length} attendees`}
+            </span>
+          )}
+          {event.location && <span className="truncate">{event.location}</span>}
+        </div>
+      </div>
+      {isBlocked ? (
+        <Ban className="h-4 w-4 text-slate-500" strokeWidth={1.75} />
+      ) : (
+        <Building2 className="h-4 w-4 text-indigo-500" strokeWidth={1.75} />
+      )}
+    </div>
   );
 }
 

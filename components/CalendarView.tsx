@@ -60,6 +60,8 @@ import {
   ExternalLink,
   Move3D,
   X,
+  Ban,
+  Building2,
 } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 
@@ -96,6 +98,26 @@ export type CalendarBooking = {
   isDemo?: boolean;
 };
 
+/** Phase 17I-2C — operational calendar entries (blocked time + internal
+ *  meetings). Painted alongside CalendarBooking but visually distinct.
+ *  NEVER customer-facing. Never opens the booking drawer (no
+ *  serviceId, no clientEmail, no payment lifecycle). */
+export type CalendarEventLite = {
+  id: string;
+  eventType: "blocked_time" | "internal_meeting";
+  title: string;
+  startAt: string;
+  endAt: string;
+  /** Slot owner — blocked_time: the blocked staff; internal_meeting:
+   *  the organizer. */
+  staffId: string;
+  staffName: string;
+  /** Other staff invited to internal_meeting. Empty for blocked_time. */
+  attendeeNames: string[];
+  meetLink?: string | null;
+  location?: string | null;
+};
+
 const VIEWS = ["day", "week", "month", "agenda"] as const;
 type View = (typeof VIEWS)[number];
 const VIEW_LABEL: Record<View, string> = { day: "Day", week: "Week", month: "Month", agenda: "Agenda" };
@@ -109,10 +131,15 @@ const PX_PER_HOUR = 56;     // visual scale
 export default function CalendarView({
   timezone,
   bookings,
+  calendarEvents = [],
   canManage = true,
 }: {
   timezone: string;
   bookings: CalendarBooking[];
+  /** Phase 17I-2C — operational calendar entries (blocked_time +
+   *  internal_meeting). Optional + defaults to [] so existing call
+   *  sites that don't supply it keep working. */
+  calendarEvents?: CalendarEventLite[];
   canManage?: boolean;
 }) {
   const [view, setView] = React.useState<View>("week");
@@ -186,6 +213,21 @@ export default function CalendarView({
     for (const list of m.values()) list.sort((a, b) => a.startAt.localeCompare(b.startAt));
     return m;
   }, [filtered, timezone]);
+
+  // Phase 17I-2C — parallel bucket for calendar_events (blocked_time +
+  // internal_meeting). Painted alongside bookings in DayColumn / Agenda
+  // but never opens the booking drawer.
+  const byDayEvents = React.useMemo(() => {
+    const m = new Map<string, CalendarEventLite[]>();
+    for (const e of calendarEvents) {
+      const k = formatInTimeZone(e.startAt, timezone, "yyyy-MM-dd");
+      const list = m.get(k) ?? [];
+      list.push(e);
+      m.set(k, list);
+    }
+    for (const list of m.values()) list.sort((a, b) => a.startAt.localeCompare(b.startAt));
+    return m;
+  }, [calendarEvents, timezone]);
 
   function shift(delta: number) {
     if (view === "day" || view === "agenda") setAnchor((d) => addDays(d, delta));
@@ -314,10 +356,10 @@ export default function CalendarView({
             <FilteredEmptyState onClear={() => setFilters({})} />
           ) : (
             <ViewCrossfade viewKey={view}>
-              {view === "day"    && <DayView anchor={anchor} timezone={timezone} byDay={byDay} onOpen={openBooking} onReschedule={canManage ? attemptReschedule : undefined} focusOverlay={pulse.bestFocusWindow} />}
-              {view === "week"   && <WeekView anchor={anchor} timezone={timezone} byDay={byDay} onOpen={openBooking} onReschedule={canManage ? attemptReschedule : undefined} focusOverlay={pulse.bestFocusWindow} />}
+              {view === "day"    && <DayView anchor={anchor} timezone={timezone} byDay={byDay} byDayEvents={byDayEvents} onOpen={openBooking} onReschedule={canManage ? attemptReschedule : undefined} focusOverlay={pulse.bestFocusWindow} />}
+              {view === "week"   && <WeekView anchor={anchor} timezone={timezone} byDay={byDay} byDayEvents={byDayEvents} onOpen={openBooking} onReschedule={canManage ? attemptReschedule : undefined} focusOverlay={pulse.bestFocusWindow} />}
               {view === "month"  && <MonthView anchor={anchor} timezone={timezone} byDay={byDay} onOpen={openBooking} onJump={(d) => { setAnchor(startOfDay(d)); setView("day"); }} />}
-              {view === "agenda" && <AgendaView anchor={anchor} timezone={timezone} byDay={byDay} onOpen={openBooking} />}
+              {view === "agenda" && <AgendaView anchor={anchor} timezone={timezone} byDay={byDay} byDayEvents={byDayEvents} onOpen={openBooking} />}
             </ViewCrossfade>
           )}
         </PremiumCard>
@@ -891,17 +933,19 @@ function MiniCalendar({
 // ─── Day View ──────────────────────────────────────────────────────
 
 function DayView({
-  anchor, timezone, byDay, onOpen, onReschedule, focusOverlay,
+  anchor, timezone, byDay, byDayEvents, onOpen, onReschedule, focusOverlay,
 }: {
   anchor: Date;
   timezone: string;
   byDay: Map<string, CalendarBooking[]>;
+  byDayEvents: Map<string, CalendarEventLite[]>;
   onOpen: (b: CalendarBooking) => void;
   onReschedule?: (id: string, newStartIso: string) => void;
   focusOverlay?: Pulse["bestFocusWindow"];
 }) {
   const key = format(anchor, "yyyy-MM-dd");
   const list = byDay.get(key) ?? [];
+  const events = byDayEvents.get(key) ?? [];
   const today = isSameDay(anchor, new Date());
 
   return (
@@ -911,6 +955,7 @@ function DayView({
         <DayColumn
           dateKey={key}
           bookings={list}
+          events={events}
           timezone={timezone}
           onOpen={onOpen}
           onReschedule={onReschedule}
@@ -926,11 +971,12 @@ function DayView({
 // ─── Week View ─────────────────────────────────────────────────────
 
 function WeekView({
-  anchor, timezone, byDay, onOpen, onReschedule, focusOverlay,
+  anchor, timezone, byDay, byDayEvents, onOpen, onReschedule, focusOverlay,
 }: {
   anchor: Date;
   timezone: string;
   byDay: Map<string, CalendarBooking[]>;
+  byDayEvents: Map<string, CalendarEventLite[]>;
   onOpen: (b: CalendarBooking) => void;
   onReschedule?: (id: string, newStartIso: string) => void;
   focusOverlay?: Pulse["bestFocusWindow"];
@@ -975,6 +1021,7 @@ function WeekView({
                   key={key}
                   dateKey={key}
                   bookings={byDay.get(key) ?? []}
+                  events={byDayEvents.get(key) ?? []}
                   timezone={timezone}
                   onOpen={onOpen}
                   onReschedule={onReschedule}
@@ -994,10 +1041,14 @@ function WeekView({
 // ─── Day Column (shared Day + Week) ────────────────────────────────
 
 function DayColumn({
-  dateKey, bookings, timezone, onOpen, onReschedule, isToday = false, focusOverlay = null,
+  dateKey, bookings, events = [], timezone, onOpen, onReschedule, isToday = false, focusOverlay = null,
 }: {
   dateKey: string;
   bookings: CalendarBooking[];
+  /** Phase 17I-2C — operational calendar entries painted below the
+   *  EventBlock layer. Optional + defaults to [] so consumers that
+   *  don't pass it (none today, but future-proof) keep working. */
+  events?: CalendarEventLite[];
   timezone: string;
   onOpen: (b: CalendarBooking) => void;
   onReschedule?: (id: string, newStartIso: string) => void;
@@ -1015,8 +1066,15 @@ function DayColumn({
   const [dragTime, setDragTime] = React.useState<string | null>(null);
 
   function eventStyle(b: CalendarBooking): React.CSSProperties {
-    const localStartLabel = formatInTimeZone(b.startAt, timezone, "HH:mm");
-    const localEndLabel = formatInTimeZone(b.endAt, timezone, "HH:mm");
+    return positionStyle(b.startAt, b.endAt);
+  }
+
+  // Shared time → pixel projection used by both bookings (above)
+  // and the new calendar_events blocks (below). Extracted into a
+  // local helper so both code paths stay byte-identical on layout.
+  function positionStyle(startIso: string, endIso: string): React.CSSProperties {
+    const localStartLabel = formatInTimeZone(startIso, timezone, "HH:mm");
+    const localEndLabel = formatInTimeZone(endIso, timezone, "HH:mm");
     const [sh, sm] = localStartLabel.split(":").map(Number);
     const [eh, em] = localEndLabel.split(":").map(Number);
     const startMin = Math.max(0, (sh - DAY_START_HOUR) * 60 + sm);
@@ -1174,6 +1232,136 @@ function DayColumn({
           draggable={Boolean(onReschedule)}
         />
       ))}
+      {/* Phase 17I-2C — operational calendar entries (blocked time +
+          internal meetings). Rendered AFTER bookings so they layer
+          underneath any overlapping booking visually; the EXCLUDE
+          constraint on calendar_events prevents two events overlapping
+          the same staff slot at all, and the availability engine (2D)
+          prevents bookings landing on these slots going forward. */}
+      {events.map((e) => (
+        <CalendarEventBlock
+          key={e.id}
+          event={e}
+          timezone={timezone}
+          style={positionStyle(e.startAt, e.endAt)}
+        />
+      ))}
+    </div>
+  );
+}
+
+/** Visual block for a calendar_events row. NEVER opens the booking
+ *  drawer (no serviceId, no clientEmail). Distinct visual treatment
+ *  per eventType — slate + lock badge for blocked_time, indigo + team
+ *  badge for internal_meeting. */
+function CalendarEventBlock({
+  event,
+  timezone,
+  style,
+}: {
+  event: CalendarEventLite;
+  timezone: string;
+  style: React.CSSProperties;
+}) {
+  const isBlocked = event.eventType === "blocked_time";
+  const start = formatInTimeZone(event.startAt, timezone, "h:mm a");
+  const durationMin = Math.max(
+    0,
+    Math.round(
+      (new Date(event.endAt).getTime() - new Date(event.startAt).getTime()) /
+        60_000,
+    ),
+  );
+  const heightPx = typeof style.height === "number" ? style.height : 0;
+  const compact = heightPx < 40;
+
+  // Tooltip body: full title + start/end + attendees + location for
+  // the native browser tooltip until we ship the dedicated drawer.
+  const tooltip = [
+    `${isBlocked ? "BLOCKED" : "INTERNAL"} · ${event.title}`,
+    `${start} · ${durationMin}m`,
+    event.attendeeNames.length > 0
+      ? `Attendees: ${event.attendeeNames.join(", ")}`
+      : null,
+    event.location ? `Location: ${event.location}` : null,
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  return (
+    <div
+      className={cn(
+        "group/cev relative flex flex-col items-start overflow-hidden rounded-xl border px-2.5 py-1.5 pl-3 text-left text-[11px] shadow-soft transition-all duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:shadow-lift hover:z-20",
+        isBlocked
+          ? "border-slate-300/80 bg-gradient-to-br from-slate-100 via-slate-50 to-white text-slate-800"
+          : "border-indigo-300/70 bg-gradient-to-br from-indigo-50 via-white to-white text-indigo-900",
+      )}
+      style={{
+        ...style,
+        // Diagonal hatched overlay communicates "not bookable" —
+        // applied via inline background-image so it composes over the
+        // gradient without a second wrapping element.
+        backgroundImage: isBlocked
+          ? `repeating-linear-gradient(135deg, rgba(100,116,139,0.07) 0 6px, transparent 6px 12px), linear-gradient(135deg, rgba(241,245,249,1) 0%, rgba(255,255,255,1) 60%)`
+          : undefined,
+      }}
+      title={tooltip}
+      aria-label={tooltip}
+    >
+      {/* Type accent bar */}
+      <span
+        aria-hidden
+        className={cn(
+          "absolute inset-y-1 left-0 w-1 rounded-full",
+          isBlocked ? "bg-slate-400" : "bg-indigo-500",
+        )}
+      />
+
+      <div className="relative flex w-full items-center gap-1.5">
+        {isBlocked ? (
+          <Ban className="h-3 w-3 text-slate-500" strokeWidth={2} />
+        ) : (
+          <Building2 className="h-3 w-3 text-indigo-500" strokeWidth={2} />
+        )}
+        <span className="font-semibold tabular-nums">{start}</span>
+        {!compact && (
+          <>
+            <span className="text-slate-400">·</span>
+            <span className="text-[10px] opacity-80">{durationMin}m</span>
+          </>
+        )}
+        <span
+          className={cn(
+            "ml-auto rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider",
+            isBlocked
+              ? "bg-slate-700/90 text-white"
+              : "bg-indigo-600 text-white",
+          )}
+        >
+          {isBlocked ? "Blocked" : "Internal"}
+        </span>
+      </div>
+
+      <div className="relative mt-0.5 line-clamp-1 text-[12px] font-semibold tracking-tight">
+        {event.title}
+      </div>
+
+      {!compact && event.attendeeNames.length > 0 && (
+        <div className="relative mt-1 flex items-center gap-1 text-[10px] opacity-80">
+          <Users className="h-2.5 w-2.5" strokeWidth={2} />
+          <span className="line-clamp-1">
+            {event.attendeeNames.length === 1
+              ? event.attendeeNames[0]
+              : `${event.attendeeNames.length} attendees`}
+          </span>
+        </div>
+      )}
+
+      {!compact && event.location && (
+        <div className="relative mt-0.5 line-clamp-1 text-[10px] opacity-70">
+          {event.location}
+        </div>
+      )}
     </div>
   );
 }
@@ -1552,11 +1740,12 @@ function MonthView({
 // ─── Agenda View ───────────────────────────────────────────────────
 
 function AgendaView({
-  anchor, timezone, byDay, onOpen,
+  anchor, timezone, byDay, byDayEvents, onOpen,
 }: {
   anchor: Date;
   timezone: string;
   byDay: Map<string, CalendarBooking[]>;
+  byDayEvents: Map<string, CalendarEventLite[]>;
   onOpen: (b: CalendarBooking) => void;
 }) {
   const days = Array.from({ length: 7 }, (_, i) => addDays(anchor, i));
@@ -1565,7 +1754,17 @@ function AgendaView({
       {days.map((d) => {
         const key = format(d, "yyyy-MM-dd");
         const list = byDay.get(key) ?? [];
+        const eventsList = byDayEvents.get(key) ?? [];
         const today = isSameDay(d, new Date());
+        // Interleave bookings + calendar_events chronologically. Each
+        // row carries a discriminator so the renderer can branch.
+        const items: Array<
+          | { kind: "booking"; row: CalendarBooking }
+          | { kind: "event"; row: CalendarEventLite }
+        > = [
+          ...list.map((b) => ({ kind: "booking" as const, row: b })),
+          ...eventsList.map((e) => ({ kind: "event" as const, row: e })),
+        ].sort((a, b) => a.row.startAt.localeCompare(b.row.startAt));
         return (
           <div key={key} className="grid grid-cols-[110px,1fr] gap-3 px-5 py-4">
             <div>
@@ -1581,14 +1780,29 @@ function AgendaView({
                   {list.length} {list.length === 1 ? "booking" : "bookings"}
                 </div>
               )}
+              {eventsList.length > 0 && (
+                <div className="mt-1 inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600">
+                  {eventsList.length} {eventsList.length === 1 ? "block" : "blocks"}
+                </div>
+              )}
             </div>
             <div className="space-y-1.5">
-              {list.length === 0 && (
+              {items.length === 0 && (
                 <div className="rounded-lg border border-dashed border-border/50 px-3 py-3 text-[11px] text-ink-subtle">
                   No bookings — open availability.
                 </div>
               )}
-              {list.map((b) => {
+              {items.map((it) => {
+                if (it.kind === "event") {
+                  return (
+                    <AgendaCalendarEventRow
+                      key={`ev-${it.row.id}`}
+                      event={it.row}
+                      timezone={timezone}
+                    />
+                  );
+                }
+                const b = it.row;
                 const accent = serviceColorFor(b.serviceId, b.serviceColor);
                 const muted = b.status === "cancelled" || b.status === "refunded";
                 return (
@@ -1635,6 +1849,96 @@ function AgendaView({
           </div>
         );
       })}
+    </div>
+  );
+}
+
+/** Phase 17I-2C — agenda row for a calendar_events entry. Static (no
+ *  drawer / no click), styled distinctly from booking rows. */
+function AgendaCalendarEventRow({
+  event,
+  timezone,
+}: {
+  event: CalendarEventLite;
+  timezone: string;
+}) {
+  const isBlocked = event.eventType === "blocked_time";
+  return (
+    <div
+      className={cn(
+        "group flex w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left shadow-soft transition-colors",
+        isBlocked
+          ? "border-slate-200 bg-slate-50/70"
+          : "border-indigo-200 bg-indigo-50/40",
+      )}
+      title={
+        event.attendeeNames.length > 0
+          ? `${event.title} · Attendees: ${event.attendeeNames.join(", ")}`
+          : event.title
+      }
+    >
+      <span
+        aria-hidden
+        className={cn(
+          "h-9 w-1 shrink-0 rounded-full",
+          isBlocked ? "bg-slate-400" : "bg-indigo-500",
+        )}
+      />
+      <div className="w-32 shrink-0">
+        <div
+          className={cn(
+            "text-[12px] font-semibold tabular-nums",
+            isBlocked ? "text-slate-800" : "text-indigo-900",
+          )}
+        >
+          {formatInTimeZone(event.startAt, timezone, "h:mm a")}
+        </div>
+        <div className="text-[10px] text-ink-muted">
+          {formatInTimeZone(event.endAt, timezone, "h:mm a")}
+        </div>
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-1.5">
+          <span
+            className={cn(
+              "rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider",
+              isBlocked
+                ? "bg-slate-700/90 text-white"
+                : "bg-indigo-600 text-white",
+            )}
+          >
+            {isBlocked ? "Blocked" : "Internal"}
+          </span>
+          <span
+            className={cn(
+              "truncate text-[13px] font-semibold",
+              isBlocked ? "text-slate-800" : "text-indigo-900",
+            )}
+          >
+            {event.title}
+          </span>
+        </div>
+        {!isBlocked && event.attendeeNames.length > 0 && (
+          <div className="mt-0.5 flex items-center gap-1.5 truncate text-[11px] text-ink-muted">
+            <Users className="h-3 w-3" strokeWidth={1.75} />
+            <span className="truncate">
+              {event.attendeeNames.length === 1
+                ? event.attendeeNames[0]
+                : `${event.attendeeNames.length} attendees`}
+            </span>
+          </div>
+        )}
+        {event.location && (
+          <div className="mt-0.5 truncate text-[11px] text-ink-muted">
+            {event.location}
+          </div>
+        )}
+      </div>
+      {isBlocked ? (
+        <Ban className="h-4 w-4 text-slate-500" strokeWidth={1.75} />
+      ) : (
+        <Building2 className="h-4 w-4 text-indigo-500" strokeWidth={1.75} />
+      )}
     </div>
   );
 }

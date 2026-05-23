@@ -1,8 +1,8 @@
 import { redirect } from "next/navigation";
-import { and, desc, eq, gte, lt } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, lt, or, sql } from "drizzle-orm";
 
 import { db } from "@/db/client";
-import { bookings, services, tenants, users } from "@/db/schema";
+import { bookings, calendarEvents, services, tenants, users } from "@/db/schema";
 import { getSession, isManagerial } from "@/lib/auth";
 import { loadTenantFeatures } from "@/lib/features";
 import { effectivePermissions } from "@/lib/security/permissions";
@@ -78,6 +78,82 @@ export default async function AppointmentsPage(props: {
     status: r.status,
   }));
 
+  // Phase 17I-2C — operational calendar_events. Visible to the caller
+  // when they own the slot OR are an attendee. Same 90-day window as
+  // bookings so the agenda's date headers align.
+  const eventTenantOnly = eq(calendarEvents.tenantId, user.tenantId);
+  const eventVisibility = isManagerial(user.role)
+    ? eventTenantOnly
+    : and(
+        eventTenantOnly,
+        or(
+          eq(calendarEvents.staffUserId, user.id),
+          sql`${calendarEvents.attendeeUserIds} @> ${JSON.stringify([user.id])}::jsonb`,
+        ),
+      );
+
+  const calendarEventRows = await db
+    .select({
+      id: calendarEvents.id,
+      eventType: calendarEvents.eventType,
+      title: calendarEvents.title,
+      startAt: calendarEvents.startAt,
+      endAt: calendarEvents.endAt,
+      location: calendarEvents.location,
+      attendeeUserIds: calendarEvents.attendeeUserIds,
+      staffUserId: calendarEvents.staffUserId,
+      staffName: users.name,
+    })
+    .from(calendarEvents)
+    .innerJoin(users, eq(users.id, calendarEvents.staffUserId))
+    .where(and(eventVisibility, gte(calendarEvents.startAt, ninetyDaysAgo)))
+    .orderBy(desc(calendarEvents.startAt))
+    .limit(500);
+
+  const allAttendeeIds = Array.from(
+    new Set(
+      calendarEventRows.flatMap((r) =>
+        Array.isArray(r.attendeeUserIds)
+          ? (r.attendeeUserIds as unknown[]).filter(
+              (id): id is string => typeof id === "string",
+            )
+          : [],
+      ),
+    ),
+  );
+  const attendeeNameById = new Map<string, string>();
+  if (allAttendeeIds.length > 0) {
+    const attendeeRows = await db
+      .select({ id: users.id, name: users.name })
+      .from(users)
+      .where(and(eq(users.tenantId, user.tenantId), inArray(users.id, allAttendeeIds)));
+    for (const row of attendeeRows) {
+      attendeeNameById.set(row.id, row.name);
+    }
+  }
+
+  const serializedEvents = calendarEventRows.map((e) => {
+    const attendeeIds: string[] = Array.isArray(e.attendeeUserIds)
+      ? (e.attendeeUserIds as unknown[]).filter(
+          (id): id is string => typeof id === "string",
+        )
+      : [];
+    return {
+      id: e.id,
+      eventType: (e.eventType === "blocked_time"
+        ? "blocked_time"
+        : "internal_meeting") as "blocked_time" | "internal_meeting",
+      title: e.title,
+      startAt: e.startAt.toISOString(),
+      endAt: e.endAt.toISOString(),
+      staffName: e.staffName,
+      attendeeNames: attendeeIds
+        .map((id) => attendeeNameById.get(id))
+        .filter((n): n is string => Boolean(n)),
+      location: e.location ?? null,
+    };
+  });
+
   return (
     <Shell
       user={{ name: user.name, email: user.email, role: user.role, permissions }}
@@ -119,6 +195,7 @@ export default async function AppointmentsPage(props: {
         <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
           <AppointmentsAgenda
             rows={serializedRows}
+            events={serializedEvents}
             timezone={user.timezone}
             canManage={user.role === "admin" || user.role === "staff" || user.role === "manager"}
             canCancel={features.cancellations}

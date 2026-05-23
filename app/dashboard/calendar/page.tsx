@@ -1,8 +1,8 @@
 import { redirect } from "next/navigation";
-import { and, desc, eq, gte, lt } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, lt, or, sql } from "drizzle-orm";
 
 import { db } from "@/db/client";
-import { bookings, services, tenants, users } from "@/db/schema";
+import { bookings, calendarEvents, services, tenants, users } from "@/db/schema";
 import { getSession, isManagerial } from "@/lib/auth";
 import CalendarView from "@/components/CalendarView";
 import Shell from "@/components/dashboard/Shell";
@@ -49,6 +49,67 @@ export default async function CalendarPage() {
     .orderBy(desc(bookings.startAt))
     .limit(1000);
 
+  // Phase 17I-2C — operational calendar_events (blocked_time +
+  // internal_meeting) for the same window. Visibility rules mirror
+  // bookings:
+  //   • managerial roles see every event in their tenant
+  //   • staff role sees events they own OR are an attendee of (the
+  //     jsonb attendee_user_ids array is queried via the @> operator
+  //     so internal meetings show on every invitee's calendar).
+  const eventTenantOnly = eq(calendarEvents.tenantId, user.tenantId);
+  const eventVisibility = isManagerial(user.role)
+    ? eventTenantOnly
+    : and(
+        eventTenantOnly,
+        or(
+          eq(calendarEvents.staffUserId, user.id),
+          sql`${calendarEvents.attendeeUserIds} @> ${JSON.stringify([user.id])}::jsonb`,
+        ),
+      );
+
+  const eventRowsRaw = await db
+    .select({
+      id: calendarEvents.id,
+      eventType: calendarEvents.eventType,
+      title: calendarEvents.title,
+      startAt: calendarEvents.startAt,
+      endAt: calendarEvents.endAt,
+      meetLink: calendarEvents.meetLink,
+      location: calendarEvents.location,
+      attendeeUserIds: calendarEvents.attendeeUserIds,
+      staffUserId: calendarEvents.staffUserId,
+      staffName: users.name,
+    })
+    .from(calendarEvents)
+    .innerJoin(users, eq(users.id, calendarEvents.staffUserId))
+    .where(and(eventVisibility, gte(calendarEvents.startAt, start), lt(calendarEvents.startAt, end)))
+    .orderBy(desc(calendarEvents.startAt))
+    .limit(1000);
+
+  // Resolve attendee display names for internal meetings in a single
+  // round-trip. Empty array for blocked_time rows is the common case.
+  const allAttendeeIds = Array.from(
+    new Set(
+      eventRowsRaw.flatMap((r) =>
+        Array.isArray(r.attendeeUserIds)
+          ? (r.attendeeUserIds as unknown[]).filter(
+              (id): id is string => typeof id === "string",
+            )
+          : [],
+      ),
+    ),
+  );
+  const attendeeNameById = new Map<string, string>();
+  if (allAttendeeIds.length > 0) {
+    const attendeeRows = await db
+      .select({ id: users.id, name: users.name })
+      .from(users)
+      .where(and(eq(users.tenantId, user.tenantId), inArray(users.id, allAttendeeIds)));
+    for (const row of attendeeRows) {
+      attendeeNameById.set(row.id, row.name);
+    }
+  }
+
   return (
     <Shell
       user={{ name: user.name, email: user.email, role: user.role }}
@@ -74,6 +135,29 @@ export default async function CalendarPage() {
           clientEmail: r.clientEmail,
           meetLink: r.meetLink ?? null,
         }))}
+        calendarEvents={eventRowsRaw.map((e) => {
+          const attendeeIds: string[] = Array.isArray(e.attendeeUserIds)
+            ? (e.attendeeUserIds as unknown[]).filter(
+                (id): id is string => typeof id === "string",
+              )
+            : [];
+          return {
+            id: e.id,
+            eventType: (e.eventType === "blocked_time"
+              ? "blocked_time"
+              : "internal_meeting") as "blocked_time" | "internal_meeting",
+            title: e.title,
+            startAt: e.startAt.toISOString(),
+            endAt: e.endAt.toISOString(),
+            staffId: e.staffUserId,
+            staffName: e.staffName,
+            attendeeNames: attendeeIds
+              .map((id) => attendeeNameById.get(id))
+              .filter((n): n is string => Boolean(n)),
+            meetLink: e.meetLink ?? null,
+            location: e.location ?? null,
+          };
+        })}
       />
     </Shell>
   );
