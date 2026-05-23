@@ -245,11 +245,21 @@ function ActivationPanel({
   onChanged,
   setError,
   setSuccess,
+  onContinueSetup,
+  hasLiveProvider,
 }: {
   activation: ActivationSnapshot | null;
   onChanged: () => Promise<void>;
   setError: (s: string | null) => void;
   setSuccess: (s: string | null) => void;
+  /** Called when admin clicks "Continue setup" — parent decides
+   *  whether to open the wizard (no provider yet) or the manage
+   *  drawer (provider exists but needs work). */
+  onContinueSetup: () => void;
+  /** Whether at least one LIVE provider row exists. Used to label
+   *  the Continue Setup CTA correctly ("Set up Stripe Live" vs
+   *  "Open Stripe Live"). */
+  hasLiveProvider: boolean;
 }) {
   const [busy, setBusy] = useState(false);
 
@@ -403,6 +413,29 @@ function ActivationPanel({
               </li>
             ))}
           </ul>
+          {/* Continue-setup CTA. Only renders when there's actually
+              something to do and the kill switch isn't blocking
+              everything. The parent decides whether this opens the
+              wizard for the empty Stripe Live slot or the manage
+              drawer for the existing provider — we just emit intent. */}
+          {!activation.canActivate && !activation.killSwitchActive && (
+            <div className="mt-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 rounded-lg border border-blue-200 bg-blue-50 p-3">
+              <div className="text-xs text-blue-900">
+                <strong>Next:</strong>{" "}
+                {hasLiveProvider
+                  ? "Open your Stripe Live connection to finish the missing steps."
+                  : "Start with Stripe Live — the wizard walks you through it."}
+              </div>
+              <button
+                type="button"
+                onClick={onContinueSetup}
+                className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-800 transition-colors whitespace-nowrap"
+              >
+                {hasLiveProvider ? "Open Stripe Live" : "Set up Stripe Live"}
+                <ArrowRight className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          )}
           {activation.killSwitchActive && (
             <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 flex items-start gap-2">
               <ShieldAlert className="h-4 w-4 flex-shrink-0 mt-0.5" />
@@ -2015,12 +2048,27 @@ export default function PaymentsClient({
       {/* Activation panel (Wave H — self-serve routing toggle).
           Loads its own state from /api/tenant/payment-routing on mount,
           and re-fetches every time provider mutations succeed (via the
-          parent refresh()). */}
+          parent refresh()). The Phase 4 "Continue setup" CTA routes
+          admins from a failing checklist directly to the right place. */}
       <ActivationPanel
         activation={activation}
         onChanged={refresh}
         setError={setError}
         setSuccess={setSuccess}
+        hasLiveProvider={providers.some((p) => p.mode === "live")}
+        onContinueSetup={() => {
+          // If a live provider already exists, open it in the manage
+          // drawer (so admin can rotate keys / paste webhook secret /
+          // make default — whatever's missing). If not, launch the
+          // wizard for the Stripe Live slot — Stripe is the most
+          // common starting point for new tenants.
+          const existingLive = providers.find((p) => p.mode === "live");
+          if (existingLive) {
+            setManagedProviderId(existingLive.id);
+          } else {
+            setSetupSlot({ provider: "stripe", mode: "live" });
+          }
+        }}
       />
 
       {/* Toasts */}
