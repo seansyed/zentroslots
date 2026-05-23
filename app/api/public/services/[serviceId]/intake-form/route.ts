@@ -27,10 +27,11 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 export async function GET(
   _req: NextRequest,
-  context: { params: Promise<{ id: string }> },
+  context: { params: Promise<{ serviceId: string }> },
 ) {
   try {
-    const { id } = await context.params;
+    const { serviceId } = await context.params;
+    const id = serviceId;
     if (!id || !UUID_RE.test(id)) throw new HttpError(404, "Not found");
 
     const service = await db.query.services.findFirst({
