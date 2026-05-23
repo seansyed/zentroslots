@@ -1,20 +1,55 @@
 "use client";
 
 /**
- * Wave H Phase 5 — Settings → Payments client.
+ * Wave H — Settings → Payments client.
  *
- * Layout decisions (locked):
- *   • Unified provider list — one row per (provider × mode)
- *   • Two-step modal for adding a provider (credentials → save+test → reveal webhook URL)
- *   • LIVE/TEST chips + colored left border for mode separation
- *   • Inline expandable Activity panel per row showing last 10 webhook events
+ * ── Layout map (post onboarding-refinement) ───────────────────────────
  *
- * Security guarantees the client honors:
- *   • Never displays the full secret. Only secretPreview ("•••XXXX").
+ *   PaymentsClient (top-level)
+ *   ├── hero strip      — workspace context + routing-mode badge
+ *   ├── ActivationPanel — toggle + prereq checklist + Continue-setup CTA
+ *   ├── SlotGrid        — 4 fixed slots: one per (provider × mode)
+ *   │     │                Empty slot → setSetupSlot()  → SetupWizard
+ *   │     └                Filled slot → setManagedProviderId() → ManageDrawer
+ *   ├── SetupWizard     — 4-step guided onboarding (modal)
+ *   │                       Account → Keys → Webhook → Verify
+ *   └── ManageDrawer    — side panel for filled providers
+ *                           Status, Quick actions, Rotate keys,
+ *                           Rotate webhook, Webhook URL, Danger zone
+ *
+ * ── Duplicate prevention ──────────────────────────────────────────────
+ *
+ * Three layers, defense in depth (NO single layer is the source of truth
+ * — they're consistent because each is engineered to AND with the others):
+ *
+ *   • DB:  tenant_payment_providers_tenant_provider_mode_key (unique index)
+ *   • API: upsertProvider() uses ON CONFLICT DO UPDATE so concurrent POSTs
+ *          to the same slot become an in-place credential refresh
+ *   • UI:  the slot grid never offers a "Set up" CTA for a filled slot —
+ *          admins can only enter through Manage, which routes new keys
+ *          through the documented rotation flow
+ *
+ * ── Credential rotation ───────────────────────────────────────────────
+ *
+ * The Manage drawer's "Rotate credentials" section is the documented
+ * key-rotation path. It posts to the same /api/tenant/payment-providers
+ * upsert endpoint — ON CONFLICT DO UPDATE re-encrypts the secret in place,
+ * preserves the webhook signing secret (not in the SET clause unless
+ * supplied), preserves is_default + enabled, and auto-runs Test Connection.
+ * Future scheduled rotation (e.g. quarterly reminders) hangs off the
+ * same Rotate section without re-architecting.
+ *
+ * ── Security guarantees the client honors ─────────────────────────────
+ *
+ *   • Never displays the full secret. Only secretPreview ("•••XXXX")
  *   • Never logs anything to console
- *   • Webhook secret entry uses type="password"
- *   • Secret form fields cleared on success
- *   • Cross-tenant providerIds are unreachable (server filters every endpoint)
+ *   • All secret-input fields use type="password"
+ *   • Secret form fields cleared on save (no lingering state)
+ *   • Cross-tenant providerIds are unreachable (server filters every
+ *     endpoint via getProviderRedacted / tenant-scoped queries)
+ *   • Adapter errors are humanized via humanizeError() — raw provider
+ *     messages are pre-redacted of any token-shaped substring before
+ *     they leave the adapter (lib/payments/{stripe,paypal}/adapter.ts)
  */
 
 import { useEffect, useMemo, useState } from "react";
