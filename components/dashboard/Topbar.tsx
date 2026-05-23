@@ -2,11 +2,23 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { Search, LogOut, ShieldCheck, ChevronDown } from "lucide-react";
+import {
+  Search,
+  LogOut,
+  ShieldCheck,
+  ChevronDown,
+  Plus,
+  CalendarPlus,
+  Users,
+  Repeat,
+  Ban,
+  Building2,
+} from "lucide-react";
 
 import { Avatar } from "@/components/ui/primitives";
 import ThemeToggle from "./ThemeToggle";
 import NotificationBell from "./NotificationBell";
+import NewAppointmentModal from "./NewAppointmentModal";
 import CommandPalette, { useCommandPalette } from "./CommandPalette";
 import { cn } from "@/lib/cn";
 
@@ -107,6 +119,9 @@ export default function Topbar({
         >
           <Search className="h-4 w-4" strokeWidth={1.75} />
         </button>
+        {/* Phase 17H — global Create dropdown. Only mounts when we
+            have a user (sign-in pages don't show it). */}
+        {user && <CreateMenu />}
         <NotificationBell />
         <ThemeToggle />
         {user && <ProfileMenu user={user} />}
@@ -114,6 +129,181 @@ export default function Topbar({
 
       <CommandPalette open={cmd.isOpen} onClose={cmd.close} />
     </header>
+  );
+}
+
+// ─── Create dropdown (Phase 17H) ───────────────────────────────────────
+//
+// Global "Create" entry point. v1 ships ONE working item (One-on-One
+// Appointment) + 4 "Coming soon" placeholders to signal the upcoming
+// surface area (Group Session, Round Robin, Blocked Time, Internal
+// Meeting). The placeholders are non-interactive — clicking does
+// nothing. Future commits replace them with their own modals.
+
+interface MeResponse {
+  id: string;
+  role: "admin" | "manager" | "staff" | "client";
+}
+
+function CreateMenu() {
+  const [open, setOpen] = React.useState(false);
+  const [showApptModal, setShowApptModal] = React.useState(false);
+  const [me, setMe] = React.useState<MeResponse | null>(null);
+  const ref = React.useRef<HTMLDivElement>(null);
+
+  // Lazy-load the current user once. Identity rarely changes during a
+  // session, and the modal is gated on it.
+  React.useEffect(() => {
+    if (me) return;
+    void (async () => {
+      try {
+        const res = await fetch("/api/auth/me", { cache: "no-store" });
+        if (res.ok) {
+          const data = (await res.json()) as MeResponse;
+          setMe(data);
+        }
+      } catch {
+        /* swallow — menu still renders; appointment item just won't open */
+      }
+    })();
+  }, [me]);
+
+  React.useEffect(() => {
+    if (!open) return;
+    function onClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("mousedown", onClick);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onClick);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  // Hide entirely for client role — they don't get to create from
+  // inside the dashboard. Server also rejects.
+  if (me && me.role === "client") return null;
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className={cn(
+          "inline-flex h-9 items-center gap-1.5 rounded-lg bg-brand-accent px-3 text-[12.5px] font-semibold text-white shadow-soft transition-all hover:bg-brand-accent/90",
+          open && "ring-2 ring-brand-accent/40",
+        )}
+        aria-haspopup="menu"
+        aria-expanded={open}
+      >
+        <Plus className="h-3.5 w-3.5" strokeWidth={2.25} />
+        <span className="hidden sm:inline">Create</span>
+        <ChevronDown
+          className={cn("h-3 w-3 transition-transform", open && "rotate-180")}
+          strokeWidth={2.25}
+        />
+      </button>
+
+      {open && (
+        <div
+          role="menu"
+          className="absolute right-0 top-full z-50 mt-2 w-72 origin-top-right overflow-hidden rounded-xl border border-border bg-surface shadow-lg"
+        >
+          <div className="px-3 py-2 border-b border-border">
+            <div className="text-[10.5px] font-semibold uppercase tracking-[0.10em] text-ink-subtle">
+              Appointments
+            </div>
+          </div>
+          <div className="py-1">
+            {/* v1 — fully wired */}
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                if (!me) return;
+                setOpen(false);
+                setShowApptModal(true);
+              }}
+              disabled={!me}
+              className="flex w-full items-start gap-2.5 px-3 py-2 text-left transition-colors hover:bg-surface-inset disabled:opacity-50"
+            >
+              <CalendarPlus className="h-4 w-4 mt-0.5 text-brand-accent" strokeWidth={1.75} />
+              <div className="min-w-0 flex-1">
+                <div className="text-[13px] font-medium text-ink">One-on-One Appointment</div>
+                <div className="text-[11px] text-ink-muted">
+                  Manually book a customer with one staff member
+                </div>
+              </div>
+            </button>
+
+            {/* v1 placeholders — coming-soon affordances */}
+            <ComingSoonRow
+              icon={<Users className="h-4 w-4 mt-0.5 text-ink-subtle" strokeWidth={1.75} />}
+              title="Group Session"
+              hint="Multiple customers, one slot"
+            />
+            <ComingSoonRow
+              icon={<Repeat className="h-4 w-4 mt-0.5 text-ink-subtle" strokeWidth={1.75} />}
+              title="Round Robin"
+              hint="Auto-assign across eligible staff"
+            />
+            <ComingSoonRow
+              icon={<Ban className="h-4 w-4 mt-0.5 text-ink-subtle" strokeWidth={1.75} />}
+              title="Blocked Time"
+              hint="Mark a slot unavailable"
+            />
+            <ComingSoonRow
+              icon={<Building2 className="h-4 w-4 mt-0.5 text-ink-subtle" strokeWidth={1.75} />}
+              title="Internal Meeting"
+              hint="Calendar-only event for staff"
+            />
+          </div>
+        </div>
+      )}
+
+      {me && (
+        <NewAppointmentModal
+          open={showApptModal}
+          onClose={() => setShowApptModal(false)}
+          onCreated={() => {
+            // Refresh the current page so the new booking appears in
+            // calendar/appointment lists immediately.
+            if (typeof window !== "undefined") window.location.reload();
+          }}
+          viewerRole={me.role}
+          viewerUserId={me.id}
+        />
+      )}
+    </div>
+  );
+}
+
+function ComingSoonRow({
+  icon,
+  title,
+  hint,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  hint: string;
+}) {
+  return (
+    <div className="flex w-full items-start gap-2.5 px-3 py-2 cursor-not-allowed opacity-60">
+      {icon}
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-1.5">
+          <span className="text-[13px] font-medium text-ink-muted">{title}</span>
+          <span className="rounded-full bg-surface-inset px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.06em] text-ink-subtle ring-1 ring-border/50">
+            Soon
+          </span>
+        </div>
+        <div className="text-[11px] text-ink-subtle">{hint}</div>
+      </div>
+    </div>
   );
 }
 
