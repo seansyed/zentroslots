@@ -825,11 +825,13 @@ export default function BookingFlow({
                   standard Name/Email/Notes inputs. They render between
                   Email and Notes so the visual order reads as a single
                   cohesive form. The booking POST validates these
-                  server-side regardless of client validation. */}
+                  server-side regardless of client validation. Each
+                  field uses the same floating-label style as Name/Email
+                  so the form reads as one continuous list of inputs. */}
               {intakeForm && intakeForm.fields.length > 0 && (
-                <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/40 p-3.5">
+                <>
                   {intakeForm.description && (
-                    <p className="text-[12px] text-slate-600">{intakeForm.description}</p>
+                    <p className="text-[12px] text-slate-600 -mt-1 mb-1">{intakeForm.description}</p>
                   )}
                   {intakeForm.fields.map((f: PublicField) => (
                     <IntakeFieldRow
@@ -852,7 +854,7 @@ export default function BookingFlow({
                       accent={accent}
                     />
                   ))}
-                </div>
+                </>
               )}
 
               <div className="relative">

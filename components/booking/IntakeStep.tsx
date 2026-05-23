@@ -286,21 +286,40 @@ function FieldRow({
   onBlur: () => void;
   accent: string;
 }) {
-  const baseInputClass = `w-full rounded-lg border px-3 py-2 text-sm transition-colors focus:outline-none focus:ring-2 ${
-    error
-      ? "border-red-400 focus:ring-red-200"
-      : "border-slate-300 focus:ring-slate-200 focus:border-slate-500"
-  }`;
+  // Visual match to BookingFlow's FloatingInput. Rounded-xl, slate
+  // border, floating uppercase label at the top of the input. Required
+  // status is set as an HTML attribute only — no visible asterisk
+  // (matches the codebase convention where Name/Email don't show one).
+  const floatingInputClass = `peer w-full rounded-xl border ${
+    error ? "border-red-300" : "border-slate-300"
+  } bg-white px-3.5 pb-2.5 pt-5 text-[13.5px] text-slate-900 outline-none transition-all duration-[180ms] focus:border-slate-400 focus:ring-2`;
+  const floatingInputStyle = {
+    /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
+    ["--tw-ring-color" as any]: error ? "#fca5a5" : accent,
+  } as React.CSSProperties;
+  const floatingLabelClass =
+    "pointer-events-none absolute left-3.5 top-2 text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500";
+  const t = field.type;
+  const isFloatingType =
+    t === "short_text" ||
+    t === "long_text" ||
+    t === "email" ||
+    t === "phone" ||
+    t === "number" ||
+    t === "url" ||
+    t === "date";
 
   return (
     <div>
-      {field.type !== "boolean" && field.type !== "consent" && (
+      {/* Only non-floating field types render their own label outside
+          the input. boolean / consent put the label NEXT to the
+          checkbox; select / radio / multi_select keep the label above. */}
+      {!isFloatingType && t !== "boolean" && t !== "consent" && (
         <label
           htmlFor={field.key}
-          className="block text-sm font-medium text-slate-800 mb-1.5"
+          className="block text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500 mb-1.5"
         >
           {field.label}
-          {field.required && <span className="text-red-600 ml-0.5">*</span>}
         </label>
       )}
 
@@ -308,94 +327,143 @@ function FieldRow({
         switch (field.type) {
           case "short_text":
             return (
-              <input
-                id={field.key}
-                type="text"
-                value={(value as string) ?? ""}
-                onChange={(e) => onChange(e.target.value)}
-                onBlur={onBlur}
-                placeholder={field.placeholder}
-                className={baseInputClass}
-              />
+              <div className="relative">
+                <input
+                  id={field.key}
+                  type="text"
+                  value={(value as string) ?? ""}
+                  onChange={(e) => onChange(e.target.value)}
+                  onBlur={onBlur}
+                  required={field.required}
+                  placeholder={field.placeholder ?? " "}
+                  className={floatingInputClass}
+                  style={floatingInputStyle}
+                />
+                <label htmlFor={field.key} className={floatingLabelClass}>
+                  {field.label}
+                </label>
+              </div>
             );
           case "long_text":
             return (
-              <textarea
-                id={field.key}
-                value={(value as string) ?? ""}
-                onChange={(e) => onChange(e.target.value)}
-                onBlur={onBlur}
-                placeholder={field.placeholder}
-                rows={4}
-                className={baseInputClass}
-              />
+              <div className="relative">
+                <textarea
+                  id={field.key}
+                  value={(value as string) ?? ""}
+                  onChange={(e) => onChange(e.target.value)}
+                  onBlur={onBlur}
+                  required={field.required}
+                  placeholder={field.placeholder ?? " "}
+                  rows={3}
+                  className={floatingInputClass}
+                  style={floatingInputStyle}
+                />
+                <label htmlFor={field.key} className={floatingLabelClass}>
+                  {field.label}
+                </label>
+              </div>
             );
           case "email":
             return (
-              <input
-                id={field.key}
-                type="email"
-                inputMode="email"
-                autoComplete="email"
-                value={(value as string) ?? ""}
-                onChange={(e) => onChange(e.target.value)}
-                onBlur={onBlur}
-                placeholder={field.placeholder ?? "you@example.com"}
-                className={baseInputClass}
-              />
+              <div className="relative">
+                <input
+                  id={field.key}
+                  type="email"
+                  inputMode="email"
+                  autoComplete="email"
+                  value={(value as string) ?? ""}
+                  onChange={(e) => onChange(e.target.value)}
+                  onBlur={onBlur}
+                  required={field.required}
+                  placeholder={field.placeholder ?? " "}
+                  className={floatingInputClass}
+                  style={floatingInputStyle}
+                />
+                <label htmlFor={field.key} className={floatingLabelClass}>
+                  {field.label}
+                </label>
+              </div>
             );
           case "phone":
             return (
-              <input
-                id={field.key}
-                type="tel"
-                inputMode="tel"
-                autoComplete="tel"
-                value={(value as string) ?? ""}
-                onChange={(e) => onChange(e.target.value)}
-                onBlur={onBlur}
-                placeholder={field.placeholder}
-                className={baseInputClass}
-              />
+              <div className="relative">
+                <input
+                  id={field.key}
+                  type="tel"
+                  inputMode="tel"
+                  autoComplete="tel"
+                  value={(value as string) ?? ""}
+                  onChange={(e) => onChange(e.target.value)}
+                  onBlur={onBlur}
+                  required={field.required}
+                  placeholder={field.placeholder ?? " "}
+                  className={floatingInputClass}
+                  style={floatingInputStyle}
+                />
+                <label htmlFor={field.key} className={floatingLabelClass}>
+                  {field.label}
+                </label>
+              </div>
             );
           case "url":
             return (
-              <input
-                id={field.key}
-                type="url"
-                inputMode="url"
-                value={(value as string) ?? ""}
-                onChange={(e) => onChange(e.target.value)}
-                onBlur={onBlur}
-                placeholder={field.placeholder ?? "https://"}
-                className={baseInputClass}
-              />
+              <div className="relative">
+                <input
+                  id={field.key}
+                  type="url"
+                  inputMode="url"
+                  value={(value as string) ?? ""}
+                  onChange={(e) => onChange(e.target.value)}
+                  onBlur={onBlur}
+                  required={field.required}
+                  placeholder={field.placeholder ?? " "}
+                  className={floatingInputClass}
+                  style={floatingInputStyle}
+                />
+                <label htmlFor={field.key} className={floatingLabelClass}>
+                  {field.label}
+                </label>
+              </div>
             );
           case "number":
             return (
-              <input
-                id={field.key}
-                type="number"
-                inputMode="numeric"
-                value={(value as number | string) ?? ""}
-                min={field.min}
-                max={field.max}
-                onChange={(e) => onChange(e.target.value)}
-                onBlur={onBlur}
-                placeholder={field.placeholder}
-                className={baseInputClass}
-              />
+              <div className="relative">
+                <input
+                  id={field.key}
+                  type="number"
+                  inputMode="numeric"
+                  value={(value as number | string) ?? ""}
+                  min={field.min}
+                  max={field.max}
+                  onChange={(e) => onChange(e.target.value)}
+                  onBlur={onBlur}
+                  required={field.required}
+                  placeholder={field.placeholder ?? " "}
+                  className={floatingInputClass}
+                  style={floatingInputStyle}
+                />
+                <label htmlFor={field.key} className={floatingLabelClass}>
+                  {field.label}
+                </label>
+              </div>
             );
           case "date":
             return (
-              <input
-                id={field.key}
-                type="date"
-                value={(value as string) ?? ""}
-                onChange={(e) => onChange(e.target.value)}
-                onBlur={onBlur}
-                className={baseInputClass}
-              />
+              <div className="relative">
+                <input
+                  id={field.key}
+                  type="date"
+                  value={(value as string) ?? ""}
+                  onChange={(e) => onChange(e.target.value)}
+                  onBlur={onBlur}
+                  required={field.required}
+                  className={floatingInputClass}
+                  style={floatingInputStyle}
+                />
+                <label htmlFor={field.key} className={floatingLabelClass}>
+                  {field.label}
+                </label>
+              </div>
             );
           case "select":
             return (
@@ -404,7 +472,11 @@ function FieldRow({
                 value={(value as string) ?? ""}
                 onChange={(e) => onChange(e.target.value)}
                 onBlur={onBlur}
-                className={baseInputClass}
+                required={field.required}
+                className={`w-full rounded-xl border ${
+                  error ? "border-red-300" : "border-slate-300"
+                } bg-white px-3.5 py-2.5 text-[13.5px] text-slate-900 outline-none transition-all focus:border-slate-400 focus:ring-2`}
+                style={floatingInputStyle}
               >
                 <option value="">— select —</option>
                 {(field.options ?? []).map((opt) => (
@@ -468,13 +540,11 @@ function FieldRow({
                   checked={value === true}
                   onChange={(e) => onChange(e.target.checked)}
                   onBlur={onBlur}
+                  required={field.required}
                   className="h-4 w-4 mt-0.5"
                   style={{ accentColor: accent }}
                 />
-                <span className="text-sm text-slate-800">
-                  {field.label}
-                  {field.required && <span className="text-red-600 ml-0.5">*</span>}
-                </span>
+                <span className="text-[13.5px] text-slate-800">{field.label}</span>
               </label>
             );
           case "consent":
@@ -485,10 +555,11 @@ function FieldRow({
                   checked={value === true}
                   onChange={(e) => onChange(e.target.checked)}
                   onBlur={onBlur}
+                  required={field.required}
                   className="h-4 w-4 mt-0.5"
                   style={{ accentColor: accent }}
                 />
-                <span className="text-sm text-slate-800">
+                <span className="text-[13.5px] text-slate-800">
                   {field.consentText ?? field.label}
                   {field.consentLinkUrl && (
                     <>
@@ -503,7 +574,6 @@ function FieldRow({
                       </a>
                     </>
                   )}
-                  {field.required && <span className="text-red-600 ml-0.5">*</span>}
                 </span>
               </label>
             );
