@@ -15,6 +15,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { formatInTimeZone } from "date-fns-tz";
 import { Skeleton, toast } from "@/components/ui/primitives";
+import IntakeStep, {
+  clearIntakeDraft,
+  type PublicForm,
+} from "@/components/booking/IntakeStep";
 
 type Props = {
   serviceId: string;
@@ -46,7 +50,7 @@ type Props = {
   defaultClientEmail?: string;
 };
 
-type Step = "pick-time" | "confirm" | "done";
+type Step = "pick-time" | "intake" | "confirm" | "done";
 
 const DEFAULT_ACCENT = "#2563eb";
 const MOTION_CURVE = "cubic-bezier(0.16,1,0.3,1)";
@@ -86,6 +90,9 @@ export default function BookingFlow({
   const [scanningNext, setScanningNext] = useState(false);
 
   const [step, setStep] = useState<Step>("pick-time");
+  // Wave I — intake form state. Null = not yet fetched / no form linked.
+  const [intakeForm, setIntakeForm] = useState<PublicForm | null>(null);
+  const [intakeResponses, setIntakeResponses] = useState<Record<string, unknown>>({});
   // Phase 19 — Wave 1 F1: hydrate from props when the visitor is signed
   // into the portal for this tenant. The inputs remain editable so a
   // customer can override (e.g. booking on behalf of a family member).
@@ -116,6 +123,25 @@ export default function BookingFlow({
     earliestBookable: string | null;
     latestBookable: string | null;
   }>({ blackoutDates: [], earliestBookable: null, latestBookable: null });
+  // Wave I — fetch the intake form definition once on mount. Null when
+  // the service has no form linked OR tenant feature flag is off; the
+  // booking flow then skips the intake step (existing behavior).
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/public/services/${encodeURIComponent(serviceId)}/intake-form`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (cancelled || !data) return;
+        if (data.form) setIntakeForm(data.form as PublicForm);
+      })
+      .catch(() => {
+        /* non-fatal — skip the step */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [serviceId]);
+
   useEffect(() => {
     let cancelled = false;
     fetch(`/api/public/services/${encodeURIComponent(serviceId)}/rules`)
@@ -267,6 +293,13 @@ export default function BookingFlow({
           clientName,
           clientEmail,
           notes: notes || undefined,
+          // Wave I — only send when the intake step was rendered (a
+          // form is linked + customer filled it out). Empty object
+          // for services without forms keeps backward compat.
+          intakeResponses:
+            intakeForm && Object.keys(intakeResponses).length > 0
+              ? intakeResponses
+              : undefined,
         }),
       });
       const data = await res.json();
@@ -283,6 +316,8 @@ export default function BookingFlow({
         throw new Error(data?.error ?? "Booking failed");
       }
       setConfirmedMeetLink(data.meetLink ?? null);
+      // Wave I — clear the intake draft cookie on successful submit.
+      clearIntakeDraft();
       setStep("done");
       toast("Booked. A confirmation is on its way.", "success");
     } catch (e) {
@@ -681,11 +716,27 @@ export default function BookingFlow({
               accent={accent}
               onPick={(iso) => {
                 setSelectedSlot(iso);
-                setStep("confirm");
+                // Wave I — route through the intake step when the
+                // service has an active form linked. Otherwise jump
+                // straight to confirm (byte-identical pre-Wave-I path).
+                setStep(intakeForm && intakeForm.fields.length > 0 ? "intake" : "confirm");
               }}
             />
           )}
         </div>
+      )}
+
+      {/* Wave I — Intake step (between pick-time and confirm) */}
+      {step === "intake" && selectedSlot && intakeForm && (
+        <IntakeStep
+          form={intakeForm}
+          accent={accent}
+          onBack={() => setStep("pick-time")}
+          onContinue={(values) => {
+            setIntakeResponses(values);
+            setStep("confirm");
+          }}
+        />
       )}
 
       {/* Confirm */}

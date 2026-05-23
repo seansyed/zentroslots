@@ -71,6 +71,12 @@ export type Plan = {
      *  bumped here, no callsite changes), but the current
      *  enterprise stance is 1-per-tenant across every paid tier. */
     maxCustomDomains: number;
+    /** Wave I — maximum fields per intake form. -1 = unlimited. Free
+     *  tier additionally restricted to a type whitelist (see lib/intake
+     *  .FREE_TIER_TYPE_WHITELIST). Existing forms above the cap on plan
+     *  downgrade are grandfathered (readable + bookable) but new fields
+     *  blocked until under limit. */
+    maxIntakeFields: number;
   };
   /** Legacy env var name (Phase ≤15) — monthly Stripe Price ID.
    *  Phase 16A keeps this as the fallback when the new
@@ -108,6 +114,10 @@ export const PLANS: Record<PlanId, Plan> = {
       publicProfile: true,
       analytics: false,
       maxCustomDomains: 0,
+      // Wave I — Free tier: 2 fields max from a whitelist of simple
+      // contact-style types. Plan-aware validator in lib/intake.ts
+      // enforces both the count and the type list.
+      maxIntakeFields: 2,
     },
   },
   solo: {
@@ -136,6 +146,7 @@ export const PLANS: Record<PlanId, Plan> = {
       publicProfile: true,
       analytics: true,
       maxCustomDomains: 1,
+      maxIntakeFields: 5,
     },
     stripePriceEnvMonthly: "STRIPE_PRICE_SOLO_MONTH",
     stripePriceEnvYearly: "STRIPE_PRICE_SOLO_YEAR",
@@ -167,6 +178,7 @@ export const PLANS: Record<PlanId, Plan> = {
       publicProfile: true,
       analytics: true,
       maxCustomDomains: 1,
+      maxIntakeFields: 15,
     },
     // Legacy fallback — existing Pro subscriptions continue billing at
     // STRIPE_PRICE_PRO until they're migrated to the new Price IDs.
@@ -201,6 +213,7 @@ export const PLANS: Record<PlanId, Plan> = {
       publicProfile: true,
       analytics: true,
       maxCustomDomains: 1,
+      maxIntakeFields: 30,
     },
     stripePriceEnvVar: "STRIPE_PRICE_TEAM",
     stripePriceEnvMonthly: "STRIPE_PRICE_TEAM_MONTH",
@@ -233,6 +246,7 @@ export const PLANS: Record<PlanId, Plan> = {
       publicProfile: true,
       analytics: true,
       maxCustomDomains: 1,
+      maxIntakeFields: -1,
     },
     stripePriceEnvMonthly: "STRIPE_PRICE_ENTERPRISE_MONTH",
     stripePriceEnvYearly: "STRIPE_PRICE_ENTERPRISE_YEAR",

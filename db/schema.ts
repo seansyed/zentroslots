@@ -879,6 +879,9 @@ export const intakeForms = pgTable(
     name: varchar("name", { length: 120 }).notNull(),
     fields: jsonb("fields").notNull().default([]),
     isActive: boolean("is_active").notNull().default(true),
+    // Wave I additions (migration 0053)
+    description: text("description"),
+    submissionCount: integer("submission_count").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -887,8 +890,68 @@ export const intakeForms = pgTable(
   })
 );
 
-export const intakeFormsRelations = relations(intakeForms, ({ one }) => ({
+export const intakeFormsRelations = relations(intakeForms, ({ one, many }) => ({
   tenant: one(tenants, { fields: [intakeForms.tenantId], references: [tenants.id] }),
+  responses: many(intakeFieldResponses),
+}));
+
+// ─── Wave I — normalized intake field responses (migration 0053) ────────
+// One row per (booking, field). The persistResponses helper writes here
+// in the same transaction that updates bookings.intake_responses jsonb
+// (kept for backward compat with existing readers).
+export const intakeFieldResponses = pgTable(
+  "intake_field_responses",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    bookingId: uuid("booking_id")
+      .notNull()
+      .references(() => bookings.id, { onDelete: "cascade" }),
+    /** Nullable: response history survives form deletion (FK SET NULL). */
+    intakeFormId: uuid("intake_form_id").references(() => intakeForms.id, {
+      onDelete: "set null",
+    }),
+    fieldKey: varchar("field_key", { length: 60 }).notNull(),
+    /** Snapshot of label at submit time — preserves audit fidelity even
+     *  if the form definition diverges later. */
+    fieldLabel: varchar("field_label", { length: 200 }).notNull(),
+    fieldType: varchar("field_type", { length: 30 }).notNull(),
+    /** One of value_text / value_number / value_json is populated based
+     *  on field_type. The persistResponses helper enforces this; the
+     *  schema does not (a CHECK would add maintenance overhead). */
+    valueText: text("value_text"),
+    valueNumber: text("value_number"), // numeric stored as text for precision
+    valueJson: jsonb("value_json"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    tenantIdx: index("intake_field_responses_tenant_idx").on(t.tenantId, t.createdAt),
+    bookingIdx: index("intake_field_responses_booking_idx").on(t.bookingId),
+    fieldIdx: index("intake_field_responses_field_idx").on(t.tenantId, t.fieldKey),
+    // One response per (booking, field). persistResponses uses
+    // ON CONFLICT for atomic upsert on retries.
+    bookingFieldUq: uniqueIndex("intake_field_responses_booking_field_key").on(
+      t.bookingId,
+      t.fieldKey,
+    ),
+  }),
+);
+
+export const intakeFieldResponsesRelations = relations(intakeFieldResponses, ({ one }) => ({
+  tenant: one(tenants, {
+    fields: [intakeFieldResponses.tenantId],
+    references: [tenants.id],
+  }),
+  booking: one(bookings, {
+    fields: [intakeFieldResponses.bookingId],
+    references: [bookings.id],
+  }),
+  form: one(intakeForms, {
+    fields: [intakeFieldResponses.intakeFormId],
+    references: [intakeForms.id],
+  }),
 }));
 
 // ─── Tenant Domains ─────────────────────────────────────────────────────
@@ -2043,6 +2106,9 @@ export type Task = typeof tasks.$inferSelect;
 export type NewTask = typeof tasks.$inferInsert;
 export type IntakeForm = typeof intakeForms.$inferSelect;
 export type NewIntakeForm = typeof intakeForms.$inferInsert;
+// Wave I
+export type IntakeFieldResponse = typeof intakeFieldResponses.$inferSelect;
+export type NewIntakeFieldResponse = typeof intakeFieldResponses.$inferInsert;
 export type TenantDomain = typeof tenantDomains.$inferSelect;
 export type NewTenantDomain = typeof tenantDomains.$inferInsert;
 export type EmbedEvent = typeof embedEvents.$inferSelect;

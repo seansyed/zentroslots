@@ -207,6 +207,8 @@ function buildNav(
           { label: "Feature controls",       href: "/dashboard/settings/features",        icon: Settings2 },
           { label: "Staff routing",          href: "/dashboard/settings/routing",         icon: GitBranch },
           { label: "Booking rules",          href: "/dashboard/settings/booking-rules",   icon: Clock },
+          // Wave I — reusable intake forms attachable to services.
+          { label: "Intake forms",           href: "/dashboard/settings/intake-forms",    icon: ListChecks },
           { label: "Waitlists",              href: "/dashboard/settings/waitlists",       icon: Users },
           { label: "Recurring bookings",     href: "/dashboard/settings/recurring",       icon: Repeat,    premium: needsProUpgrade },
         ]

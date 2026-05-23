@@ -27,6 +27,7 @@ import {
   createTenantVaultCheckout,
   resolveTenantVaultRoute,
 } from "@/lib/billing/tenantVaultBooking";
+import { persistIntakeResponses } from "@/lib/intake/persistResponses";
 
 // List bookings — strictly scoped to the caller's tenant.
 // Staff see their own, admins see the whole tenant.
@@ -241,6 +242,9 @@ export async function POST(req: NextRequest) {
     // (gated symmetrically in the public booking GET), and the
     // service-level attachment becomes a no-op.
     let normalisedResponses: Record<string, unknown> | null = null;
+    // Hoisted to outer scope so the post-insert dual-write hook can
+    // see the form id + fields to persist normalized responses (Wave I).
+    let intakeFormForPersist: { id: string; fields: IntakeField[] } | null = null;
     if (service.intakeFormId && features.intakeForms) {
       const form = await db.query.intakeForms.findFirst({
         where: and(eq(intakeForms.id, service.intakeFormId), eq(intakeForms.tenantId, tenantId)),
@@ -251,6 +255,10 @@ export async function POST(req: NextRequest) {
             (form.fields as IntakeField[]) ?? [],
             body.intakeResponses ?? {}
           );
+          intakeFormForPersist = {
+            id: form.id,
+            fields: (form.fields as IntakeField[]) ?? [],
+          };
         } catch (e) {
           throw new HttpError(400, e instanceof Error ? e.message : "Invalid intake response");
         }
@@ -329,6 +337,19 @@ export async function POST(req: NextRequest) {
             throw new HttpError(502, "Payment provider unavailable — please try again");
           }
           throw new HttpError(500, "Could not reserve slot");
+        }
+        // Wave I — dual-write intake responses to normalized table.
+        // Best-effort: failure here doesn't break the booking (the
+        // jsonb mirror on bookings.intake_responses is the source of
+        // truth for legacy readers; normalized is enhancement).
+        if (intakeFormForPersist && normalisedResponses) {
+          await persistIntakeResponses({
+            tenantId,
+            bookingId: result.booking.id,
+            intakeFormId: intakeFormForPersist.id,
+            fields: intakeFormForPersist.fields,
+            responses: normalisedResponses,
+          }).catch(() => null);
         }
         // createTenantVaultCheckout built the success/cancel URLs
         // internally using the freshly-allocated booking id, so the
@@ -428,6 +449,17 @@ export async function POST(req: NextRequest) {
         throw new HttpError(502, "Payment provider unavailable — please try again");
       }
 
+      // Wave I — dual-write intake responses to normalized table.
+      if (intakeFormForPersist && normalisedResponses) {
+        await persistIntakeResponses({
+          tenantId,
+          bookingId: pending.booking.id,
+          intakeFormId: intakeFormForPersist.id,
+          fields: intakeFormForPersist.fields,
+          responses: normalisedResponses,
+        }).catch(() => null);
+      }
+
       // Return the pending booking + the checkout URL. NO post-confirmation
       // hooks fire yet — those run in the webhook after payment settles.
       return NextResponse.json({
@@ -495,6 +527,17 @@ export async function POST(req: NextRequest) {
       const code = (e as { code?: string })?.code;
       if (code === "23P01") throw new HttpError(409, "Slot just taken — pick another");
       throw e;
+    }
+
+    // Wave I — dual-write intake responses to normalized table.
+    if (intakeFormForPersist && normalisedResponses) {
+      await persistIntakeResponses({
+        tenantId,
+        bookingId: row.id,
+        intakeFormId: intakeFormForPersist.id,
+        fields: intakeFormForPersist.fields,
+        responses: normalisedResponses,
+      }).catch(() => null);
     }
 
     // External calendar sync. Routes through the orchestrator which:
