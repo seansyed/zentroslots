@@ -338,6 +338,33 @@ export default function BookingFlow({
         }
         throw new Error(data?.error ?? "Booking failed");
       }
+
+      // ─── Paid-booking redirect (Wave H Phase 3 / legacy platform) ──
+      // For services with a price, the server inserts a pending_payment
+      // booking and returns the hosted-checkout URL on the same response.
+      // Without this redirect the customer would see "Booked" while their
+      // booking is still in pending_payment — the slot dies when the
+      // hold expires and no payment ever lands. Webhook is sole source
+      // of truth for finalization, so we MUST hand the customer off to
+      // the provider's hosted checkout here.
+      //
+      // Same shape for both routes:
+      //   • tenant_vault   → tenant's own Stripe/PayPal checkout
+      //   • legacy_platform → ZentroMeet platform Stripe checkout
+      // The booking row is already inserted with payment_provider_id
+      // (vault) or stripeSessionId (legacy) stamped — webhook reconciles.
+      if (data?.requiresPayment && typeof data.checkoutUrl === "string") {
+        // Clear draft so a back-button return doesn't re-submit. We do
+        // NOT setStep("done") — the customer is leaving the SPA for the
+        // provider's hosted page and will land on /booking/confirmed
+        // (success) or /booking/cancelled (cancel) when they return.
+        clearIntakeDraft();
+        // Use replace() so the back button from checkout doesn't bring
+        // them back to a confirm-button that would double-submit.
+        window.location.replace(data.checkoutUrl);
+        return;
+      }
+
       setConfirmedMeetLink(data.meetLink ?? null);
       // Wave I — clear the intake draft cookie on successful submit.
       clearIntakeDraft();
