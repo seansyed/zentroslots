@@ -24,6 +24,7 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   buildCallbackUrl,
   consumeOAuthStateCookie,
+  enrichUserProfileFromOAuth,
   findOrCreateUserForOAuth,
   issueOAuthSession,
   publicUrl,
@@ -139,6 +140,7 @@ export async function GET(req: NextRequest) {
     return loginError(req, "missing_email");
   }
 
+  let resolvedUserId: string | null = null;
   try {
     const result = await findOrCreateUserForOAuth({
       email: rawEmail,
@@ -150,9 +152,32 @@ export async function GET(req: NextRequest) {
       provider: "microsoft",
       req,
     });
+    resolvedUserId = result.userId;
   } catch (e) {
     console.error("[oauth/microsoft] session mint failed:", e);
     return loginError(req, "session_mint_failed");
+  }
+
+  // Phase 17I-8 — profile enrichment via Microsoft Graph. The photo
+  // endpoint /me/photo/$value requires Authorization with the access
+  // token we just received; we pass it through so the server-side
+  // fetcher can authenticate the one-shot download. Access token is
+  // NEVER persisted; calendar OAuth (which DOES need long-lived
+  // tokens) handles that in its own flow via encrypted storage.
+  // Fire-and-forget — login latency unaffected by Graph latency.
+  if (resolvedUserId && tokens.access_token) {
+    void enrichUserProfileFromOAuth({
+      userId: resolvedUserId,
+      identity: {
+        email: rawEmail,
+        name: claims?.name ?? null,
+        provider: "microsoft",
+        pictureUrl: "https://graph.microsoft.com/v1.0/me/photo/$value",
+        pictureBearerToken: tokens.access_token,
+      },
+    }).catch((e) => {
+      console.warn("[oauth/microsoft] profile enrichment failed (non-fatal):", e);
+    });
   }
 
   const nextCookie = req.cookies.get("zm_oauth_next")?.value;

@@ -22,6 +22,7 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   buildCallbackUrl,
   consumeOAuthStateCookie,
+  enrichUserProfileFromOAuth,
   findOrCreateUserForOAuth,
   issueOAuthSession,
   publicUrl,
@@ -47,6 +48,12 @@ type GoogleIdTokenClaims = {
   name?: string;
   given_name?: string;
   family_name?: string;
+  /** Phase 17I-8 — Google sets this on the ID token when `profile`
+   *  scope is requested (already in our scope set). URL points at
+   *  the user's Google profile photo on lh3.googleusercontent.com.
+   *  We download it server-side and cache locally so expired
+   *  provider URLs don't leak into the UI. */
+  picture?: string;
   sub?: string;
 };
 
@@ -144,6 +151,7 @@ export async function GET(req: NextRequest) {
   }
 
   // Resolve identity → user/session.
+  let resolvedUserId: string | null = null;
   try {
     const result = await findOrCreateUserForOAuth({
       email: claims.email,
@@ -155,9 +163,30 @@ export async function GET(req: NextRequest) {
       provider: "google",
       req,
     });
+    resolvedUserId = result.userId;
   } catch (e) {
     console.error("[oauth/google] session mint failed:", e);
     return loginError(req, "session_mint_failed");
+  }
+
+  // Phase 17I-8 — profile enrichment (avatar + name refresh). Runs
+  // AFTER the session cookie is set so we never block login latency
+  // on a slow provider image. Fire-and-forget; failure is logged but
+  // never surfaces to the user. Topbar + Sidebar already lazy-fetch
+  // /api/auth/me on mount, so the avatar appears as soon as it's
+  // written (typically <300ms, ahead of /dashboard mount).
+  if (resolvedUserId && claims.picture) {
+    void enrichUserProfileFromOAuth({
+      userId: resolvedUserId,
+      identity: {
+        email: claims.email,
+        name: claims.name ?? null,
+        provider: "google",
+        pictureUrl: claims.picture,
+      },
+    }).catch((e) => {
+      console.warn("[oauth/google] profile enrichment failed (non-fatal):", e);
+    });
   }
 
   // Consume the `next` cookie if present; default to /dashboard.
