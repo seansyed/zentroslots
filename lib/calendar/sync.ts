@@ -273,7 +273,10 @@ export async function getMicrosoftAccessToken(
  * token is non-negotiable. A persist failure is logged but doesn't
  * fail the current call — we just refresh again next time.
  */
-async function getZoomAccessToken(
+// Exported (Phase 17I-2B) so the calendar_events orchestrator can
+// reuse the same Zoom token cache + rolling-refresh logic when an
+// internal meeting selects videoProvider="zoom".
+export async function getZoomAccessToken(
   conn: typeof calendarConnections.$inferSelect,
 ): Promise<string | null> {
   if (

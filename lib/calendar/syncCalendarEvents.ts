@@ -41,11 +41,14 @@ import { google } from "googleapis";
 
 import { calendarConnections, type User } from "@/db/schema";
 import {
+  getActiveConnection,
   getMicrosoftAccessToken,
+  getZoomAccessToken,
   markActive,
   markNeedsReconnect,
   pickConnectionForWrite,
 } from "./sync";
+import { createEvent as zoomCreateEvent } from "./zoom";
 import { decryptSecret } from "@/lib/crypto";
 import type { CalendarProvider } from "./types";
 
@@ -70,8 +73,15 @@ export type CalendarEventForSync = {
   endAt: Date;
   notes: string | null;
   location: string | null;
-  /** Optional Google Meet / Teams creation flag. */
-  videoProvider: "google_meet" | "teams" | null;
+  /** Optional video provider. google_meet + teams are embedded in the
+   *  calendar provider's create call; zoom uses a side-car create
+   *  (same pattern as the booking lifecycle in lib/calendar/sync.ts)
+   *  so the join URL ends up in the event description. */
+  videoProvider: "google_meet" | "teams" | "zoom" | null;
+  /** Whether the external calendar should notify attendees on create.
+   *  Only meaningful for internal_meeting; ignored for blocked_time
+   *  (which has no attendees by definition). */
+  sendNotifications: boolean;
 };
 
 // ─── Helpers ───────────────────────────────────────────────────────────
@@ -90,12 +100,20 @@ function safeDecrypt(envelope: string | null | undefined): string | null {
   }
 }
 
-/** Build the calendar event description body shared by both providers. */
+/** Build the calendar event description body shared by both providers.
+ *  Optional sideCarUrl is prepended (Zoom side-car path) so the join
+ *  link is the first thing the staff sees on their Outlook / Google
+ *  Calendar entry. */
 function buildDescription(args: {
   event: CalendarEventForSync;
   organizer: User;
+  sideCarUrl?: string | null;
 }): string {
   const lines: string[] = [];
+  if (args.sideCarUrl) {
+    lines.push(`Join: ${args.sideCarUrl}`);
+    lines.push("");
+  }
   if (args.event.notes && args.event.notes.trim().length > 0) {
     lines.push(args.event.notes.trim());
   }
@@ -108,6 +126,59 @@ function buildDescription(args: {
   return lines.join("\n");
 }
 
+// ─── Zoom side-car ─────────────────────────────────────────────────────
+
+/** When the organizer picks Zoom for an internal meeting, we create
+ *  the Zoom meeting BEFORE the calendar event so the calendar event's
+ *  description can include the join URL. Mirror of the Wave D side-car
+ *  pattern in lib/calendar/sync.ts onBookingCreated. NEVER throws — if
+ *  Zoom fails the calendar event is still created (just without a URL,
+ *  which the staff can paste in manually). */
+async function createZoomSideCar(args: {
+  userId: string;
+  event: CalendarEventForSync;
+  organizer: User;
+}): Promise<{ meetingId: string; joinUrl: string | null } | null> {
+  const zoomConn = await getActiveConnection(args.userId, "zoom");
+  if (!zoomConn || zoomConn.status !== "active") return null;
+  try {
+    const accessToken = await getZoomAccessToken(zoomConn);
+    if (!accessToken) {
+      await markNeedsReconnect(zoomConn.id, "Zoom token refresh failed");
+      return null;
+    }
+    const result = await zoomCreateEvent({
+      accessToken,
+      // Zoom adapter expects a booking-shaped draft. We re-use the
+      // shape with the organizer as the sole attendee since Zoom's
+      // meeting body doesn't care about the attendee list (Zoom
+      // identifies participants by who joins, not by invite list).
+      draft: {
+        summary: args.event.title,
+        description: args.event.notes ?? "",
+        startAt: args.event.startAt,
+        endAt: args.event.endAt,
+        organizerEmail: args.organizer.email,
+        organizerName: args.organizer.name,
+        attendeeEmail: args.organizer.email,
+        attendeeName: args.organizer.name,
+        videoConference: true,
+      },
+    });
+    await markActive(zoomConn.id).catch(() => undefined);
+    return {
+      meetingId: result.eventId,
+      joinUrl: result.meetLink,
+    };
+  } catch (e) {
+    console.error(
+      `[calendar-events] zoom side-car failed (event=${args.event.id}):`,
+      e instanceof Error ? e.message : String(e),
+    );
+    return null;
+  }
+}
+
 // ─── Google ────────────────────────────────────────────────────────────
 
 async function createOnGoogle(args: {
@@ -115,6 +186,10 @@ async function createOnGoogle(args: {
   event: CalendarEventForSync;
   organizer: User;
   attendees: User[];
+  /** Set when Zoom side-car succeeded — its join URL is baked into
+   *  the description so the staff click-through works directly from
+   *  their calendar entry. */
+  sideCarUrl: string | null;
 }): Promise<{ externalEventId: string; meetLink: string | null }> {
   const refreshToken = safeDecrypt(args.conn.refreshTokenEncrypted);
   if (!refreshToken) {
@@ -138,7 +213,10 @@ async function createOnGoogle(args: {
   client.setCredentials({ refresh_token: refreshToken });
   const cal = google.calendar({ version: "v3", auth: client });
 
-  const wantsVideo = args.event.videoProvider === "google_meet";
+  // Bundled Meet only when google_meet is selected. If Zoom side-car
+  // already produced a join URL we MUST NOT also create a Meet — the
+  // event would carry two competing meeting links.
+  const wantsBundledMeet = args.event.videoProvider === "google_meet" && !args.sideCarUrl;
   const requestId = `cev-${args.event.id}-${args.event.startAt.getTime()}`;
 
   // Attendees list: organizer FIRST (so Google attaches it as a
@@ -153,22 +231,29 @@ async function createOnGoogle(args: {
       .map((u) => ({ email: u.email, displayName: u.name })),
   ];
 
+  // Blocked time has no real attendees beyond the organizer — never
+  // notify on a personal block. Internal meetings honor the toggle.
+  const sendUpdates: "all" | "none" =
+    args.event.eventType === "internal_meeting" && args.event.sendNotifications
+      ? "all"
+      : "none";
+
   const res = await cal.events.insert({
     calendarId: args.conn.calendarId || "primary",
-    conferenceDataVersion: wantsVideo ? 1 : 0,
-    // sendUpdates: "none" — these are internal events, not customer
-    // bookings. We DON'T want Google emailing the attendees from the
-    // organizer's account; the in-app notification system (Phase 17I-C)
-    // is responsible for telling attendees they were added.
-    sendUpdates: "none",
+    conferenceDataVersion: wantsBundledMeet ? 1 : 0,
+    sendUpdates,
     requestBody: {
       summary: args.event.title,
-      description: buildDescription({ event: args.event, organizer: args.organizer }),
+      description: buildDescription({
+        event: args.event,
+        organizer: args.organizer,
+        sideCarUrl: args.sideCarUrl,
+      }),
       location: args.event.location ?? undefined,
       start: { dateTime: args.event.startAt.toISOString(), timeZone: "UTC" },
       end: { dateTime: args.event.endAt.toISOString(), timeZone: "UTC" },
       attendees,
-      conferenceData: wantsVideo
+      conferenceData: wantsBundledMeet
         ? {
             createRequest: {
               requestId,
@@ -176,13 +261,13 @@ async function createOnGoogle(args: {
             },
           }
         : undefined,
-      transparency: args.event.eventType === "blocked_time" ? "opaque" : "opaque",
+      transparency: "opaque",
     },
   });
 
   return {
     externalEventId: res.data.id ?? "",
-    meetLink: res.data.hangoutLink ?? null,
+    meetLink: args.sideCarUrl ?? res.data.hangoutLink ?? null,
   };
 }
 
@@ -193,6 +278,10 @@ async function createOnMicrosoft(args: {
   event: CalendarEventForSync;
   organizer: User;
   attendees: User[];
+  /** Zoom side-car URL, when present. We must NOT also flip
+   *  isOnlineMeeting in that case — the event would have two
+   *  competing join URLs. */
+  sideCarUrl: string | null;
 }): Promise<{ externalEventId: string; meetLink: string | null }> {
   const accessToken = await getMicrosoftAccessToken(args.conn);
   if (!accessToken) {
@@ -200,7 +289,9 @@ async function createOnMicrosoft(args: {
     throw new Error("microsoft: token_refresh_failed");
   }
 
-  const wantsTeams = args.event.videoProvider === "teams";
+  // Embedded Teams only when teams is selected AND there's no Zoom
+  // side-car URL already taking that role.
+  const wantsTeams = args.event.videoProvider === "teams" && !args.sideCarUrl;
 
   // Attendees: Graph wants `{ emailAddress: { address, name }, type }`.
   // Organizer goes implicitly via the connection identity — we don't
@@ -216,7 +307,11 @@ async function createOnMicrosoft(args: {
     subject: args.event.title,
     body: {
       contentType: "text",
-      content: buildDescription({ event: args.event, organizer: args.organizer }),
+      content: buildDescription({
+        event: args.event,
+        organizer: args.organizer,
+        sideCarUrl: args.sideCarUrl,
+      }),
     },
     start: {
       dateTime: args.event.startAt.toISOString(),
@@ -231,6 +326,12 @@ async function createOnMicrosoft(args: {
     // both event types so freebusy lookups (from other tools polling
     // the staff's Outlook) correctly treat the block as unavailable.
     showAs: "busy",
+    // Internal meetings honor the toggle; blocked time always silent
+    // (Outlook would otherwise prompt every attendee — but blocked
+    // time has none, so this is mostly defensive). false suppresses
+    // the response-tracking UI prompt on each attendee's invite.
+    responseRequested:
+      args.event.eventType === "internal_meeting" ? args.event.sendNotifications : false,
   };
   if (args.event.location) {
     body.location = { displayName: args.event.location };
@@ -245,12 +346,6 @@ async function createOnMicrosoft(args: {
     headers: {
       Authorization: `Bearer ${accessToken}`,
       "Content-Type": "application/json",
-      // No `Prefer: outlook.body-content-type=text` — Graph honors the
-      // contentType in the body. No `Send` header — Graph "responses"
-      // to internal Outlook attendees are auto-handled by their own
-      // calendar; we don't need to suppress invites here the way Google
-      // does (Graph doesn't email external addresses for /me/events
-      // create unless `sendInvitations=true` is set, which we don't).
     },
     body: JSON.stringify(body),
   });
@@ -265,11 +360,11 @@ async function createOnMicrosoft(args: {
     onlineMeeting?: { joinUrl?: string };
     onlineMeetingUrl?: string;
   };
-  const joinUrl = json?.onlineMeeting?.joinUrl ?? json?.onlineMeetingUrl ?? null;
+  const teamsJoinUrl = json?.onlineMeeting?.joinUrl ?? json?.onlineMeetingUrl ?? null;
 
   return {
     externalEventId: json?.id ?? "",
-    meetLink: wantsTeams ? joinUrl : null,
+    meetLink: args.sideCarUrl ?? (wantsTeams ? teamsJoinUrl : null),
   };
 }
 
@@ -301,8 +396,32 @@ export async function onCalendarEventCreated(args: {
    *  Organizer should NOT be in this list (we filter regardless). */
   attendees: User[];
 }): Promise<CalendarEventSyncResult> {
+  // ── Zoom side-car (optional, runs before the calendar event) ───
+  // Same Wave D pattern as the booking lifecycle: if the organizer
+  // picked Zoom, create the meeting first so the calendar event's
+  // description can include the join URL. Failure is non-fatal —
+  // the calendar event still gets created, just without the URL.
+  let sideCarMeetingId: string | null = null;
+  let sideCarUrl: string | null = null;
+  if (args.event.videoProvider === "zoom") {
+    const zoom = await createZoomSideCar({
+      userId: args.organizer.id,
+      event: args.event,
+      organizer: args.organizer,
+    });
+    if (zoom) {
+      sideCarMeetingId = zoom.meetingId;
+      sideCarUrl = zoom.joinUrl;
+    }
+  }
+
+  // ── Pick the calendar host connection ──────────────────────────
   const conn = await pickConnectionForWrite({
     userId: args.organizer.id,
+    // The hint only steers between google and microsoft. Zoom never
+    // hosts a calendar event, so when the user picked zoom we leave
+    // the hint null and pickConnectionForWrite falls back to whatever
+    // calendar host the organizer has connected.
     videoProviderHint:
       args.event.videoProvider === "google_meet"
         ? "google_meet"
@@ -312,6 +431,17 @@ export async function onCalendarEventCreated(args: {
   });
 
   if (!conn) {
+    // No calendar host: if Zoom side-car succeeded we still consider
+    // the operation a soft-ok (the meeting exists, just no calendar
+    // event). Otherwise nothing happened.
+    if (sideCarUrl) {
+      return {
+        status: "ok",
+        provider: "zoom",
+        externalEventId: sideCarMeetingId ?? "",
+        meetLink: sideCarUrl,
+      };
+    }
     return { status: "skipped", reason: "no_connection" };
   }
   if (conn.status !== "active") {
@@ -329,8 +459,8 @@ export async function onCalendarEventCreated(args: {
   try {
     const result =
       provider === "google"
-        ? await createOnGoogle({ conn, ...args })
-        : await createOnMicrosoft({ conn, ...args });
+        ? await createOnGoogle({ conn, ...args, sideCarUrl })
+        : await createOnMicrosoft({ conn, ...args, sideCarUrl });
 
     // Opportunistically mark the connection as healthy. Mirrors the
     // booking path: a successful write is the strongest signal of

@@ -19,6 +19,8 @@ import { Avatar } from "@/components/ui/primitives";
 import ThemeToggle from "./ThemeToggle";
 import NotificationBell from "./NotificationBell";
 import NewAppointmentModal from "./NewAppointmentModal";
+import NewBlockedTimeModal from "./NewBlockedTimeModal";
+import NewInternalMeetingModal from "./NewInternalMeetingModal";
 import CommandPalette, { useCommandPalette } from "./CommandPalette";
 import { cn } from "@/lib/cn";
 
@@ -148,6 +150,8 @@ interface MeResponse {
 function CreateMenu() {
   const [open, setOpen] = React.useState(false);
   const [showApptModal, setShowApptModal] = React.useState(false);
+  const [showBlockedModal, setShowBlockedModal] = React.useState(false);
+  const [showMeetingModal, setShowMeetingModal] = React.useState(false);
   const [me, setMe] = React.useState<MeResponse | null>(null);
   const ref = React.useRef<HTMLDivElement>(null);
 
@@ -240,7 +244,48 @@ function CreateMenu() {
               </div>
             </button>
 
-            {/* v1 placeholders — coming-soon affordances */}
+            {/* Phase 17I-2B — Blocked Time & Internal Meeting active */}
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                if (!me) return;
+                setOpen(false);
+                setShowBlockedModal(true);
+              }}
+              disabled={!me}
+              className="flex w-full items-start gap-2.5 px-3 py-2 text-left transition-colors hover:bg-surface-inset disabled:opacity-50"
+            >
+              <Ban className="h-4 w-4 mt-0.5 text-slate-600" strokeWidth={1.75} />
+              <div className="min-w-0 flex-1">
+                <div className="text-[13px] font-medium text-ink">Blocked Time</div>
+                <div className="text-[11px] text-ink-muted">
+                  Mark a slot unavailable (lunch, PTO, focus)
+                </div>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                if (!me) return;
+                setOpen(false);
+                setShowMeetingModal(true);
+              }}
+              disabled={!me}
+              className="flex w-full items-start gap-2.5 px-3 py-2 text-left transition-colors hover:bg-surface-inset disabled:opacity-50"
+            >
+              <Building2 className="h-4 w-4 mt-0.5 text-indigo-600" strokeWidth={1.75} />
+              <div className="min-w-0 flex-1">
+                <div className="text-[13px] font-medium text-ink">Internal Meeting</div>
+                <div className="text-[11px] text-ink-muted">
+                  Multi-staff calendar event — Teams / Meet / Zoom
+                </div>
+              </div>
+            </button>
+
+            {/* Remaining v1 placeholders — coming-soon affordances */}
             <ComingSoonRow
               icon={<Users className="h-4 w-4 mt-0.5 text-ink-subtle" strokeWidth={1.75} />}
               title="Group Session"
@@ -251,32 +296,42 @@ function CreateMenu() {
               title="Round Robin"
               hint="Auto-assign across eligible staff"
             />
-            <ComingSoonRow
-              icon={<Ban className="h-4 w-4 mt-0.5 text-ink-subtle" strokeWidth={1.75} />}
-              title="Blocked Time"
-              hint="Mark a slot unavailable"
-            />
-            <ComingSoonRow
-              icon={<Building2 className="h-4 w-4 mt-0.5 text-ink-subtle" strokeWidth={1.75} />}
-              title="Internal Meeting"
-              hint="Calendar-only event for staff"
-            />
           </div>
         </div>
       )}
 
       {me && (
-        <NewAppointmentModal
-          open={showApptModal}
-          onClose={() => setShowApptModal(false)}
-          onCreated={() => {
-            // Refresh the current page so the new booking appears in
-            // calendar/appointment lists immediately.
-            if (typeof window !== "undefined") window.location.reload();
-          }}
-          viewerRole={me.role}
-          viewerUserId={me.id}
-        />
+        <>
+          <NewAppointmentModal
+            open={showApptModal}
+            onClose={() => setShowApptModal(false)}
+            onCreated={() => {
+              // Refresh the current page so the new booking appears in
+              // calendar/appointment lists immediately.
+              if (typeof window !== "undefined") window.location.reload();
+            }}
+            viewerRole={me.role}
+            viewerUserId={me.id}
+          />
+          <NewBlockedTimeModal
+            open={showBlockedModal}
+            onClose={() => setShowBlockedModal(false)}
+            onCreated={() => {
+              if (typeof window !== "undefined") window.location.reload();
+            }}
+            viewerRole={me.role}
+            viewerUserId={me.id}
+          />
+          <NewInternalMeetingModal
+            open={showMeetingModal}
+            onClose={() => setShowMeetingModal(false)}
+            onCreated={() => {
+              if (typeof window !== "undefined") window.location.reload();
+            }}
+            viewerRole={me.role}
+            viewerUserId={me.id}
+          />
+        </>
       )}
     </div>
   );

@@ -183,12 +183,21 @@ export async function POST(req: NextRequest) {
     // self-contained: own connection-pick, own provider dispatch,
     // own decrypt + token refresh. NEVER throws.
     if (row.syncExternal) {
-      const videoProviderHint: "google_meet" | "teams" | null =
-        body.eventType === "internal_meeting" && body.videoProvider === "google_meet"
-          ? "google_meet"
-          : body.eventType === "internal_meeting" && body.videoProvider === "teams"
-          ? "teams"
+      // Narrow the schema's optional video provider to the
+      // orchestrator's closed union (matches CalendarEventForSync).
+      const videoProviderHint: "google_meet" | "teams" | "zoom" | null =
+        body.eventType === "internal_meeting"
+          ? body.videoProvider === "google_meet"
+            ? "google_meet"
+            : body.videoProvider === "teams"
+            ? "teams"
+            : body.videoProvider === "zoom"
+            ? "zoom"
+            : null
           : null;
+
+      const sendNotifications =
+        body.eventType === "internal_meeting" ? body.sendNotifications : false;
 
       const eventForSync = {
         id: row.id,
@@ -199,6 +208,7 @@ export async function POST(req: NextRequest) {
         notes: row.notes,
         location: row.location,
         videoProvider: videoProviderHint,
+        sendNotifications,
       };
 
       void onCalendarEventCreated({

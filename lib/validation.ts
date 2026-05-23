@@ -168,6 +168,12 @@ export const createInternalMeetingSchema = calendarEventBaseSchema.extend({
    *  to support the chosen provider. */
   videoProvider: z.enum(["google_meet", "teams", "zoom"]).optional(),
   location: z.string().max(500).optional(),
+  /** Whether to ask the external calendar provider to notify the
+   *  attendees on create. Google → sendUpdates=all|none; Microsoft →
+   *  responseRequested toggles the "Accept/Decline" prompt on the
+   *  attendee's invite. Default true (matches the booking path's
+   *  behavior for customer-facing events). */
+  sendNotifications: z.boolean().default(true),
 });
 
 /** Discriminated union — the endpoint picks the right schema from
