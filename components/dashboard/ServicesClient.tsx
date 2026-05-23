@@ -88,6 +88,9 @@ type Svc = {
   // generation directly.
   deliveryModes?: Array<"in_person" | "virtual"> | null;
   staff: { userId: string; name: string }[];
+  // Wave I follow-up — intake form attachment. `null` = no form
+  // (intake step skipped on booking page). uuid = form attached.
+  intakeFormId?: string | null;
   // Direct department ownership (migration 0032). Primary signal.
   // `null` = explicitly unassigned. `undefined` = legacy row before
   // GET surfaced the column (treated identically to null in UI).
@@ -359,6 +362,27 @@ export default function ServicesClient({
     [healthyStaffIds],
   );
   const [rows, setRows] = React.useState<Svc[] | null>(null);
+  // Wave I follow-up — list of tenant's intake forms for the Service
+  // editor dropdown. Empty initially; populated on mount.
+  const [allIntakeForms, setAllIntakeForms] = React.useState<
+    { id: string; name: string; isActive: boolean }[]
+  >([]);
+  React.useEffect(() => {
+    let cancelled = false;
+    fetch("/api/tenant/intake-forms")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (cancelled || !data) return;
+        const arr = (data.forms ?? []) as Array<{ id: string; name: string; isActive: boolean }>;
+        setAllIntakeForms(arr.map((f) => ({ id: f.id, name: f.name, isActive: f.isActive })));
+      })
+      .catch(() => {
+        /* non-fatal — picker just shows empty state */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   // Edit-service drawer: existing "new" + service-id state
   const [openId, setOpenId] = React.useState<string | "new" | null>(null);
   // Dedicated Assign-Staff panel: separate state, separate workflow
@@ -560,6 +584,7 @@ export default function ServicesClient({
         onSaved={() => { setOpenId(null); reload(); }}
         allStaff={allStaff}
         allDepartments={allDepartments}
+        allIntakeForms={allIntakeForms}
         isAdmin={isAdmin}
         existing={rows ?? []}
         tenantSlug={tenantSlug ?? null}
@@ -2110,13 +2135,17 @@ function ActivationStepCard({
 // ─── ServiceDrawer — logic preserved 100%, chrome refreshed ───────
 
 function ServiceDrawer({
-  openId, onClose, onSaved, allStaff, allDepartments, isAdmin, existing, tenantSlug,
+  openId, onClose, onSaved, allStaff, allDepartments, allIntakeForms, isAdmin, existing, tenantSlug,
 }: {
   openId: string | "new" | null;
   onClose: () => void;
   onSaved: () => void;
   allStaff: StaffOption[];
   allDepartments: { id: string; name: string; color: string | null }[];
+  /** Wave I follow-up — active intake forms for the tenant. Fetched
+   *  once at the parent and threaded through so the drawer dropdown
+   *  doesn't need its own fetch. */
+  allIntakeForms: { id: string; name: string; isActive: boolean }[];
   isAdmin: boolean;
   existing: Svc[];
   /** Threaded for the Booking & sharing field inside the drawer. */
@@ -2159,6 +2188,10 @@ function ServiceDrawer({
   // an assignment.
   const [departmentId, setDepartmentId] = React.useState<string | null>(null);
   const [deptQuery, setDeptQuery] = React.useState("");
+  // Wave I follow-up — intake form attachment. `null` = no form
+  // (intake step skipped). Hydrated from svc.intakeFormId; on save,
+  // sent to PATCH /api/services/<id>.
+  const [intakeFormId, setIntakeFormId] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
 
   React.useEffect(() => {
@@ -2175,6 +2208,7 @@ function ServiceDrawer({
       setSelectedStaff(new Set(svc.staff.map((s) => s.userId)));
       setDepartmentId(svc.departmentId ?? null);
       setDeptQuery("");
+      setIntakeFormId(svc.intakeFormId ?? null);
     } else if (isNew) {
       setName(""); setDescription(""); setDurationMinutes(30);
       // Empty string = "$0" on submit (see dollarsToCents). Cleaner
@@ -2187,6 +2221,7 @@ function ServiceDrawer({
       setSelectedStaff(new Set());
       setDepartmentId(null);
       setDeptQuery("");
+      setIntakeFormId(null);
     }
   }, [openId, svc, isNew]);
 
@@ -2241,6 +2276,9 @@ function ServiceDrawer({
         // Direct department ownership (migration 0032).
         // `null` clears the assignment server-side; a uuid sets it.
         departmentId,
+        // Wave I follow-up — intake form attachment. `null` = no
+        // form (intake step skipped). Server validates tenant ownership.
+        intakeFormId,
       };
       const url = isNew ? "/api/services" : `/api/services/${svc!.id}`;
       const method = isNew ? "POST" : "PATCH";
@@ -2478,6 +2516,42 @@ function ServiceDrawer({
               <input type="checkbox" checked={isActive} disabled={!isAdmin} onChange={(e) => setIsActive(e.target.checked)} className="h-4 w-4 accent-brand-accent" />
               Active and bookable
             </label>
+          </Field>
+
+          {/* Wave I follow-up — intake form attachment. Dropdown over
+              the tenant's active intake forms (built in
+              Settings → Intake forms). "No form" = customer skips
+              the intake step on the booking page. Tenant scope is
+              enforced server-side on save. */}
+          <Field label="Intake form">
+            <select
+              value={intakeFormId ?? ""}
+              disabled={!isAdmin}
+              onChange={(e) => setIntakeFormId(e.target.value === "" ? null : e.target.value)}
+              className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-brand-accent/30"
+            >
+              <option value="">— No form (skip intake step) —</option>
+              {allIntakeForms
+                .filter((f) => f.isActive || f.id === intakeFormId)
+                .map((f) => (
+                  <option key={f.id} value={f.id}>
+                    {f.name}{!f.isActive ? " (disabled)" : ""}
+                  </option>
+                ))}
+            </select>
+            <p className="mt-1.5 text-[11px] text-ink-subtle">
+              {allIntakeForms.length === 0 ? (
+                <>
+                  No forms yet. Build one in{" "}
+                  <a href="/dashboard/settings/intake-forms" className="underline">
+                    Settings → Intake forms
+                  </a>
+                  .
+                </>
+              ) : (
+                <>Attach a form so customers fill it during booking. Manage forms in Settings → Intake forms.</>
+              )}
+            </p>
           </Field>
 
           {/* Department ownership — single primary department per

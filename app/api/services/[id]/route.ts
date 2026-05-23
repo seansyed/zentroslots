@@ -3,7 +3,7 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "@/db/client";
-import { bookings, departments, serviceStaff, services, tenants, users } from "@/db/schema";
+import { bookings, departments, intakeForms, serviceStaff, services, tenants, users } from "@/db/schema";
 import { errorResponse, HttpError, requireRole } from "@/lib/auth";
 import { canActivateService, getPlan } from "@/lib/plans";
 import { serviceDeliveryModesSchema } from "@/lib/workforce-location";
@@ -35,6 +35,10 @@ const patchSchema = z.object({
   // filter intersects this with each staff's per-day location type
   // — never gates slot generation directly.
   deliveryModes: serviceDeliveryModesSchema.optional(),
+  // Wave I follow-up — intake form attachment. Pass `null` to detach,
+  // a uuid to attach, or omit to leave unchanged. Tenant-scoped
+  // validation below.
+  intakeFormId: z.string().uuid().nullable().optional(),
 });
 
 export async function PATCH(
@@ -60,6 +64,25 @@ export async function PATCH(
         .where(and(eq(departments.id, body.departmentId), eq(departments.tenantId, admin.tenantId)));
       if (dept.length === 0) {
         throw new HttpError(403, "Department not in this workspace");
+      }
+    }
+
+    // Wave I follow-up — validate intake form belongs to this tenant.
+    // Same pattern as departmentId: `null` detaches, uuid attaches,
+    // undefined leaves alone. Tenant-scoped lookup prevents attaching
+    // a form from another tenant.
+    if (body.intakeFormId !== undefined && body.intakeFormId !== null) {
+      const form = await db
+        .select({ id: intakeForms.id })
+        .from(intakeForms)
+        .where(
+          and(
+            eq(intakeForms.id, body.intakeFormId),
+            eq(intakeForms.tenantId, admin.tenantId),
+          ),
+        );
+      if (form.length === 0) {
+        throw new HttpError(403, "Intake form not in this workspace");
       }
     }
 

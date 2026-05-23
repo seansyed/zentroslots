@@ -51,6 +51,10 @@ export async function GET(req: NextRequest) {
         // Direct department ownership (migration 0032). The primary
         // signal for "this service belongs to this department."
         departmentId: services.departmentId,
+        // Wave I follow-up — intake form attachment. Surfaced so the
+        // Service editor drawer can pre-select the current form in
+        // its dropdown.
+        intakeFormId: services.intakeFormId,
       })
       .from(services)
       .where(whereClause);
