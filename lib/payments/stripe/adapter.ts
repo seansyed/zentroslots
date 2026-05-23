@@ -24,6 +24,8 @@ import type {
   CheckoutResult,
   ProviderCapabilities,
   ProviderCredentials,
+  RefundArgs,
+  RefundResult,
   StripeCredentials,
   ValidationErrorClass,
   ValidationResult,
@@ -308,6 +310,52 @@ function classifyStripeEventType(t: string): WebhookEventKind {
   }
 }
 
+// ─── refund (Phase 3) ─────────────────────────────────────────────────
+
+async function refund(
+  raw: ProviderCredentials,
+  args: RefundArgs,
+): Promise<RefundResult> {
+  let creds: StripeCredentials;
+  try {
+    creds = assertStripeCreds(raw);
+  } catch (e) {
+    return {
+      ok: false,
+      errorClass: "config",
+      reason: e instanceof Error ? e.message : String(e),
+    };
+  }
+  try {
+    const stripe = await clientFor(creds.secretKey);
+    // Stripe idempotency keys are scoped to the API key, so we don't
+    // need to namespace by tenant — the key is already tenant-bound.
+    // (charge, booking) tuple → deterministic key → safe replay.
+    const idempotencyKey = `refund:${args.externalChargeId}:${args.bookingId}`;
+    const refundParams: Parameters<Stripe["refunds"]["create"]>[0] = {
+      payment_intent: args.externalChargeId,
+      // requested_by_customer is the closest semantically-neutral
+      // Stripe enum; the real reason lives in metadata for forensics.
+      reason: "requested_by_customer",
+      metadata: {
+        bookingId: args.bookingId,
+        internalReason: args.reason.slice(0, 200),
+      },
+    };
+    if (args.amountCents !== null) {
+      refundParams.amount = args.amountCents;
+    }
+    const r = await stripe.refunds.create(refundParams, { idempotencyKey });
+    return { ok: true, refundId: r.id };
+  } catch (err) {
+    return {
+      ok: false,
+      errorClass: classifyError(err),
+      reason: errorMessage(err),
+    };
+  }
+}
+
 // ─── Error classification ──────────────────────────────────────────────
 
 function classifyError(err: unknown): ValidationErrorClass {
@@ -372,4 +420,5 @@ export const stripeAdapter: PaymentProvider = {
   validateCredentials,
   createCheckout,
   verifyWebhook,
+  refund,
 };

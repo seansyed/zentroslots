@@ -185,3 +185,44 @@ export interface WebhookEvent {
 /** Result of `verifyWebhook()`. Null = signature failed / replayed
  *  outside tolerance. The receiver MUST reject without further work. */
 export type VerifyWebhookResult = WebhookEvent | null;
+
+// ─── Refund (Phase 3) ──────────────────────────────────────────────────
+// Required on every adapter. Used by the booking webhook receiver when:
+//   • EXCLUDE constraint fires post-payment (slot taken during checkout)
+//   • Webhook arrives after the hold-expiry cron already cancelled the
+//     booking ("late arrival" path)
+//   • Operator action from the admin dashboard (Phase 5)
+// MUST be idempotent at the provider — pass an idempotency key derived
+// deterministically from (externalChargeId, bookingId) so retries can't
+// double-refund.
+
+export interface RefundArgs {
+  /** Stripe payment_intent_id OR PayPal capture_id. Whichever the
+   *  adapter recorded on its successful checkout completion event. */
+  externalChargeId: string;
+  /** Booking id — used to namespace the idempotency key so refunds for
+   *  different bookings on the same charge can't collide. The same
+   *  (charge, booking) pair always produces the same key. */
+  bookingId: string;
+  /** Refund partial amount, or null for full refund. Cents (integer). */
+  amountCents: number | null;
+  /** Internal-facing reason string. Stored in provider metadata for
+   *  audit; never user-visible. Max ~200 chars. */
+  reason: string;
+}
+
+export interface RefundOk {
+  ok: true;
+  /** Provider's refund id (Stripe re_…, PayPal refund id). */
+  refundId: string;
+}
+
+export interface RefundError {
+  ok: false;
+  /** Adapter-redacted message (no provider tokens). */
+  reason: string;
+  /** Hint to the caller about whether retry is worthwhile. */
+  errorClass: ValidationErrorClass;
+}
+
+export type RefundResult = RefundOk | RefundError;

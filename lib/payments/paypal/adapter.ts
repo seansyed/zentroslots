@@ -29,11 +29,34 @@ import type {
   PayPalCredentials,
   ProviderCapabilities,
   ProviderCredentials,
+  RefundArgs,
+  RefundResult,
   ValidationErrorClass,
   ValidationResult,
   VerifyWebhookResult,
   WebhookEventKind,
 } from "../types";
+
+// ─── Fetch timeout (Phase 3) ───────────────────────────────────────────
+// Wraps fetch() with an AbortController so PayPal-side hangs can't tie
+// up the webhook receiver / booking POST indefinitely. 10s is comfortable
+// — PayPal's verify-webhook-signature typically responds in <500ms; if
+// it's slower than 10s something is genuinely broken upstream and the
+// caller's retry path is the right answer.
+const PAYPAL_FETCH_TIMEOUT_MS = 10_000;
+
+async function paypalFetch(
+  url: string,
+  init: RequestInit = {},
+): Promise<Response> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), PAYPAL_FETCH_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...init, signal: ctrl.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 // ─── Environment routing ────────────────────────────────────────────────
 
@@ -86,7 +109,7 @@ async function getAccessToken(creds: PayPalCredentials): Promise<string> {
   const basic = Buffer.from(`${creds.clientId}:${creds.clientSecret}`).toString(
     "base64",
   );
-  const res = await fetch(url, {
+  const res = await paypalFetch(url, {
     method: "POST",
     headers: {
       Authorization: `Basic ${basic}`,
@@ -167,7 +190,7 @@ async function validateCredentials(
     };
 
     try {
-      const userinfo = await fetch(
+      const userinfo = await paypalFetch(
         `${baseUrl(creds.mode)}/v1/identity/oauth2/userinfo?schema=paypalv1.1`,
         {
           headers: {
@@ -264,7 +287,7 @@ async function createCheckout(
     },
   };
 
-  const res = await fetch(`${baseUrl(creds.mode)}/v2/checkout/orders`, {
+  const res = await paypalFetch(`${baseUrl(creds.mode)}/v2/checkout/orders`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${accessToken}`,
@@ -376,7 +399,7 @@ async function verifyWebhook(
 
   let verifyRes: Response;
   try {
-    verifyRes = await fetch(
+    verifyRes = await paypalFetch(
       `${baseUrl(creds.mode)}/v1/notifications/verify-webhook-signature`,
       {
         method: "POST",
@@ -493,6 +516,109 @@ function classifyPayPalEventType(t: string): WebhookEventKind {
   }
 }
 
+// ─── refund (Phase 3) ─────────────────────────────────────────────────
+//
+// PayPal refund flow: POST /v2/payments/captures/{capture_id}/refund.
+// The `externalChargeId` we receive IS the capture id (PayPal's
+// capture-completed events carry it as `resource.id`). For Stripe the
+// equivalent is the payment_intent_id.
+//
+// Idempotency: `PayPal-Request-Id` header, deterministic on
+// (capture_id, booking_id). PayPal enforces this for 1 hour after the
+// first request — long enough for any retry storm but not so long
+// that a legitimate second refund (e.g. an admin partial-refunding the
+// same booking a week later) would collide.
+
+async function refund(
+  raw: ProviderCredentials,
+  args: RefundArgs,
+): Promise<RefundResult> {
+  let creds: PayPalCredentials;
+  try {
+    creds = assertPayPalCreds(raw);
+  } catch (e) {
+    return {
+      ok: false,
+      errorClass: "config",
+      reason: e instanceof Error ? e.message : String(e),
+    };
+  }
+  let accessToken: string;
+  try {
+    accessToken = await getAccessToken(creds);
+  } catch (err) {
+    return {
+      ok: false,
+      errorClass: classifyError(err),
+      reason: errorMessage(err),
+    };
+  }
+
+  const requestId = `refund:${args.externalChargeId}:${args.bookingId}`;
+  // PayPal refund body: empty for full refund, { amount: { value, currency_code } }
+  // for partial. We don't know the currency at refund time from RefundArgs
+  // alone — for partial refunds the caller must include it via a
+  // future args extension. For Phase 3 we ONLY issue full refunds
+  // from the receiver's auto-refund paths, so this is fine.
+  const body: Record<string, unknown> = {};
+  if (args.amountCents !== null) {
+    // Caller asked for partial; we don't have currency here. Fail
+    // structured rather than guess.
+    return {
+      ok: false,
+      errorClass: "config",
+      reason: "Partial PayPal refunds not yet supported by adapter (Phase 3 issues full refunds only)",
+    };
+  }
+
+  let res: Response;
+  try {
+    res = await paypalFetch(
+      `${baseUrl(creds.mode)}/v2/payments/captures/${encodeURIComponent(args.externalChargeId)}/refund`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+          Accept: "application/json",
+          "PayPal-Request-Id": requestId,
+          // Prefer return=representation so the response body includes
+          // the refund id. Without this PayPal can return 204 + empty.
+          Prefer: "return=representation",
+        },
+        body: JSON.stringify(body),
+      },
+    );
+  } catch (err) {
+    return {
+      ok: false,
+      errorClass: classifyError(err),
+      reason: errorMessage(err),
+    };
+  }
+
+  if (!res.ok) {
+    const text = await safeReadText(res);
+    return {
+      ok: false,
+      errorClass: classifyError(new PayPalApiError(res.status, text || res.statusText)),
+      reason: redactSecrets(text || res.statusText).slice(0, 500),
+    };
+  }
+
+  // 200/201 → JSON body with refund id. 204 → no body, but with
+  // Prefer: return=representation that shouldn't happen. Defensive
+  // either way.
+  let refundId = `paypal-refund:${args.externalChargeId}`;
+  try {
+    const r = (await res.json()) as { id?: string };
+    if (r?.id) refundId = r.id;
+  } catch {
+    // Empty body — refund still succeeded; we just don't have the id.
+  }
+  return { ok: true, refundId };
+}
+
 // ─── Error classification + redaction ──────────────────────────────────
 
 function classifyError(err: unknown): ValidationErrorClass {
@@ -550,4 +676,5 @@ export const paypalAdapter: PaymentProvider = {
   validateCredentials,
   createCheckout,
   verifyWebhook,
+  refund,
 };

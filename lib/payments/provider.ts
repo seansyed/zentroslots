@@ -17,6 +17,8 @@ import type {
   CheckoutResult,
   PaymentProviderId,
   ProviderCredentials,
+  RefundArgs,
+  RefundResult,
   ValidationResult,
   VerifyWebhookResult,
 } from "./types";
@@ -78,4 +80,22 @@ export interface PaymentProvider {
     rawBody: string,
     headers: Record<string, string>,
   ): Promise<VerifyWebhookResult>;
+
+  /**
+   * Refund a previously captured charge. Required on every adapter from
+   * Phase 3 forward — the booking webhook receiver invokes this when:
+   *   • EXCLUDE fires post-payment (slot taken during checkout)
+   *   • Webhook arrives after hold-expiry cron cancelled the booking
+   *   • Operator action via admin dashboard (Phase 5)
+   *
+   * MUST be idempotent at the provider via a deterministic idempotency
+   * key derived from (externalChargeId, bookingId). Returns ok:false on
+   * provider error — caller decides retry / surface to admin.
+   *
+   * MUST NEVER throw — return a structured error.
+   */
+  refund(
+    creds: ProviderCredentials,
+    args: RefundArgs,
+  ): Promise<RefundResult>;
 }

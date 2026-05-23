@@ -23,6 +23,10 @@ import { notify } from "@/lib/notify";
 import { postTenantWebhook } from "@/lib/outbound";
 import { getStripe, isStripeConfigured } from "@/lib/stripe";
 import { createPendingPaymentBooking } from "@/lib/billing/paymentLifecycle";
+import {
+  createTenantVaultCheckout,
+  resolveTenantVaultRoute,
+} from "@/lib/billing/tenantVaultBooking";
 
 // List bookings — strictly scoped to the caller's tenant.
 // Staff see their own, admins see the whole tenant.
@@ -217,15 +221,14 @@ export async function POST(req: NextRequest) {
 
     const endAt = new Date(startAt.getTime() + service.durationMinutes * 60_000);
 
-    // ─── Paid-booking pre-check (0030) ──────────────────────────────────
-    // If the service has a price AND Stripe is configured, divert to the
-    // pending_payment → checkout flow. Free services continue down the
-    // existing inline path (BYTE-IDENTICAL behavior preserved per
-    // strict rule).
-    const requiresPayment = service.price > 0 && isStripeConfigured();
+    // ─── Paid-booking pre-check (0030 + Wave H Phase 3) ─────────────────
+    // If the service has a price, route to one of:
+    //   • Wave H tenant vault   (tenant.use_tenant_payment_providers=true)
+    //   • Legacy platform Stripe (the default — byte-identical behavior)
+    //   • Strict 503 (tenant opted in but didn't finish provider setup)
     // The actual divert happens AFTER we've validated intake responses
-    // (below) so a bad intake form short-circuits without ever
-    // creating a Stripe session.
+    // (below) so a bad intake form short-circuits without ever creating
+    // a checkout session OR a pending_payment row.
 
     // ─── Tenant feature flags ──────────────────────────────────────────
     // Pulled once and reused below for intake + Google Meet gates so
@@ -254,7 +257,97 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // ─── DIVERT: paid booking → pending_payment + Stripe Checkout ───
+    // ─── DIVERT: paid booking → Wave H tenant vault OR legacy Stripe ───
+    if (service.price > 0) {
+      // Wave H Phase 3 — route resolution. Returns:
+      //   • tenant_vault     → use the tenant's own provider creds
+      //   • legacy_platform  → fall through to platform Stripe path
+      //   • strict_no_provider → 503 (tenant opted in but didn't finish setup)
+      //
+      // The route resolver evaluates PHASE3_KILL_SWITCH on every call so a
+      // hot env flip rolls back instantly (no rebuild).
+      const route = await resolveTenantVaultRoute({ tenantId, mode: "live" });
+
+      if (route.kind === "strict_no_provider") {
+        throw new HttpError(
+          503,
+          "Payments are not yet configured for this workspace. Please contact support.",
+        );
+      }
+
+      if (route.kind === "tenant_vault") {
+        // Wave H path. createTenantVaultCheckout does:
+        //   1. INSERT pending_payment row with payment_provider_id stamped
+        //   2. Decrypt creds + dispatch to adapter.createCheckout()
+        //   3. Persist provider session id back onto the booking
+        //   4. Audit booking.payment.checkout_created
+        // On adapter failure it auto-marks the booking payment_failed
+        // so the slot releases immediately.
+        const appBase = (process.env.APP_BASE_URL ?? "http://localhost:3001").replace(/\/+$/, "");
+        // Currency: Wave H services carry no explicit currency yet —
+        // services.currency lands in Phase 5. For now we use the
+        // tenant's provider default currency snapshot OR fall back to
+        // USD. This is acceptable because the tenant configures their
+        // provider in the currency they actually charge in.
+        const currency = (
+          (route.provider.capabilities?.defaultCurrency as string | undefined) ?? "usd"
+        ).toLowerCase();
+
+        const result = await createTenantVaultCheckout({
+          tenantId,
+          providerId: route.provider.id,
+          servicePrice: service.price,
+          serviceCurrency: currency,
+          serviceDescription: `${service.name} — ${service.durationMinutes} min with ${staff.name}`,
+          customerEmail: body.clientEmail,
+          appBaseUrl: appBase,
+          ipAddress: ip === "anon" ? null : ip,
+          pendingArgs: {
+            tenantId,
+            serviceId: service.id,
+            staffUserId: staff.id,
+            clientName: body.clientName,
+            clientEmail: body.clientEmail,
+            startAt,
+            endAt,
+            notes: body.notes,
+            intakeResponses: normalisedResponses,
+            assignmentMode: body.staffUserId === "auto" ? "auto" : "direct",
+          },
+        });
+        if (!result.ok) {
+          if (result.reason === "slot_held") {
+            throw new HttpError(409, "Another customer is checking out for this slot — try another time");
+          }
+          if (result.reason === "slot_taken") {
+            throw new HttpError(409, "Slot just taken — pick another");
+          }
+          if (result.reason === "provider_disabled") {
+            throw new HttpError(503, "Payment provider is temporarily unavailable. Please try again.");
+          }
+          if (result.reason === "adapter_error") {
+            throw new HttpError(502, "Payment provider unavailable — please try again");
+          }
+          throw new HttpError(500, "Could not reserve slot");
+        }
+        // createTenantVaultCheckout built the success/cancel URLs
+        // internally using the freshly-allocated booking id, so the
+        // provider's checkout session sends the customer to the right
+        // /booking/confirmed?booking=<actual-id> path. (The page itself
+        // is Phase 5; until then customers see a 404 but their booking
+        // IS confirmed via the webhook — they also receive an email.)
+        return NextResponse.json({
+          ...result.booking,
+          checkoutUrl: result.checkoutUrl,
+          requiresPayment: true,
+          paymentRoute: "tenant_vault",
+        });
+      }
+      // Otherwise route.kind === 'legacy_platform' — fall through to the
+      // existing Stripe path below.
+    }
+
+    const requiresPayment = service.price > 0 && isStripeConfigured();
     if (requiresPayment) {
       const pending = await createPendingPaymentBooking({
         tenantId,

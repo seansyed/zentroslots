@@ -593,6 +593,19 @@ export const tenantPaymentWebhookEvents = pgTable(
     status: varchar("status", { length: 20 }).notNull(),
     error: text("error"),
     receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
+    // ── Wave H Phase 3 — forensic retention (migration 0052) ──
+    /** Parsed (NOT raw bytes) event payload. JSON.parse'd ONCE inside the
+     *  receiver, redacted of token-shaped substrings via adapter's
+     *  redactSecrets(), then stored. PII (customer email, name, billing
+     *  country) IS present and governed by tenant retention policy. */
+    rawPayload: jsonb("raw_payload"),
+    /** Lowercase-keyed map of provider-prefixed headers we received
+     *  (stripe-*, paypal-*). Used for offline signature re-verification
+     *  + cert_url debugging. Never includes auth/cookies/forwarded headers. */
+    signatureHeaders: jsonb("signature_headers"),
+    /** ms from receiver entry to 200 response. Surfaces slow PayPal
+     *  verify calls in dashboard health card. */
+    processingDurationMs: integer("processing_duration_ms"),
   },
   (t) => ({
     providerEventUq: uniqueIndex("tenant_payment_webhook_events_provider_event_key")

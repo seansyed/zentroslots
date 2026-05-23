@@ -56,6 +56,10 @@ export type CreatePendingArgs = {
   assignmentMode?: string;
   /** Override the default hold window. */
   holdMinutes?: number;
+  /** Wave H Phase 3 — when set, stamps the tenant_payment_providers
+   *  row id onto bookings.payment_provider_id so the receiver can
+   *  validate event ownership. NULL for legacy platform-Stripe bookings. */
+  paymentProviderId?: string | null;
 };
 
 /** Insert a booking in 'pending_payment' state with a soft-hold expiry.
@@ -83,6 +87,10 @@ export async function createPendingPaymentBooking(args: CreatePendingArgs): Prom
         intakeResponses: args.intakeResponses ?? null,
         assignmentMode: args.assignmentMode ?? "direct",
         paymentHoldExpiresAt: holdExpires,
+        // Wave H Phase 3 — stamp the provider that owns this booking
+        // so the webhook receiver can validate event ownership.
+        // NULL on legacy platform-Stripe bookings (unchanged behavior).
+        paymentProviderId: args.paymentProviderId ?? null,
       })
       .returning();
     return { ok: true, booking: row };
