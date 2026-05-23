@@ -48,6 +48,12 @@ type FieldType =
   | "consent";
 
 interface AdminField {
+  /** Client-side stable id used for React keys. Generated when the
+   *  field is created or first hydrated from the server. NEVER sent
+   *  to the server (zod strips unknown keys, but we strip explicitly
+   *  on save for clarity). Required so the per-field card's
+   *  expanded/edit state survives keystrokes that mutate `key`. */
+  _uid?: string;
   key: string;
   label: string;
   type: FieldType;
@@ -61,6 +67,11 @@ interface AdminField {
   consentText?: string;
   consentLinkUrl?: string;
   consentLinkLabel?: string;
+}
+
+/** Random, locally-unique. Not crypto — just unique within a session. */
+function newFieldUid(): string {
+  return `f_${Math.random().toString(36).slice(2, 10)}_${Date.now().toString(36)}`;
 }
 
 interface AdminForm {
@@ -153,6 +164,9 @@ export default function IntakeFormsClient({
   }, [error, success]);
 
   // When selection changes, hydrate the draft from the source row.
+  // Each field gets a client-side `_uid` so React reconciliation keys
+  // are stable across keystrokes that mutate `key` (otherwise the
+  // per-field expanded card would unmount + remount per keystroke).
   useEffect(() => {
     if (!selectedId) {
       setDraft(null);
@@ -161,7 +175,10 @@ export default function IntakeFormsClient({
     }
     const src = forms.find((f) => f.id === selectedId);
     if (src) {
-      setDraft({ ...src, fields: [...src.fields] });
+      setDraft({
+        ...src,
+        fields: src.fields.map((f) => ({ ...f, _uid: f._uid ?? newFieldUid() })),
+      });
       setDirty(false);
       setPreviewMode(false);
     }
@@ -207,13 +224,20 @@ export default function IntakeFormsClient({
     setSaving(true);
     setError(null);
     try {
+      // Strip the client-only `_uid` before sending — it's a React
+      // reconciliation aid only and has no meaning on the server.
+      const fieldsForServer = draft.fields.map((f) => {
+        const { _uid: _strip, ...rest } = f;
+        void _strip;
+        return rest;
+      });
       const res = await fetch(`/api/tenant/intake-forms/${draft.id}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           name: draft.name,
           description: draft.description ?? "",
-          fields: draft.fields,
+          fields: fieldsForServer,
           isActive: draft.isActive,
         }),
       });
@@ -277,6 +301,7 @@ export default function IntakeFormsClient({
     }
     const baseType: FieldType = allowedTypes[0] ?? "short_text";
     const newField: AdminField = {
+      _uid: newFieldUid(),
       key: `field_${draft.fields.length + 1}`,
       label: "New field",
       type: baseType,
@@ -558,7 +583,11 @@ export default function IntakeFormsClient({
               <div className="space-y-2">
                 {draft.fields.map((f, idx) => (
                   <FieldCard
-                    key={f.key + idx}
+                    // Use the stable _uid so React reconciliation
+                    // doesn't unmount the card when label/key changes
+                    // mid-typing. Falls back to (key + idx) for any
+                    // field that somehow lacks _uid.
+                    key={f._uid ?? `${f.key}-${idx}`}
                     field={f}
                     index={idx}
                     total={draft.fields.length}
