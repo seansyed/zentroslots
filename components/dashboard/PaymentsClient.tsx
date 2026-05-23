@@ -39,6 +39,40 @@ type Provider = "stripe" | "paypal";
 type Status = "pending" | "verified" | "invalid" | "disabled";
 type WebhookStatus = "unconfigured" | "configured" | "verified" | "failing";
 
+// ─── Activation (Wave H — self-serve routing toggle) ──────────────────
+//
+// Mirrors lib/payments/activation.ts. The server is the source of truth
+// for every field below; the client only renders + posts back the
+// admin's intent (enabled true/false).
+type RoutingMode =
+  | "kill_switch"
+  | "legacy_platform"
+  | "tenant_vault_active"
+  | "tenant_vault_strict";
+
+type PrereqKey =
+  | "providerExists"
+  | "providerEnabled"
+  | "providerDefault"
+  | "providerVerified"
+  | "webhookSecretConfigured";
+
+interface PrereqItem {
+  key: PrereqKey;
+  label: string;
+  ok: boolean;
+  detail: string;
+}
+
+interface ActivationSnapshot {
+  enabled: boolean;
+  killSwitchActive: boolean;
+  routingMode: RoutingMode;
+  checklist: PrereqItem[];
+  canActivate: boolean;
+  blockedReason: string | null;
+}
+
 interface ProviderRow {
   id: string;
   tenantId: string;
@@ -169,6 +203,222 @@ function CopyButton({ value, label }: { value: string; label?: string }) {
   );
 }
 
+// ─── Activation panel (Wave H — self-serve routing toggle) ────────────
+
+function routingModeChip(mode: RoutingMode) {
+  switch (mode) {
+    case "tenant_vault_active":
+      return {
+        bg: "bg-emerald-50 border-emerald-200",
+        text: "text-emerald-800",
+        label: "Tenant-owned billing — ACTIVE",
+        sub: "Bookings route to your own Stripe/PayPal. Money lands in your account directly.",
+      };
+    case "tenant_vault_strict":
+      return {
+        bg: "bg-red-50 border-red-200",
+        text: "text-red-800",
+        label: "Tenant-owned billing — STRICT (broken)",
+        sub: "Activation flag is on but no usable default provider — paid bookings will fail with 503. Disable below to fall back, or fix the provider.",
+      };
+    case "kill_switch":
+      return {
+        bg: "bg-amber-50 border-amber-200",
+        text: "text-amber-800",
+        label: "Operator kill switch active",
+        sub: "PHASE3_KILL_SWITCH is enabled platform-wide. All paid bookings route to the legacy platform path regardless of your activation flag.",
+      };
+    case "legacy_platform":
+    default:
+      return {
+        bg: "bg-slate-50 border-slate-200",
+        text: "text-slate-700",
+        label: "Platform billing (legacy)",
+        sub: "Paid bookings flow through the ZentroMeet platform Stripe account. Activate below to switch to your own provider.",
+      };
+  }
+}
+
+function ActivationPanel({
+  activation,
+  onChanged,
+  setError,
+  setSuccess,
+}: {
+  activation: ActivationSnapshot | null;
+  onChanged: () => Promise<void>;
+  setError: (s: string | null) => void;
+  setSuccess: (s: string | null) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+
+  // First-paint skeleton — activation snapshot loads asynchronously.
+  if (!activation) {
+    return (
+      <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <div className="flex items-center gap-2 text-slate-500 text-sm">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Checking activation state…
+        </div>
+      </div>
+    );
+  }
+
+  const mode = routingModeChip(activation.routingMode);
+  // Toggle gates:
+  //   • currently enabled → can ALWAYS disable (rollback)
+  //   • currently disabled → can enable iff canActivate
+  // Kill switch active doesn't block disabling; an admin should still
+  // be able to clear their flag while the kill switch is on.
+  const canToggle = activation.enabled || activation.canActivate;
+
+  async function postEnabled(next: boolean) {
+    setBusy(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      const res = await fetch("/api/tenant/payment-routing", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: next }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        if (res.status === 409) {
+          // Server re-evaluated prereqs and refused. Surface the reason
+          // and refresh so the checklist reflects the live failing item.
+          setError(
+            data?.blockedReason ?? "Activation blocked — setup incomplete.",
+          );
+        } else {
+          throw new Error(data?.error ?? "Activation request failed");
+        }
+        await onChanged();
+        return;
+      }
+      setSuccess(
+        next
+          ? "Tenant-owned billing activated. New paid bookings route to your provider."
+          : "Tenant-owned billing disabled. New paid bookings route to the legacy platform path.",
+      );
+      await onChanged();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Activation request failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+      {/* Header — mode + toggle */}
+      <div className="flex flex-col gap-4 p-6 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <h3 className="text-base font-semibold text-slate-900">Booking payment routing</h3>
+            <span
+              className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium border ${mode.bg} ${mode.text}`}
+            >
+              {mode.label}
+            </span>
+          </div>
+          <p className="mt-1.5 text-sm text-slate-600 max-w-2xl">{mode.sub}</p>
+        </div>
+
+        {/* Toggle */}
+        <label className="inline-flex items-center gap-3 cursor-pointer select-none">
+          <span className="text-sm font-medium text-slate-700">
+            {activation.enabled ? "Activated" : "Activate"}
+          </span>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={activation.enabled}
+            disabled={busy || !canToggle}
+            onClick={() => postEnabled(!activation.enabled)}
+            className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
+              activation.enabled ? "bg-emerald-500" : "bg-slate-300"
+            }`}
+          >
+            <span
+              className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${
+                activation.enabled ? "translate-x-5" : "translate-x-0.5"
+              }`}
+            />
+          </button>
+        </label>
+      </div>
+
+      {/* Checklist — collapsed when active+canActivate, expanded when
+          blocked or strict. Always-visible while inactive so admins see
+          exactly what's needed to enable. */}
+      {(!activation.enabled || activation.routingMode === "tenant_vault_strict") && (
+        <div className="border-t border-slate-100 px-6 py-5 bg-slate-50/60">
+          <div className="flex items-start justify-between gap-4 mb-3">
+            <div>
+              <h4 className="text-sm font-semibold text-slate-900">
+                Activation checklist
+              </h4>
+              <p className="text-xs text-slate-600 mt-0.5">
+                All five must pass before tenant-owned billing can be activated.
+              </p>
+            </div>
+            {activation.blockedReason && (
+              <span className="text-xs text-amber-700 max-w-xs text-right">
+                {activation.blockedReason}
+              </span>
+            )}
+          </div>
+          <ul className="space-y-2">
+            {activation.checklist.map((item) => (
+              <li
+                key={item.key}
+                className="flex items-start gap-3 rounded-lg bg-white border border-slate-200 px-3 py-2"
+              >
+                <div className="flex-shrink-0 mt-0.5">
+                  {item.ok ? (
+                    <ShieldCheck className="h-4 w-4 text-emerald-600" />
+                  ) : (
+                    <ShieldAlert className="h-4 w-4 text-amber-600" />
+                  )}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium text-slate-900">{item.label}</div>
+                  <div
+                    className={`text-xs mt-0.5 ${item.ok ? "text-slate-500" : "text-slate-700"}`}
+                  >
+                    {item.detail}
+                  </div>
+                </div>
+                <span
+                  className={`flex-shrink-0 text-[10px] font-bold tracking-wide px-1.5 py-0.5 rounded ${
+                    item.ok
+                      ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                      : "bg-amber-50 text-amber-700 border border-amber-200"
+                  }`}
+                >
+                  {item.ok ? "OK" : "TODO"}
+                </span>
+              </li>
+            ))}
+          </ul>
+          {activation.killSwitchActive && (
+            <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 flex items-start gap-2">
+              <ShieldAlert className="h-4 w-4 flex-shrink-0 mt-0.5" />
+              <span>
+                Operator override is in effect — activation is paused
+                platform-wide while <code className="font-mono">PHASE3_KILL_SWITCH</code> is set.
+                You can still configure providers; the toggle will become
+                available once the override is cleared.
+              </span>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Main client ──────────────────────────────────────────────────────
 
 export default function PaymentsClient({
@@ -181,6 +431,11 @@ export default function PaymentsClient({
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  // Activation snapshot — null until the first fetch resolves. We seed
+  // the routing badge from `useTenantPaymentProviders` (server prop) so
+  // the at-a-glance state is correct on first paint; the full panel
+  // appears once the snapshot loads.
+  const [activation, setActivation] = useState<ActivationSnapshot | null>(null);
 
   // Auto-clear toasts.
   useEffect(() => {
@@ -192,6 +447,19 @@ export default function PaymentsClient({
     return () => clearTimeout(t);
   }, [success, error]);
 
+  async function refreshActivation() {
+    try {
+      const res = await fetch("/api/tenant/payment-routing", { cache: "no-store" });
+      if (!res.ok) throw new Error("Failed to load activation state");
+      const data = (await res.json()) as ActivationSnapshot;
+      setActivation(data);
+    } catch (err) {
+      // Don't toast — activation state is supplemental; provider list
+      // is the primary surface and its own errors are loud enough.
+      console.warn("[payments] activation refresh failed:", err);
+    }
+  }
+
   async function refresh() {
     try {
       const res = await fetch("/api/tenant/payment-providers", { cache: "no-store" });
@@ -201,7 +469,18 @@ export default function PaymentsClient({
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load");
     }
+    // ALWAYS refresh activation alongside providers — provider mutations
+    // (set default, save webhook secret, test connection, soft-disable)
+    // all change the prereq checklist. Doing this here means every
+    // existing call site picks up the new behavior for free.
+    await refreshActivation();
   }
+
+  // Initial activation fetch — providers were server-rendered on first
+  // paint but activation wasn't, so we need a client load to populate.
+  useEffect(() => {
+    void refreshActivation();
+  }, []);
 
   const liveDefault = useMemo(
     () => providers.find((p) => p.mode === "live" && p.isDefault),
@@ -229,7 +508,9 @@ export default function PaymentsClient({
           <div>
             <div className="flex items-center gap-2">
               <h2 className="text-xl font-semibold text-slate-900">Payment processors</h2>
-              {useTenantPaymentProviders ? (
+              {/* Hero badge — uses live activation when available, falls
+                  back to the server-rendered prop for first paint. */}
+              {(activation?.enabled ?? useTenantPaymentProviders) ? (
                 <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700 border border-emerald-200">
                   <Zap className="h-3 w-3" /> Active
                 </span>
@@ -242,12 +523,6 @@ export default function PaymentsClient({
             <p className="mt-1 text-sm text-slate-600 max-w-2xl">
               Connect your own Stripe or PayPal account. Customers pay you
               directly — ZentroMeet never appears in the money path.
-              {!useTenantPaymentProviders && (
-                <span className="block mt-2 text-amber-700">
-                  This workspace is not yet activated for tenant-owned payments. Contact
-                  support to enable after you&apos;ve configured + tested at least one provider.
-                </span>
-              )}
             </p>
           </div>
           <button
@@ -280,6 +555,17 @@ export default function PaymentsClient({
           </div>
         </div>
       </div>
+
+      {/* Activation panel (Wave H — self-serve routing toggle).
+          Loads its own state from /api/tenant/payment-routing on mount,
+          and re-fetches every time provider mutations succeed (via the
+          parent refresh()). */}
+      <ActivationPanel
+        activation={activation}
+        onChanged={refresh}
+        setError={setError}
+        setSuccess={setSuccess}
+      />
 
       {/* Toasts */}
       {error && (
