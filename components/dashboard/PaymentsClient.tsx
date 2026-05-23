@@ -18,12 +18,12 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
+
+import { Drawer } from "@/components/ui/primitives";
 import {
   AlertCircle,
   ArrowRight,
   Check,
-  ChevronDown,
-  ChevronRight,
   Copy,
   Loader2,
   RefreshCw,
@@ -1353,6 +1353,522 @@ function SetupWizard({
   );
 }
 
+// ─── Manage drawer (Wave H onboarding-refinement Phase 3) ────────────
+//
+// Sectioned side drawer for a single connected provider. Replaces the
+// Phase 1 inline expansion. All actions route through existing
+// endpoints — this component owns NO new server code.
+//
+// Sections:
+//   • Status        — verification + webhook + capability summary
+//   • Quick actions — Test Connection · Make default · Soft disable
+//   • Rotate keys   — paste new credentials (uses the same upsert
+//                     ON CONFLICT path; webhook_secret preserved)
+//   • Rotate hook   — paste new whsec_ / webhook ID
+//   • Receiver URL  — show + copy the webhook endpoint URL
+//   • Danger zone   — permanent delete
+//
+// Future scheduled rotation (e.g. "remind me every 90 days") hangs off
+// the same Rotate keys section with no architecture change.
+
+function ManageDrawer({
+  provider,
+  appBaseUrl,
+  onClose,
+  onChanged,
+  setError,
+  setSuccess,
+}: {
+  provider: ProviderRow | null;
+  appBaseUrl: string;
+  onClose: () => void;
+  onChanged: () => Promise<void>;
+  setError: (s: string | null) => void;
+  setSuccess: (s: string | null) => void;
+}) {
+  // Local state for inline mutation forms. Keyed off the provider id so
+  // switching between providers (a future enhancement) resets cleanly.
+  const [busy, setBusy] = useState(false);
+  const [newSecret, setNewSecret] = useState("");
+  const [newPublishable, setNewPublishable] = useState("");
+  const [newClientId, setNewClientId] = useState("");
+  const [newWebhookSecret, setNewWebhookSecret] = useState("");
+  // Reset form state every time the drawer's target provider changes.
+  useEffect(() => {
+    setNewSecret("");
+    setNewPublishable("");
+    setNewClientId("");
+    setNewWebhookSecret("");
+  }, [provider?.id]);
+
+  // The Drawer primitive renders the overlay + slide animation; the
+  // child markup is the panel body. We branch on provider===null to
+  // keep the slide-out animation when closing (Drawer reads `open`).
+  const open = provider !== null;
+
+  async function postAction(
+    action: string | null,
+    body?: object,
+    method: "POST" | "PATCH" | "DELETE" = "POST",
+  ) {
+    if (!provider) throw new Error("No provider");
+    const url = `/api/tenant/payment-providers/${provider.id}${action ? `/${action}` : ""}`;
+    const res = await fetch(url, {
+      method,
+      headers: body ? { "content-type": "application/json" } : undefined,
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data?.error ?? "Action failed");
+    }
+    return await res.json();
+  }
+
+  async function onTest() {
+    if (!provider) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const data = await postAction("test");
+      if (data.validation?.ok) setSuccess("Connection verified.");
+      else setError(humanizeError(data.validation?.errorClass, data.validation?.message));
+      await onChanged();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Test failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onMakeDefault() {
+    if (!provider) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await postAction("default");
+      setSuccess(`Set as default for ${provider.mode} bookings.`);
+      await onChanged();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Set default failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onToggleEnabled() {
+    if (!provider) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await postAction(null, { enabled: !provider.enabled }, "PATCH");
+      setSuccess(provider.enabled ? "Provider disabled." : "Provider re-enabled.");
+      await onChanged();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Toggle failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onRotateCredentials() {
+    if (!provider) return;
+    if (!newSecret.trim() || newSecret.trim().length < 10) {
+      setError("That secret looks too short. Make sure you copied the whole value.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      // Upsert path — POST /api/tenant/payment-providers with the same
+      // (provider, mode) hits ON CONFLICT DO UPDATE in upsertProvider().
+      // webhook_secret is preserved when not supplied; is_default and
+      // enabled are preserved (they're not in the SET clause). Status
+      // resets to pending and the route auto-runs Test Connection.
+      const res = await fetch("/api/tenant/payment-providers", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          provider: provider.provider,
+          mode: provider.mode,
+          accountLabel: provider.accountLabel ?? "",
+          secret: newSecret.trim(),
+          publishableKey:
+            provider.provider === "stripe" ? newPublishable.trim() || null : null,
+          clientId:
+            provider.provider === "paypal" ? newClientId.trim() || null : null,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data?.error ?? "Rotation failed");
+        return;
+      }
+      if (data.validation?.ok) {
+        setSuccess("Credentials rotated. New key verified.");
+        setNewSecret("");
+        setNewPublishable("");
+        setNewClientId("");
+      } else {
+        setError(
+          `Credentials saved, but verification failed: ${humanizeError(data.validation?.errorClass, data.validation?.message)}`,
+        );
+      }
+      await onChanged();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Rotation failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onRotateWebhookSecret() {
+    if (!provider) return;
+    if (!newWebhookSecret.trim()) {
+      setError("Paste the new webhook signing secret first.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await postAction("webhook-secret", { secret: newWebhookSecret.trim() });
+      setSuccess("Webhook signing secret rotated.");
+      setNewWebhookSecret("");
+      await onChanged();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Save failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onDelete() {
+    if (!provider) return;
+    if (
+      !confirm(
+        `Permanently delete this ${providerDisplayName(provider.provider)} ${provider.mode} connection? This cannot be undone — past bookings keep their payment_provider_id audit reference but no new bookings can route here.`,
+      )
+    )
+      return;
+    setBusy(true);
+    setError(null);
+    try {
+      await postAction(null, undefined, "DELETE");
+      setSuccess("Provider deleted.");
+      onClose();
+      await onChanged();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Delete failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const webhookUrl = provider
+    ? `${appBaseUrl || (typeof window !== "undefined" ? window.location.origin : "")}/api/webhooks/payments/${provider.id}`
+    : "";
+
+  return (
+    <Drawer
+      open={open}
+      onClose={onClose}
+      size="xl"
+      side="right"
+      ariaLabel="Manage payment provider"
+    >
+      {provider && (
+        <>
+          {/* Drawer header */}
+          <div className="flex items-start justify-between p-5 border-b border-slate-200">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <ModeChip mode={provider.mode} />
+                <h3 className="text-lg font-semibold text-slate-900">
+                  {providerDisplayName(provider.provider)}
+                </h3>
+                <StatusPill status={provider.status} />
+                {provider.isDefault && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200">
+                    Default for {provider.mode}
+                  </span>
+                )}
+              </div>
+              {provider.accountLabel && (
+                <p className="mt-1 text-sm text-slate-600 truncate">{provider.accountLabel}</p>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="text-slate-400 hover:text-slate-700"
+              aria-label="Close drawer"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+
+          {/* Scrollable body */}
+          <div className="flex-1 overflow-y-auto">
+            {/* Status section */}
+            <DrawerSection title="Status" icon={<ShieldCheck className="h-4 w-4 text-slate-500" />}>
+              <dl className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-xs">
+                <dt className="text-slate-500">Secret</dt>
+                <dd className="text-slate-900 font-mono">{provider.secretPreview}</dd>
+                {provider.capabilities.country !== undefined && (
+                  <>
+                    <dt className="text-slate-500">Country</dt>
+                    <dd className="text-slate-900">{String(provider.capabilities.country).toUpperCase()}</dd>
+                  </>
+                )}
+                {provider.capabilities.defaultCurrency !== undefined && (
+                  <>
+                    <dt className="text-slate-500">Currency</dt>
+                    <dd className="text-slate-900">{String(provider.capabilities.defaultCurrency).toUpperCase()}</dd>
+                  </>
+                )}
+                <dt className="text-slate-500">Last verified</dt>
+                <dd className="text-slate-900">{formatRelative(provider.lastVerifiedAt)}</dd>
+                <dt className="text-slate-500">Webhook</dt>
+                <dd>
+                  <WebhookStatusPill status={provider.webhookStatus} />
+                </dd>
+                {provider.lastWebhookVerifiedAt && (
+                  <>
+                    <dt className="text-slate-500">Last event</dt>
+                    <dd className="text-slate-900">{formatRelative(provider.lastWebhookVerifiedAt)}</dd>
+                  </>
+                )}
+              </dl>
+              {provider.status === "invalid" && provider.lastError && (
+                <div className="mt-3 text-xs text-red-700 bg-red-50 border border-red-200 rounded-md px-2 py-1.5">
+                  <AlertCircle className="inline h-3.5 w-3.5 mr-1" />
+                  {provider.lastError}
+                </div>
+              )}
+            </DrawerSection>
+
+            {/* Quick actions */}
+            <DrawerSection title="Quick actions" icon={<Zap className="h-4 w-4 text-slate-500" />}>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={onTest}
+                  disabled={busy}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  <RefreshCw className="h-3.5 w-3.5" />
+                  Test Connection
+                </button>
+                {!provider.isDefault && (
+                  <button
+                    type="button"
+                    onClick={onMakeDefault}
+                    disabled={busy}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                  >
+                    <Check className="h-3.5 w-3.5" />
+                    Make default
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={onToggleEnabled}
+                  disabled={busy}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  {provider.enabled ? "Soft-disable" : "Re-enable"}
+                </button>
+              </div>
+              {!provider.enabled && (
+                <p className="mt-2 text-xs text-slate-500">
+                  This provider is soft-disabled — bookings won&apos;t route here.
+                  Config and audit history are preserved.
+                </p>
+              )}
+            </DrawerSection>
+
+            {/* Webhook URL */}
+            <DrawerSection
+              title="Webhook URL"
+              icon={<ShieldCheck className="h-4 w-4 text-slate-500" />}
+            >
+              <p className="text-xs text-slate-600 mb-2">
+                Use this URL when adding the webhook endpoint in your
+                {" "}{providerDisplayName(provider.provider)} dashboard. Tied to
+                this provider only — you don&apos;t need to update it after
+                rotating keys.
+              </p>
+              <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                <code className="flex-1 text-xs font-mono text-slate-900 break-all">{webhookUrl}</code>
+                <CopyButton value={webhookUrl} label="Copy URL" />
+              </div>
+            </DrawerSection>
+
+            {/* Rotate credentials */}
+            <DrawerSection
+              title="Rotate credentials"
+              icon={<RefreshCw className="h-4 w-4 text-slate-500" />}
+            >
+              <p className="text-xs text-slate-600 mb-3">
+                When {providerDisplayName(provider.provider)} issues you a new key
+                (annual rotation, suspected leak, restricted-key upgrade), paste
+                it here. Your webhook secret, default status, and audit history
+                are preserved — only the credentials change.
+              </p>
+              <div className="space-y-2">
+                {provider.provider === "paypal" && (
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      New Client ID
+                    </label>
+                    <input
+                      type="text"
+                      value={newClientId}
+                      onChange={(e) => setNewClientId(e.target.value)}
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-mono"
+                      autoComplete="off"
+                    />
+                  </div>
+                )}
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">
+                    New {provider.provider === "stripe" ? "secret key" : "client secret"}
+                  </label>
+                  <input
+                    type="password"
+                    value={newSecret}
+                    onChange={(e) => setNewSecret(e.target.value)}
+                    placeholder={
+                      provider.provider === "stripe"
+                        ? provider.mode === "live"
+                          ? "sk_live_…"
+                          : "sk_test_…"
+                        : "Client secret"
+                    }
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-mono"
+                    autoComplete="off"
+                  />
+                </div>
+                {provider.provider === "stripe" && (
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      New publishable key (optional)
+                    </label>
+                    <input
+                      type="text"
+                      value={newPublishable}
+                      onChange={(e) => setNewPublishable(e.target.value)}
+                      placeholder={provider.mode === "live" ? "pk_live_…" : "pk_test_…"}
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-mono"
+                      autoComplete="off"
+                    />
+                  </div>
+                )}
+                <button
+                  type="button"
+                  onClick={onRotateCredentials}
+                  disabled={busy || !newSecret.trim()}
+                  className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-3 py-2 text-xs font-medium text-white hover:bg-slate-800 disabled:opacity-50"
+                >
+                  {busy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                  Replace credentials
+                </button>
+              </div>
+            </DrawerSection>
+
+            {/* Rotate webhook secret */}
+            <DrawerSection
+              title="Rotate webhook signing secret"
+              icon={<RefreshCw className="h-4 w-4 text-slate-500" />}
+            >
+              <p className="text-xs text-slate-600 mb-3">
+                {provider.provider === "stripe"
+                  ? "Stripe lets you rotate the whsec_… signing secret without recreating the endpoint."
+                  : "PayPal lets you re-issue your Webhook ID without recreating the endpoint."}
+              </p>
+              <div className="space-y-2">
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">
+                    New {provider.provider === "stripe" ? "signing secret" : "webhook ID"}
+                  </label>
+                  <input
+                    type="password"
+                    value={newWebhookSecret}
+                    onChange={(e) => setNewWebhookSecret(e.target.value)}
+                    placeholder={provider.provider === "stripe" ? "whsec_…" : "Webhook ID"}
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-mono"
+                    autoComplete="off"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={onRotateWebhookSecret}
+                  disabled={busy || !newWebhookSecret.trim()}
+                  className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-3 py-2 text-xs font-medium text-white hover:bg-slate-800 disabled:opacity-50"
+                >
+                  {busy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                  Replace signing secret
+                </button>
+              </div>
+            </DrawerSection>
+
+            {/* Danger zone */}
+            <DrawerSection
+              title="Danger zone"
+              icon={<ShieldAlert className="h-4 w-4 text-red-500" />}
+              tone="danger"
+            >
+              <p className="text-xs text-slate-600 mb-3">
+                Permanent. Deletes the provider row and its credentials. Past
+                bookings keep their <code className="font-mono">payment_provider_id</code> reference
+                for audit but no new bookings route here. Prefer{" "}
+                <strong>Soft-disable</strong> if you might re-enable later.
+              </p>
+              <button
+                type="button"
+                onClick={onDelete}
+                disabled={busy}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-red-300 bg-white px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                Delete permanently
+              </button>
+            </DrawerSection>
+          </div>
+        </>
+      )}
+    </Drawer>
+  );
+}
+
+/** Sectioned wrapper used inside the ManageDrawer. Keeps spacing and
+ *  visual rhythm consistent — section title + icon + body. */
+function DrawerSection({
+  title,
+  icon,
+  tone,
+  children,
+}: {
+  title: string;
+  icon: React.ReactNode;
+  tone?: "danger";
+  children: React.ReactNode;
+}) {
+  return (
+    <section
+      className={`px-5 py-4 border-b border-slate-100 ${tone === "danger" ? "bg-red-50/30" : ""}`}
+    >
+      <div className="flex items-center gap-2 mb-2">
+        {icon}
+        <h4 className={`text-xs font-semibold uppercase tracking-wide ${tone === "danger" ? "text-red-700" : "text-slate-700"}`}>
+          {title}
+        </h4>
+      </div>
+      {children}
+    </section>
+  );
+}
+
 // ─── Main client ──────────────────────────────────────────────────────
 
 export default function PaymentsClient({
@@ -1538,40 +2054,25 @@ export default function PaymentsClient({
         }
       />
 
-      {/* Inline manage panel — Phase 1 placeholder. The Phase 3 commit
-          replaces this with a side drawer matching the existing
-          operational-drawer pattern. */}
-      {managedProviderId &&
-        (() => {
-          const p = providers.find((x) => x.id === managedProviderId);
-          if (!p) return null;
-          return (
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm font-medium text-slate-700">
-                  Managing {providerDisplayName(p.provider)} {p.mode.toUpperCase()}
-                </h3>
-                <button
-                  type="button"
-                  onClick={() => setManagedProviderId(null)}
-                  className="text-xs text-slate-500 hover:text-slate-900"
-                >
-                  Close
-                </button>
-              </div>
-              <ProviderCard
-                key={p.id}
-                provider={p}
-                appBaseUrl={appBaseUrl}
-                busyId={busyId}
-                setBusyId={setBusyId}
-                setError={setError}
-                setSuccess={setSuccess}
-                refresh={refresh}
-              />
-            </div>
-          );
-        })()}
+      {/* Manage drawer (Phase 3). Side panel matching the existing
+          operational-drawer pattern. Sections: Status, Quick actions,
+          Rotate credentials, Rotate webhook, Webhook URL, Danger zone.
+          All actions route through existing endpoints — zero new
+          server code. The drawer's rotate flows are the documented
+          credential-rotation path: future scheduled rotation can hang
+          off the same UI without re-architecting. */}
+      <ManageDrawer
+        provider={
+          managedProviderId
+            ? providers.find((x) => x.id === managedProviderId) ?? null
+            : null
+        }
+        appBaseUrl={appBaseUrl}
+        onClose={() => setManagedProviderId(null)}
+        onChanged={refresh}
+        setError={setError}
+        setSuccess={setSuccess}
+      />
 
       {/* Setup wizard (Phase 2). Guided 4-step flow: account → keys →
           webhook → verify. Each step has plain-English explanations,
@@ -1590,424 +2091,6 @@ export default function PaymentsClient({
           onError={(msg) => setError(msg)}
         />
       )}
-    </div>
-  );
-}
-
-// ─── Provider card ────────────────────────────────────────────────────
-
-function ProviderCard({
-  provider,
-  appBaseUrl,
-  busyId,
-  setBusyId,
-  setError,
-  setSuccess,
-  refresh,
-}: {
-  provider: ProviderRow;
-  appBaseUrl: string;
-  busyId: string | null;
-  setBusyId: (id: string | null) => void;
-  setError: (s: string | null) => void;
-  setSuccess: (s: string | null) => void;
-  refresh: () => Promise<void>;
-}) {
-  const [expanded, setExpanded] = useState(false);
-  const [whSecretMode, setWhSecretMode] = useState(false);
-  const [whSecret, setWhSecret] = useState("");
-  const busy = busyId === provider.id;
-  const borderColor = provider.mode === "live" ? "border-l-emerald-500" : "border-l-amber-500";
-  const webhookUrl = `${appBaseUrl}/api/webhooks/payments/${provider.id}`;
-
-  async function run(action: string, body?: object) {
-    setBusyId(provider.id);
-    setError(null);
-    try {
-      const url = `/api/tenant/payment-providers/${provider.id}${action ? `/${action}` : ""}`;
-      const res = await fetch(url, {
-        method: action ? "POST" : "DELETE",
-        headers: body ? { "content-type": "application/json" } : undefined,
-        body: body ? JSON.stringify(body) : undefined,
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error ?? "Action failed");
-      }
-      return await res.json();
-    } finally {
-      setBusyId(null);
-    }
-  }
-
-  async function onTest() {
-    try {
-      const data = await run("test");
-      if (data.validation?.ok) {
-        setSuccess("Connection verified.");
-      } else {
-        setError(`Validation failed: ${data.validation?.message ?? "unknown"}`);
-      }
-      await refresh();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Test failed");
-    }
-  }
-
-  async function onSetDefault() {
-    try {
-      await run("default");
-      setSuccess(`Set as default for ${provider.mode} bookings.`);
-      await refresh();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Set default failed");
-    }
-  }
-
-  async function onToggleEnabled() {
-    setBusyId(provider.id);
-    setError(null);
-    try {
-      const res = await fetch(`/api/tenant/payment-providers/${provider.id}`, {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ enabled: !provider.enabled }),
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error ?? "Toggle failed");
-      }
-      setSuccess(provider.enabled ? "Provider disabled." : "Provider re-enabled.");
-      await refresh();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Toggle failed");
-    } finally {
-      setBusyId(null);
-    }
-  }
-
-  async function onDelete() {
-    if (!confirm(`Delete this ${providerDisplayName(provider.provider)} ${provider.mode} provider? This cannot be undone.`)) return;
-    try {
-      await run("");
-      setSuccess("Provider deleted.");
-      await refresh();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Delete failed");
-    }
-  }
-
-  async function onSaveWebhookSecret() {
-    if (!whSecret.trim()) {
-      setError("Webhook secret cannot be empty.");
-      return;
-    }
-    try {
-      await run("webhook-secret", { secret: whSecret.trim() });
-      setSuccess("Webhook signing secret saved.");
-      setWhSecret("");
-      setWhSecretMode(false);
-      await refresh();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Save failed");
-    }
-  }
-
-  return (
-    <div className={`rounded-2xl border border-slate-200 bg-white shadow-sm border-l-4 ${borderColor} ${!provider.enabled ? "opacity-60" : ""}`}>
-      {/* Header row */}
-      <div className="p-5">
-        <div className="flex items-start justify-between gap-4 flex-wrap">
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2 flex-wrap">
-              <ModeChip mode={provider.mode} />
-              <h3 className="text-base font-semibold text-slate-900">
-                {providerDisplayName(provider.provider)}
-                {provider.accountLabel && (
-                  <span className="ml-2 font-normal text-slate-600">— {provider.accountLabel}</span>
-                )}
-              </h3>
-              <StatusPill status={provider.status} />
-              {provider.isDefault && (
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200">
-                  Default for {provider.mode}
-                </span>
-              )}
-            </div>
-            <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-600">
-              <span>
-                Secret: <code className="text-slate-900">{provider.secretPreview}</code>
-              </span>
-              {provider.capabilities.country !== undefined && (
-                <span>Country: <span className="text-slate-900">{String(provider.capabilities.country).toUpperCase()}</span></span>
-              )}
-              {provider.capabilities.defaultCurrency !== undefined && (
-                <span>Currency: <span className="text-slate-900">{String(provider.capabilities.defaultCurrency).toUpperCase()}</span></span>
-              )}
-              <span>
-                Last verified: <span className="text-slate-900">{formatRelative(provider.lastVerifiedAt)}</span>
-              </span>
-            </div>
-            {provider.status === "invalid" && provider.lastError && (
-              <div className="mt-2 text-xs text-red-700 bg-red-50 border border-red-200 rounded-md px-2 py-1.5">
-                <ShieldAlert className="inline h-3.5 w-3.5 mr-1" />
-                {provider.lastError}
-              </div>
-            )}
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={onTest}
-              disabled={busy}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-            >
-              {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-              Test connection
-            </button>
-            {!provider.isDefault && provider.enabled && provider.status !== "invalid" && (
-              <button
-                type="button"
-                onClick={onSetDefault}
-                disabled={busy}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-blue-300 bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-100 disabled:opacity-50"
-              >
-                Set default
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={onToggleEnabled}
-              disabled={busy}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-            >
-              {provider.enabled ? "Disable" : "Re-enable"}
-            </button>
-            <button
-              type="button"
-              onClick={onDelete}
-              disabled={busy}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 bg-white px-2 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
-              title="Delete provider"
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-            </button>
-          </div>
-        </div>
-
-        {/* Webhook section */}
-        <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50/50 p-4">
-          <div className="flex items-start justify-between gap-3 flex-wrap">
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2 mb-2">
-                <h4 className="text-sm font-medium text-slate-900">Webhook</h4>
-                <WebhookStatusPill status={provider.webhookStatus} />
-                {provider.lastWebhookVerifiedAt && (
-                  <span className="text-xs text-slate-600">
-                    Verified {formatRelative(provider.lastWebhookVerifiedAt)}
-                  </span>
-                )}
-                {provider.lastPaymentEventAt && (
-                  <span className="text-xs text-slate-600">
-                    · Last payment {formatRelative(provider.lastPaymentEventAt)}
-                  </span>
-                )}
-              </div>
-              <div className="text-xs text-slate-600 mb-1">
-                Configure this URL in your {providerDisplayName(provider.provider)} dashboard:
-              </div>
-              <div className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-mono text-slate-800 break-all">
-                {webhookUrl || "(set APP_BASE_URL in .env)"}
-                {webhookUrl && <CopyButton value={webhookUrl} />}
-              </div>
-              {provider.lastWebhookError && (
-                <div className="mt-2 text-xs text-red-700 bg-red-50 border border-red-200 rounded-md px-2 py-1.5">
-                  <ShieldAlert className="inline h-3.5 w-3.5 mr-1" />
-                  {provider.lastWebhookError}
-                </div>
-              )}
-            </div>
-            <div className="flex flex-col items-end gap-2">
-              <div className="text-xs text-slate-600">
-                Signing secret: <span className="text-slate-900 font-medium">{provider.hasWebhookSecret ? "Set" : "Not set"}</span>
-              </div>
-              {!whSecretMode ? (
-                <button
-                  type="button"
-                  onClick={() => setWhSecretMode(true)}
-                  className="text-xs text-blue-600 hover:text-blue-800 font-medium"
-                >
-                  {provider.hasWebhookSecret ? "Rotate secret" : "Add signing secret"}
-                </button>
-              ) : (
-                <div className="flex items-center gap-2">
-                  <input
-                    type="password"
-                    value={whSecret}
-                    onChange={(e) => setWhSecret(e.target.value)}
-                    placeholder={provider.provider === "stripe" ? "whsec_..." : "PayPal webhook id"}
-                    className="rounded-md border border-slate-300 px-2 py-1 text-xs w-56 font-mono"
-                    autoComplete="off"
-                  />
-                  <button
-                    type="button"
-                    onClick={onSaveWebhookSecret}
-                    disabled={busy}
-                    className="rounded-md bg-slate-900 px-2.5 py-1 text-xs font-medium text-white hover:bg-slate-800 disabled:opacity-50"
-                  >
-                    Save
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setWhSecretMode(false);
-                      setWhSecret("");
-                    }}
-                    className="text-xs text-slate-600 hover:text-slate-900"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Activity disclosure */}
-        <button
-          type="button"
-          onClick={() => setExpanded(!expanded)}
-          className="mt-3 flex items-center gap-1 text-xs text-slate-600 hover:text-slate-900"
-        >
-          {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
-          Activity (recent webhook events)
-        </button>
-        {expanded && <ActivityPanel providerId={provider.id} />}
-      </div>
-    </div>
-  );
-}
-
-// ─── Activity panel ───────────────────────────────────────────────────
-
-function ActivityPanel({ providerId }: { providerId: string }) {
-  const [events, setEvents] = useState<WebhookEventRow[] | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [expandedEventId, setExpandedEventId] = useState<string | null>(null);
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const res = await fetch(`/api/tenant/payment-providers/${providerId}/events?limit=20`, {
-          cache: "no-store",
-        });
-        if (!res.ok) throw new Error("Failed to load events");
-        const data = await res.json();
-        setEvents(data.events ?? []);
-      } catch (e) {
-        setError(e instanceof Error ? e.message : "Failed to load");
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, [providerId]);
-
-  if (loading) {
-    return (
-      <div className="mt-3 text-xs text-slate-500 flex items-center gap-2">
-        <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading events...
-      </div>
-    );
-  }
-  if (error) {
-    return <div className="mt-3 text-xs text-red-700">{error}</div>;
-  }
-  if (!events || events.length === 0) {
-    return (
-      <div className="mt-3 text-xs text-slate-500 italic">
-        No webhook events recorded for this provider yet.
-      </div>
-    );
-  }
-
-  const statusColor = (s: string) => {
-    if (s === "processed") return "bg-emerald-50 text-emerald-700 border-emerald-200";
-    if (s === "received") return "bg-blue-50 text-blue-700 border-blue-200";
-    if (s === "replay") return "bg-slate-50 text-slate-600 border-slate-200";
-    if (s === "invalid_signature") return "bg-red-50 text-red-700 border-red-200";
-    if (s === "unhandled") return "bg-amber-50 text-amber-700 border-amber-200";
-    return "bg-slate-50 text-slate-600 border-slate-200";
-  };
-
-  return (
-    <div className="mt-3 space-y-1.5">
-      {events.map((ev) => (
-        <div key={ev.id} className="rounded-md border border-slate-200 bg-white">
-          <button
-            type="button"
-            onClick={() => setExpandedEventId(expandedEventId === ev.id ? null : ev.id)}
-            className="w-full text-left flex items-center gap-3 px-3 py-2 hover:bg-slate-50"
-          >
-            <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium border ${statusColor(ev.status)}`}>
-              {ev.status}
-            </span>
-            <code className="text-xs text-slate-700 truncate flex-1 min-w-0">{ev.eventType}</code>
-            <span className="text-[11px] text-slate-500 flex-shrink-0">
-              {formatRelative(ev.receivedAt)}
-            </span>
-            {ev.processingDurationMs !== null && (
-              <span className="text-[11px] text-slate-400 flex-shrink-0">{ev.processingDurationMs}ms</span>
-            )}
-            {expandedEventId === ev.id ? (
-              <ChevronDown className="h-3 w-3 text-slate-400" />
-            ) : (
-              <ChevronRight className="h-3 w-3 text-slate-400" />
-            )}
-          </button>
-          {expandedEventId === ev.id && (
-            <div className="border-t border-slate-200 px-3 py-2 space-y-2 bg-slate-50/50">
-              <div className="grid grid-cols-2 gap-2 text-[11px]">
-                <div>
-                  <span className="text-slate-500">Event id: </span>
-                  <code className="text-slate-800 break-all">{ev.externalEventId}</code>
-                </div>
-                {ev.bookingId && (
-                  <div>
-                    <span className="text-slate-500">Booking: </span>
-                    <code className="text-slate-800 break-all">{ev.bookingId}</code>
-                  </div>
-                )}
-              </div>
-              {ev.error && (
-                <div className="text-[11px] text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1">
-                  {ev.error}
-                </div>
-              )}
-              {ev.signatureHeaders && Object.keys(ev.signatureHeaders).length > 0 && (
-                <details className="text-[11px]">
-                  <summary className="cursor-pointer text-slate-600 hover:text-slate-900">
-                    Signature headers ({Object.keys(ev.signatureHeaders).length})
-                  </summary>
-                  <pre className="mt-1 bg-white border border-slate-200 rounded p-2 overflow-x-auto text-[10px] font-mono text-slate-700">
-                    {JSON.stringify(ev.signatureHeaders, null, 2)}
-                  </pre>
-                </details>
-              )}
-              {ev.rawPayload !== null && ev.rawPayload !== undefined && (
-                <details className="text-[11px]">
-                  <summary className="cursor-pointer text-slate-600 hover:text-slate-900">
-                    Raw payload (redacted)
-                  </summary>
-                  <pre className="mt-1 bg-white border border-slate-200 rounded p-2 overflow-x-auto text-[10px] font-mono text-slate-700 max-h-96">
-                    {JSON.stringify(ev.rawPayload, null, 2)}
-                  </pre>
-                </details>
-              )}
-            </div>
-          )}
-        </div>
-      ))}
     </div>
   );
 }
