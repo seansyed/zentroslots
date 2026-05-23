@@ -19,6 +19,7 @@ import {
 
 import { db } from "@/db/client";
 import { departments, serviceStaff, services, tenants, users } from "@/db/schema";
+import { Avatar } from "@/components/ui/Avatar";
 
 /**
  * Public workspace landing page (`/u/:slug`).
@@ -70,7 +71,7 @@ type ServiceRow = {
   durationMinutes: number;
   price: number;
   departmentIds: Set<string>;
-  staff: { id: string; name: string }[];
+  staff: { id: string; name: string; avatarUrl: string | null }[];
 };
 
 export default async function PublicProfilePage(props: {
@@ -93,6 +94,7 @@ export default async function PublicProfilePage(props: {
       price: services.price,
       staffId: users.id,
       staffName: users.name,
+      staffAvatarUrl: users.avatarUrl,
       staffDepartmentId: users.departmentId,
     })
     .from(services)
@@ -119,7 +121,7 @@ export default async function PublicProfilePage(props: {
         departmentIds: new Set<string>(),
         staff: [],
       };
-    cur.staff.push({ id: r.staffId, name: r.staffName });
+    cur.staff.push({ id: r.staffId, name: r.staffName, avatarUrl: r.staffAvatarUrl });
     if (r.staffDepartmentId) cur.departmentIds.add(r.staffDepartmentId);
     byService.set(r.serviceId, cur);
   }
@@ -774,7 +776,7 @@ function HostPreview({
   staff,
   accent,
 }: {
-  staff: { id: string; name: string }[];
+  staff: { id: string; name: string; avatarUrl: string | null }[];
   accent: string;
 }) {
   if (staff.length === 0) return null;
@@ -787,7 +789,7 @@ function HostPreview({
           <AvatarChip
             key={s.id}
             name={s.name}
-            accent={accent}
+            avatarUrl={s.avatarUrl}
             z={visible.length - idx}
           />
         ))}
@@ -821,24 +823,25 @@ function HostPreview({
 
 function AvatarChip({
   name,
-  accent,
+  avatarUrl,
   z,
 }: {
   name: string;
-  accent: string;
+  /** Real profile photo when uploaded — otherwise the shared Avatar
+   *  primitive renders a deterministic gradient-initials disc. */
+  avatarUrl: string | null;
   z: number;
 }) {
-  const initial = (name.trim().split(/\s+/)[0]?.[0] ?? "?").toUpperCase();
+  // Uses the shared <Avatar/> from components/ui/Avatar.tsx so the
+  // staff-photo treatment stays byte-identical across booking surfaces
+  // (slot summary, done step, host preview here, manage drawer in
+  // dashboard, etc.). Size xs matches the prior 24px footprint.
   return (
     <span
-      className="relative inline-flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-semibold text-white ring-2 ring-white shadow-sm"
-      style={{
-        zIndex: z,
-        background: `linear-gradient(135deg, ${accent} 0%, ${darken(accent, 0.20)} 100%)`,
-      }}
-      aria-hidden
+      className="relative inline-block ring-2 ring-white rounded-full"
+      style={{ zIndex: z }}
     >
-      {initial}
+      <Avatar src={avatarUrl} name={name} size="xs" ring={false} />
     </span>
   );
 }

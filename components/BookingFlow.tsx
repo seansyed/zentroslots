@@ -22,11 +22,17 @@ import {
   type PublicField,
   type PublicForm,
 } from "@/components/booking/IntakeStep";
+import { Avatar } from "@/components/ui/Avatar";
 
 type Props = {
   serviceId: string;
   staffId: string;
   staffName: string;
+  /** Optional profile photo for the pinned staff. When set, the inline
+   *  staff mentions inside the booking flow (slot summary, done step)
+   *  render a circular avatar next to the name. When unset, the Avatar
+   *  primitive falls back to a deterministic gradient-initials disc. */
+  staffAvatarUrl?: string | null;
   durationMinutes: number;
   /** Tenant brand color. Threaded down so selected states + CTA match the
    *  rest of the public page. Falls back to a sensible default. */
@@ -62,6 +68,7 @@ export default function BookingFlow({
   serviceId,
   staffId,
   staffName,
+  staffAvatarUrl,
   durationMinutes,
   accentColor,
   tenantName,
@@ -484,8 +491,16 @@ export default function BookingFlow({
                   <div className="text-[13px] text-slate-700">
                     {formatInTimeZone(start, tz, "h:mm a")} &middot; {durationMinutes} min
                   </div>
-                  <div className="mt-1 text-[11.5px] text-slate-500">
-                    With <span className="font-medium text-slate-700">{staffName}</span> &middot; {tz}
+                  <div className="mt-1.5 flex items-center gap-2 text-[11.5px] text-slate-500">
+                    <Avatar
+                      src={staffAvatarUrl ?? null}
+                      name={staffName}
+                      size="sm"
+                      showOnlineDot={googleConnected}
+                    />
+                    <span>
+                      With <span className="font-medium text-slate-700">{staffName}</span> &middot; {tz}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -816,8 +831,19 @@ export default function BookingFlow({
                   <div className="text-[14px] font-semibold tracking-tight text-slate-900">
                     {formatInTimeZone(selectedSlot, tz, "EEEE, h:mm a")}
                   </div>
-                  <div className="mt-0.5 text-[12px] text-slate-600">
-                    {durationMinutes} min &middot; with <span className="font-medium text-slate-800">{staffName}</span>
+                  {/* Staff line with real profile photo — 28px mobile,
+                      32px desktop. Avatar primitive falls back to
+                      gradient initials when staffAvatarUrl is null. */}
+                  <div className="mt-1 flex items-center gap-2 text-[12px] text-slate-600">
+                    <Avatar
+                      src={staffAvatarUrl ?? null}
+                      name={staffName}
+                      size="sm"
+                      showOnlineDot={googleConnected}
+                    />
+                    <span>
+                      {durationMinutes} min &middot; with <span className="font-medium text-slate-800">{staffName}</span>
+                    </span>
                   </div>
                   <div className="mt-0.5 text-[11px] text-slate-500">{tz}</div>
                 </div>

@@ -60,6 +60,7 @@ export default async function BookingPage(props: {
         serviceId={service.id}
         staffId={staff.id}
         staffName={staff.name}
+        staffAvatarUrl={staff.avatarUrl}
         durationMinutes={service.durationMinutes}
       />
     </div>

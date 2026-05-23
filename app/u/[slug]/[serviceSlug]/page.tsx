@@ -387,6 +387,7 @@ export default async function PublicServicePage(props: {
           serviceId={service.id}
           staffId={staff.userId}
           staffName={staff.name}
+          staffAvatarUrl={profile.avatarUrl}
           durationMinutes={service.durationMinutes}
           accentColor={accent}
           tenantName={tenant.name}

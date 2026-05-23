@@ -52,6 +52,8 @@ export function Avatar({
   name,
   size = "md",
   ring = true,
+  hoverScale = false,
+  showOnlineDot = false,
   className,
 }: {
   /** Image URL or null/undefined to render initials fallback. */
@@ -62,6 +64,14 @@ export function Avatar({
   size?: AvatarSize;
   /** Subtle ring/border treatment (default true). */
   ring?: boolean;
+  /** Adds a hover scale (1.03) + slight shadow lift. Use on cards where
+   *  the avatar is part of an interactive surface; leave off for static
+   *  inline displays to avoid hover artifacts on non-clickable elements. */
+  hoverScale?: boolean;
+  /** Renders a small emerald dot in the lower-right corner. Use to
+   *  indicate "calendar connected" / "live" status. Caller decides
+   *  semantics — this is just the visual primitive. */
+  showOnlineDot?: boolean;
   /** Extra classes to merge onto the root. */
   className?: string;
 }) {
@@ -93,12 +103,19 @@ export function Avatar({
     }
   }, [src]);
 
+  // Shared hover treatment — applied to either branch so initials +
+  // image avatars feel identical on interactive cards.
+  const hoverClasses = hoverScale
+    ? "transition-transform duration-200 ease-out hover:scale-[1.03] hover:shadow-[0_4px_14px_rgba(15,23,42,0.16)]"
+    : "";
+
   if (useImage) {
     return (
       <span
         className={cn(
           "relative inline-block shrink-0 overflow-hidden rounded-full bg-surface-inset",
           ring && "ring-1 ring-border/60",
+          hoverClasses,
           cfg.box,
           className,
         )}
@@ -115,6 +132,8 @@ export function Avatar({
           ref={imgRef}
           src={src!}
           alt={name}
+          loading="lazy"
+          decoding="async"
           className={cn(
             "h-full w-full object-cover transition-opacity duration-[280ms] ease-[cubic-bezier(0.16,1,0.3,1)]",
             loaded ? "opacity-100" : "opacity-0",
@@ -122,6 +141,7 @@ export function Avatar({
           onLoad={() => setLoaded(true)}
           onError={() => setErrored(true)}
         />
+        {showOnlineDot && <OnlineDot size={size} />}
       </span>
     );
   }
@@ -135,6 +155,7 @@ export function Avatar({
       className={cn(
         "relative inline-flex shrink-0 items-center justify-center rounded-full font-semibold tracking-tight text-white shadow-[0_2px_8px_rgba(15,23,42,0.10)]",
         ring && "ring-1 ring-white/40",
+        hoverClasses,
         cfg.box,
         cfg.text,
         className,
@@ -150,7 +171,33 @@ export function Avatar({
         className="pointer-events-none absolute inset-x-0 top-0 h-1/2 rounded-t-full bg-gradient-to-b from-white/22 to-transparent"
       />
       <span className="relative">{initials}</span>
+      {showOnlineDot && <OnlineDot size={size} />}
     </span>
+  );
+}
+
+// ─── Online dot — small emerald presence indicator ─────────────────
+//
+// Caller decides semantics ("calendar connected", "online now", etc.);
+// this is purely the visual primitive. Sized to look balanced against
+// each Avatar size and offset so it visually sits on the bottom-right
+// edge of the circular avatar.
+function OnlineDot({ size }: { size: AvatarSize }) {
+  const dot: Record<AvatarSize, string> = {
+    xs: "h-1.5 w-1.5 ring-[1.5px] -right-0 -bottom-0",
+    sm: "h-2 w-2 ring-2 -right-0 -bottom-0",
+    md: "h-2.5 w-2.5 ring-2 right-0 bottom-0",
+    lg: "h-3 w-3 ring-2 right-0 bottom-0",
+    xl: "h-3.5 w-3.5 ring-[3px] right-0.5 bottom-0.5",
+  };
+  return (
+    <span
+      aria-label="online"
+      className={cn(
+        "absolute block rounded-full bg-emerald-500 ring-white",
+        dot[size],
+      )}
+    />
   );
 }
 
