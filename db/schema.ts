@@ -397,6 +397,11 @@ export const bookings = pgTable(
     meetingProviderEventId: varchar("meeting_provider_event_id", { length: 255 }),
     meetLink: text("meet_link"),
     notes: text("notes"),
+    // Phase 17H — admin/staff-only annotation, never surfaced on
+    // customer-facing emails or public pages. Set exclusively by
+    // POST /api/tenant/appointments. Public /api/bookings does not
+    // write this field. Migration 0054.
+    internalNotes: text("internal_notes"),
 
     locationId: uuid("location_id"),
     departmentId: uuid("department_id"),

@@ -65,6 +65,62 @@ export const createBookingSchema = z.object({
   intakeResponses: z.record(z.unknown()).optional(),
 });
 
+// ─── Phase 17H — admin/staff-driven appointment creation ──────────────
+//
+// Separate schema from the public `createBookingSchema` on purpose:
+//   • Internal callers select an EXISTING customer by id OR quick-
+//     create one inline; the public schema only takes name+email and
+//     auto-upserts a customer.
+//   • Staff is explicit (no "auto" — the operator picked).
+//   • Optional flags differentiate operational scenarios that public
+//     bookings never need: skipPayment (admin-book a free
+//     consultation against a paid service), forceBook (override the
+//     overlap warning), sendConfirmation (silent admin-create).
+//   • `internalNotes` is staff-only and never surfaces in
+//     customer-facing emails or the public confirmation page.
+//
+// Public bookings cannot reach this endpoint — it lives under
+// /api/tenant/* which is auth-gated.
+export const createAppointmentSchema = z
+  .object({
+    // Customer — either by id OR quick-create payload, exclusive.
+    customerId: z.string().uuid().optional(),
+    customer: z
+      .object({
+        name: z.string().min(1).max(120),
+        email: z.string().email(),
+        phone: z.string().max(40).optional(),
+      })
+      .optional(),
+
+    serviceId: z.string().uuid(),
+    staffUserId: z.string().uuid(),     // admin/manager pick a real staff
+    startAt: z.string().datetime(),     // ISO UTC string
+
+    notes: z.string().max(2000).optional(),
+    internalNotes: z.string().max(2000).optional(),
+
+    /** When false, skip the appointment.created automation (no email,
+     *  no .ics, no in-app notify to the customer). Default true. */
+    sendConfirmation: z.boolean().default(true),
+
+    /** Admin override — allow booking a paid service without routing
+     *  to Stripe. The booking lands as status='confirmed' with no
+     *  payment record. Audit captures the override. */
+    skipPayment: z.boolean().default(false),
+
+    /** Admin override — bypass the slot-overlap pre-check. The DB-
+     *  level EXCLUDE constraint (bookings_no_overlap) still applies
+     *  and will reject a true double-book; this flag only suppresses
+     *  the soft warning + pre-check that the admin already saw in
+     *  the modal. */
+    forceBook: z.boolean().default(false),
+  })
+  .refine((v) => Boolean(v.customerId) !== Boolean(v.customer), {
+    message: "Provide exactly one of customerId or customer",
+    path: ["customer"],
+  });
+
 export const slotsQuerySchema = z.object({
   serviceId: z.string().uuid(),
   staffUserId: z.string().uuid(),
