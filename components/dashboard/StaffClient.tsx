@@ -3337,12 +3337,22 @@ function CalendarConnectionsSection({
   );
 }
 
-// The calendarConnections table stores "google" as the provider value
-// (legacy nomenclature pre-dating the workspace catalog). The
-// workspace catalog uses "google_calendar". Map between the two so
-// catalog lookups stay accurate even when only one row exists.
+// The calendarConnections table stores "google", "microsoft", and
+// "zoom" as canonical provider values. The workspace catalog uses
+// "google_calendar", "outlook", "teams", "zoom" as UI ids. Map
+// between the two so catalog lookups stay accurate even when only
+// one row exists.
+//
+// Wave C — Microsoft Outlook and Microsoft Teams share a single
+// calendar_connections row (provider="microsoft"). Teams piggybacks
+// on the Outlook connection — creating a Microsoft event with
+// isOnlineMeeting=true spawns the Teams join URL on the same Graph
+// call. So both UI catalog rows resolve to the same DB row; if the
+// staff has a Microsoft connection, both Outlook AND Teams render
+// as Connected.
 function providerKeyFor(catalogId: string): string {
   if (catalogId === "google_calendar") return "google";
+  if (catalogId === "outlook" || catalogId === "teams") return "microsoft";
   return catalogId;
 }
 
@@ -3451,7 +3461,7 @@ function ProviderConnectionRow({
             label="Reconnect"
           />
         )}
-        {isConnected && canEdit && (
+        {isConnected && canEdit && provider.id !== "teams" && (
           <Button
             type="button"
             variant="ghost"
@@ -3462,6 +3472,16 @@ function ProviderConnectionRow({
           >
             {busy ? "…" : "Disconnect"}
           </Button>
+        )}
+        {isConnected && provider.id === "teams" && (
+          // Wave C — Teams piggybacks on the Outlook connection. There
+          // is no separate Teams OAuth or DB row to disconnect; the
+          // shared Microsoft connection lives on the Outlook row.
+          // Surface a calm "via Outlook" affordance so the user
+          // understands why no Disconnect button appears here.
+          <span className="inline-flex items-center gap-1 rounded-md bg-surface-inset px-2 py-1 text-[10.5px] font-medium text-ink-muted ring-1 ring-border/40">
+            via Outlook
+          </span>
         )}
       </div>
     </div>
