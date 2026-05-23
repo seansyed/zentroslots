@@ -1,4 +1,4 @@
-import { and, eq, gte, lt } from "drizzle-orm";
+import { and, eq, gte, lt, or, sql } from "drizzle-orm";
 import { fromZonedTime } from "date-fns-tz";
 import { addDays, addMinutes, areIntervalsOverlapping, parseISO } from "date-fns";
 
@@ -7,6 +7,7 @@ import {
   availability,
   availabilityOverrides,
   bookings,
+  calendarEvents,
   services,
   tenants,
   users,
@@ -63,17 +64,25 @@ export async function getAvailableSlots(params: {
     .filter((w): w is Interval => w !== null);
   if (bookable.length === 0) return [];
 
-  // Combine internal bookings + external calendar busy time. The
-  // external lookup is no-op for staff without an active Google
-  // connection — output is then byte-identical to the pre-feature
-  // behavior. Freebusy is also wrapped in try/catch inside the
-  // orchestrator so a Google API failure can't break availability.
-  const [existing, externalBusy, features] = await Promise.all([
+  // Combine internal bookings + external calendar busy time + new in
+  // Phase 17I-2D: operational calendar_events (blocked time + internal
+  // meetings, where this staff is either the organizer OR an
+  // attendee). The external lookup is no-op for staff without an
+  // active Google connection — output is then byte-identical to the
+  // pre-feature behavior. Freebusy is also wrapped in try/catch
+  // inside the orchestrator so a Google API failure can't break
+  // availability.
+  const [existing, externalBusy, calendarBlocks, features] = await Promise.all([
     getBookingsInRange(staffUserId, viewerDay),
     getExternalBusyForUser(staffUserId, viewerDay.start, viewerDay.end),
+    getCalendarEventsInRange(staffUserId, viewerDay),
     loadTenantFeatures(staff.tenantId),
   ]);
-  const combinedBusy: Interval[] = [...existing, ...externalBusy];
+  const combinedBusy: Interval[] = [
+    ...existing,
+    ...externalBusy,
+    ...calendarBlocks,
+  ];
 
   // Phase 16: tenant-level `bookingBuffers` gate. When OFF, the engine
   // ignores per-service before/after padding entirely — back-to-back
@@ -234,6 +243,45 @@ async function getBookingsInRange(
         gte(bookings.endAt, window.start),
         lt(bookings.startAt, window.end)
       )
+    );
+  return rows.map((r) => ({ start: r.startAt, end: r.endAt }));
+}
+
+/**
+ * Phase 17I-2D — fetch operational calendar_events that should block
+ * the public booking flow from landing slots on top.
+ *
+ * Two membership predicates:
+ *   • staff_user_id = the staff being checked (organizer of an internal
+ *     meeting, or the blocked party on a blocked_time row)
+ *   • attendee_user_ids @> [staffId] — internal meetings where this
+ *     staff is an attendee. The jsonb @> operator checks containment;
+ *     wrapping the id in a single-element jsonb array gives us
+ *     "is this staff in the array" without scanning every value.
+ *
+ * No status column on calendar_events — every row is "live" until it
+ * gets deleted. Time-window predicate mirrors bookings for symmetry
+ * (end >= windowStart AND start < windowEnd).
+ */
+async function getCalendarEventsInRange(
+  staffUserId: string,
+  window: Interval
+): Promise<Interval[]> {
+  const rows = await db
+    .select({
+      startAt: calendarEvents.startAt,
+      endAt: calendarEvents.endAt,
+    })
+    .from(calendarEvents)
+    .where(
+      and(
+        or(
+          eq(calendarEvents.staffUserId, staffUserId),
+          sql`${calendarEvents.attendeeUserIds} @> ${JSON.stringify([staffUserId])}::jsonb`,
+        ),
+        gte(calendarEvents.endAt, window.start),
+        lt(calendarEvents.startAt, window.end),
+      ),
     );
   return rows.map((r) => ({ start: r.startAt, end: r.endAt }));
 }
