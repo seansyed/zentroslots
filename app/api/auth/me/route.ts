@@ -24,6 +24,11 @@ export async function GET() {
       name: user.name,
       role: user.role,
       timezone: user.timezone,
+      // Phase 17I-5 — surface the staff's uploaded avatar URL so the
+      // Topbar profile chip + Sidebar footer can display the real
+      // profile picture instead of always falling back to initials.
+      // Null when no avatar has been uploaded (initials path).
+      avatarUrl: user.avatarUrl ?? null,
       googleConnected,
       tenant: tenant
         ? {

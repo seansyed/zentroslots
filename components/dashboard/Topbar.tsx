@@ -421,6 +421,31 @@ function ProfileMenu({ user }: { user: { name: string; email: string; role: stri
   const [open, setOpen] = React.useState(false);
   const ref = React.useRef<HTMLDivElement>(null);
 
+  // Phase 17I-5 — lazy-load the signed-in user's avatar URL from
+  // /api/auth/me. The Shell's user prop is server-rendered and
+  // intentionally lean (name + email + role + permissions); plumbing
+  // avatarUrl through 36 page.tsx callers would be invasive. One
+  // client-side fetch on mount is the additive path. Initials remain
+  // the fallback while the request resolves OR when no avatar has
+  // been uploaded.
+  const [avatarUrl, setAvatarUrl] = React.useState<string | null>(null);
+  React.useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch("/api/auth/me", { cache: "no-store" });
+        if (!res.ok) return;
+        const data = (await res.json()) as { avatarUrl?: string | null };
+        if (!cancelled && data.avatarUrl) setAvatarUrl(data.avatarUrl);
+      } catch {
+        /* swallow — initials fallback already in place */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   React.useEffect(() => {
     if (!open) return;
     function onClick(e: MouseEvent) {
@@ -450,7 +475,7 @@ function ProfileMenu({ user }: { user: { name: string; email: string; role: stri
         aria-expanded={open}
         aria-label="Account menu"
       >
-        <Avatar name={user.name} size="sm" />
+        <Avatar name={user.name} src={avatarUrl} size="sm" />
         <ChevronDown
           className={cn(
             "h-3.5 w-3.5 text-ink-subtle transition-transform",
@@ -467,7 +492,7 @@ function ProfileMenu({ user }: { user: { name: string; email: string; role: stri
         >
           <div className="border-b border-border px-3 py-3">
             <div className="flex items-center gap-2.5">
-              <Avatar name={user.name} size="sm" />
+              <Avatar name={user.name} src={avatarUrl} size="sm" />
               <div className="min-w-0 flex-1">
                 <div className="truncate text-[13px] font-semibold text-ink">{user.name}</div>
                 <div className="truncate text-[11px] text-ink-muted">{user.email}</div>

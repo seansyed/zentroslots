@@ -325,6 +325,31 @@ export default function Sidebar({
   const pathname = usePathname();
   const groups = buildNav(variant, user.role, user.permissions, tenant?.plan);
 
+  // Phase 17I-5 — lazy-load the signed-in user's avatar URL from
+  // /api/auth/me. The Shell's SidebarUser prop is server-rendered
+  // and intentionally lean (name + email + role + permissions);
+  // plumbing avatarUrl through 36 page.tsx callers would be invasive.
+  // One client-side fetch on mount is the additive path. The Avatar
+  // primitive falls back to initials while the request resolves OR
+  // when no avatar has been uploaded.
+  const [avatarUrl, setAvatarUrl] = React.useState<string | null>(null);
+  React.useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch("/api/auth/me", { cache: "no-store" });
+        if (!res.ok) return;
+        const data = (await res.json()) as { avatarUrl?: string | null };
+        if (!cancelled && data.avatarUrl) setAvatarUrl(data.avatarUrl);
+      } catch {
+        /* swallow — initials fallback already in place */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   return (
     <div className="flex h-full flex-col bg-surface">
       {/* Workspace header */}
@@ -389,7 +414,7 @@ export default function Sidebar({
       {/* User footer + collapse toggle */}
       <div className="border-t border-border p-3">
         <div className={cn("flex items-center", collapsed ? "flex-col gap-2" : "gap-2.5")}>
-          <Avatar name={user.name} size="sm" />
+          <Avatar name={user.name} src={avatarUrl} size="sm" />
           {!collapsed && (
             <div className="min-w-0 flex-1">
               <div className="truncate text-[13px] font-medium text-ink">{user.name}</div>
