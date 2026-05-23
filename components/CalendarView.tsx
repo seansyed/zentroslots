@@ -118,6 +118,24 @@ export type CalendarEventLite = {
   location?: string | null;
 };
 
+/** Phase 17I-3B — customer-facing group sessions (webinars, workshops,
+ *  office hours). Distinct entity from CalendarBooking (1:1) AND
+ *  CalendarEventLite (operational, non-customer). Rendered with its
+ *  own emerald accent + GROUP badge + N/cap attendee counter. */
+export type GroupSessionLite = {
+  id: string;
+  title: string;
+  startAt: string;
+  endAt: string;
+  /** Host's slot owner (group_sessions.host_user_id). */
+  hostId: string;
+  hostName: string;
+  maxCapacity: number;         // 0 = unlimited
+  currentRegistrations: number;
+  meetLink?: string | null;
+  location?: string | null;
+};
+
 const VIEWS = ["day", "week", "month", "agenda"] as const;
 type View = (typeof VIEWS)[number];
 const VIEW_LABEL: Record<View, string> = { day: "Day", week: "Week", month: "Month", agenda: "Agenda" };
@@ -132,6 +150,7 @@ export default function CalendarView({
   timezone,
   bookings,
   calendarEvents = [],
+  groupSessions = [],
   canManage = true,
 }: {
   timezone: string;
@@ -140,6 +159,9 @@ export default function CalendarView({
    *  internal_meeting). Optional + defaults to [] so existing call
    *  sites that don't supply it keep working. */
   calendarEvents?: CalendarEventLite[];
+  /** Phase 17I-3B — customer-facing group sessions. Optional +
+   *  defaults to [] for back-compat. */
+  groupSessions?: GroupSessionLite[];
   canManage?: boolean;
 }) {
   const [view, setView] = React.useState<View>("week");
@@ -228,6 +250,20 @@ export default function CalendarView({
     for (const list of m.values()) list.sort((a, b) => a.startAt.localeCompare(b.startAt));
     return m;
   }, [calendarEvents, timezone]);
+
+  // Phase 17I-3B — parallel bucket for group_sessions. Same pattern;
+  // distinct rendering. Never opens the booking drawer.
+  const byDayGroupSessions = React.useMemo(() => {
+    const m = new Map<string, GroupSessionLite[]>();
+    for (const g of groupSessions) {
+      const k = formatInTimeZone(g.startAt, timezone, "yyyy-MM-dd");
+      const list = m.get(k) ?? [];
+      list.push(g);
+      m.set(k, list);
+    }
+    for (const list of m.values()) list.sort((a, b) => a.startAt.localeCompare(b.startAt));
+    return m;
+  }, [groupSessions, timezone]);
 
   function shift(delta: number) {
     if (view === "day" || view === "agenda") setAnchor((d) => addDays(d, delta));
@@ -356,10 +392,10 @@ export default function CalendarView({
             <FilteredEmptyState onClear={() => setFilters({})} />
           ) : (
             <ViewCrossfade viewKey={view}>
-              {view === "day"    && <DayView anchor={anchor} timezone={timezone} byDay={byDay} byDayEvents={byDayEvents} onOpen={openBooking} onReschedule={canManage ? attemptReschedule : undefined} focusOverlay={pulse.bestFocusWindow} />}
-              {view === "week"   && <WeekView anchor={anchor} timezone={timezone} byDay={byDay} byDayEvents={byDayEvents} onOpen={openBooking} onReschedule={canManage ? attemptReschedule : undefined} focusOverlay={pulse.bestFocusWindow} />}
+              {view === "day"    && <DayView anchor={anchor} timezone={timezone} byDay={byDay} byDayEvents={byDayEvents} byDayGroupSessions={byDayGroupSessions} onOpen={openBooking} onReschedule={canManage ? attemptReschedule : undefined} focusOverlay={pulse.bestFocusWindow} />}
+              {view === "week"   && <WeekView anchor={anchor} timezone={timezone} byDay={byDay} byDayEvents={byDayEvents} byDayGroupSessions={byDayGroupSessions} onOpen={openBooking} onReschedule={canManage ? attemptReschedule : undefined} focusOverlay={pulse.bestFocusWindow} />}
               {view === "month"  && <MonthView anchor={anchor} timezone={timezone} byDay={byDay} onOpen={openBooking} onJump={(d) => { setAnchor(startOfDay(d)); setView("day"); }} />}
-              {view === "agenda" && <AgendaView anchor={anchor} timezone={timezone} byDay={byDay} byDayEvents={byDayEvents} onOpen={openBooking} />}
+              {view === "agenda" && <AgendaView anchor={anchor} timezone={timezone} byDay={byDay} byDayEvents={byDayEvents} byDayGroupSessions={byDayGroupSessions} onOpen={openBooking} />}
             </ViewCrossfade>
           )}
         </PremiumCard>
@@ -933,12 +969,13 @@ function MiniCalendar({
 // ─── Day View ──────────────────────────────────────────────────────
 
 function DayView({
-  anchor, timezone, byDay, byDayEvents, onOpen, onReschedule, focusOverlay,
+  anchor, timezone, byDay, byDayEvents, byDayGroupSessions, onOpen, onReschedule, focusOverlay,
 }: {
   anchor: Date;
   timezone: string;
   byDay: Map<string, CalendarBooking[]>;
   byDayEvents: Map<string, CalendarEventLite[]>;
+  byDayGroupSessions: Map<string, GroupSessionLite[]>;
   onOpen: (b: CalendarBooking) => void;
   onReschedule?: (id: string, newStartIso: string) => void;
   focusOverlay?: Pulse["bestFocusWindow"];
@@ -946,6 +983,7 @@ function DayView({
   const key = format(anchor, "yyyy-MM-dd");
   const list = byDay.get(key) ?? [];
   const events = byDayEvents.get(key) ?? [];
+  const sessions = byDayGroupSessions.get(key) ?? [];
   const today = isSameDay(anchor, new Date());
 
   return (
@@ -956,6 +994,7 @@ function DayView({
           dateKey={key}
           bookings={list}
           events={events}
+          groupSessions={sessions}
           timezone={timezone}
           onOpen={onOpen}
           onReschedule={onReschedule}
@@ -971,12 +1010,13 @@ function DayView({
 // ─── Week View ─────────────────────────────────────────────────────
 
 function WeekView({
-  anchor, timezone, byDay, byDayEvents, onOpen, onReschedule, focusOverlay,
+  anchor, timezone, byDay, byDayEvents, byDayGroupSessions, onOpen, onReschedule, focusOverlay,
 }: {
   anchor: Date;
   timezone: string;
   byDay: Map<string, CalendarBooking[]>;
   byDayEvents: Map<string, CalendarEventLite[]>;
+  byDayGroupSessions: Map<string, GroupSessionLite[]>;
   onOpen: (b: CalendarBooking) => void;
   onReschedule?: (id: string, newStartIso: string) => void;
   focusOverlay?: Pulse["bestFocusWindow"];
@@ -1022,6 +1062,7 @@ function WeekView({
                   dateKey={key}
                   bookings={byDay.get(key) ?? []}
                   events={byDayEvents.get(key) ?? []}
+                  groupSessions={byDayGroupSessions.get(key) ?? []}
                   timezone={timezone}
                   onOpen={onOpen}
                   onReschedule={onReschedule}
@@ -1041,7 +1082,7 @@ function WeekView({
 // ─── Day Column (shared Day + Week) ────────────────────────────────
 
 function DayColumn({
-  dateKey, bookings, events = [], timezone, onOpen, onReschedule, isToday = false, focusOverlay = null,
+  dateKey, bookings, events = [], groupSessions = [], timezone, onOpen, onReschedule, isToday = false, focusOverlay = null,
 }: {
   dateKey: string;
   bookings: CalendarBooking[];
@@ -1049,6 +1090,9 @@ function DayColumn({
    *  EventBlock layer. Optional + defaults to [] so consumers that
    *  don't pass it (none today, but future-proof) keep working. */
   events?: CalendarEventLite[];
+  /** Phase 17I-3B — customer-facing group sessions rendered with their
+   *  own emerald accent + GROUP badge + N/cap counter. */
+  groupSessions?: GroupSessionLite[];
   timezone: string;
   onOpen: (b: CalendarBooking) => void;
   onReschedule?: (id: string, newStartIso: string) => void;
@@ -1246,6 +1290,108 @@ function DayColumn({
           style={positionStyle(e.startAt, e.endAt)}
         />
       ))}
+
+      {/* Phase 17I-3B — customer-facing group sessions. Distinct
+          emerald accent + GROUP badge + attendee counter. The host
+          slot is blocked by the availability engine (3B); the
+          group_sessions_no_host_overlap EXCLUDE constraint prevents
+          two sessions overlapping on the same host. */}
+      {groupSessions.map((g) => (
+        <GroupSessionBlock
+          key={g.id}
+          session={g}
+          timezone={timezone}
+          style={positionStyle(g.startAt, g.endAt)}
+        />
+      ))}
+    </div>
+  );
+}
+
+/** Visual block for a group_sessions row. NEVER opens the booking
+ *  drawer (the entity has no service status, no clientEmail). Emerald
+ *  accent + GROUP badge + N/cap attendee counter distinguish it from
+ *  bookings and from calendar_events. */
+function GroupSessionBlock({
+  session,
+  timezone,
+  style,
+}: {
+  session: GroupSessionLite;
+  timezone: string;
+  style: React.CSSProperties;
+}) {
+  const start = formatInTimeZone(session.startAt, timezone, "h:mm a");
+  const durationMin = Math.max(
+    0,
+    Math.round(
+      (new Date(session.endAt).getTime() - new Date(session.startAt).getTime()) /
+        60_000,
+    ),
+  );
+  const heightPx = typeof style.height === "number" ? style.height : 0;
+  const compact = heightPx < 40;
+  const capacityLabel =
+    session.maxCapacity > 0
+      ? `${session.currentRegistrations}/${session.maxCapacity}`
+      : `${session.currentRegistrations}`;
+  const tooltip = [
+    `GROUP · ${session.title}`,
+    `${start} · ${durationMin}m`,
+    `Host: ${session.hostName}`,
+    session.maxCapacity > 0
+      ? `Registrations: ${capacityLabel}`
+      : `Registrations: ${capacityLabel} (no cap)`,
+    session.location ? `Location: ${session.location}` : null,
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  return (
+    <div
+      className="group/grp relative flex flex-col items-start overflow-hidden rounded-xl border border-emerald-300/70 bg-gradient-to-br from-emerald-50 via-white to-white px-2.5 py-1.5 pl-3 text-left text-[11px] text-emerald-900 shadow-soft transition-all duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:shadow-lift hover:z-20"
+      style={style}
+      title={tooltip}
+      aria-label={tooltip}
+    >
+      {/* Emerald accent bar */}
+      <span
+        aria-hidden
+        className="absolute inset-y-1 left-0 w-1 rounded-full bg-emerald-500"
+      />
+
+      <div className="relative flex w-full items-center gap-1.5">
+        <Users className="h-3 w-3 text-emerald-500" strokeWidth={2} />
+        <span className="font-semibold tabular-nums">{start}</span>
+        {!compact && (
+          <>
+            <span className="text-emerald-400">·</span>
+            <span className="text-[10px] opacity-80">{durationMin}m</span>
+          </>
+        )}
+        <span className="ml-auto rounded-full bg-emerald-600 text-white px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider">
+          Group
+        </span>
+      </div>
+
+      <div className="relative mt-0.5 line-clamp-1 text-[12px] font-semibold tracking-tight">
+        {session.title}
+      </div>
+
+      {!compact && (
+        <div className="relative mt-1 flex items-center gap-1 text-[10px] opacity-80">
+          <Users className="h-2.5 w-2.5" strokeWidth={2} />
+          <span>{capacityLabel}</span>
+          {session.maxCapacity > 0 && (
+            <span className="opacity-70">registered</span>
+          )}
+        </div>
+      )}
+      {!compact && session.location && (
+        <div className="relative mt-0.5 line-clamp-1 text-[10px] opacity-70">
+          {session.location}
+        </div>
+      )}
     </div>
   );
 }
@@ -1740,12 +1886,13 @@ function MonthView({
 // ─── Agenda View ───────────────────────────────────────────────────
 
 function AgendaView({
-  anchor, timezone, byDay, byDayEvents, onOpen,
+  anchor, timezone, byDay, byDayEvents, byDayGroupSessions, onOpen,
 }: {
   anchor: Date;
   timezone: string;
   byDay: Map<string, CalendarBooking[]>;
   byDayEvents: Map<string, CalendarEventLite[]>;
+  byDayGroupSessions: Map<string, GroupSessionLite[]>;
   onOpen: (b: CalendarBooking) => void;
 }) {
   const days = Array.from({ length: 7 }, (_, i) => addDays(anchor, i));
@@ -1755,15 +1902,19 @@ function AgendaView({
         const key = format(d, "yyyy-MM-dd");
         const list = byDay.get(key) ?? [];
         const eventsList = byDayEvents.get(key) ?? [];
+        const sessionsList = byDayGroupSessions.get(key) ?? [];
         const today = isSameDay(d, new Date());
-        // Interleave bookings + calendar_events chronologically. Each
-        // row carries a discriminator so the renderer can branch.
+        // Interleave bookings + calendar_events + group_sessions
+        // chronologically. Each row carries a discriminator so the
+        // renderer can branch into the right card component.
         const items: Array<
           | { kind: "booking"; row: CalendarBooking }
           | { kind: "event"; row: CalendarEventLite }
+          | { kind: "session"; row: GroupSessionLite }
         > = [
           ...list.map((b) => ({ kind: "booking" as const, row: b })),
           ...eventsList.map((e) => ({ kind: "event" as const, row: e })),
+          ...sessionsList.map((s) => ({ kind: "session" as const, row: s })),
         ].sort((a, b) => a.row.startAt.localeCompare(b.row.startAt));
         return (
           <div key={key} className="grid grid-cols-[110px,1fr] gap-3 px-5 py-4">
@@ -1785,6 +1936,11 @@ function AgendaView({
                   {eventsList.length} {eventsList.length === 1 ? "block" : "blocks"}
                 </div>
               )}
+              {sessionsList.length > 0 && (
+                <div className="mt-1 inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-medium text-emerald-700">
+                  {sessionsList.length} {sessionsList.length === 1 ? "session" : "sessions"}
+                </div>
+              )}
             </div>
             <div className="space-y-1.5">
               {items.length === 0 && (
@@ -1798,6 +1954,15 @@ function AgendaView({
                     <AgendaCalendarEventRow
                       key={`ev-${it.row.id}`}
                       event={it.row}
+                      timezone={timezone}
+                    />
+                  );
+                }
+                if (it.kind === "session") {
+                  return (
+                    <AgendaGroupSessionRow
+                      key={`gs-${it.row.id}`}
+                      session={it.row}
                       timezone={timezone}
                     />
                   );
@@ -1939,6 +2104,57 @@ function AgendaCalendarEventRow({
       ) : (
         <Building2 className="h-4 w-4 text-indigo-500" strokeWidth={1.75} />
       )}
+    </div>
+  );
+}
+
+/** Phase 17I-3B — agenda row for a group_sessions entry. Static (no
+ *  drawer / no click); emerald accent + GROUP badge + capacity. */
+function AgendaGroupSessionRow({
+  session,
+  timezone,
+}: {
+  session: GroupSessionLite;
+  timezone: string;
+}) {
+  const capacityLabel =
+    session.maxCapacity > 0
+      ? `${session.currentRegistrations}/${session.maxCapacity}`
+      : `${session.currentRegistrations}`;
+  return (
+    <div
+      className="flex w-full items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50/50 px-3 py-2.5 shadow-soft transition-colors"
+      title={`${session.title} · Host: ${session.hostName} · ${capacityLabel} registered`}
+    >
+      <span aria-hidden className="h-9 w-1 shrink-0 rounded-full bg-emerald-500" />
+      <div className="w-32 shrink-0">
+        <div className="text-[12px] font-semibold tabular-nums text-emerald-900">
+          {formatInTimeZone(session.startAt, timezone, "h:mm a")}
+        </div>
+        <div className="text-[10px] text-ink-muted">
+          {formatInTimeZone(session.endAt, timezone, "h:mm a")}
+        </div>
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-1.5">
+          <span className="rounded-full bg-emerald-600 text-white px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider">
+            Group
+          </span>
+          <span className="truncate text-[13px] font-semibold text-emerald-900">
+            {session.title}
+          </span>
+        </div>
+        <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[11px] text-ink-muted">
+          <span className="truncate">Host: {session.hostName}</span>
+          <span className="inline-flex items-center gap-1">
+            <Users className="h-3 w-3" strokeWidth={1.75} />
+            {capacityLabel}
+            {session.maxCapacity > 0 ? "" : " registered"}
+          </span>
+          {session.location && <span className="truncate">{session.location}</span>}
+        </div>
+      </div>
+      <Users className="h-4 w-4 text-emerald-500" strokeWidth={1.75} />
     </div>
   );
 }

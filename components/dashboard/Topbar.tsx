@@ -13,6 +13,7 @@ import {
   Repeat,
   Ban,
   Building2,
+  Shuffle,
 } from "lucide-react";
 
 import { Avatar } from "@/components/ui/primitives";
@@ -20,7 +21,9 @@ import ThemeToggle from "./ThemeToggle";
 import NotificationBell from "./NotificationBell";
 import NewAppointmentModal from "./NewAppointmentModal";
 import NewBlockedTimeModal from "./NewBlockedTimeModal";
+import NewGroupSessionModal from "./NewGroupSessionModal";
 import NewInternalMeetingModal from "./NewInternalMeetingModal";
+import NewRoundRobinModal from "./NewRoundRobinModal";
 import CommandPalette, { useCommandPalette } from "./CommandPalette";
 import { cn } from "@/lib/cn";
 
@@ -152,6 +155,8 @@ function CreateMenu() {
   const [showApptModal, setShowApptModal] = React.useState(false);
   const [showBlockedModal, setShowBlockedModal] = React.useState(false);
   const [showMeetingModal, setShowMeetingModal] = React.useState(false);
+  const [showGroupModal, setShowGroupModal] = React.useState(false);
+  const [showRoundRobinModal, setShowRoundRobinModal] = React.useState(false);
   const [me, setMe] = React.useState<MeResponse | null>(null);
   const ref = React.useRef<HTMLDivElement>(null);
 
@@ -285,17 +290,47 @@ function CreateMenu() {
               </div>
             </button>
 
-            {/* Remaining v1 placeholders — coming-soon affordances */}
-            <ComingSoonRow
-              icon={<Users className="h-4 w-4 mt-0.5 text-ink-subtle" strokeWidth={1.75} />}
-              title="Group Session"
-              hint="Multiple customers, one slot"
-            />
-            <ComingSoonRow
-              icon={<Repeat className="h-4 w-4 mt-0.5 text-ink-subtle" strokeWidth={1.75} />}
-              title="Round Robin"
-              hint="Auto-assign across eligible staff"
-            />
+            {/* Phase 17I-3A — Group Session active */}
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                if (!me) return;
+                setOpen(false);
+                setShowGroupModal(true);
+              }}
+              disabled={!me}
+              className="flex w-full items-start gap-2.5 px-3 py-2 text-left transition-colors hover:bg-surface-inset disabled:opacity-50"
+            >
+              <Users className="h-4 w-4 mt-0.5 text-emerald-600" strokeWidth={1.75} />
+              <div className="min-w-0 flex-1">
+                <div className="text-[13px] font-medium text-ink">Group Session</div>
+                <div className="text-[11px] text-ink-muted">
+                  Webinar / workshop / office hours — one host, many attendees
+                </div>
+              </div>
+            </button>
+
+            {/* Phase 17I-4A — Round Robin active */}
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                if (!me) return;
+                setOpen(false);
+                setShowRoundRobinModal(true);
+              }}
+              disabled={!me}
+              className="flex w-full items-start gap-2.5 px-3 py-2 text-left transition-colors hover:bg-surface-inset disabled:opacity-50"
+            >
+              <Shuffle className="h-4 w-4 mt-0.5 text-violet-600" strokeWidth={1.75} />
+              <div className="min-w-0 flex-1">
+                <div className="text-[13px] font-medium text-ink">Round Robin</div>
+                <div className="text-[11px] text-ink-muted">
+                  Auto-assign across eligible staff (uses your routing rule)
+                </div>
+              </div>
+            </button>
           </div>
         </div>
       )}
@@ -325,6 +360,24 @@ function CreateMenu() {
           <NewInternalMeetingModal
             open={showMeetingModal}
             onClose={() => setShowMeetingModal(false)}
+            onCreated={() => {
+              if (typeof window !== "undefined") window.location.reload();
+            }}
+            viewerRole={me.role}
+            viewerUserId={me.id}
+          />
+          <NewGroupSessionModal
+            open={showGroupModal}
+            onClose={() => setShowGroupModal(false)}
+            onCreated={() => {
+              if (typeof window !== "undefined") window.location.reload();
+            }}
+            viewerRole={me.role}
+            viewerUserId={me.id}
+          />
+          <NewRoundRobinModal
+            open={showRoundRobinModal}
+            onClose={() => setShowRoundRobinModal(false)}
             onCreated={() => {
               if (typeof window !== "undefined") window.location.reload();
             }}

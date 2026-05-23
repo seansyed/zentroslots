@@ -8,6 +8,7 @@ import {
   availabilityOverrides,
   bookings,
   calendarEvents,
+  groupSessions,
   services,
   tenants,
   users,
@@ -72,16 +73,23 @@ export async function getAvailableSlots(params: {
   // pre-feature behavior. Freebusy is also wrapped in try/catch
   // inside the orchestrator so a Google API failure can't break
   // availability.
-  const [existing, externalBusy, calendarBlocks, features] = await Promise.all([
-    getBookingsInRange(staffUserId, viewerDay),
-    getExternalBusyForUser(staffUserId, viewerDay.start, viewerDay.end),
-    getCalendarEventsInRange(staffUserId, viewerDay),
-    loadTenantFeatures(staff.tenantId),
-  ]);
+  const [existing, externalBusy, calendarBlocks, groupBlocks, features] =
+    await Promise.all([
+      getBookingsInRange(staffUserId, viewerDay),
+      getExternalBusyForUser(staffUserId, viewerDay.start, viewerDay.end),
+      getCalendarEventsInRange(staffUserId, viewerDay),
+      // Phase 17I-3B — when this staff is the HOST of a group session,
+      // the slot is blocked for public booking. Future multi-host work
+      // can union co-host ids the same way internal_meeting attendees
+      // are handled in getCalendarEventsInRange.
+      getGroupSessionsInRange(staffUserId, viewerDay),
+      loadTenantFeatures(staff.tenantId),
+    ]);
   const combinedBusy: Interval[] = [
     ...existing,
     ...externalBusy,
     ...calendarBlocks,
+    ...groupBlocks,
   ];
 
   // Phase 16: tenant-level `bookingBuffers` gate. When OFF, the engine
@@ -281,6 +289,39 @@ async function getCalendarEventsInRange(
         ),
         gte(calendarEvents.endAt, window.start),
         lt(calendarEvents.startAt, window.end),
+      ),
+    );
+  return rows.map((r) => ({ start: r.startAt, end: r.endAt }));
+}
+
+/**
+ * Phase 17I-3B — fetch group_sessions where the staff is the HOST and
+ * the session is still scheduled (not cancelled). Customers can't
+ * book 1:1 appointments on top of a host's group session window.
+ *
+ * Cancelled sessions are filtered out at the SQL level so the public
+ * booking flow re-opens the slot the moment the admin soft-cancels.
+ *
+ * Future multi-host extension will OR-union an additional jsonb
+ * containment predicate the way getCalendarEventsInRange already
+ * does for internal-meeting attendees.
+ */
+async function getGroupSessionsInRange(
+  staffUserId: string,
+  window: Interval
+): Promise<Interval[]> {
+  const rows = await db
+    .select({
+      startAt: groupSessions.startAt,
+      endAt: groupSessions.endAt,
+    })
+    .from(groupSessions)
+    .where(
+      and(
+        eq(groupSessions.hostUserId, staffUserId),
+        eq(groupSessions.status, "scheduled"),
+        gte(groupSessions.endAt, window.start),
+        lt(groupSessions.startAt, window.end),
       ),
     );
   return rows.map((r) => ({ start: r.startAt, end: r.endAt }));

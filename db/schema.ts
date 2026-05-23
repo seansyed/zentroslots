@@ -529,6 +529,65 @@ export const calendarEvents = pgTable(
   }),
 );
 
+// ─── Group Sessions (Phase 17I-3A) ──────────────────────────────────────
+//
+// Customer-facing group events: one host + many attendees + one shared
+// meeting link (webinars, onboarding, workshops, office hours). Sibling
+// to bookings (1:1) and calendar_events (operational, non-customer).
+// Migration 0056.
+
+export const groupSessions = pgTable(
+  "group_sessions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    title: varchar("title", { length: 255 }).notNull(),
+    /** Optional service linkage — nullable for ad-hoc sessions
+     *  (e.g. office hours) that don't map to a priced service. */
+    serviceId: uuid("service_id").references(() => services.id, {
+      onDelete: "set null",
+    }),
+    /** Primary host. v1 supports a single host; multi-host extension
+     *  ships when public registration does. */
+    hostUserId: uuid("host_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    startAt: timestamp("start_at", { withTimezone: true }).notNull(),
+    endAt: timestamp("end_at", { withTimezone: true }).notNull(),
+    /** 0 = unlimited; positive integer caps registrations. */
+    maxCapacity: integer("max_capacity").notNull().default(0),
+    /** Cached count of confirmed registrations (maintained by future
+     *  public registration flow; stays 0 in v1). */
+    currentRegistrations: integer("current_registrations").notNull().default(0),
+    videoProvider: varchar("video_provider", { length: 20 }),
+    meetLink: text("meet_link"),
+    location: text("location"),
+    notes: text("notes"),
+    internalNotes: text("internal_notes"),
+    registrationDeadline: timestamp("registration_deadline", {
+      withTimezone: true,
+    }),
+    externalEventId: varchar("external_event_id", { length: 255 }),
+    externalEventProvider: varchar("external_event_provider", { length: 20 }),
+    syncExternal: boolean("sync_external").notNull().default(true),
+    /** scheduled | cancelled. Cancelled rows are soft-deleted (kept for
+     *  audit) and excluded from the host-overlap EXCLUDE constraint. */
+    status: varchar("status", { length: 20 }).notNull().default("scheduled"),
+    createdByUserId: uuid("created_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    tenantIdx: index("group_sessions_tenant_idx").on(t.tenantId),
+    hostWindowIdx: index("group_sessions_host_window_idx").on(t.hostUserId, t.startAt),
+    tenantWindowIdx: index("group_sessions_tenant_window_idx").on(t.tenantId, t.startAt, t.endAt),
+  }),
+);
+
 // ─── Availability Overrides ─────────────────────────────────────────────
 // Vacations, holidays, lunch breaks, custom one-off schedules.
 // Multiple rows per (user_id, date) supported for split-day schedules.
@@ -2156,6 +2215,8 @@ export type NewBooking = typeof bookings.$inferInsert;
 // Phase 17H+ — calendar_events sibling table for blocked_time + internal_meeting
 export type CalendarEvent = typeof calendarEvents.$inferSelect;
 export type NewCalendarEvent = typeof calendarEvents.$inferInsert;
+export type GroupSession = typeof groupSessions.$inferSelect;
+export type NewGroupSession = typeof groupSessions.$inferInsert;
 export type AvailabilityOverride = typeof availabilityOverrides.$inferSelect;
 export type NewAvailabilityOverride = typeof availabilityOverrides.$inferInsert;
 export type AuditLog = typeof auditLogs.$inferSelect;

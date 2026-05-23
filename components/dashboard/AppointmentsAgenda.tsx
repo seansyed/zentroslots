@@ -76,6 +76,19 @@ export type AgendaCalendarEvent = {
   location?: string | null;
 };
 
+/** Phase 17I-3B — customer-facing group sessions on the agenda.
+ *  Distinct entity from CalendarBooking + AgendaCalendarEvent. */
+export type AgendaGroupSession = {
+  id: string;
+  title: string;
+  startAt: string;
+  endAt: string;
+  hostName: string;
+  maxCapacity: number;
+  currentRegistrations: number;
+  location?: string | null;
+};
+
 const STATUS_TABS = [
   { value: "",          label: "All" },
   { value: "confirmed", label: "Confirmed" },
@@ -88,6 +101,7 @@ const STATUS_TABS = [
 export default function AppointmentsAgenda({
   rows: initialRows,
   events = [],
+  sessions = [],
   timezone,
   canManage,
   canCancel,
@@ -99,6 +113,8 @@ export default function AppointmentsAgenda({
    *  groups. Optional + defaults to [] for back-compat with call sites
    *  that don't supply it yet. */
   events?: AgendaCalendarEvent[];
+  /** Phase 17I-3B — customer-facing group sessions. Same pattern. */
+  sessions?: AgendaGroupSession[];
   timezone: string;
   canManage: boolean;
   canCancel?: boolean;
@@ -200,6 +216,21 @@ export default function AppointmentsAgenda({
     return m;
   }, [events, timezone, currentStatus]);
 
+  // Phase 17I-3B — same pattern for group sessions. Status filter
+  // also suppresses these (status is a booking-only concept).
+  const sessionsByDate = React.useMemo(() => {
+    if (currentStatus) return new Map<string, AgendaGroupSession[]>();
+    const m = new Map<string, AgendaGroupSession[]>();
+    for (const s of sessions) {
+      const k = formatInTimeZone(s.startAt, timezone, "yyyy-MM-dd");
+      const list = m.get(k) ?? [];
+      list.push(s);
+      m.set(k, list);
+    }
+    for (const list of m.values()) list.sort((a, b) => a.startAt.localeCompare(b.startAt));
+    return m;
+  }, [sessions, timezone, currentStatus]);
+
   // Merge date keys from BOTH bookings and events so a day that has
   // only an internal meeting still shows up as its own section. The
   // existing groupByDate output is the source of truth for booking
@@ -211,10 +242,23 @@ export default function AppointmentsAgenda({
   );
   const eventOnlyGroups = React.useMemo(() => {
     const out: { dateKey: string; dateLabel: string; relativeLabel: string | null; rows: Row[] }[] = [];
-    for (const [dateKey, eventsForDate] of eventsByDate.entries()) {
+    const seen = new Set<string>();
+    // Union of dates that have either events OR sessions but no
+    // bookings — they need their own DateSection to surface.
+    for (const dateKey of eventsByDate.keys()) {
       if (groupedKeys.has(dateKey)) continue;
-      if (eventsForDate.length === 0) continue;
-      const ref = new Date(eventsForDate[0].startAt);
+      seen.add(dateKey);
+    }
+    for (const dateKey of sessionsByDate.keys()) {
+      if (groupedKeys.has(dateKey)) continue;
+      seen.add(dateKey);
+    }
+    for (const dateKey of seen) {
+      const eventsForDate = eventsByDate.get(dateKey) ?? [];
+      const sessionsForDate = sessionsByDate.get(dateKey) ?? [];
+      const ref = new Date(
+        (eventsForDate[0]?.startAt ?? sessionsForDate[0]?.startAt) as string,
+      );
       out.push({
         dateKey,
         dateLabel: formatInTimeZone(ref, timezone, "EEE, MMM d"),
@@ -225,7 +269,7 @@ export default function AppointmentsAgenda({
       });
     }
     return out.sort((a, b) => b.dateKey.localeCompare(a.dateKey));
-  }, [eventsByDate, groupedKeys, timezone]);
+  }, [eventsByDate, sessionsByDate, groupedKeys, timezone]);
 
   const datesWithBookings = React.useMemo(
     () => new Set(grouped.map((g) => g.dateKey)),
@@ -270,6 +314,7 @@ export default function AppointmentsAgenda({
                   relativeLabel={g.relativeLabel}
                   rows={g.rows}
                   events={eventsByDate.get(g.dateKey) ?? []}
+                  sessions={sessionsByDate.get(g.dateKey) ?? []}
                   timezone={timezone}
                   onOpen={openRow}
                   isToday={g.dateKey === todayKey}
@@ -284,6 +329,7 @@ export default function AppointmentsAgenda({
                   relativeLabel={g.relativeLabel}
                   rows={g.rows}
                   events={eventsByDate.get(g.dateKey) ?? []}
+                  sessions={sessionsByDate.get(g.dateKey) ?? []}
                   timezone={timezone}
                   onOpen={openRow}
                   isToday={g.dateKey === todayKey}
@@ -340,6 +386,7 @@ function DateSection({
   relativeLabel,
   rows,
   events = [],
+  sessions = [],
   timezone,
   onOpen,
   isToday = false,
@@ -351,6 +398,8 @@ function DateSection({
   /** Phase 17I-2C — operational calendar entries painted alongside
    *  bookings, interleaved chronologically. */
   events?: AgendaCalendarEvent[];
+  /** Phase 17I-3B — customer-facing group sessions. */
+  sessions?: AgendaGroupSession[];
   timezone: string;
   onOpen: (r: Row) => void;
   isToday?: boolean;
@@ -423,8 +472,67 @@ function DateSection({
             <CalendarEventAgendaCard event={e} timezone={timezone} />
           </li>
         ))}
+
+        {/* Phase 17I-3B — customer-facing group sessions for this
+            date. Same status-filter suppression rule as events. */}
+        {sessions.map((s) => (
+          <li key={`gs-${s.id}`}>
+            <GroupSessionAgendaCard session={s} timezone={timezone} />
+          </li>
+        ))}
       </ul>
     </section>
+  );
+}
+
+/** Phase 17I-3B — agenda card for a group_sessions row. Emerald
+ *  accent + GROUP badge + N/cap counter. Static (no drawer). */
+function GroupSessionAgendaCard({
+  session,
+  timezone,
+}: {
+  session: AgendaGroupSession;
+  timezone: string;
+}) {
+  const capacityLabel =
+    session.maxCapacity > 0
+      ? `${session.currentRegistrations}/${session.maxCapacity}`
+      : `${session.currentRegistrations}`;
+  return (
+    <div
+      className="flex w-full items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50/50 px-3 py-2.5 shadow-soft transition-colors"
+      title={`${session.title} · Host: ${session.hostName} · ${capacityLabel}${session.maxCapacity ? "" : " registered"}`}
+    >
+      <span aria-hidden className="h-9 w-1 shrink-0 rounded-full bg-emerald-500" />
+      <div className="w-32 shrink-0">
+        <div className="text-[12px] font-semibold tabular-nums text-emerald-900">
+          {formatInTimeZone(session.startAt, timezone, "h:mm a")}
+        </div>
+        <div className="text-[10px] text-ink-muted">
+          {formatInTimeZone(session.endAt, timezone, "h:mm a")}
+        </div>
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-1.5">
+          <span className="rounded-full bg-emerald-600 text-white px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider">
+            Group
+          </span>
+          <span className="truncate text-[13px] font-semibold text-emerald-900">
+            {session.title}
+          </span>
+        </div>
+        <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[11px] text-ink-muted">
+          <span className="truncate">Host: {session.hostName}</span>
+          <span className="inline-flex items-center gap-1">
+            <Users className="h-3 w-3" strokeWidth={1.75} />
+            {capacityLabel}
+            {session.maxCapacity > 0 ? "" : " registered"}
+          </span>
+          {session.location && <span className="truncate">{session.location}</span>}
+        </div>
+      </div>
+      <Users className="h-4 w-4 text-emerald-500" strokeWidth={1.75} />
+    </div>
   );
 }
 

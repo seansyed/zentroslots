@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { and, desc, eq, gte, inArray, lt, or, sql } from "drizzle-orm";
 
 import { db } from "@/db/client";
-import { bookings, calendarEvents, services, tenants, users } from "@/db/schema";
+import { bookings, calendarEvents, groupSessions, services, tenants, users } from "@/db/schema";
 import { getSession, isManagerial } from "@/lib/auth";
 import { loadTenantFeatures } from "@/lib/features";
 import { effectivePermissions } from "@/lib/security/permissions";
@@ -132,6 +132,49 @@ export default async function AppointmentsPage(props: {
     }
   }
 
+  // Phase 17I-3B — group_sessions for the same 90-day window.
+  // Visibility mirrors the calendar page: managerial sees tenant-wide;
+  // staff sees only sessions they host.
+  const sessionTenantOnly = eq(groupSessions.tenantId, user.tenantId);
+  const sessionVisibility = isManagerial(user.role)
+    ? sessionTenantOnly
+    : and(sessionTenantOnly, eq(groupSessions.hostUserId, user.id));
+
+  const sessionRowsRaw = await db
+    .select({
+      id: groupSessions.id,
+      title: groupSessions.title,
+      startAt: groupSessions.startAt,
+      endAt: groupSessions.endAt,
+      hostUserId: groupSessions.hostUserId,
+      hostName: users.name,
+      maxCapacity: groupSessions.maxCapacity,
+      currentRegistrations: groupSessions.currentRegistrations,
+      location: groupSessions.location,
+    })
+    .from(groupSessions)
+    .innerJoin(users, eq(users.id, groupSessions.hostUserId))
+    .where(
+      and(
+        sessionVisibility,
+        eq(groupSessions.status, "scheduled"),
+        gte(groupSessions.startAt, ninetyDaysAgo),
+      ),
+    )
+    .orderBy(desc(groupSessions.startAt))
+    .limit(500);
+
+  const serializedSessions = sessionRowsRaw.map((g) => ({
+    id: g.id,
+    title: g.title,
+    startAt: g.startAt.toISOString(),
+    endAt: g.endAt.toISOString(),
+    hostName: g.hostName,
+    maxCapacity: g.maxCapacity,
+    currentRegistrations: g.currentRegistrations,
+    location: g.location ?? null,
+  }));
+
   const serializedEvents = calendarEventRows.map((e) => {
     const attendeeIds: string[] = Array.isArray(e.attendeeUserIds)
       ? (e.attendeeUserIds as unknown[]).filter(
@@ -196,6 +239,7 @@ export default async function AppointmentsPage(props: {
           <AppointmentsAgenda
             rows={serializedRows}
             events={serializedEvents}
+            sessions={serializedSessions}
             timezone={user.timezone}
             canManage={user.role === "admin" || user.role === "staff" || user.role === "manager"}
             canCancel={features.cancellations}

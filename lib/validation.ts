@@ -183,6 +183,35 @@ export const createCalendarEventSchema = z.discriminatedUnion("eventType", [
   createInternalMeetingSchema,
 ]);
 
+// ─── Phase 17I-3A — Group Sessions ─────────────────────────────────────
+//
+// Customer-facing group event (webinar, onboarding, workshop, office
+// hours). One host + many attendees + one shared meeting link. Stored
+// in the group_sessions table — sibling to bookings and
+// calendar_events, never merged.
+
+export const createGroupSessionSchema = z.object({
+  title: z.string().min(1).max(255),
+  /** Optional service linkage — nullable for ad-hoc sessions
+   *  (office hours) that aren't priced services. */
+  serviceId: z.string().uuid().nullable().optional(),
+  hostUserId: z.string().uuid(),
+  startAt: z.string().datetime(),
+  endAt: z.string().datetime(),
+  /** 0 = unlimited. Positive integer caps registrations. */
+  maxCapacity: z.number().int().min(0).max(10000).default(0),
+  /** Same video provider closed enum as the internal-meeting schema.
+   *  Optional — admin may run a session with no video link. */
+  videoProvider: z.enum(["google_meet", "teams", "zoom"]).optional(),
+  location: z.string().max(500).optional(),
+  notes: z.string().max(2000).optional(),
+  internalNotes: z.string().max(2000).optional(),
+  /** Optional registration cutoff. v1 stores it for future public
+   *  registration enforcement; doesn't gate anything today. */
+  registrationDeadline: z.string().datetime().optional(),
+  syncExternal: z.boolean().default(true),
+});
+
 export const slotsQuerySchema = z.object({
   serviceId: z.string().uuid(),
   staffUserId: z.string().uuid(),

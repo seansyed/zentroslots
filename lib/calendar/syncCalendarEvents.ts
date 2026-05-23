@@ -389,6 +389,66 @@ async function createOnMicrosoft(args: {
  * actually generate. If they mismatch, the event still creates on
  * the calendar but without a meeting link.
  */
+// ─── Group Session sync (Phase 17I-3A) ────────────────────────────────
+//
+// Group sessions ride the same Google/Microsoft/Zoom infrastructure as
+// calendar_events. The only delta vs an internal_meeting is the
+// SHAPE of attendance:
+//   • internal_meeting → multiple staff attendees, no customers
+//   • group_session    → one host, N CUSTOMER attendees (added later
+//                        via the future public registration flow)
+//
+// For v1 (admin-create only, no registrations yet) the external event
+// is simply the host's calendar entry with the title + optional
+// Teams/Meet/Zoom link. When the public registration flow ships, the
+// registration handler will add attendee emails to the same external
+// event — that's why we persist externalEventId on the group_sessions
+// row from this initial create.
+
+export type GroupSessionForSync = {
+  id: string;
+  title: string;
+  startAt: Date;
+  endAt: Date;
+  notes: string | null;
+  location: string | null;
+  videoProvider: "google_meet" | "teams" | "zoom" | null;
+};
+
+/** Push a group_session row to the host's external calendar. NEVER
+ *  throws. Mirror of onCalendarEventCreated but typed for the group-
+ *  session shape so we can extend the description footer and emit a
+ *  distinct log tag. */
+export async function onGroupSessionCreated(args: {
+  session: GroupSessionForSync;
+  host: User;
+}): Promise<CalendarEventSyncResult> {
+  // We synthesize a CalendarEventForSync record with eventType set to
+  // 'internal_meeting' purely so the shared helpers (createOnGoogle /
+  // createOnMicrosoft) treat it as an attendee-bearing event vs a
+  // hatched blocked-time slot. The description footer is overridden
+  // below to say "Group session" rather than "Internal meeting".
+  const event: CalendarEventForSync = {
+    id: args.session.id,
+    eventType: "internal_meeting",
+    title: args.session.title,
+    startAt: args.session.startAt,
+    endAt: args.session.endAt,
+    notes: args.session.notes,
+    location: args.session.location,
+    videoProvider: args.session.videoProvider,
+    sendNotifications: false, // no attendees yet; nothing to notify
+  };
+  // Delegate to the existing entry point. Empty attendees array → the
+  // host gets a clean entry on their own calendar. Future registration
+  // flow will PATCH the same externalEventId to add attendee emails.
+  return onCalendarEventCreated({
+    event,
+    organizer: args.host,
+    attendees: [],
+  });
+}
+
 export async function onCalendarEventCreated(args: {
   event: CalendarEventForSync;
   organizer: User;

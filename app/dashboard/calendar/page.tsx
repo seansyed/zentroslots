@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { and, desc, eq, gte, inArray, lt, or, sql } from "drizzle-orm";
 
 import { db } from "@/db/client";
-import { bookings, calendarEvents, services, tenants, users } from "@/db/schema";
+import { bookings, calendarEvents, groupSessions, services, tenants, users } from "@/db/schema";
 import { getSession, isManagerial } from "@/lib/auth";
 import CalendarView from "@/components/CalendarView";
 import Shell from "@/components/dashboard/Shell";
@@ -110,6 +110,43 @@ export default async function CalendarPage() {
     }
   }
 
+  // Phase 17I-3B — group_sessions for the same window. Visibility:
+  //   • managerial roles see every session in their tenant
+  //   • staff role sees sessions THEY host
+  // (Once attendees move into a dedicated registration table, that's
+  // when staff-as-attendee visibility joins the predicate.)
+  const sessionTenantOnly = eq(groupSessions.tenantId, user.tenantId);
+  const sessionVisibility = isManagerial(user.role)
+    ? sessionTenantOnly
+    : and(sessionTenantOnly, eq(groupSessions.hostUserId, user.id));
+
+  const sessionRows = await db
+    .select({
+      id: groupSessions.id,
+      title: groupSessions.title,
+      startAt: groupSessions.startAt,
+      endAt: groupSessions.endAt,
+      hostUserId: groupSessions.hostUserId,
+      hostName: users.name,
+      maxCapacity: groupSessions.maxCapacity,
+      currentRegistrations: groupSessions.currentRegistrations,
+      meetLink: groupSessions.meetLink,
+      location: groupSessions.location,
+      status: groupSessions.status,
+    })
+    .from(groupSessions)
+    .innerJoin(users, eq(users.id, groupSessions.hostUserId))
+    .where(
+      and(
+        sessionVisibility,
+        eq(groupSessions.status, "scheduled"),
+        gte(groupSessions.startAt, start),
+        lt(groupSessions.startAt, end),
+      ),
+    )
+    .orderBy(desc(groupSessions.startAt))
+    .limit(500);
+
   return (
     <Shell
       user={{ name: user.name, email: user.email, role: user.role }}
@@ -134,6 +171,18 @@ export default async function CalendarPage() {
           clientName: r.clientName,
           clientEmail: r.clientEmail,
           meetLink: r.meetLink ?? null,
+        }))}
+        groupSessions={sessionRows.map((g) => ({
+          id: g.id,
+          title: g.title,
+          startAt: g.startAt.toISOString(),
+          endAt: g.endAt.toISOString(),
+          hostId: g.hostUserId,
+          hostName: g.hostName,
+          maxCapacity: g.maxCapacity,
+          currentRegistrations: g.currentRegistrations,
+          meetLink: g.meetLink ?? null,
+          location: g.location ?? null,
         }))}
         calendarEvents={eventRowsRaw.map((e) => {
           const attendeeIds: string[] = Array.isArray(e.attendeeUserIds)
