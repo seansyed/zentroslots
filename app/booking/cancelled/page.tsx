@@ -132,8 +132,13 @@ export default async function PaymentCancelledPage({
       <div className="mt-6 flex flex-col sm:flex-row gap-2 w-full">
         {summary && (
           <>
+            {/* Try again → the same service's canonical public booking
+                URL (/u/<tenantSlug>/<serviceSlug>). NOT /book/<id> —
+                that route exists only as /book/<serviceId>/<staffId>
+                and would 404 here. The /u/ pattern is the one customers
+                originally arrived through. */}
             <Link
-              href={`/book/${summary.serviceId}`}
+              href={`/u/${summary.tenantSlug}/${summary.serviceSlug}`}
               className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-slate-800 transition-colors"
             >
               Try again
