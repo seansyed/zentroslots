@@ -184,6 +184,11 @@ function buildNav(
           { label: "Email log",      href: "/dashboard/emails",                  icon: Mail },
           { label: "Communications", href: "/dashboard/settings/communications", icon: Mail },
           { label: "Billing",        href: "/dashboard/billing",                 icon: Receipt },
+          // Wave H Phase 5 — tenant payment provider vault. Distinct
+          // from "Billing" (platform subscription) — this is the
+          // tenant's own Stripe/PayPal credentials for charging
+          // their customers directly.
+          { label: "Payments",       href: "/dashboard/settings/payments",       icon: CreditCard },
           { label: "Branding",       href: "/dashboard/settings/branding",       icon: Palette },
           { label: "Integrations",   href: "/dashboard/settings/integrations",   icon: Plug },
           { label: "Custom domain",  href: "/dashboard/settings/domain",         icon: Plug },
