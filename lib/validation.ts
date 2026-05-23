@@ -121,6 +121,62 @@ export const createAppointmentSchema = z
     path: ["customer"],
   });
 
+// ─── Phase 17I — calendar_events (blocked time + internal meeting) ────
+//
+// Single endpoint handles both; the discriminator + payload shape
+// differ enough that a union schema keeps validation honest.
+//
+// Blocked time fields:
+//   • title (e.g. "Lunch", "PTO")
+//   • staffUserId — whose calendar is blocked (admin/manager can
+//     specify any; staff is locked to self at the route layer)
+//   • startAt + endAt (or allDay)
+//   • notes / internalNotes
+//   • syncExternal — push to the connected external calendar
+//
+// Internal meeting fields (everything above PLUS):
+//   • attendeeUserIds — other staff participants (busy-time blocked)
+//   • videoProvider — optional Teams/Meet/Zoom link auto-create
+//   • location — free-form
+//
+// Both forms reject every customer-facing field (no customerId, no
+// serviceId, no payment toggles).
+const calendarEventBaseSchema = z.object({
+  title: z.string().min(1).max(255),
+  staffUserId: z.string().uuid(),
+  startAt: z.string().datetime(),
+  endAt: z.string().datetime(),
+  allDay: z.boolean().default(false),
+  notes: z.string().max(2000).optional(),
+  internalNotes: z.string().max(2000).optional(),
+  syncExternal: z.boolean().default(true),
+});
+
+export const createBlockedTimeSchema = calendarEventBaseSchema.extend({
+  eventType: z.literal("blocked_time"),
+});
+
+export const createInternalMeetingSchema = calendarEventBaseSchema.extend({
+  eventType: z.literal("internal_meeting"),
+  /** Other staff participants. Their availability is also blocked.
+   *  Empty array allowed — internal meeting with only the organizer
+   *  is a "solo focus block" use case. */
+  attendeeUserIds: z.array(z.string().uuid()).default([]),
+  /** When set, the calendar sync orchestrator passes videoConference:
+   *  true to the provider adapter, which spawns Teams/Meet/Zoom on
+   *  the event create. Requires the organizer's connected calendar
+   *  to support the chosen provider. */
+  videoProvider: z.enum(["google_meet", "teams", "zoom"]).optional(),
+  location: z.string().max(500).optional(),
+});
+
+/** Discriminated union — the endpoint picks the right schema from
+ *  the eventType field. */
+export const createCalendarEventSchema = z.discriminatedUnion("eventType", [
+  createBlockedTimeSchema,
+  createInternalMeetingSchema,
+]);
+
 export const slotsQuerySchema = z.object({
   serviceId: z.string().uuid(),
   staffUserId: z.string().uuid(),

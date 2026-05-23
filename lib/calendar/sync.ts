@@ -219,7 +219,10 @@ function retryDelayForAttempt(
 // but no functional break).
 const TOKEN_REFRESH_SAFETY_MS = 60_000;
 
-async function getMicrosoftAccessToken(
+// Exported (Phase 17I) so the calendar_events orchestrator can reuse
+// the same token cache + rolling-refresh logic without duplicating it.
+// Still private-by-convention to anything outside the calendar/* layer.
+export async function getMicrosoftAccessToken(
   conn: typeof calendarConnections.$inferSelect,
 ): Promise<string | null> {
   // Fast path: usable cached access token.

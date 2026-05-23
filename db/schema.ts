@@ -471,6 +471,64 @@ export const bookings = pgTable(
   })
 );
 
+// ─── Calendar Events (Phase 17H+) ────────────────────────────────────
+// Operational scheduling events that block staff availability but are
+// NOT customer-facing bookings:
+//   • blocked_time     — lunch, PTO, focus, tax-season blocking
+//   • internal_meeting — team standups, internal reviews
+//
+// Sibling to `bookings`. Never carries customer / payment / intake /
+// service fields. The availability engine reads BOTH tables to
+// compute a staff's busy set. Migration 0055.
+export const calendarEvents = pgTable(
+  "calendar_events",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    /** 'blocked_time' | 'internal_meeting' — closed enum at the app
+     *  layer; varchar so future types (focus_block, travel, etc.) can
+     *  be added without a Postgres enum migration. */
+    eventType: varchar("event_type", { length: 20 }).notNull(),
+    title: varchar("title", { length: 255 }).notNull(),
+    startAt: timestamp("start_at", { withTimezone: true }).notNull(),
+    endAt: timestamp("end_at", { withTimezone: true }).notNull(),
+    allDay: boolean("all_day").notNull().default(false),
+    /** Primary owner. Blocked_time: the blocked staff. Internal_meeting:
+     *  the organizer. Additional internal-meeting participants live in
+     *  attendeeUserIds. */
+    staffUserId: uuid("staff_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** jsonb array of user ids — participants for internal meetings;
+     *  empty array for blocked time. */
+    attendeeUserIds: jsonb("attendee_user_ids").notNull().default([]),
+    notes: text("notes"),
+    /** Admin/staff-only annotation, never surfaced on customer-facing
+     *  emails (none are sent for these events anyway). */
+    internalNotes: text("internal_notes"),
+    location: text("location"),
+    videoProvider: varchar("video_provider", { length: 20 }),
+    meetLink: text("meet_link"),
+    externalEventId: varchar("external_event_id", { length: 255 }),
+    externalEventProvider: varchar("external_event_provider", { length: 20 }),
+    /** When true, push to the organizer's connected external calendar.
+     *  Default true so the block shows up on the staff's Outlook/Google. */
+    syncExternal: boolean("sync_external").notNull().default(true),
+    createdByUserId: uuid("created_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    tenantIdx: index("calendar_events_tenant_idx").on(t.tenantId),
+    staffWindowIdx: index("calendar_events_staff_window_idx").on(t.staffUserId, t.startAt),
+    tenantWindowIdx: index("calendar_events_tenant_window_idx").on(t.tenantId, t.startAt, t.endAt),
+  }),
+);
+
 // ─── Availability Overrides ─────────────────────────────────────────────
 // Vacations, holidays, lunch breaks, custom one-off schedules.
 // Multiple rows per (user_id, date) supported for split-day schedules.
@@ -2095,6 +2153,9 @@ export type Availability = typeof availability.$inferSelect;
 export type NewAvailability = typeof availability.$inferInsert;
 export type Booking = typeof bookings.$inferSelect;
 export type NewBooking = typeof bookings.$inferInsert;
+// Phase 17H+ — calendar_events sibling table for blocked_time + internal_meeting
+export type CalendarEvent = typeof calendarEvents.$inferSelect;
+export type NewCalendarEvent = typeof calendarEvents.$inferInsert;
 export type AvailabilityOverride = typeof availabilityOverrides.$inferSelect;
 export type NewAvailabilityOverride = typeof availabilityOverrides.$inferInsert;
 export type AuditLog = typeof auditLogs.$inferSelect;
