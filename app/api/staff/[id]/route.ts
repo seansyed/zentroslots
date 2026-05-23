@@ -19,7 +19,7 @@ import {
   type DeliveryMode,
   type LocationType,
 } from "@/lib/workforce-location";
-import { isGoogleConnected } from "@/lib/calendar/connections";
+import { isGoogleConnected, isMicrosoftConnected } from "@/lib/calendar/connections";
 
 // Accept either a full http(s) URL OR a local upload path served by
 // Next out of /public — see /api/users/[id]/avatar (multipart upload
@@ -76,7 +76,7 @@ export async function GET(
     // `calendar_connections` table, not the legacy plaintext column.
     // Run it in parallel with the existing five queries to avoid
     // adding a serial round-trip.
-    const [assignedServices, weeklyRules, completed30, cancelled30, upcoming, locationRows, googleConnected] = await Promise.all([
+    const [assignedServices, weeklyRules, completed30, cancelled30, upcoming, locationRows, googleConnected, microsoftConnected] = await Promise.all([
       db
         .select({ id: services.id, name: services.name, durationMinutes: services.durationMinutes, color: services.color })
         .from(serviceStaff)
@@ -156,6 +156,11 @@ export async function GET(
       // Wave A — encrypted-connection-table source of truth for the
       // Google-connected flag. See lib/calendar/connections.ts.
       isGoogleConnected(id),
+      // Wave C — same source of truth, Microsoft side. Additive — old
+      // consumers reading only `googleConnected` continue to behave
+      // identically; new consumers can OR the two flags to render an
+      // accurate "any calendar connected" signal.
+      isMicrosoftConnected(id),
     ]);
 
     return NextResponse.json({
@@ -174,6 +179,7 @@ export async function GET(
         primaryLocationId: staff.primaryLocationId,
         departmentId: staff.departmentId,
         googleConnected,
+        microsoftConnected,
         // Workforce delivery mode (migration 0037). Defaults to
         // 'hybrid' for any staff predating the migration — most
         // permissive setting, no observable booking change.

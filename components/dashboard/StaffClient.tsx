@@ -92,6 +92,10 @@ type StaffRow = {
   publicDisplayName?: string | null;
   publicTitle?: string | null;
   googleConnected: boolean;
+  /** Wave C — additive: present when the staff has an active Microsoft
+   *  Outlook connection. Optional + defaulted false so older payloads
+   *  remain compatible. */
+  microsoftConnected?: boolean;
   upcomingCount: number;
   completedThisMonth: number;
   role?: "staff" | "manager" | "admin";
@@ -296,7 +300,9 @@ export default function StaffClient({
     const totalUpcoming = list.reduce((s, r) => s + r.upcomingCount, 0);
     const totalCompleted = list.reduce((s, r) => s + r.completedThisMonth, 0);
     const avgUpcoming = total > 0 ? Math.round(totalUpcoming / total) : 0;
-    const calendarConnected = list.filter((s) => s.googleConnected).length;
+    // Wave C — any healthy calendar connection counts toward coverage.
+    // OR-fold across providers so Microsoft-only staff aren't undercounted.
+    const calendarConnected = list.filter((s) => s.googleConnected || s.microsoftConnected).length;
     const calendarCoveragePct = total > 0 ? Math.round((calendarConnected / total) * 100) : 0;
     const managers = list.filter((s) => s.role === "manager").length;
     const managerRatioPct = total > 0 ? Math.round((managers / total) * 100) : 0;
@@ -999,7 +1005,7 @@ function StaffOpRow({
         <div className="hidden shrink-0 items-center gap-4 md:flex">
           <OpsStat icon={CalendarRange} value={staff.upcomingCount} label="upcoming" />
           <OpsStat icon={CheckCircle2} value={staff.completedThisMonth} label="this month" tone="positive" />
-          <CalendarPill connected={staff.googleConnected} />
+          <CalendarPill connected={staff.googleConnected || Boolean(staff.microsoftConnected)} />
         </div>
 
         <ChevronGlyph />

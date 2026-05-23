@@ -500,7 +500,16 @@ export default function CalendarConnectionsClient({
       {/* Supported provider catalog (Phase 17B refinement #2) —
           renders BEFORE distribution so even tenants with zero
           connections see what infrastructure speaks. */}
-      <ProviderCatalog activeProviders={kpis.providerDistribution.map((d) => d.provider)} />
+      <ProviderCatalog
+        // Normalize the canonical DB provider id ("microsoft") to the
+        // catalog's UI id ("outlook") so the Outlook tile lights up
+        // when a Microsoft connection exists. Mirrors the same
+        // alias used by the icon resolver at line 227 — keeping the
+        // mapping consistent across this component.
+        activeProviders={kpis.providerDistribution.map((d) =>
+          d.provider === "microsoft" ? "outlook" : d.provider,
+        )}
+      />
 
       {/* Provider distribution — only when we have real data */}
       {kpis.providerDistribution.length > 0 && (

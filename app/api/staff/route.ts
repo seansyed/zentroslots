@@ -39,6 +39,19 @@ export async function GET() {
             AND ${calendarConnections.provider} = 'google'
             AND ${calendarConnections.status} = 'active'
         )`,
+        // Wave C — Microsoft is a first-class calendar provider too.
+        // Mirrors the Google EXISTS subquery so downstream consumers
+        // (workspace KPI, calendar pill, coverage %) can treat any
+        // healthy calendar connection as "connected" instead of
+        // hard-coding Google. Additive — old consumers that only read
+        // `googleConnected` continue to behave identically.
+        microsoftConnected: sql<boolean>`EXISTS (
+          SELECT 1 FROM ${calendarConnections}
+          WHERE ${calendarConnections.userId} = ${users.id}
+            AND ${calendarConnections.tenantId} = ${users.tenantId}
+            AND ${calendarConnections.provider} = 'microsoft'
+            AND ${calendarConnections.status} = 'active'
+        )`,
         createdAt: users.createdAt,
       })
       .from(users)
