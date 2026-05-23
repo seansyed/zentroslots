@@ -93,16 +93,31 @@ export async function consumeOAuthStateCookie(
 
 // ─── Redirect URI construction ─────────────────────────────────────────
 
-/** Build the absolute callback URL using the incoming request's host
- *  (honors x-forwarded-host + x-forwarded-proto so it works behind the
- *  Caddy/nginx reverse proxy fronting app.zentromeet.com). */
-export function buildCallbackUrl(req: NextRequest, provider: OAuthProvider): string {
+/** Resolve the PUBLIC base URL of the incoming request (honors
+ *  x-forwarded-host + x-forwarded-proto). This is the only correct
+ *  way to build redirect URLs behind the Caddy/nginx proxy that
+ *  fronts app.zentromeet.com — `req.url` sees the internal
+ *  http://localhost:3001 origin and would land users on an
+ *  unreachable URL after an OAuth callback. */
+export function publicBaseUrl(req: NextRequest): string {
   const h = req.headers;
   const fwdHost = h.get("x-forwarded-host");
   const fwdProto = h.get("x-forwarded-proto");
   const host = (fwdHost ?? h.get("host") ?? "app.zentromeet.com").trim();
   const proto = (fwdProto ?? "https").trim();
-  return `${proto}://${host}/api/auth/oauth/${provider}/callback`;
+  return `${proto}://${host}`;
+}
+
+/** Build the absolute callback URL using the public base. */
+export function buildCallbackUrl(req: NextRequest, provider: OAuthProvider): string {
+  return `${publicBaseUrl(req)}/api/auth/oauth/${provider}/callback`;
+}
+
+/** Build an absolute URL for a same-origin path using the public base.
+ *  Use this instead of `new URL(path, req.url)` anywhere a redirect
+ *  target needs to round-trip back to the user's browser. */
+export function publicUrl(req: NextRequest, path: string): URL {
+  return new URL(path, publicBaseUrl(req));
 }
 
 // ─── Identity → session ────────────────────────────────────────────────

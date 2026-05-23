@@ -26,6 +26,7 @@ import {
   consumeOAuthStateCookie,
   findOrCreateUserForOAuth,
   issueOAuthSession,
+  publicUrl,
   safeNextPath,
 } from "@/lib/auth/oauth";
 
@@ -60,7 +61,9 @@ type MicrosoftIdTokenClaims = {
 };
 
 function loginError(req: NextRequest, code: string): NextResponse {
-  const target = new URL("/dashboard/login", req.url);
+  // Public-host redirect — see google/callback/route.ts for the
+  // reverse-proxy rationale.
+  const target = publicUrl(req, "/dashboard/login");
   target.searchParams.set("error", code);
   return NextResponse.redirect(target);
 }
@@ -154,7 +157,7 @@ export async function GET(req: NextRequest) {
 
   const nextCookie = req.cookies.get("zm_oauth_next")?.value;
   const nextPath = safeNextPath(nextCookie);
-  const res = NextResponse.redirect(new URL(nextPath, req.url));
+  const res = NextResponse.redirect(publicUrl(req, nextPath));
   res.cookies.delete("zm_oauth_next");
   return res;
 }

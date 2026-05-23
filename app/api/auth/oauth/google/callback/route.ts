@@ -24,6 +24,7 @@ import {
   consumeOAuthStateCookie,
   findOrCreateUserForOAuth,
   issueOAuthSession,
+  publicUrl,
   safeNextPath,
 } from "@/lib/auth/oauth";
 
@@ -50,7 +51,11 @@ type GoogleIdTokenClaims = {
 };
 
 function loginError(req: NextRequest, code: string): NextResponse {
-  const target = new URL("/dashboard/login", req.url);
+  // IMPORTANT: build the redirect against the PUBLIC host (Caddy/nginx
+  // forwarded host), NOT req.url — req.url resolves to the internal
+  // http://localhost:3001 origin behind the proxy and would land
+  // users on an unreachable URL.
+  const target = publicUrl(req, "/dashboard/login");
   target.searchParams.set("error", code);
   return NextResponse.redirect(target);
 }
@@ -158,7 +163,7 @@ export async function GET(req: NextRequest) {
   // Consume the `next` cookie if present; default to /dashboard.
   const nextCookie = req.cookies.get("zm_oauth_next")?.value;
   const nextPath = safeNextPath(nextCookie);
-  const res = NextResponse.redirect(new URL(nextPath, req.url));
+  const res = NextResponse.redirect(publicUrl(req, nextPath));
   res.cookies.delete("zm_oauth_next");
   return res;
 }
