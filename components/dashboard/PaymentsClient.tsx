@@ -20,13 +20,14 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   AlertCircle,
+  ArrowRight,
   Check,
   ChevronDown,
   ChevronRight,
   Copy,
   Loader2,
-  Plus,
   RefreshCw,
+  Settings2,
   ShieldAlert,
   ShieldCheck,
   Trash2,
@@ -419,6 +420,182 @@ function ActivationPanel({
   );
 }
 
+// ─── Slot grid (Wave H onboarding-refinement Phase 1) ────────────────
+//
+// One card per (provider × mode). There are exactly four possible
+// slots — Stripe Live, Stripe Test, PayPal Live, PayPal Test. The DB
+// unique index `tenant_payment_providers_tenant_provider_mode_key`
+// enforces this at the storage layer; the slot grid mirrors that
+// constraint visually so the admin can never see a "create new"
+// affordance for a slot that's already filled.
+//
+// Empty slot → onSetupSlot({provider, mode}) — parent opens the wizard.
+// Filled slot → onManageSlot(providerId)    — parent toggles inline mgmt.
+
+const SLOT_DEFS: Array<{
+  provider: Provider;
+  mode: Mode;
+  emptyTagline: string;
+}> = [
+  {
+    provider: "stripe",
+    mode: "live",
+    emptyTagline: "Accept card payments worldwide. Funds settle into your bank account.",
+  },
+  {
+    provider: "stripe",
+    mode: "test",
+    emptyTagline: "Sandbox testing — try the booking flow without real charges.",
+  },
+  {
+    provider: "paypal",
+    mode: "live",
+    emptyTagline: "PayPal + Venmo. Helpful for customers who prefer not to enter card details.",
+  },
+  {
+    provider: "paypal",
+    mode: "test",
+    emptyTagline: "PayPal sandbox — dry-run before going live.",
+  },
+];
+
+function SlotGrid({
+  providers,
+  managedProviderId,
+  onSetupSlot,
+  onManageSlot,
+}: {
+  providers: ProviderRow[];
+  managedProviderId: string | null;
+  onSetupSlot: (slot: { provider: Provider; mode: Mode }) => void;
+  onManageSlot: (providerId: string) => void;
+}) {
+  return (
+    <div>
+      <h3 className="text-sm font-semibold text-slate-900 mb-3">
+        Connected accounts
+      </h3>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        {SLOT_DEFS.map((slot) => {
+          const filled = providers.find(
+            (p) => p.provider === slot.provider && p.mode === slot.mode,
+          );
+          return (
+            <SlotCard
+              key={`${slot.provider}-${slot.mode}`}
+              slot={slot}
+              filled={filled ?? null}
+              isManaged={filled ? managedProviderId === filled.id : false}
+              onSetup={() => onSetupSlot({ provider: slot.provider, mode: slot.mode })}
+              onManage={() => filled && onManageSlot(filled.id)}
+            />
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function SlotCard({
+  slot,
+  filled,
+  isManaged,
+  onSetup,
+  onManage,
+}: {
+  slot: { provider: Provider; mode: Mode; emptyTagline: string };
+  filled: ProviderRow | null;
+  isManaged: boolean;
+  onSetup: () => void;
+  onManage: () => void;
+}) {
+  // Mode-driven left border tint — matches the existing per-provider
+  // card pattern in ProviderCard so the visual language stays coherent
+  // when the admin drills in.
+  const borderColor =
+    slot.mode === "live" ? "border-l-emerald-500" : "border-l-amber-500";
+
+  if (!filled) {
+    // Empty slot: tagline + "Set up →" CTA. Clicking enters the wizard
+    // with this (provider, mode) locked.
+    return (
+      <button
+        type="button"
+        onClick={onSetup}
+        className={`group text-left rounded-2xl border-l-4 ${borderColor} border border-slate-200 bg-white p-5 hover:border-slate-300 hover:shadow-sm transition-all`}
+      >
+        <div className="flex items-center gap-2 mb-2">
+          <ModeChip mode={slot.mode} />
+          <span className="text-base font-semibold text-slate-900">
+            {providerDisplayName(slot.provider)}
+          </span>
+        </div>
+        <p className="text-xs text-slate-600 leading-relaxed mb-4 min-h-[2.5rem]">
+          {slot.emptyTagline}
+        </p>
+        <div className="inline-flex items-center gap-1.5 text-sm font-medium text-slate-900 group-hover:text-slate-700">
+          Set up
+          <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
+        </div>
+      </button>
+    );
+  }
+
+  // Filled slot: status + account info + "Manage" CTA.
+  return (
+    <div
+      className={`rounded-2xl border-l-4 ${borderColor} border border-slate-200 bg-white p-5 ${isManaged ? "ring-2 ring-slate-900/10" : ""} ${!filled.enabled ? "opacity-60" : ""}`}
+    >
+      <div className="flex items-center gap-2 mb-2 flex-wrap">
+        <ModeChip mode={filled.mode} />
+        <span className="text-base font-semibold text-slate-900">
+          {providerDisplayName(filled.provider)}
+        </span>
+        <StatusPill status={filled.status} />
+      </div>
+      <div className="text-xs text-slate-600 space-y-0.5 mb-4 min-h-[2.5rem]">
+        {filled.accountLabel ? (
+          <div className="text-slate-900 font-medium truncate">{filled.accountLabel}</div>
+        ) : null}
+        <div className="flex flex-wrap gap-x-3 gap-y-0.5">
+          {filled.capabilities.country !== undefined && (
+            <span>{String(filled.capabilities.country).toUpperCase()}</span>
+          )}
+          {filled.capabilities.defaultCurrency !== undefined && (
+            <span>{String(filled.capabilities.defaultCurrency).toUpperCase()}</span>
+          )}
+          {filled.isDefault && (
+            <span className="text-blue-700 font-medium">Default for {filled.mode}</span>
+          )}
+        </div>
+      </div>
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-xs text-slate-500">
+          {filled.hasWebhookSecret ? (
+            <span className="inline-flex items-center gap-1">
+              <ShieldCheck className="h-3 w-3 text-emerald-600" />
+              Webhook configured
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1 text-amber-700">
+              <ShieldAlert className="h-3 w-3" />
+              Webhook not configured
+            </span>
+          )}
+        </div>
+        <button
+          type="button"
+          onClick={onManage}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 transition-colors"
+        >
+          <Settings2 className="h-3.5 w-3.5" />
+          {isManaged ? "Close" : "Manage"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main client ──────────────────────────────────────────────────────
 
 export default function PaymentsClient({
@@ -427,7 +604,14 @@ export default function PaymentsClient({
   useTenantPaymentProviders,
 }: Props) {
   const [providers, setProviders] = useState(initialProviders);
-  const [showAdd, setShowAdd] = useState(false);
+  // setupSlot: when an admin clicks "Set up" on an empty grid slot, we
+  // open the AddProviderModal with that (provider, mode) pre-locked.
+  // The slot identity is the duplicate-prevention layer at the UX.
+  const [setupSlot, setSetupSlot] = useState<{ provider: Provider; mode: Mode } | null>(null);
+  // managedProviderId: when an admin clicks "Manage" on a filled slot,
+  // we render the ProviderCard for that one provider below the grid.
+  // Phase 3 will replace this inline panel with a proper side drawer.
+  const [managedProviderId, setManagedProviderId] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -525,13 +709,12 @@ export default function PaymentsClient({
               directly — ZentroMeet never appears in the money path.
             </p>
           </div>
-          <button
-            type="button"
-            onClick={() => setShowAdd(true)}
-            className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 transition-colors shadow-sm"
-          >
-            <Plus className="h-4 w-4" /> Add provider
-          </button>
+          {/* Phase 1 onboarding-refinement: the global "Add provider"
+              button is gone. Each empty slot in the grid below carries
+              its own "Set up" CTA so admins enter through a specific
+              (provider, mode) — duplicate creation becomes impossible
+              at the UX layer (the DB unique index is still the hard
+              backstop). */}
         </div>
         {/* Defaults summary */}
         <div className="mt-4 flex flex-wrap gap-4 text-sm">
@@ -583,48 +766,64 @@ export default function PaymentsClient({
         </div>
       )}
 
-      {/* Provider list */}
-      {sortedProviders.length === 0 ? (
-        <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-12 text-center">
-          <div className="mx-auto h-12 w-12 rounded-full bg-slate-100 flex items-center justify-center">
-            <Plus className="h-6 w-6 text-slate-400" />
-          </div>
-          <h3 className="mt-4 text-base font-medium text-slate-900">No providers yet</h3>
-          <p className="mt-1 text-sm text-slate-600 max-w-md mx-auto">
-            Add your Stripe or PayPal account to start accepting payments
-            directly through your booking flow.
-          </p>
-          <button
-            type="button"
-            onClick={() => setShowAdd(true)}
-            className="mt-4 inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 transition-colors"
-          >
-            <Plus className="h-4 w-4" /> Add provider
-          </button>
-        </div>
-      ) : (
-        <div className="space-y-3">
-          {sortedProviders.map((p) => (
-            <ProviderCard
-              key={p.id}
-              provider={p}
-              appBaseUrl={appBaseUrl}
-              busyId={busyId}
-              setBusyId={setBusyId}
-              setError={setError}
-              setSuccess={setSuccess}
-              refresh={refresh}
-            />
-          ))}
-        </div>
-      )}
+      {/* Slot grid — Wave H onboarding-refinement Phase 1.
+          One card per (provider × mode). Empty slot → wizard; filled
+          slot → inline Manage panel (replaced by a side drawer in
+          Phase 3). The 4-slot model makes duplicate prevention visual:
+          a filled slot never shows a "Set up" CTA, only "Manage". */}
+      <SlotGrid
+        providers={providers}
+        managedProviderId={managedProviderId}
+        onSetupSlot={(slot) => setSetupSlot(slot)}
+        onManageSlot={(providerId) =>
+          // Toggle: clicking Manage on the already-managed slot collapses it.
+          setManagedProviderId((cur) => (cur === providerId ? null : providerId))
+        }
+      />
 
-      {/* Add modal */}
-      {showAdd && (
+      {/* Inline manage panel — Phase 1 placeholder. The Phase 3 commit
+          replaces this with a side drawer matching the existing
+          operational-drawer pattern. */}
+      {managedProviderId &&
+        (() => {
+          const p = providers.find((x) => x.id === managedProviderId);
+          if (!p) return null;
+          return (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-medium text-slate-700">
+                  Managing {providerDisplayName(p.provider)} {p.mode.toUpperCase()}
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => setManagedProviderId(null)}
+                  className="text-xs text-slate-500 hover:text-slate-900"
+                >
+                  Close
+                </button>
+              </div>
+              <ProviderCard
+                key={p.id}
+                provider={p}
+                appBaseUrl={appBaseUrl}
+                busyId={busyId}
+                setBusyId={setBusyId}
+                setError={setError}
+                setSuccess={setSuccess}
+                refresh={refresh}
+              />
+            </div>
+          );
+        })()}
+
+      {/* Setup wizard (Phase 2 will swap this implementation; for now
+          we reuse the existing AddProviderModal with the slot locked). */}
+      {setupSlot && (
         <AddProviderModal
-          onClose={() => setShowAdd(false)}
+          seedSlot={setupSlot}
+          onClose={() => setSetupSlot(null)}
           onSuccess={async (msg) => {
-            setShowAdd(false);
+            setSetupSlot(null);
             setSuccess(msg);
             await refresh();
           }}
@@ -1059,14 +1258,21 @@ function AddProviderModal({
   onClose,
   onSuccess,
   onError,
+  seedSlot,
 }: {
   onClose: () => void;
   onSuccess: (msg: string) => Promise<void>;
   onError: (msg: string) => void;
+  /** When supplied (Phase 1+ slot-grid entry path), the modal locks
+   *  provider+mode to this pair and hides the picker entirely. Prevents
+   *  duplicate (provider, mode) creation at the UX layer — the DB
+   *  unique index + ON CONFLICT DO UPDATE in upsertProvider() are the
+   *  hard backstop. */
+  seedSlot?: { provider: Provider; mode: Mode };
 }) {
   const [step, setStep] = useState<1 | 2>(1);
-  const [provider, setProvider] = useState<Provider>("stripe");
-  const [mode, setMode] = useState<Mode>("live");
+  const [provider, setProvider] = useState<Provider>(seedSlot?.provider ?? "stripe");
+  const [mode, setMode] = useState<Mode>(seedSlot?.mode ?? "live");
   const [accountLabel, setAccountLabel] = useState("");
   const [secret, setSecret] = useState("");
   const [publishableKey, setPublishableKey] = useState("");
@@ -1142,48 +1348,62 @@ function AddProviderModal({
         <div className="p-5 space-y-4">
           {step === 1 ? (
             <>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">Provider</label>
-                  <div className="grid grid-cols-2 gap-2">
-                    {(["stripe", "paypal"] as Provider[]).map((p) => (
-                      <button
-                        key={p}
-                        type="button"
-                        onClick={() => setProvider(p)}
-                        className={`rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
-                          provider === p
-                            ? "border-slate-900 bg-slate-900 text-white"
-                            : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
-                        }`}
-                      >
-                        {providerDisplayName(p)}
-                      </button>
-                    ))}
+              {seedSlot ? (
+                // Slot-grid entry: provider+mode are locked. Show a
+                // read-only summary chip instead of the picker. Prevents
+                // accidental duplicate creation since the slot is the
+                // identity here, not user input.
+                <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                  <span className="text-xs font-medium text-slate-600 uppercase tracking-wide">Setting up</span>
+                  <ModeChip mode={seedSlot.mode} />
+                  <span className="text-sm font-semibold text-slate-900">
+                    {providerDisplayName(seedSlot.provider)}
+                  </span>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">Provider</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {(["stripe", "paypal"] as Provider[]).map((p) => (
+                        <button
+                          key={p}
+                          type="button"
+                          onClick={() => setProvider(p)}
+                          className={`rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
+                            provider === p
+                              ? "border-slate-900 bg-slate-900 text-white"
+                              : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                          }`}
+                        >
+                          {providerDisplayName(p)}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">Mode</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {(["live", "test"] as Mode[]).map((m) => (
+                        <button
+                          key={m}
+                          type="button"
+                          onClick={() => setMode(m)}
+                          className={`rounded-lg border px-3 py-2 text-sm font-medium uppercase transition-colors ${
+                            mode === m
+                              ? m === "live"
+                                ? "border-emerald-500 bg-emerald-50 text-emerald-800"
+                                : "border-amber-500 bg-amber-50 text-amber-800"
+                              : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                          }`}
+                        >
+                          {m}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">Mode</label>
-                  <div className="grid grid-cols-2 gap-2">
-                    {(["live", "test"] as Mode[]).map((m) => (
-                      <button
-                        key={m}
-                        type="button"
-                        onClick={() => setMode(m)}
-                        className={`rounded-lg border px-3 py-2 text-sm font-medium uppercase transition-colors ${
-                          mode === m
-                            ? m === "live"
-                              ? "border-emerald-500 bg-emerald-50 text-emerald-800"
-                              : "border-amber-500 bg-amber-50 text-amber-800"
-                            : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
-                        }`}
-                      >
-                        {m}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
+              )}
               <div>
                 <label className="block text-xs font-medium text-slate-700 mb-1">Account label (optional)</label>
                 <input
