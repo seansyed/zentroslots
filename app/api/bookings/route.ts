@@ -560,45 +560,82 @@ export async function POST(req: NextRequest) {
     const wantVideo =
       (service.videoProvider === "google_meet" || service.videoProvider === "teams") &&
       features.googleMeet;
-    try {
-      const result = await onBookingCreated({
-        booking: row,
-        staff,
-        serviceName: service.name,
-        videoConference: wantVideo,
-        videoProviderHint: service.videoProvider,
-      });
-      if (result.status === "ok" && result.eventId) {
-        // Reflect orchestrator's writes back onto the in-memory row so
-        // the response carries them. `externalEventProvider` mirrors
-        // whichever adapter actually serviced the create — could be
-        // google or microsoft.
-        row.externalEventId = result.eventId;
-        row.externalEventProvider = result.provider;
-        if (result.provider === "google") row.googleEventId = result.eventId;
-        if (result.meetLink) row.meetLink = result.meetLink;
-      }
-    } catch (gErr) {
-      // Defense in depth: the orchestrator never throws, but if a bug
-      // makes it, the booking still stays committed.
-      console.error("Calendar sync create failed (booking kept):", gErr);
-    }
 
-    // Confirmation email routed through the central automation engine,
-    // which handles: customer-pref gate, idempotency, template
-    // resolution (service → tenant → system fallback), variable
-    // rendering, .ics attachment, and structured delivery logging.
-    // Wrapped in try/catch so a failing mailer NEVER blocks the booking.
-    try {
-      await triggerAutomation({
-        tenantId,
-        bookingId: row.id,
-        eventType: "appointment.created",
-        attachIcs: true,
+    // ── Fire-and-forget calendar sync + confirmation email ──────────
+    //
+    // We deliberately DO NOT `await` the calendar sync. Microsoft
+    // Graph and (occasionally) Google can take 5–60s on cold
+    // App Registrations or under throttling. The customer is staring
+    // at a "Confirming…" spinner during that whole window; their
+    // browser/proxy times out around 30–60s and they retry, which
+    // hammers Graph with duplicate event creates (each retry passes
+    // the same clientRequestId but Graph's idempotency is best-
+    // effort — we've seen 3+ duplicate Outlook events from a single
+    // logical create when the round-trip exceeds 30s).
+    //
+    // Architectural correctness:
+    //   • The booking row is already committed in the DB above with
+    //     status='confirmed' — the customer's slot is locked in.
+    //   • onBookingCreated() persists externalEventId + meetLink
+    //     directly to the booking row when Graph responds, so the
+    //     confirmation page's polling + the eventual email pickup
+    //     converge on the right data without us holding the response.
+    //   • triggerAutomation() reads the booking row fresh at send
+    //     time, so chaining it AFTER the calendar sync means the
+    //     email body includes the Teams/Meet link even though we've
+    //     already returned to the customer.
+    //   • The drift scanner cron repairs any sync that never
+    //     completed (network blip, etc.) within 30 min.
+    //
+    // The orchestrator NEVER throws (catches its own errors and
+    // writes to calendar_sync_logs), so the .catch() below only
+    // fires on truly unexpected failures.
+    void onBookingCreated({
+      booking: row,
+      staff,
+      serviceName: service.name,
+      videoConference: wantVideo,
+      videoProviderHint: service.videoProvider,
+    })
+      .then((result) => {
+        if (result.status === "ok" && result.eventId) {
+          // Persist the orchestrator's results to the booking row so
+          // future reads (status poll, email render, dashboard view)
+          // see the externalEventId + meetLink.
+          return db
+            .update(bookings)
+            .set({
+              externalEventId: result.eventId,
+              externalEventProvider: result.provider,
+              ...(result.provider === "google" ? { googleEventId: result.eventId } : {}),
+              ...(result.meetLink ? { meetLink: result.meetLink } : {}),
+              updatedAt: new Date(),
+            })
+            .where(eq(bookings.id, row.id));
+        }
+        return undefined;
+      })
+      .then(() =>
+        // Confirmation email routed through the central automation
+        // engine, which handles: customer-pref gate, idempotency,
+        // template resolution (service → tenant → system fallback),
+        // variable rendering, .ics attachment, and structured
+        // delivery logging. Runs AFTER the calendar sync update so
+        // the email template renders with the live meet_link.
+        triggerAutomation({
+          tenantId,
+          bookingId: row.id,
+          eventType: "appointment.created",
+          attachIcs: true,
+        }),
+      )
+      .catch((bgErr) => {
+        // Defense in depth: even though the orchestrator + automation
+        // engine both catch their own errors internally, log here so
+        // a stack-trace surface remains for ops without throwing on
+        // the now-detached promise (which would unhandledRejection).
+        console.error("Booking post-create background chain failed:", bgErr);
       });
-    } catch (eErr) {
-      console.error("Confirmation automation failed (booking kept):", eErr);
-    }
 
     // Best-effort customer upsert — make every public booking promote
     // the client to a first-class CRM record. Wrapped in try/catch so a
