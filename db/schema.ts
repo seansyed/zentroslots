@@ -83,6 +83,16 @@ export const tenants = pgTable(
     // Plan-gated: when true and plan allows, embed footer hides "Powered by"
     hidePoweredBy: boolean("hide_powered_by").notNull().default(false),
 
+    // Wave H — feature flag for the tenant-owned payment vault (migration
+    // 0050). When false (default), paid bookings continue to flow through
+    // the legacy platform-charge code path. When true, the booking POST
+    // looks up the tenant's default payment provider, instantiates the
+    // adapter with the tenant's credentials, and creates a checkout
+    // session directly on the tenant's account. Money never touches
+    // ZentroMeet. Flag flipped per-tenant by super-admin during Phase 6
+    // opt-in rollout.
+    useTenantPaymentProviders: boolean("use_tenant_payment_providers").notNull().default(false),
+
     // ── Default workspace hours (migration 0034) ──
     // Tenant-level fallback weekly schedule. Staff with no rows in
     // the `availability` table inherit this. Staff WITH per-user
@@ -417,6 +427,21 @@ export const bookings = pgTable(
     /** Charged cents at confirmation. Source of truth for refunds. */
     amountChargedCents: integer("amount_charged_cents"),
 
+    // ── Wave H — tenant-owned payment provider linkage (migration 0050) ──
+    // NULL on:
+    //   • Every booking created BEFORE Wave H deployment
+    //   • Free bookings (no payment provider needed)
+    //   • Tenants where `tenants.use_tenant_payment_providers = false`
+    //     (the legacy platform-charge path still creates the row)
+    //
+    // Set on Wave H paid bookings to record which tenant_payment_providers
+    // row created the checkout. The Phase 4 webhook receiver uses this
+    // to validate that an incoming event's provider matches what
+    // created the booking — prevents cross-provider spoofing. ON DELETE
+    // SET NULL so deleting a provider row preserves booking history
+    // (the row goes back to "unattributed" rather than cascading away).
+    paymentProviderId: uuid("payment_provider_id"),
+
     // ── Customer feedback loop (migration 0043) — additive, nullable ──
     /** F30: free-text reason captured on /cancel/[token]. NULL when
      *  unspecified. No PII enforcement — surfaced only in CRM. */
@@ -469,12 +494,108 @@ export const availabilityOverrides = pgTable(
   })
 );
 
+// ─── Wave H — Tenant Payment Provider Vault (migration 0050) ────────────
+// One row per (tenant, provider, mode). Secrets stored as v1: envelopes
+// from lib/crypto.encryptSecret. See db/migrations/0050_tenant_payment
+// _providers.sql for the full column-level commentary — these
+// definitions mirror that DDL.
+
+export const tenantPaymentProviders = pgTable(
+  "tenant_payment_providers",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    /** 'stripe' today; 'paypal' Phase 2; 'square'/'authorize_net' future.
+     *  Varchar (not enum) so additions don't require enum migration. */
+    provider: varchar("provider", { length: 20 }).notNull(),
+    /** 'live' | 'test' — tenant can configure both in parallel. */
+    mode: varchar("mode", { length: 10 }).notNull().default("live"),
+    /** Tenant-chosen display name. Never used as credential. */
+    accountLabel: varchar("account_label", { length: 120 }).notNull().default(""),
+
+    // ── Credentials (all v1: envelopes from lib/crypto.encryptSecret) ──
+    /** Master credential: Stripe secret key / PayPal client_secret. Never
+     *  decrypted on a path that returns to the client. */
+    secretEncrypted: text("secret_encrypted").notNull(),
+    /** Stripe publishable key — safe to expose, stored plaintext for UI. */
+    publishableKey: text("publishable_key"),
+    /** PayPal client_id — semi-public, stored plaintext. */
+    clientId: text("client_id"),
+    /** Webhook signing secret (Stripe whsec_… / PayPal webhook_id).
+     *  Encrypted because some providers treat it as credential-grade. */
+    webhookSecretEncrypted: text("webhook_secret_encrypted"),
+
+    // ── Connection state ──
+    /** 'pending' | 'verified' | 'invalid' | 'disabled' */
+    status: varchar("status", { length: 20 }).notNull().default("pending"),
+    lastVerifiedAt: timestamp("last_verified_at", { withTimezone: true }),
+    lastError: text("last_error"),
+    lastErrorAt: timestamp("last_error_at", { withTimezone: true }),
+
+    /** Provider-reported capabilities from validateCredentials(). */
+    capabilities: jsonb("capabilities").notNull().default({}),
+
+    /** Partial unique index in migration enforces exactly one per
+     *  (tenant, mode) where is_default = true. */
+    isDefault: boolean("is_default").notNull().default(false),
+    /** Soft toggle. Disabled providers preserved for audit. */
+    enabled: boolean("enabled").notNull().default(true),
+
+    /** Updated by webhook receiver (Phase 4) on every classified 'paid'
+     *  event. Surfaces "last paid 2h ago" in dashboard health card. */
+    lastPaymentEventAt: timestamp("last_payment_event_at", { withTimezone: true }),
+
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    createdByUserId: uuid("created_by_user_id"),
+  },
+  (t) => ({
+    /** Re-saving a provider overwrites in place rather than duplicating. */
+    tenantProviderModeUq: uniqueIndex("tenant_payment_providers_tenant_provider_mode_key")
+      .on(t.tenantId, t.provider, t.mode),
+  })
+);
+
+export const tenantPaymentWebhookEvents = pgTable(
+  "tenant_payment_webhook_events",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    providerId: uuid("provider_id")
+      .notNull()
+      .references(() => tenantPaymentProviders.id, { onDelete: "cascade" }),
+    provider: varchar("provider", { length: 20 }).notNull(),
+    /** Provider's event id (Stripe evt_…, PayPal event id). The UNIQUE
+     *  on (provider_id, external_event_id) gives us idempotent dedup
+     *  across replays without colliding with processed_stripe_events. */
+    externalEventId: varchar("external_event_id", { length: 255 }).notNull(),
+    eventType: varchar("event_type", { length: 80 }).notNull(),
+    /** Set when classifier resolved a booking; NULL otherwise. */
+    bookingId: uuid("booking_id"),
+    /** 'received' | 'processed' | 'invalid_signature' | 'replay' | 'unhandled' */
+    status: varchar("status", { length: 20 }).notNull(),
+    error: text("error"),
+    receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    providerEventUq: uniqueIndex("tenant_payment_webhook_events_provider_event_key")
+      .on(t.providerId, t.externalEventId),
+    tenantReceivedIdx: index("tenant_payment_webhook_events_tenant_idx")
+      .on(t.tenantId, t.receivedAt),
+  })
+);
+
 // ─── Relations ──────────────────────────────────────────────────────────
 
 export const tenantsRelations = relations(tenants, ({ many }) => ({
   users: many(users),
   services: many(services),
   bookings: many(bookings),
+  paymentProviders: many(tenantPaymentProviders),
 }));
 
 export const usersRelations = relations(users, ({ one, many }) => ({
@@ -505,7 +626,36 @@ export const bookingsRelations = relations(bookings, ({ one }) => ({
   service: one(services, { fields: [bookings.serviceId], references: [services.id] }),
   staff: one(users, { fields: [bookings.staffUserId], references: [users.id] }),
   tenant: one(tenants, { fields: [bookings.tenantId], references: [tenants.id] }),
+  paymentProvider: one(tenantPaymentProviders, {
+    fields: [bookings.paymentProviderId],
+    references: [tenantPaymentProviders.id],
+  }),
 }));
+
+export const tenantPaymentProvidersRelations = relations(
+  tenantPaymentProviders,
+  ({ one, many }) => ({
+    tenant: one(tenants, {
+      fields: [tenantPaymentProviders.tenantId],
+      references: [tenants.id],
+    }),
+    webhookEvents: many(tenantPaymentWebhookEvents),
+  })
+);
+
+export const tenantPaymentWebhookEventsRelations = relations(
+  tenantPaymentWebhookEvents,
+  ({ one }) => ({
+    tenant: one(tenants, {
+      fields: [tenantPaymentWebhookEvents.tenantId],
+      references: [tenants.id],
+    }),
+    provider: one(tenantPaymentProviders, {
+      fields: [tenantPaymentWebhookEvents.providerId],
+      references: [tenantPaymentProviders.id],
+    }),
+  })
+);
 
 export const availabilityOverridesRelations = relations(availabilityOverrides, ({ one }) => ({
   user: one(users, { fields: [availabilityOverrides.userId], references: [users.id] }),
@@ -1891,3 +2041,8 @@ export type TenantGovernanceSettings = typeof tenantGovernanceSettings.$inferSel
 export type NewTenantGovernanceSettings = typeof tenantGovernanceSettings.$inferInsert;
 export type ExportAuditEvent = typeof exportAuditEvents.$inferSelect;
 export type NewExportAuditEvent = typeof exportAuditEvents.$inferInsert;
+// Wave H — tenant payment provider vault (migration 0050)
+export type TenantPaymentProvider = typeof tenantPaymentProviders.$inferSelect;
+export type NewTenantPaymentProvider = typeof tenantPaymentProviders.$inferInsert;
+export type TenantPaymentWebhookEvent = typeof tenantPaymentWebhookEvents.$inferSelect;
+export type NewTenantPaymentWebhookEvent = typeof tenantPaymentWebhookEvents.$inferInsert;
