@@ -1,8 +1,63 @@
 import Link from "next/link";
+import { headers } from "next/headers";
+import { redirect } from "next/navigation";
 import MarketingNav from "@/components/MarketingNav";
 import Footer from "@/components/Footer";
 
-export default function HomePage() {
+/**
+ * Root route — host-aware dispatch (Phase 17I-6).
+ *
+ * Two domains resolve to the same Next.js process via the upstream
+ * reverse proxy:
+ *
+ *   zentromeet.com       → marketing (this file's JSX below)
+ *   app.zentromeet.com   → application
+ *
+ * The application subdomain must NEVER render marketing content. We
+ * detect the host on the server, and for any `app.*` host we redirect
+ * straight to /dashboard. The existing /dashboard page already
+ * handles its own auth gate (`if (!session) redirect("/dashboard/
+ * login")`), so:
+ *
+ *   app.* + signed in   → /dashboard
+ *   app.* + signed out  → /dashboard → /dashboard/login
+ *   zentromeet.com + *  → marketing (byte-identical to before)
+ *
+ * Why detect on the SERVER rather than middleware:
+ *   • This route is the only one that renders marketing-only chrome
+ *     at the root path; every other route (/u/*, /dashboard/*,
+ *     /reschedule/*, /reset-password/*, etc.) is already correctly
+ *     host-agnostic.
+ *   • A middleware change touches the whole app surface; a one-line
+ *     redirect here is strictly additive.
+ *
+ * Host matching rule:
+ *   Any incoming host beginning with `app.` (case-insensitive) is
+ *   treated as the application domain. This covers app.zentromeet.com
+ *   and any future white-label app subdomain (app.<custom>.com).
+ *   Marketing rendering is unchanged for every other host.
+ */
+async function isAppSubdomain(): Promise<boolean> {
+  const h = await headers();
+  // Prefer the proxy-forwarded host when Caddy/nginx sits in front;
+  // fall back to the direct host header otherwise. Lowercased to be
+  // case-insensitive.
+  const raw =
+    h.get("x-forwarded-host")?.toLowerCase() ?? h.get("host")?.toLowerCase() ?? "";
+  // Strip a possible port suffix (e.g. "app.zentromeet.com:443") for
+  // clean prefix matching.
+  const host = raw.split(":")[0];
+  return host.startsWith("app.");
+}
+
+export default async function HomePage() {
+  if (await isAppSubdomain()) {
+    // /dashboard handles its own auth gate — when no session it
+    // redirects to /dashboard/login. So a single redirect from here
+    // covers both authenticated and unauthenticated visitors.
+    redirect("/dashboard");
+  }
+
   return (
     <div className="min-h-screen bg-white">
       <MarketingNav />
