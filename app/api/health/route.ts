@@ -620,6 +620,50 @@ export async function GET() {
     }
   }
 
+  // ─── Wave H Operational Hardening — tenant_payment_vault ───────
+  // Cross-tenant aggregate counts. No tenant ids, no provider ids,
+  // no customer data. Safe for public health endpoint exposure.
+  //
+  // ok=true when no operational alarms fire. Stale-verify and orphan
+  // counts are surfaced as metrics but don't toggle ok=false on
+  // their own — those are informational signals, not outages.
+  //
+  // Lightweight: 8 indexed COUNT queries running in parallel inside
+  // getGlobalPaymentVaultMetrics(). Each is sub-millisecond on the
+  // current data volume. Soft-fails internally — never throws.
+  {
+    const start = Date.now();
+    try {
+      const { getGlobalPaymentVaultMetrics, paymentVaultHealthOk } = await import(
+        "@/lib/payments/opsMetrics"
+      );
+      const metrics = await getGlobalPaymentVaultMetrics();
+      const ok = paymentVaultHealthOk(metrics);
+      checks.tenant_payment_vault = {
+        ok,
+        ms: Date.now() - start,
+        detail: `${metrics.providersStaleVerify7d} stale, ${metrics.providersWebhookFailing} failing, ${metrics.pendingPaymentBacklog} backlog`,
+      };
+      // Attach metrics for graphability. Done as a property bag on
+      // the check entry so existing /api/health consumers (load
+      // balancers reading just `ok`) are unaffected.
+      (checks.tenant_payment_vault as Record<string, unknown>).metrics = metrics;
+      if (!ok) {
+        allOk = false;
+        log.error("health:tenant_payment_vault_degraded", metrics);
+      }
+    } catch (e) {
+      // Hard error in the aggregator itself — soft-fail so the
+      // health endpoint stays green for legacy components. Logged so
+      // ops sees the failure.
+      checks.tenant_payment_vault = {
+        ok: true,
+        ms: Date.now() - start,
+        detail: `metrics unavailable: ${(e as Error).message.slice(0, 120)}`,
+      };
+    }
+  }
+
   return NextResponse.json(
     {
       ok: allOk,

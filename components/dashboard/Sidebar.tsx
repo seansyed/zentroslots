@@ -220,11 +220,22 @@ function buildNav(
       : []),
   ];
 
+  // Operational Hardening Wave — admin-only "Operations" group for
+  // observability + safety-net tools that aren't settings. Currently
+  // holds Payment ops; future ops tools (sync inspectors, etc.) land
+  // here too. Group is hidden entirely for non-admins.
+  const operations: Item[] = role === "admin"
+    ? [
+        { label: "Payment ops", href: "/dashboard/operations/payments", icon: Activity },
+      ]
+    : [];
+
   const groups: Group[] = [
-    { id: "operate",   label: "Operate",   items: operate },
-    { id: "crm",       label: "CRM",       items: crm },
-    { id: "booking",   label: "Booking",   items: booking },
-    { id: "workspace", label: "Workspace", items: workspace },
+    { id: "operate",    label: "Operate",    items: operate },
+    { id: "crm",        label: "CRM",        items: crm },
+    { id: "booking",    label: "Booking",    items: booking },
+    { id: "workspace",  label: "Workspace",  items: workspace },
+    { id: "operations", label: "Operations", items: operations },
     {
       id: "advanced",
       label: "Advanced",
