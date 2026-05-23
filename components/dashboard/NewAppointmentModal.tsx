@@ -176,8 +176,24 @@ export default function NewAppointmentModal({
         }
         if (stRes.ok) {
           const stData = await stRes.json();
-          // /api/staff returns { staff: [...] }
-          setStaff(stData.staff ?? []);
+          // /api/staff returns a raw array (admin/manager/staff rows
+          // for this tenant, with stats appended). Defensively accept
+          // a wrapped { staff: [...] } shape too in case a future
+          // refactor changes the contract — both forms become the
+          // same StaffLite[] for the picker.
+          const list: StaffLite[] = Array.isArray(stData)
+            ? stData
+            : Array.isArray(stData?.staff)
+            ? stData.staff
+            : [];
+          setStaff(
+            list.map((u) => ({
+              id: u.id,
+              name: u.name,
+              email: u.email,
+              role: u.role,
+            })),
+          );
         }
       } catch (e) {
         console.warn("[NewAppointmentModal] load failed:", e);
