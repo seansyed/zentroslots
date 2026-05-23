@@ -83,6 +83,17 @@ export function clearIntakeDraft() {
   document.cookie = `${COOKIE_NAME}=; path=/; max-age=0; samesite=lax`;
 }
 
+/** Public helper: same client-side validation, used both by the
+ *  standalone IntakeStep and by BookingFlow when it submits the
+ *  combined confirm-step form. Exported so the caller can run it
+ *  inline against its existing submit handler. */
+export function validateIntakeResponsesClient(
+  fields: PublicField[],
+  values: Record<string, unknown>,
+): Record<string, string> {
+  return validateClientSide(fields, values);
+}
+
 function validateClientSide(
   fields: PublicField[],
   values: Record<string, unknown>,
@@ -246,6 +257,19 @@ export default function IntakeStep({
 }
 
 // ─── Field row ────────────────────────────────────────────────────────
+// Exported so BookingFlow can render the same fields inline alongside
+// the standard Name/Email/Notes inputs in the confirm step.
+
+export function IntakeFieldRow(props: {
+  field: PublicField;
+  value: unknown;
+  error?: string;
+  onChange: (v: unknown) => void;
+  onBlur: () => void;
+  accent: string;
+}) {
+  return <FieldRow {...props} />;
+}
 
 function FieldRow({
   field,

@@ -15,8 +15,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { formatInTimeZone } from "date-fns-tz";
 import { Skeleton, toast } from "@/components/ui/primitives";
-import IntakeStep, {
+import {
   clearIntakeDraft,
+  IntakeFieldRow,
+  validateIntakeResponsesClient,
+  type PublicField,
   type PublicForm,
 } from "@/components/booking/IntakeStep";
 
@@ -50,7 +53,7 @@ type Props = {
   defaultClientEmail?: string;
 };
 
-type Step = "pick-time" | "intake" | "confirm" | "done";
+type Step = "pick-time" | "confirm" | "done";
 
 const DEFAULT_ACCENT = "#2563eb";
 const MOTION_CURVE = "cubic-bezier(0.16,1,0.3,1)";
@@ -93,6 +96,10 @@ export default function BookingFlow({
   // Wave I — intake form state. Null = not yet fetched / no form linked.
   const [intakeForm, setIntakeForm] = useState<PublicForm | null>(null);
   const [intakeResponses, setIntakeResponses] = useState<Record<string, unknown>>({});
+  // Per-field validation errors (keyed by field.key). Populated on
+  // submit-click; cleared per-field as the user edits.
+  const [intakeErrors, setIntakeErrors] = useState<Record<string, string>>({});
+  const [intakeTouched, setIntakeTouched] = useState<Record<string, boolean>>({});
   // Phase 19 — Wave 1 F1: hydrate from props when the visitor is signed
   // into the portal for this tenant. The inputs remain editable so a
   // customer can override (e.g. booking on behalf of a family member).
@@ -276,6 +283,22 @@ export default function BookingFlow({
     // a fast double-tap could fire two `submit()` calls before either
     // disables. This guard is the floor.
     if (!selectedSlot || submitting) return;
+
+    // Wave I — validate custom intake fields client-side before
+    // submitting. Server re-validates as the canonical source.
+    if (intakeForm && intakeForm.fields.length > 0) {
+      const errs = validateIntakeResponsesClient(intakeForm.fields, intakeResponses);
+      if (Object.keys(errs).length > 0) {
+        // Mark all fields touched so errors render inline.
+        const allTouched: Record<string, boolean> = {};
+        for (const f of intakeForm.fields) allTouched[f.key] = true;
+        setIntakeTouched(allTouched);
+        setIntakeErrors(errs);
+        setError("Please complete the required fields below.");
+        return;
+      }
+    }
+
     setSubmitting(true);
     setError(null);
     setSlotConflict(false);
@@ -716,27 +739,11 @@ export default function BookingFlow({
               accent={accent}
               onPick={(iso) => {
                 setSelectedSlot(iso);
-                // Wave I — route through the intake step when the
-                // service has an active form linked. Otherwise jump
-                // straight to confirm (byte-identical pre-Wave-I path).
-                setStep(intakeForm && intakeForm.fields.length > 0 ? "intake" : "confirm");
+                setStep("confirm");
               }}
             />
           )}
         </div>
-      )}
-
-      {/* Wave I — Intake step (between pick-time and confirm) */}
-      {step === "intake" && selectedSlot && intakeForm && (
-        <IntakeStep
-          form={intakeForm}
-          accent={accent}
-          onBack={() => setStep("pick-time")}
-          onContinue={(values) => {
-            setIntakeResponses(values);
-            setStep("confirm");
-          }}
-        />
       )}
 
       {/* Confirm */}
@@ -813,6 +820,41 @@ export default function BookingFlow({
                 inputMode="email"
                 accent={accent}
               />
+
+              {/* Wave I — custom intake fields appear inline with the
+                  standard Name/Email/Notes inputs. They render between
+                  Email and Notes so the visual order reads as a single
+                  cohesive form. The booking POST validates these
+                  server-side regardless of client validation. */}
+              {intakeForm && intakeForm.fields.length > 0 && (
+                <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/40 p-3.5">
+                  {intakeForm.description && (
+                    <p className="text-[12px] text-slate-600">{intakeForm.description}</p>
+                  )}
+                  {intakeForm.fields.map((f: PublicField) => (
+                    <IntakeFieldRow
+                      key={f.key}
+                      field={f}
+                      value={intakeResponses[f.key]}
+                      error={intakeTouched[f.key] ? intakeErrors[f.key] : undefined}
+                      onChange={(v) => {
+                        setIntakeResponses((prev) => ({ ...prev, [f.key]: v }));
+                        // Clear that field's error eagerly.
+                        setIntakeErrors((prev) => {
+                          const next = { ...prev };
+                          delete next[f.key];
+                          return next;
+                        });
+                      }}
+                      onBlur={() =>
+                        setIntakeTouched((prev) => ({ ...prev, [f.key]: true }))
+                      }
+                      accent={accent}
+                    />
+                  ))}
+                </div>
+              )}
+
               <div className="relative">
                 <textarea
                   id="bk-notes"
