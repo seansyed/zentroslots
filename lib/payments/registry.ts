@@ -3,43 +3,26 @@
  *
  * Single chokepoint that maps a `PaymentProviderId` to the concrete
  * adapter implementing the `PaymentProvider` contract. Callers ONLY
- * import `getAdapter` from here — never reach into `./stripe/adapter`
- * directly — so adding a provider in Phase 2+ is one line here.
+ * import `getAdapter` from here — never reach into a specific adapter
+ * file directly — so adding a provider in future phases is one line.
  *
  * Why not a Map literal? Lazy SDK init: each adapter dynamic-imports
- * its provider SDK on first call (the Stripe adapter uses `import
- * ("stripe")` inside its methods). The registry itself stays
- * dependency-free so unit tests can import it without dragging in
- * the entire Stripe SDK.
+ * (Stripe) or fetches against (PayPal) its provider on first call. The
+ * registry itself stays dependency-free so unit tests can import it
+ * without dragging in any provider SDK.
  */
 
 import type { PaymentProvider } from "./provider";
 import type { PaymentProviderId } from "./types";
 
+import { paypalAdapter } from "./paypal/adapter";
 import { stripeAdapter } from "./stripe/adapter";
 
 const REGISTRY: Record<PaymentProviderId, PaymentProvider> = {
   stripe: stripeAdapter,
-  // paypal: paypalAdapter,  // Phase 2 — gated behind verification report
-  // square: ...              // future
-  // authorize_net: ...       // future
-  // Temporary stub keeps the type complete for Phase 1.
-  paypal: {
-    id: "paypal",
-    async validateCredentials() {
-      return {
-        ok: false,
-        errorClass: "config",
-        message: "PayPal adapter not implemented in Phase 1",
-      };
-    },
-    async createCheckout() {
-      throw new Error("PayPal adapter not implemented in Phase 1");
-    },
-    async verifyWebhook() {
-      return null;
-    },
-  },
+  paypal: paypalAdapter, // Phase 2 — REST-based, no SDK dependency
+  // square: ...           // future
+  // authorize_net: ...    // future
 };
 
 export function getAdapter(id: PaymentProviderId): PaymentProvider {
@@ -51,7 +34,7 @@ export function getAdapter(id: PaymentProviderId): PaymentProvider {
 }
 
 /** Closed list for UI enumeration ("which providers can a tenant
- *  configure right now?"). Adapters not yet implemented can return
- *  `validateCredentials: { ok: false, errorClass: 'config' }` and the
- *  UI can render them as "Coming soon" rather than hide them. */
+ *  configure right now?"). Adapters not yet implemented should be
+ *  removed from this list rather than left as no-op stubs — UI uses
+ *  this directly to render the provider chooser. */
 export const SUPPORTED_PROVIDERS: PaymentProviderId[] = ["stripe", "paypal"];

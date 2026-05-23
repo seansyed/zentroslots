@@ -24,6 +24,31 @@ export type PaymentMode = "live" | "test";
  *  on `tenant_payment_providers`. */
 export type ProviderStatus = "pending" | "verified" | "invalid" | "disabled";
 
+/** Lifecycle of the webhook configuration on THIS provider row.
+ *  Distinct from `ProviderStatus` (which is about the master credential).
+ *  Mirrors the `webhook_status` column added in migration 0051.
+ *    'unconfigured' : no webhook secret saved
+ *    'configured'   : secret saved, no events received yet
+ *    'verified'     : last received event verified OK
+ *    'failing'      : last received event signature failed */
+export type WebhookStatus = "unconfigured" | "configured" | "verified" | "failing";
+
+/** Operational health snapshot stored on `tenant_payment_providers.health`.
+ *  All fields optional — adapters populate what they can answer. The
+ *  dashboard renders best-effort, never assumes presence. */
+export interface ProviderHealth {
+  /** ms taken on the last validateCredentials() call. */
+  lastValidateLatencyMs?: number;
+  /** When that validate ran (ISO 8601). */
+  lastValidateAt?: string;
+  /** Count of webhook events accepted (signature OK) in last 24h. */
+  recentEventCount24h?: number;
+  /** Count of webhook events rejected in last 24h. */
+  recentFailureCount24h?: number;
+  /** Adapter-specific extras (PayPal merchant_id, etc.). */
+  [key: string]: unknown;
+}
+
 /** Outcome of `validateCredentials()` — every adapter MUST classify
  *  failures into one of these so the UI can render the right hint. */
 export type ValidationErrorClass =

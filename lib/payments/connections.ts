@@ -35,8 +35,10 @@ import type {
   PaymentProviderId,
   ProviderCapabilities,
   ProviderCredentials,
+  ProviderHealth,
   ProviderStatus,
   ValidationResult,
+  WebhookStatus,
 } from "./types";
 
 // ─── Public, redacted row shape ────────────────────────────────────────
@@ -63,6 +65,12 @@ export interface RedactedProviderRow {
   isDefault: boolean;
   enabled: boolean;
   lastPaymentEventAt: Date | null;
+  // ── Wave H Phase 2 additions (migration 0051) ──
+  webhookStatus: WebhookStatus;
+  lastWebhookVerifiedAt: Date | null;
+  lastWebhookError: string | null;
+  lastWebhookErrorAt: Date | null;
+  health: ProviderHealth;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -99,6 +107,11 @@ function redact(row: TenantPaymentProvider): RedactedProviderRow {
     isDefault: row.isDefault,
     enabled: row.enabled,
     lastPaymentEventAt: row.lastPaymentEventAt,
+    webhookStatus: row.webhookStatus as WebhookStatus,
+    lastWebhookVerifiedAt: row.lastWebhookVerifiedAt,
+    lastWebhookError: row.lastWebhookError,
+    lastWebhookErrorAt: row.lastWebhookErrorAt,
+    health: (row.health ?? {}) as ProviderHealth,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -315,7 +328,18 @@ export async function setWebhookSecret(
   }
   const [row] = await db
     .update(tenantPaymentProviders)
-    .set({ webhookSecretEncrypted: encrypted, updatedAt: new Date() })
+    .set({
+      webhookSecretEncrypted: encrypted,
+      // Saving a secret moves the lifecycle 'unconfigured' → 'configured'.
+      // The first received event will flip it to 'verified' or 'failing'
+      // via recordWebhookSuccess / recordWebhookFailure (Phase 4
+      // receiver). Reset prior error fields so a re-paste after a
+      // failure clears the dashboard's red state.
+      webhookStatus: "configured",
+      lastWebhookError: null,
+      lastWebhookErrorAt: null,
+      updatedAt: new Date(),
+    })
     .where(
       and(
         eq(tenantPaymentProviders.id, providerRowId),
@@ -324,6 +348,71 @@ export async function setWebhookSecret(
     )
     .returning();
   return row ? redact(row) : null;
+}
+
+/**
+ * Called by the Phase 4 webhook receiver on a verified-signature event.
+ * Flips webhook_status to 'verified', stamps last_webhook_verified_at,
+ * and bumps last_payment_event_at when the event was payment-shaped
+ * (caller decides — receiver passes `wasPaymentEvent`).
+ *
+ * Tenant-scoped WHERE for defense in depth; receiver already resolved
+ * (tenantId, providerId) via getProviderWithCredentials but we guard
+ * any future refactor that loses that pairing.
+ */
+export async function recordWebhookSuccess(
+  tenantId: string,
+  providerRowId: string,
+  opts: { wasPaymentEvent: boolean } = { wasPaymentEvent: false },
+): Promise<void> {
+  const now = new Date();
+  await db
+    .update(tenantPaymentProviders)
+    .set({
+      webhookStatus: "verified",
+      lastWebhookVerifiedAt: now,
+      lastWebhookError: null,
+      lastWebhookErrorAt: null,
+      // Only stamp lastPaymentEventAt when the event actually moved
+      // money — receiver classifies before calling us. Non-payment
+      // events (account.updated etc.) still bump verified state but
+      // leave the payment timestamp alone.
+      ...(opts.wasPaymentEvent ? { lastPaymentEventAt: now } : {}),
+      updatedAt: now,
+    })
+    .where(
+      and(
+        eq(tenantPaymentProviders.id, providerRowId),
+        eq(tenantPaymentProviders.tenantId, tenantId),
+      ),
+    );
+}
+
+/**
+ * Called by the Phase 4 webhook receiver when signature verification
+ * fails. The receiver passes a message already redacted by the
+ * adapter's redactSecrets() (see Stripe adapter); we still slice to
+ * 500 chars as a row-size cap.
+ */
+export async function recordWebhookFailure(
+  tenantId: string,
+  providerRowId: string,
+  message: string,
+): Promise<void> {
+  await db
+    .update(tenantPaymentProviders)
+    .set({
+      webhookStatus: "failing",
+      lastWebhookError: message.slice(0, 500),
+      lastWebhookErrorAt: new Date(),
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(tenantPaymentProviders.id, providerRowId),
+        eq(tenantPaymentProviders.tenantId, tenantId),
+      ),
+    );
 }
 
 export async function setEnabled(
@@ -457,18 +546,34 @@ export async function testConnection(
     };
   }
   const adapter = getAdapter(loaded.row.provider as PaymentProviderId);
+  // Time the adapter call so we can record latency into `health`. This
+  // gives the dashboard a "responsive vs slow" signal independent of
+  // status. We measure only the adapter call itself, not surrounding
+  // DB I/O.
+  const t0 = Date.now();
   const result = await adapter.validateCredentials(loaded.creds);
+  const latencyMs = Date.now() - t0;
+  const validateAt = new Date();
+  // Merge into existing health jsonb so adapter-specific fields a
+  // previous worker stashed (e.g. `merchantId`) aren't overwritten.
+  const priorHealth = (loaded.row.health ?? {}) as ProviderHealth;
+  const nextHealth: ProviderHealth = {
+    ...priorHealth,
+    lastValidateLatencyMs: latencyMs,
+    lastValidateAt: validateAt.toISOString(),
+  };
 
   if (result.ok) {
     await db
       .update(tenantPaymentProviders)
       .set({
         status: "verified",
-        lastVerifiedAt: new Date(),
+        lastVerifiedAt: validateAt,
         lastError: null,
         lastErrorAt: null,
         capabilities: result.capabilities,
-        updatedAt: new Date(),
+        health: nextHealth,
+        updatedAt: validateAt,
       })
       // Defense-in-depth: tenantId is in the WHERE even though we
       // already ownership-checked via getProviderWithCredentials. A
@@ -496,8 +601,9 @@ export async function testConnection(
         // Stripe adapter. The .slice(0, 500) is a belt-and-braces cap
         // on row size, not a redaction step.
         lastError: result.message.slice(0, 500),
-        lastErrorAt: new Date(),
-        updatedAt: new Date(),
+        lastErrorAt: validateAt,
+        health: nextHealth,
+        updatedAt: validateAt,
       })
       .where(
         and(

@@ -547,6 +547,19 @@ export const tenantPaymentProviders = pgTable(
      *  event. Surfaces "last paid 2h ago" in dashboard health card. */
     lastPaymentEventAt: timestamp("last_payment_event_at", { withTimezone: true }),
 
+    // ── Wave H Phase 2 — webhook health + operational metadata (0051) ──
+    /** 'unconfigured' | 'configured' | 'verified' | 'failing'. See the
+     *  0051 migration for the lifecycle. Defaults 'unconfigured' so
+     *  pre-Phase-2 rows behave correctly. */
+    webhookStatus: varchar("webhook_status", { length: 20 }).notNull().default("unconfigured"),
+    lastWebhookVerifiedAt: timestamp("last_webhook_verified_at", { withTimezone: true }),
+    lastWebhookError: text("last_webhook_error"),
+    lastWebhookErrorAt: timestamp("last_webhook_error_at", { withTimezone: true }),
+    /** Operational snapshot (lastValidateLatencyMs, recentEventCount24h,
+     *  etc.). Distinct from `capabilities` which is the provider's
+     *  static account info. Adapter + worker write here. */
+    health: jsonb("health").notNull().default({}),
+
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
     createdByUserId: uuid("created_by_user_id"),

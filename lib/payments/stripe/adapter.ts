@@ -205,7 +205,7 @@ async function createCheckout(
 async function verifyWebhook(
   raw: ProviderCredentials,
   rawBody: string,
-  signatureHeader: string,
+  headers: Record<string, string>,
 ): Promise<VerifyWebhookResult> {
   const creds = assertStripeCreds(raw);
   if (!creds.webhookSecret) {
@@ -214,6 +214,12 @@ async function verifyWebhook(
     // "invalid_signature" rather than a 500.
     return null;
   }
+  // Stripe concentrates everything into a single `stripe-signature`
+  // header. The receiver normalizes header keys to lowercase before
+  // calling us, so lookup is case-stable.
+  const signatureHeader = headers["stripe-signature"];
+  if (!signatureHeader) return null;
+
   const stripe = await clientFor(creds.secretKey);
 
   let event: Stripe.Event;

@@ -60,12 +60,22 @@ export interface PaymentProvider {
    * shape. Returns null on signature failure / replay-outside-tolerance
    * — the receiver MUST treat null as a hard reject.
    *
-   * Signature verification uses the PROVIDER'S library (e.g.
-   * `stripe.webhooks.constructEvent`) — never hand-rolled HMAC.
+   * Why a Map of headers instead of a single signature string? Stripe
+   * concentrates everything in one `stripe-signature` header, but PayPal
+   * spreads its verification across FIVE distinct headers
+   * (paypal-auth-algo, paypal-cert-url, paypal-transmission-id,
+   * paypal-transmission-sig, paypal-transmission-time). The receiver
+   * normalizes header keys to lowercase before calling — adapters MUST
+   * NOT rely on canonical-case lookup.
+   *
+   * Signature verification uses the PROVIDER'S facility (Stripe:
+   * `stripe.webhooks.constructEvent`; PayPal: the
+   * `/v1/notifications/verify-webhook-signature` REST endpoint). Never
+   * hand-rolled HMAC.
    */
   verifyWebhook(
     creds: ProviderCredentials,
     rawBody: string,
-    signatureHeader: string,
+    headers: Record<string, string>,
   ): Promise<VerifyWebhookResult>;
 }
