@@ -119,6 +119,10 @@ export const tenants = pgTable(
     //     visible + honored by engine; reconnect blocked).
     // See lib/integrations.ts for the typed reader/writer.
     enabledIntegrations: jsonb("enabled_integrations").notNull().default({}),
+    // Phase SMART-1 — tenant-level scheduling intelligence defaults
+    // (lunch hours, end-of-day decay, quiet hours, daily soft cap).
+    // Per-staff overrides live on users.focus_rules.
+    focusRules: jsonb("focus_rules"),
 
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -183,6 +187,10 @@ export const users = pgTable(
     sessionMinIat: timestamp("session_min_iat", { withTimezone: true }),
     // Per-user permission overrides (jsonb) — see lib/security/permissions.ts.
     permissionsExtra: jsonb("permissions_extra").notNull().default({}),
+    // Phase SMART-1 — optional scheduling intelligence overrides
+    // (lunch hours, daily soft cap, quiet hours, etc.). Nullable;
+    // falls back to tenant focus_rules, then to engine defaults.
+    focusRules: jsonb("focus_rules"),
     // Last-login bookkeeping for suspicious-activity heuristic.
     lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
     lastLoginIp: varchar("last_login_ip", { length: 45 }),

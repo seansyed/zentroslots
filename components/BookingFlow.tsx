@@ -86,6 +86,11 @@ export default function BookingFlow({
 
   const [date, setDate] = useState<string>(() => todayInTz(tz));
   const [slots, setSlots] = useState<string[]>([]);
+  // Phase SMART-1 — optional scoring overlay. Map of slot-ISO → labels[].
+  // The slot list (above) is the source of truth for ordering + bookability;
+  // this is just the annotation layer. Falls back to empty Map when the
+  // server doesn't return intelligence (older API consumers see no change).
+  const [slotLabels, setSlotLabels] = useState<Map<string, string[]>>(new Map());
   const [loadingSlots, setLoadingSlots] = useState(false);
   const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
   // Phase 14A — empty-availability recovery. When the selected day
@@ -203,14 +208,35 @@ export default function BookingFlow({
     url.searchParams.set("staffUserId", staffId);
     url.searchParams.set("date", date);
     url.searchParams.set("timezone", tz);
+    // Phase SMART-1 — request the optional intelligence overlay.
+    // Backward compatible: if the endpoint doesn't recognize the
+    // param (older deployments / a downgrade) the slots array
+    // returns unchanged and we just get no labels.
+    url.searchParams.set("include", "intelligence");
 
     fetch(url)
       .then((r) => r.json())
       .then((data) => {
         if (cancelled) return;
         setSlots(Array.isArray(data.slots) ? data.slots : []);
+        // Defensive parse — the intelligence payload is optional.
+        const labelMap = new Map<string, string[]>();
+        const scored = data?.intelligence?.scored;
+        if (Array.isArray(scored)) {
+          for (const s of scored) {
+            if (s && typeof s.time === "string" && Array.isArray(s.labels) && s.labels.length > 0) {
+              labelMap.set(s.time, s.labels);
+            }
+          }
+        }
+        setSlotLabels(labelMap);
       })
-      .catch(() => !cancelled && setSlots([]))
+      .catch(() => {
+        if (!cancelled) {
+          setSlots([]);
+          setSlotLabels(new Map());
+        }
+      })
       .finally(() => !cancelled && setLoadingSlots(false));
 
     return () => { cancelled = true; };
@@ -783,6 +809,7 @@ export default function BookingFlow({
                 setSelectedSlot(iso);
                 setStep("confirm");
               }}
+              slotLabels={slotLabels}
             />
           )}
         </div>
@@ -1126,11 +1153,17 @@ function SlotsGrouped({
   tz,
   accent,
   onPick,
+  slotLabels,
 }: {
   slots: string[];
   tz: string;
   accent: string;
   onPick: (iso: string) => void;
+  /** Phase SMART-1 — optional per-slot recommendation labels.
+   *  When absent or empty for a given slot, the button renders
+   *  byte-identical to pre-SMART-1 (this keeps the legacy UX
+   *  intact when the intelligence layer is unavailable). */
+  slotLabels?: Map<string, string[]>;
 }) {
   // Group slots into Morning / Afternoon / Evening using the visitor's tz
   // hour. Keeps grouping cheap (no extra lib).
@@ -1217,6 +1250,35 @@ function SlotsGrouped({
                   <span className="relative tabular-nums transition-colors duration-[160ms] group-hover:text-white" style={{ transitionTimingFunction: MOTION_CURVE }}>
                     {formatInTimeZone(iso, tz, "h:mm a")}
                   </span>
+                  {/* Phase SMART-1 — recommendation chip. Pure
+                      annotation: never changes which slot is rendered
+                      OR its bookability. The chip is absolute-
+                      positioned at the top-right of the existing
+                      button so the slot grid layout is unchanged.
+                      Only the highest-priority label renders to keep
+                      the chip from cluttering the UI. */}
+                  {(() => {
+                    const labels = slotLabels?.get(iso);
+                    if (!labels || labels.length === 0) return null;
+                    // Priority: recommended > best_availability > fastest_confirmation
+                    const top =
+                      labels.includes("recommended")
+                        ? "Recommended"
+                        : labels.includes("best_availability")
+                          ? "Best"
+                          : labels.includes("fastest_confirmation")
+                            ? "Soonest"
+                            : null;
+                    if (!top) return null;
+                    return (
+                      <span
+                        aria-label={top}
+                        className="pointer-events-none absolute -top-1.5 -right-1.5 inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-1.5 py-px text-[9px] font-semibold uppercase tracking-wide text-emerald-700 shadow-sm"
+                      >
+                        {top}
+                      </span>
+                    );
+                  })()}
                 </button>
               ))}
             </div>

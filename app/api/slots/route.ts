@@ -7,6 +7,7 @@ import { getAvailableSlots } from "@/lib/availability";
 import { errorResponse, HttpError } from "@/lib/auth";
 import { assertResourcesShareTenant } from "@/lib/tenant";
 import { slotsQuerySchema } from "@/lib/validation";
+import { recommendSlots } from "@/lib/scheduling/intelligence/recommendationEngine";
 
 export async function GET(req: NextRequest) {
   try {
@@ -54,6 +55,36 @@ export async function GET(req: NextRequest) {
       if (maxAdvanceMs !== null && t - now > maxAdvanceMs) return false;
       return true;
     });
+
+    // Phase SMART-1 — opt-in scored slots. Backward compatible:
+    // the `slots: string[]` field stays in place. Callers that pass
+    // ?include=intelligence (or =scoring) get an ADDITIONAL
+    // `intelligence: { scored: ScoredSlot[] }` field with score +
+    // labels per slot. Existing consumers see no change.
+    //
+    // We never fail the request on intelligence errors — the
+    // recommender catches its own errors and returns score-less
+    // shapes.
+    const include = req.nextUrl.searchParams.get("include");
+    const customerEmail = req.nextUrl.searchParams.get("customerEmail") || undefined;
+    const customerTimezone = req.nextUrl.searchParams.get("customerTimezone") || undefined;
+
+    if (include === "intelligence" || include === "scoring") {
+      const scored = await recommendSlots({
+        slots: filtered,
+        tenantId: service.tenantId,
+        serviceId: service.id,
+        staffUserId: staff.id,
+        date: params.date,
+        timezone: params.timezone,
+        customerEmail,
+        customerTimezone,
+      });
+      return NextResponse.json({
+        slots: filtered,
+        intelligence: { scored },
+      });
+    }
 
     return NextResponse.json({ slots: filtered });
   } catch (err) {
