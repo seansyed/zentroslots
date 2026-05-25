@@ -1,15 +1,34 @@
 /**
- * Minimal RFC 5545 iCalendar generator. No deps — emails attach this
- * as text/calendar so calendar apps offer "Add to calendar".
+ * @deprecated Phase ICAL-1 — this minimal ICS generator was replaced
+ * by the universal generator at `lib/calendar/ics/*`. The new module
+ * adds VTIMEZONE (required by Apple Calendar), 75-octet line folding
+ * (required by Outlook), VALARM reminders, monotonic SEQUENCE
+ * derivation, multi-attendee support, and a matching Content-Type
+ * for CANCEL events.
+ *
+ * This shim re-exports a compatibility wrapper so any external
+ * caller still depending on `import { buildIcs } from "@/lib/ics"`
+ * keeps working. New code should import directly from
+ * `@/lib/calendar/ics/generateICS` or `@/lib/calendar/ics/booking-ics`.
+ *
+ * The shim is intentionally THIN: it constructs an `IcsEvent` from
+ * the legacy args, calls the new generator, and returns the body
+ * string. The legacy shape lacked `timezone` + `sequence` so we
+ * default both to safe values (UTC + 0). To get the upgraded output
+ * (VTIMEZONE in the staff's locale + sequence-from-updated_at),
+ * switch the import to `generateBookingIcs`.
  */
 
-type IcsArgs = {
-  uid: string;                 // stable per booking, e.g. booking.id + domain
+import { generateICS } from "./calendar/ics/generateICS";
+import type { IcsEvent } from "./calendar/ics/types";
+
+type LegacyIcsArgs = {
+  uid: string;
   start: Date;
   end: Date;
   summary: string;
   description?: string;
-  location?: string;           // meet URL, address, etc.
+  location?: string;
   organizerEmail?: string;
   organizerName?: string;
   attendeeEmail?: string;
@@ -17,49 +36,32 @@ type IcsArgs = {
   method?: "REQUEST" | "CANCEL";
 };
 
-function fmt(d: Date): string {
-  // YYYYMMDDTHHmmssZ (UTC)
-  return d
-    .toISOString()
-    .replace(/[-:]/g, "")
-    .replace(/\.\d{3}/, "");
-}
-
-function escape(s: string): string {
-  return s.replace(/\\/g, "\\\\").replace(/;/g, "\\;").replace(/,/g, "\\,").replace(/\n/g, "\\n");
-}
-
-export function buildIcs(args: IcsArgs): string {
-  const method = args.method ?? "REQUEST";
-  const status = method === "CANCEL" ? "CANCELLED" : "CONFIRMED";
-  const lines: string[] = [
-    "BEGIN:VCALENDAR",
-    "VERSION:2.0",
-    "PRODID:-//ZentroMeet//EN",
-    `METHOD:${method}`,
-    "CALSCALE:GREGORIAN",
-    "BEGIN:VEVENT",
-    `UID:${args.uid}`,
-    `DTSTAMP:${fmt(new Date())}`,
-    `DTSTART:${fmt(args.start)}`,
-    `DTEND:${fmt(args.end)}`,
-    `SUMMARY:${escape(args.summary)}`,
-    `STATUS:${status}`,
-    `SEQUENCE:${method === "CANCEL" ? 1 : 0}`,
-  ];
-  if (args.description) lines.push(`DESCRIPTION:${escape(args.description)}`);
-  if (args.location) lines.push(`LOCATION:${escape(args.location)}`);
-  if (args.organizerEmail) {
-    lines.push(
-      `ORGANIZER${args.organizerName ? `;CN=${escape(args.organizerName)}` : ""}:mailto:${args.organizerEmail}`
-    );
-  }
-  if (args.attendeeEmail) {
-    lines.push(
-      `ATTENDEE;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=TRUE${args.attendeeName ? `;CN=${escape(args.attendeeName)}` : ""}:mailto:${args.attendeeEmail}`
-    );
-  }
-  lines.push("END:VEVENT", "END:VCALENDAR");
-  // RFC 5545: CRLF line endings, fold lines >75 octets (best-effort).
-  return lines.join("\r\n") + "\r\n";
+/** @deprecated use generateBookingIcs() or generateICS() directly. */
+export function buildIcs(args: LegacyIcsArgs): string {
+  const event: IcsEvent = {
+    uid: args.uid,
+    sequence: 0,
+    startAt: args.start,
+    endAt: args.end,
+    timezone: "UTC",
+    summary: args.summary,
+    description: args.description,
+    location: args.location,
+    organizer: args.organizerEmail
+      ? { email: args.organizerEmail, name: args.organizerName ?? null }
+      : undefined,
+    attendees: args.attendeeEmail
+      ? [
+          {
+            email: args.attendeeEmail,
+            name: args.attendeeName ?? null,
+            role: "REQ-PARTICIPANT",
+            status: "NEEDS-ACTION",
+            rsvp: true,
+          },
+        ]
+      : [],
+    method: args.method ?? "REQUEST",
+  };
+  return generateICS(event).body;
 }

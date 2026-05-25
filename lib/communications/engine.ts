@@ -39,7 +39,10 @@ import {
 } from "@/db/schema";
 import { signBookingToken } from "@/lib/tokens";
 import { sendEmail, type BookingForEmail } from "@/lib/email";
-import { buildIcs } from "@/lib/ics";
+// Phase ICAL-1 — swapped from buildIcs (lib/ics.ts) to the universal
+// generator. buildIcs still exists as a deprecated re-export shim
+// for back-compat; no live caller depends on it inside this file.
+import { generateBookingIcs } from "@/lib/calendar/ics/booking-ics";
 import {
   gateSchedulingEmail,
   logSuppressed,
@@ -282,23 +285,46 @@ export async function triggerAutomation(args: TriggerArgs): Promise<TriggerResul
     });
 
     // ── (6) Send.
-    const attachments = args.attachIcs
+    //
+    // Phase ICAL-1 — the ICS attachment now goes through the
+    // universal generator (lib/calendar/ics/booking-ics.ts) which:
+    //   • emits VTIMEZONE so Apple Calendar renders local time
+    //     correctly (the previous minimal generator emitted UTC
+    //     only, which Apple displayed as a UTC string)
+    //   • folds lines at 75 octets so long meeting URLs don't
+    //     break Outlook's parser
+    //   • derives SEQUENCE from bookings.updated_at so each
+    //     reschedule cleanly UPDATES the existing calendar entry
+    //     instead of creating a duplicate
+    //   • FIXES the prior bug where the Content-Type always said
+    //     method=REQUEST even when the body was METHOD:CANCEL
+    //     (Outlook ignored cancellations as a result)
+    //   • attaches the default 24h + 15min VALARM reminders for
+    //     REQUEST events (suppressed automatically on CANCEL)
+    const ics = args.attachIcs
+      ? generateBookingIcs({
+          booking: {
+            id: booking.id,
+            startAt: booking.startAt,
+            endAt: booking.endAt,
+            clientEmail: booking.clientEmail,
+            clientName: booking.clientName,
+            notes: booking.notes,
+            meetLink: booking.meetLink,
+            updatedAt: booking.updatedAt,
+          },
+          service: { name: service.name },
+          staff: { email: staff.email, name: staff.name, timezone: staff.timezone },
+          tenant: { name: tenant.name },
+          method: args.eventType === "appointment.cancelled" ? "CANCEL" : "REQUEST",
+          alarms: [{ minutesBefore: 1440 }, { minutesBefore: 15 }],
+        })
+      : null;
+    const attachments = ics
       ? [{
-          filename: "invite.ics",
-          content: buildIcs({
-            uid: `${booking.id}@scheduling-saas`,
-            start: booking.startAt,
-            end: booking.endAt,
-            summary: `${service.name} with ${staff.name}`,
-            description: booking.notes ?? "",
-            location: booking.meetLink ?? undefined,
-            organizerEmail: staff.email,
-            organizerName: staff.name,
-            attendeeEmail: booking.clientEmail,
-            attendeeName: booking.clientName,
-            method: args.eventType === "appointment.cancelled" ? "CANCEL" : "REQUEST",
-          }),
-          contentType: "text/calendar; charset=utf-8; method=REQUEST",
+          filename: ics.filename,
+          content: ics.body,
+          contentType: ics.contentType,
         }]
       : undefined;
 

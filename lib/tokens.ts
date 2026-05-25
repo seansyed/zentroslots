@@ -2,7 +2,7 @@ import { SignJWT, jwtVerify } from "jose";
 
 const TOKEN_EXPIRY = "30d";
 
-export type BookingTokenKind = "cancel" | "reschedule";
+export type BookingTokenKind = "cancel" | "reschedule" | "ics";
 
 export type BookingTokenPayload = {
   bookingId: string;
@@ -34,7 +34,13 @@ export async function verifyBookingToken(
     const { payload } = await jwtVerify(token, secret());
     if (payload.purpose !== "booking_action") return null;
     if (!payload.bookingId || !payload.tenantId || !payload.kind) return null;
-    if (payload.kind !== "cancel" && payload.kind !== "reschedule") return null;
+    if (
+      payload.kind !== "cancel" &&
+      payload.kind !== "reschedule" &&
+      payload.kind !== "ics"
+    ) {
+      return null;
+    }
     return {
       bookingId: String(payload.bookingId),
       tenantId: String(payload.tenantId),

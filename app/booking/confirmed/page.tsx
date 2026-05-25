@@ -25,6 +25,8 @@ import { CheckCircle2, Home } from "lucide-react";
 import { db } from "@/db/client";
 import { bookings, services, users } from "@/db/schema";
 import BookingConfirmedStatus from "@/components/booking/BookingConfirmedStatus";
+import AddToCalendarButtons from "@/components/booking/AddToCalendarButtons";
+import { signBookingToken } from "@/lib/tokens";
 
 export const dynamic = "force-dynamic";
 
@@ -38,6 +40,10 @@ interface BookingSummary {
   serviceName: string;
   staffName: string;
   meetLink: string | null;
+  /** Tenant id — needed to mint a kind=ics signed token for the
+   *  AddToCalendarButtons component (Phase ICAL-1). Not surfaced
+   *  in the rendered UI — server-side use only. */
+  tenantId: string;
 }
 
 async function lookupBooking(bookingId: string): Promise<BookingSummary | null> {
@@ -51,6 +57,7 @@ async function lookupBooking(bookingId: string): Promise<BookingSummary | null> 
       serviceName: services.name,
       staffName: users.name,
       meetLink: bookings.meetLink,
+      tenantId: bookings.tenantId,
     })
     .from(bookings)
     .leftJoin(services, eq(services.id, bookings.serviceId))
@@ -76,32 +83,11 @@ function formatDate(start: Date): { day: string; time: string } {
   return { day: dayFmt.format(start), time: timeFmt.format(start) };
 }
 
-/** Build a Google Calendar quick-add URL. Browsers handle the rest —
- *  the customer's signed-in Google account opens with the event
- *  pre-filled, they click Save. */
-function gcalUrl(args: { title: string; start: Date; end: Date; description: string }): string {
-  const fmt = (d: Date) =>
-    d.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
-  const params = new URLSearchParams({
-    action: "TEMPLATE",
-    text: args.title,
-    dates: `${fmt(args.start)}/${fmt(args.end)}`,
-    details: args.description,
-  });
-  return `https://www.google.com/calendar/render?${params.toString()}`;
-}
-
-function outlookUrl(args: { title: string; start: Date; end: Date; description: string }): string {
-  const params = new URLSearchParams({
-    path: "/calendar/action/compose",
-    rru: "addevent",
-    startdt: args.start.toISOString(),
-    enddt: args.end.toISOString(),
-    subject: args.title,
-    body: args.description,
-  });
-  return `https://outlook.live.com/calendar/0/deeplink/compose?${params.toString()}`;
-}
+// Phase ICAL-1 — inline gcalUrl/outlookUrl helpers were extracted
+// into lib/calendar/ics/calendarLinks.ts so the email engine, the
+// public download endpoint, and this confirmation page all build
+// IDENTICAL Add-to-Calendar links. See AddToCalendarButtons.tsx for
+// the four-provider button row that replaces the old two buttons.
 
 export default async function PaymentConfirmedPage({
   searchParams,
@@ -133,6 +119,16 @@ export default async function PaymentConfirmedPage({
   const { day, time } = formatDate(summary.startAt);
   const calTitle = `Meeting with ${summary.staffName} — ${summary.serviceName}`;
   const calDesc = summary.meetLink ? `Join: ${summary.meetLink}` : "";
+
+  // Phase ICAL-1 — sign a kind=ics token so the AddToCalendarButtons
+  // component can render an Apple Calendar / .ics download link that
+  // streams the latest booking state through the public download
+  // endpoint. Token is bound to this specific booking + tenant.
+  const icsToken = await signBookingToken({
+    bookingId: summary.id,
+    tenantId: summary.tenantId,
+    kind: "ics",
+  });
 
   return (
     <div className="mx-auto flex min-h-[80vh] max-w-md flex-col items-center justify-center px-6 py-12 text-center">
@@ -168,34 +164,20 @@ export default async function PaymentConfirmedPage({
         )}
       </div>
 
-      <div className="mt-4 flex flex-col sm:flex-row gap-2 w-full">
-        <a
-          href={gcalUrl({
-            title: calTitle,
-            start: summary.startAt,
-            end: summary.endAt,
-            description: calDesc,
-          })}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors"
-        >
-          Add to Google Calendar
-        </a>
-        <a
-          href={outlookUrl({
-            title: calTitle,
-            start: summary.startAt,
-            end: summary.endAt,
-            description: calDesc,
-          })}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors"
-        >
-          Add to Outlook
-        </a>
-      </div>
+      {/* Phase ICAL-1 — universal Add-to-Calendar row. Replaces the
+          old two inline buttons with Apple / Google / Outlook /
+          Yahoo + an .ics download. Apple support via signed-token
+          download (Apple has no documented web-add deep link). */}
+      <AddToCalendarButtons
+        event={{
+          title: calTitle,
+          startAt: summary.startAt,
+          endAt: summary.endAt,
+          description: calDesc,
+          location: summary.meetLink ?? undefined,
+        }}
+        icsToken={icsToken}
+      />
 
       <p className="mt-6 text-xs text-slate-500">
         A confirmation email is on its way.
