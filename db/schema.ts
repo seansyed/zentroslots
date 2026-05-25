@@ -588,6 +588,42 @@ export const groupSessions = pgTable(
   }),
 );
 
+// ─── Staff Calendar Feed Tokens (Phase ICAL-2) ──────────────────────────
+//
+// Per-staff secrets backing Apple Calendar webcal:// subscription feeds.
+// Migration 0057. See db/migrations/0057_staff_calendar_feed_tokens.sql
+// for full design notes.
+//
+// SHA-256-hashed at rest; never reversible. One active token per
+// (tenant_id, user_id); rotation soft-revokes the prior row for
+// audit instead of hard-deleting it.
+
+export const staffCalendarFeedTokens = pgTable(
+  "staff_calendar_feed_tokens",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    // SHA-256 hex of the 256-bit secret. 64 chars.
+    tokenHash: varchar("token_hash", { length: 64 }).notNull(),
+    lastAccessedAt: timestamp("last_accessed_at", { withTimezone: true }),
+    lastAccessedIp: varchar("last_accessed_ip", { length: 45 }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    // 'rotated' | 'user_revoke' | 'admin_revoke' | 'staff_offboarded'
+    revokedReason: varchar("revoked_reason", { length: 40 }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    hashUnique: uniqueIndex("staff_calendar_feed_tokens_hash_unique").on(t.tokenHash),
+    activeIdx: index("staff_calendar_feed_tokens_active_idx").on(t.tenantId, t.userId),
+    tenantIdx: index("staff_calendar_feed_tokens_tenant_idx").on(t.tenantId, t.createdAt),
+  }),
+);
+
 // ─── Availability Overrides ─────────────────────────────────────────────
 // Vacations, holidays, lunch breaks, custom one-off schedules.
 // Multiple rows per (user_id, date) supported for split-day schedules.

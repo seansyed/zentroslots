@@ -53,6 +53,11 @@ import {
   Video,
   AlertTriangle,
   Star as StarIcon,
+  Apple,
+  Copy,
+  RefreshCw,
+  ExternalLink,
+  Info,
   type LucideIcon,
 } from "lucide-react";
 
@@ -3333,7 +3338,289 @@ function CalendarConnectionsSection({
           })
         )}
       </div>
+
+      {/* Phase ICAL-2 — Apple Calendar subscription feed. NOT an
+          OAuth provider; this is a one-way webcal:// feed of the
+          staff's bookings. Rendered as a distinct row to make the
+          difference from Google/Outlook unambiguous. */}
+      <div className="mt-4 border-t border-border pt-4">
+        <div className="mb-2 flex items-center gap-1.5">
+          <div className="text-[10px] font-semibold uppercase tracking-[0.10em] text-ink-muted">
+            Subscription feeds · one-way
+          </div>
+        </div>
+        <AppleCalendarSubscriptionRow staffUserId={staffUserId} canEdit={canEdit} />
+      </div>
     </PremiumCard>
+  );
+}
+
+// ─── Apple Calendar subscription row (Phase ICAL-2) ─────────────────
+//
+// Distinct from the OAuth provider rows above: Apple does NOT offer a
+// calendar API for SaaS integration, so this is a one-way feed only.
+// Bookings appear on the staff's iPhone/iPad/Mac Calendar; busy times
+// do NOT flow back to the booking engine.
+//
+// The required educational copy below — "this is one-way, for two-way
+// connect Google/Outlook" — is non-removable per Phase ICAL-2 spec so
+// users don't expect availability blocking from this.
+
+type FeedTokenState = {
+  active: boolean;
+  rawToken?: string;
+  httpsUrl?: string;
+  webcalUrl?: string;
+  token: {
+    id: string;
+    createdAt: string;
+    lastAccessedAt: string | null;
+    lastAccessedIp: string | null;
+  } | null;
+};
+
+function AppleCalendarSubscriptionRow({
+  staffUserId,
+  canEdit,
+}: {
+  staffUserId: string;
+  canEdit: boolean;
+}) {
+  const [state, setState] = React.useState<FeedTokenState | null>(null);
+  // The plaintext URL is held in component state ONLY while the user
+  // has the modal/banner open after a generate/rotate. Refreshing
+  // the page wipes it (the server can never re-show it).
+  const [revealed, setRevealed] = React.useState<{
+    httpsUrl: string;
+    webcalUrl: string;
+  } | null>(null);
+  const [busy, setBusy] = React.useState<"generate" | "rotate" | "revoke" | null>(
+    null,
+  );
+
+  const qs = staffUserId ? `?userId=${encodeURIComponent(staffUserId)}` : "";
+
+  const load = React.useCallback(() => {
+    fetch(`/api/staff/calendar-feed${qs}`)
+      .then((r) => r.json())
+      .then((d) => setState(d))
+      .catch(() => setState({ active: false, token: null }));
+  }, [qs]);
+
+  React.useEffect(() => {
+    load();
+  }, [load]);
+
+  async function generateOrRotate(kind: "generate" | "rotate") {
+    if (!canEdit) return;
+    if (kind === "rotate") {
+      const ok = window.confirm(
+        "Regenerate the feed URL? Your existing iPhone/Mac subscription will stop syncing until you re-subscribe with the new URL.",
+      );
+      if (!ok) return;
+    }
+    setBusy(kind);
+    try {
+      const r = await fetch(`/api/staff/calendar-feed${qs}`, { method: "POST" });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error ?? "Failed");
+      setRevealed({ httpsUrl: d.httpsUrl, webcalUrl: d.webcalUrl });
+      setState({
+        active: true,
+        rawToken: d.rawToken,
+        httpsUrl: d.httpsUrl,
+        webcalUrl: d.webcalUrl,
+        token: d.token,
+      });
+      toast(
+        kind === "rotate"
+          ? "New feed URL issued — previous URL is now invalid."
+          : "Feed URL issued.",
+        "success",
+      );
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed", "error");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function revoke() {
+    if (!canEdit) return;
+    const ok = window.confirm(
+      "Revoke the feed URL? Your Apple Calendar subscription will stop receiving updates.",
+    );
+    if (!ok) return;
+    setBusy("revoke");
+    try {
+      const r = await fetch(`/api/staff/calendar-feed${qs}`, { method: "DELETE" });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error ?? "Failed");
+      setRevealed(null);
+      setState({ active: false, token: null });
+      toast("Subscription feed revoked.", "success");
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed", "error");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function copyToClipboard(text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast("Copied to clipboard", "success");
+    } catch {
+      toast("Copy failed — select the text manually", "error");
+    }
+  }
+
+  // Loading skeleton
+  if (state === null) {
+    return <div className="h-32 animate-pulse rounded-xl bg-surface-inset/40" />;
+  }
+
+  const active = state.active && state.token;
+
+  return (
+    <div className="rounded-xl border border-border bg-surface-raised/60 p-3">
+      <div className="flex items-start gap-3">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-900 text-white">
+          <Apple className="h-5 w-5" strokeWidth={1.75} />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <div className="text-[13px] font-semibold tracking-tight text-ink">
+              Apple Calendar
+            </div>
+            <span className="inline-flex items-center rounded-full bg-slate-100 px-1.5 py-px text-[9px] font-semibold uppercase tracking-wide text-slate-700">
+              Subscription feed
+            </span>
+            {active ? (
+              <span className="inline-flex items-center rounded-full bg-emerald-50 px-1.5 py-px text-[9px] font-semibold uppercase tracking-wide text-emerald-700">
+                Active
+              </span>
+            ) : null}
+          </div>
+          <p className="mt-0.5 text-[11.5px] leading-relaxed text-ink-muted">
+            Your ZentroMeet bookings, blocked time, and group sessions appear
+            automatically in Apple Calendar on iPhone, iPad, and macOS using a
+            secure subscription URL.
+          </p>
+        </div>
+      </div>
+
+      {/* Required educational copy — Phase ICAL-2 spec §5. Non-removable. */}
+      <div className="mt-3 flex items-start gap-1.5 rounded-lg bg-amber-50/60 px-2.5 py-2 text-[11px] leading-snug text-amber-900">
+        <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" strokeWidth={1.75} />
+        <div>
+          <strong className="font-semibold">One-way sync only.</strong>{" "}
+          Bookings appear in Apple Calendar — busy times do{" "}
+          <em className="not-italic underline decoration-amber-700/40">not</em>{" "}
+          flow back. For conflict detection + availability sync, connect Google
+          or Microsoft Calendar above.
+        </div>
+      </div>
+
+      {/* URL surface — shown ONLY immediately after generate/rotate.
+          The plaintext token can never be re-recovered server-side,
+          so once the user navigates away, only metadata stays. */}
+      {revealed ? (
+        <div className="mt-3 space-y-2 rounded-lg border border-brand-accent/30 bg-brand-accent/5 p-2.5">
+          <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-brand-accent">
+            <CheckCircle2 className="h-3 w-3" strokeWidth={2} />
+            Your subscription URL (shown once)
+          </div>
+          <div className="rounded-md bg-white p-2 font-mono text-[10.5px] leading-snug text-ink break-all">
+            {revealed.webcalUrl}
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            <button
+              type="button"
+              onClick={() => copyToClipboard(revealed.webcalUrl)}
+              className="inline-flex items-center gap-1 rounded-md bg-brand-accent px-2.5 py-1 text-[11px] font-medium text-white hover:bg-blue-700"
+            >
+              <Copy className="h-3 w-3" strokeWidth={2} />
+              Copy webcal URL
+            </button>
+            <a
+              href={revealed.webcalUrl}
+              className="inline-flex items-center gap-1 rounded-md border border-border bg-white px-2.5 py-1 text-[11px] font-medium text-ink hover:bg-surface-inset"
+            >
+              <ExternalLink className="h-3 w-3" strokeWidth={2} />
+              Open in Apple Calendar
+            </a>
+            <button
+              type="button"
+              onClick={() => copyToClipboard(revealed.httpsUrl)}
+              className="inline-flex items-center gap-1 rounded-md border border-border bg-white px-2.5 py-1 text-[11px] font-medium text-ink hover:bg-surface-inset"
+            >
+              <Copy className="h-3 w-3" strokeWidth={2} />
+              Copy https URL
+            </button>
+          </div>
+          <p className="text-[10.5px] leading-snug text-ink-subtle">
+            Save this URL now — for security, ZentroMeet never displays it
+            again. If you lose it, click <em>Regenerate</em> below.
+          </p>
+        </div>
+      ) : null}
+
+      {/* Action bar */}
+      <div className="mt-3 flex flex-wrap items-center gap-1.5">
+        {!active ? (
+          <button
+            type="button"
+            disabled={!canEdit || busy !== null}
+            onClick={() => generateOrRotate("generate")}
+            className="inline-flex items-center gap-1 rounded-md bg-brand-accent px-2.5 py-1 text-[11px] font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+          >
+            {busy === "generate" ? "Generating…" : "Generate feed URL"}
+          </button>
+        ) : (
+          <>
+            <button
+              type="button"
+              disabled={!canEdit || busy !== null}
+              onClick={() => generateOrRotate("rotate")}
+              className="inline-flex items-center gap-1 rounded-md border border-border bg-white px-2.5 py-1 text-[11px] font-medium text-ink hover:bg-surface-inset disabled:opacity-50"
+            >
+              <RefreshCw className="h-3 w-3" strokeWidth={2} />
+              {busy === "rotate" ? "Regenerating…" : "Regenerate"}
+            </button>
+            <button
+              type="button"
+              disabled={!canEdit || busy !== null}
+              onClick={revoke}
+              className="inline-flex items-center gap-1 rounded-md border border-red-200 bg-white px-2.5 py-1 text-[11px] font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
+            >
+              {busy === "revoke" ? "Revoking…" : "Revoke"}
+            </button>
+          </>
+        )}
+      </div>
+
+      {/* Metadata: when issued, last polled. Helps the user audit
+          which device is actively syncing. */}
+      {active && state.token ? (
+        <div className="mt-2 grid grid-cols-2 gap-2 text-[10.5px] text-ink-subtle">
+          <div>
+            <div className="font-semibold uppercase tracking-wide text-[9px] text-ink-muted">
+              Issued
+            </div>
+            {new Date(state.token.createdAt).toLocaleDateString()}
+          </div>
+          <div>
+            <div className="font-semibold uppercase tracking-wide text-[9px] text-ink-muted">
+              Last polled
+            </div>
+            {state.token.lastAccessedAt
+              ? new Date(state.token.lastAccessedAt).toLocaleString()
+              : "Never"}
+          </div>
+        </div>
+      ) : null}
+    </div>
   );
 }
 
