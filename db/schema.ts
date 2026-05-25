@@ -660,6 +660,13 @@ export const externalCalendarFeeds = pgTable(
     etag: varchar("etag", { length: 255 }),
     lastModified: varchar("last_modified", { length: 64 }),
     nextSyncAfter: timestamp("next_sync_after", { withTimezone: true }).notNull().defaultNow(),
+    // Phase ICAL-4 diagnostic columns (migration 0059) — additive,
+    // all nullable or default-bearing so pre-ICAL-4 code paths
+    // remain byte-compatible.
+    syncDurationMs: integer("sync_duration_ms"),
+    eventCount: integer("event_count"),
+    consecutiveFailures: integer("consecutive_failures").notNull().default(0),
+    notifiedStaleAt: timestamp("notified_stale_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -671,6 +678,12 @@ export const externalCalendarFeeds = pgTable(
     ),
     activeIdx: index("external_calendar_feeds_active_idx").on(t.tenantId, t.userId),
     dueIdx: index("external_calendar_feeds_due_idx").on(t.nextSyncAfter),
+    // Partial index used by the admin observability endpoint to
+    // surface problematic feeds without scanning the whole table.
+    failuresIdx: index("external_calendar_feeds_failures_idx").on(
+      t.tenantId,
+      t.consecutiveFailures,
+    ),
   }),
 );
 

@@ -31,6 +31,7 @@ import {
   syncExternalFeed,
   normalizedFeedHash,
 } from "@/lib/calendar/externalFeeds/syncExternalFeed";
+import { classifyFeedHealth } from "@/lib/calendar/externalFeeds/feedHealth";
 
 export const dynamic = "force-dynamic";
 
@@ -88,6 +89,7 @@ export async function GET(req: NextRequest) {
         ),
       );
 
+    const now = new Date();
     const feeds = rows.map((r) => {
       let preview = "(encrypted)";
       try {
@@ -96,6 +98,18 @@ export async function GET(req: NextRequest) {
       } catch {
         /* keep generic */
       }
+      // Phase ICAL-4 — surface health classification + diagnostic
+      // fields. Pure function; no extra DB hit.
+      const health = classifyFeedHealth(
+        {
+          isEnabled: r.isEnabled,
+          lastSyncedAt: r.lastSyncedAt,
+          lastSyncStatus: r.lastSyncStatus,
+          consecutiveFailures: r.consecutiveFailures,
+          createdAt: r.createdAt,
+        },
+        now,
+      );
       return {
         id: r.id,
         providerLabel: r.providerLabel,
@@ -105,6 +119,15 @@ export async function GET(req: NextRequest) {
         lastSyncedAt: r.lastSyncedAt?.toISOString() ?? null,
         lastSyncStatus: r.lastSyncStatus,
         lastError: r.lastError,
+        nextSyncAfter: r.nextSyncAfter.toISOString(),
+        syncDurationMs: r.syncDurationMs,
+        eventCount: r.eventCount,
+        consecutiveFailures: r.consecutiveFailures,
+        health: {
+          state: health.state,
+          reason: health.reason,
+          tone: health.tone,
+        },
         createdAt: r.createdAt.toISOString(),
       };
     });

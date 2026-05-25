@@ -3658,7 +3658,39 @@ type ImportedFeed = {
   lastSyncedAt: string | null;
   lastSyncStatus: string | null;
   lastError: string | null;
+  // Phase ICAL-4 fields
+  nextSyncAfter?: string;
+  syncDurationMs?: number | null;
+  eventCount?: number | null;
+  consecutiveFailures?: number;
+  health?: {
+    state: "healthy" | "warning" | "stale" | "error" | "disabled";
+    reason: string;
+    tone: "green" | "amber" | "red" | "slate";
+  };
   createdAt: string;
+};
+
+type FeedDiagnosticsPayload = {
+  feedId: string;
+  health: { state: string; reason: string; tone: string };
+  providerKind: string;
+  providerLabel: string;
+  urlHost: string;
+  supportsETag: boolean;
+  supportsLastModified: boolean;
+  lastRun: {
+    at: string | null;
+    status: string | null;
+    durationMs: number | null;
+    eventCount: number | null;
+    error: string | null;
+  };
+  consecutiveFailures: number;
+  nextSyncAt: string;
+  cachedEventCount?: number;
+  createdAt: string;
+  updatedAt: string;
 };
 
 function ImportedCalendarFeedsSection({
@@ -3776,6 +3808,28 @@ function ImportedCalendarFeedsSection({
         </div>
       </div>
 
+      {/* Phase ICAL-4 — top-of-section problem banner. Only renders
+          when at least one feed needs attention. */}
+      {feeds.filter(
+        (f) => f.health && (f.health.state === "stale" || f.health.state === "error"),
+      ).length > 0 ? (
+        <div className="flex items-start gap-1.5 rounded-lg bg-amber-50 border border-amber-200 px-2.5 py-2 text-[11px] leading-snug text-amber-900">
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" strokeWidth={1.75} />
+          <div>
+            <strong className="font-semibold">
+              {feeds.filter((f) => f.health && (f.health.state === "stale" || f.health.state === "error")).length}{" "}
+              feed
+              {feeds.filter((f) => f.health && (f.health.state === "stale" || f.health.state === "error")).length === 1
+                ? ""
+                : "s"}{" "}
+              need attention.
+            </strong>{" "}
+            Booking slots may be allowed during times that are actually busy on
+            the source calendar. Review the affected feeds below.
+          </div>
+        </div>
+      ) : null}
+
       {/* Feed list */}
       {feeds.length === 0 ? (
         <div className="rounded-xl border border-dashed border-border bg-surface-inset/30 px-3 py-4 text-center text-[11.5px] text-ink-subtle">
@@ -3789,6 +3843,7 @@ function ImportedCalendarFeedsSection({
             feed={f}
             busy={busyId === f.id}
             canEdit={canEdit}
+            qs={qs}
             onToggle={() => toggleEnabled(f)}
             onSync={() => syncNow(f)}
             onRemove={() => removeFeed(f)}
@@ -3825,6 +3880,7 @@ function ImportedFeedRow({
   feed,
   busy,
   canEdit,
+  qs,
   onToggle,
   onSync,
   onRemove,
@@ -3832,10 +3888,41 @@ function ImportedFeedRow({
   feed: ImportedFeed;
   busy: boolean;
   canEdit: boolean;
+  qs: string;
   onToggle: () => void;
   onSync: () => void;
   onRemove: () => void;
 }) {
+  const [showDiagnostics, setShowDiagnostics] = React.useState(false);
+  const [diagnostics, setDiagnostics] = React.useState<FeedDiagnosticsPayload | null>(null);
+
+  // Phase ICAL-4 — sync-now cooldown timer. Counts seconds remaining
+  // from the 30s cooldown the backend enforces. Re-evaluated on
+  // every tick + every render.
+  const COOLDOWN_S = 30;
+  const [now, setNow] = React.useState(() => Date.now());
+  React.useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  const cooldownRemaining = feed.lastSyncedAt
+    ? Math.max(
+        0,
+        COOLDOWN_S - Math.floor((now - new Date(feed.lastSyncedAt).getTime()) / 1000),
+      )
+    : 0;
+
+  async function loadDiagnostics() {
+    if (diagnostics) return;
+    try {
+      const r = await fetch(`/api/staff/external-feeds/${feed.id}/diagnostics${qs}`);
+      const d = await r.json();
+      if (r.ok && d?.diagnostics) setDiagnostics(d.diagnostics);
+    } catch {
+      /* silent */
+    }
+  }
+
   const providerLabel: Record<ImportedFeed["providerKind"], string> = {
     apple_icloud: "Apple iCloud",
     outlook: "Outlook",
@@ -3843,20 +3930,18 @@ function ImportedFeedRow({
     exchange: "Exchange",
     other: "Other",
   };
-  const statusColor =
-    feed.lastSyncStatus === "ok" || feed.lastSyncStatus === "not_modified"
-      ? "text-emerald-700"
-      : feed.lastSyncStatus
-        ? "text-amber-700"
-        : "text-ink-subtle";
-  const statusLabel =
-    feed.lastSyncStatus === "ok"
-      ? "Synced"
-      : feed.lastSyncStatus === "not_modified"
-        ? "Up to date"
-        : feed.lastSyncStatus
-          ? feed.lastSyncStatus.replace(/_/g, " ")
-          : "Pending first sync";
+
+  // Phase ICAL-4 — health badge color from the classifier tone.
+  const healthBadge = feed.health
+    ? {
+        healthy: "bg-emerald-50 text-emerald-700 border-emerald-200",
+        warning: "bg-amber-50 text-amber-800 border-amber-200",
+        stale: "bg-amber-100 text-amber-900 border-amber-300",
+        error: "bg-red-50 text-red-700 border-red-200",
+        disabled: "bg-slate-100 text-slate-700 border-slate-200",
+      }[feed.health.state]
+    : "bg-slate-100 text-slate-700 border-slate-200";
+
   return (
     <div className="rounded-xl border border-border bg-surface-raised/60 p-3">
       <div className="flex items-start justify-between gap-2">
@@ -3868,7 +3953,17 @@ function ImportedFeedRow({
             <span className="inline-flex items-center rounded-full bg-slate-100 px-1.5 py-px text-[9px] font-semibold uppercase tracking-wide text-slate-700">
               {providerLabel[feed.providerKind]}
             </span>
-            {!feed.isEnabled ? (
+            {feed.health ? (
+              <span
+                className={cn(
+                  "inline-flex items-center rounded-full border px-1.5 py-px text-[9px] font-semibold uppercase tracking-wide",
+                  healthBadge,
+                )}
+                title={feed.health.reason}
+              >
+                {feed.health.state}
+              </span>
+            ) : !feed.isEnabled ? (
               <span className="inline-flex items-center rounded-full bg-slate-200 px-1.5 py-px text-[9px] font-semibold uppercase tracking-wide text-slate-700">
                 Disabled
               </span>
@@ -3877,15 +3972,35 @@ function ImportedFeedRow({
           <div className="mt-0.5 font-mono text-[10.5px] text-ink-subtle truncate">
             {feed.urlPreview}
           </div>
-          <div className={cn("mt-1 text-[10.5px] font-medium", statusColor)}>
-            {statusLabel}
+          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10.5px] text-ink-subtle">
             {feed.lastSyncedAt ? (
-              <span className="ml-1 text-ink-subtle font-normal">
-                · {new Date(feed.lastSyncedAt).toLocaleString()}
+              <span>
+                <span className="font-medium text-ink-muted">Synced:</span>{" "}
+                {new Date(feed.lastSyncedAt).toLocaleString()}
+              </span>
+            ) : (
+              <span className="italic">Pending first sync</span>
+            )}
+            {typeof feed.eventCount === "number" ? (
+              <span>
+                <span className="font-medium text-ink-muted">Events:</span>{" "}
+                {feed.eventCount}
+              </span>
+            ) : null}
+            {typeof feed.syncDurationMs === "number" ? (
+              <span>
+                <span className="font-medium text-ink-muted">Took:</span>{" "}
+                {feed.syncDurationMs}ms
+              </span>
+            ) : null}
+            {feed.nextSyncAfter ? (
+              <span>
+                <span className="font-medium text-ink-muted">Next:</span>{" "}
+                {formatNextSync(feed.nextSyncAfter, now)}
               </span>
             ) : null}
           </div>
-          {feed.lastError ? (
+          {feed.lastError && feed.health?.state !== "healthy" ? (
             <div className="mt-1 text-[10.5px] text-red-700 line-clamp-2">
               {feed.lastError}
             </div>
@@ -3895,12 +4010,13 @@ function ImportedFeedRow({
       <div className="mt-2 flex flex-wrap gap-1.5">
         <button
           type="button"
-          disabled={!canEdit || busy}
+          disabled={!canEdit || busy || cooldownRemaining > 0}
           onClick={onSync}
           className="inline-flex items-center gap-1 rounded-md border border-border bg-white px-2 py-0.5 text-[10.5px] font-medium text-ink hover:bg-surface-inset disabled:opacity-50"
+          title={cooldownRemaining > 0 ? `Wait ${cooldownRemaining}s` : "Force a sync now"}
         >
-          <RefreshCw className="h-3 w-3" strokeWidth={2} />
-          Sync now
+          <RefreshCw className={cn("h-3 w-3", busy && "animate-spin")} strokeWidth={2} />
+          {cooldownRemaining > 0 ? `Wait ${cooldownRemaining}s` : busy ? "Syncing…" : "Sync now"}
         </button>
         <button
           type="button"
@@ -3912,6 +4028,16 @@ function ImportedFeedRow({
         </button>
         <button
           type="button"
+          onClick={() => {
+            setShowDiagnostics((s) => !s);
+            if (!showDiagnostics) void loadDiagnostics();
+          }}
+          className="inline-flex items-center gap-1 rounded-md border border-border bg-white px-2 py-0.5 text-[10.5px] font-medium text-ink hover:bg-surface-inset"
+        >
+          {showDiagnostics ? "Hide" : "Diagnostics"}
+        </button>
+        <button
+          type="button"
           disabled={!canEdit || busy}
           onClick={onRemove}
           className="inline-flex items-center gap-1 rounded-md border border-red-200 bg-white px-2 py-0.5 text-[10.5px] font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
@@ -3919,8 +4045,78 @@ function ImportedFeedRow({
           Remove
         </button>
       </div>
+
+      {/* Phase ICAL-4 — expandable diagnostics drawer. Loads
+          on-demand from the redacted /diagnostics endpoint. */}
+      {showDiagnostics ? (
+        <div className="mt-2 rounded-lg border border-border bg-surface-inset/50 p-2.5 text-[10.5px] text-ink-muted">
+          {!diagnostics ? (
+            <div className="italic">Loading diagnostics…</div>
+          ) : (
+            <div className="space-y-1.5">
+              <DiagRow label="Feed ID" value={diagnostics.feedId} mono />
+              <DiagRow label="Host" value={diagnostics.urlHost} mono />
+              <DiagRow label="Health" value={`${diagnostics.health.state} — ${diagnostics.health.reason}`} />
+              <DiagRow
+                label="ETag support"
+                value={diagnostics.supportsETag ? "yes" : "no"}
+              />
+              <DiagRow
+                label="Last-Modified support"
+                value={diagnostics.supportsLastModified ? "yes" : "no"}
+              />
+              <DiagRow
+                label="Last status"
+                value={diagnostics.lastRun.status ?? "(never synced)"}
+              />
+              {diagnostics.lastRun.durationMs !== null ? (
+                <DiagRow label="Last duration" value={`${diagnostics.lastRun.durationMs}ms`} />
+              ) : null}
+              {diagnostics.lastRun.eventCount !== null ? (
+                <DiagRow label="Last event count" value={String(diagnostics.lastRun.eventCount)} />
+              ) : null}
+              {typeof diagnostics.cachedEventCount === "number" ? (
+                <DiagRow label="Cached events" value={String(diagnostics.cachedEventCount)} />
+              ) : null}
+              <DiagRow label="Consecutive failures" value={String(diagnostics.consecutiveFailures)} />
+              <DiagRow label="Next scheduled sync" value={new Date(diagnostics.nextSyncAt).toLocaleString()} />
+              {diagnostics.lastRun.error ? (
+                <DiagRow label="Last error" value={diagnostics.lastRun.error} mono />
+              ) : null}
+              <div className="pt-1 text-[9.5px] italic text-ink-subtle">
+                Safe to share with support — URL path is redacted; only the host is exposed.
+              </div>
+            </div>
+          )}
+        </div>
+      ) : null}
     </div>
   );
+}
+
+function DiagRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <div className="flex items-start gap-2">
+      <div className="w-32 shrink-0 text-[9.5px] font-semibold uppercase tracking-wide text-ink-subtle">
+        {label}
+      </div>
+      <div className={cn("min-w-0 flex-1 break-all", mono && "font-mono")}>
+        {value}
+      </div>
+    </div>
+  );
+}
+
+/** Phase ICAL-4 — human-friendly "next sync in" formatter. */
+function formatNextSync(iso: string, nowMs: number): string {
+  const target = new Date(iso).getTime();
+  const deltaMs = target - nowMs;
+  if (deltaMs <= 0) return "now";
+  const m = Math.round(deltaMs / 60_000);
+  if (m < 1) return "< 1 min";
+  if (m < 60) return `in ${m}m`;
+  const h = Math.round(m / 60);
+  return `in ${h}h`;
 }
 
 function AddFeedForm({

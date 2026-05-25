@@ -47,6 +47,26 @@ export async function POST(
 
     // Rate limit: per-feed 5/min. Defends the upstream provider
     // from a "click sync 20 times" user.
+    //
+    // Phase ICAL-4 — also enforce a 30s post-sync cooldown to
+    // prevent eager retries when an upstream is unstable. The
+    // cooldown is separate from the token bucket so the user gets
+    // a clear "wait X seconds" message instead of an opaque 429.
+    if (row.lastSyncedAt) {
+      const elapsedMs = Date.now() - row.lastSyncedAt.getTime();
+      const COOLDOWN_MS = 30_000;
+      if (elapsedMs < COOLDOWN_MS) {
+        const remainingSec = Math.ceil((COOLDOWN_MS - elapsedMs) / 1000);
+        return NextResponse.json(
+          {
+            error: `Recently synced. Wait ${remainingSec} second${remainingSec === 1 ? "" : "s"} before trying again.`,
+            cooldownRemainingSec: remainingSec,
+          },
+          { status: 429 },
+        );
+      }
+    }
+
     const rl = rateLimit({
       key: `external_feed_manual_sync:${row.id}`,
       capacity: 5,
