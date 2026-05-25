@@ -3351,6 +3351,20 @@ function CalendarConnectionsSection({
         </div>
         <AppleCalendarSubscriptionRow staffUserId={staffUserId} canEdit={canEdit} />
       </div>
+
+      {/* Phase ICAL-3 — Imported calendar feeds (inbound). Read-only
+          busy-time import from external ICS URLs (Apple iCloud share,
+          published Outlook .ics, Google iCal). The OPPOSITE direction
+          from Phase ICAL-2: we PULL events to block our slots, not
+          PUSH bookings to their calendar. */}
+      <div className="mt-4 border-t border-border pt-4">
+        <div className="mb-2 flex items-center gap-1.5">
+          <div className="text-[10px] font-semibold uppercase tracking-[0.10em] text-ink-muted">
+            Imported calendar feeds · read-only busy blocking
+          </div>
+        </div>
+        <ImportedCalendarFeedsSection staffUserId={staffUserId} canEdit={canEdit} />
+      </div>
     </PremiumCard>
   );
 }
@@ -3620,6 +3634,379 @@ function AppleCalendarSubscriptionRow({
           </div>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+// ─── Imported Calendar Feeds section (Phase ICAL-3) ─────────────────
+//
+// Read-only inbound ICS feed import. The OPPOSITE direction from
+// Phase ICAL-2: we PULL events from a URL the user pastes and use
+// them as busy blocks in the availability engine. No CalDAV. No
+// password collection. No write-back.
+//
+// Each row shows: provider icon, label, redacted URL preview, last
+// sync status, error (if any). Actions: enable/disable, sync now,
+// remove.
+
+type ImportedFeed = {
+  id: string;
+  providerLabel: string;
+  providerKind: "apple_icloud" | "outlook" | "google" | "exchange" | "other";
+  urlPreview: string;
+  isEnabled: boolean;
+  lastSyncedAt: string | null;
+  lastSyncStatus: string | null;
+  lastError: string | null;
+  createdAt: string;
+};
+
+function ImportedCalendarFeedsSection({
+  staffUserId,
+  canEdit,
+}: {
+  staffUserId: string;
+  canEdit: boolean;
+}) {
+  const [feeds, setFeeds] = React.useState<ImportedFeed[] | null>(null);
+  const [showAdd, setShowAdd] = React.useState(false);
+  const [busyId, setBusyId] = React.useState<string | null>(null);
+
+  const qs = staffUserId ? `?userId=${encodeURIComponent(staffUserId)}` : "";
+
+  const load = React.useCallback(() => {
+    fetch(`/api/staff/external-feeds${qs}`)
+      .then((r) => r.json())
+      .then((d) => setFeeds(d?.feeds ?? []))
+      .catch(() => setFeeds([]));
+  }, [qs]);
+
+  React.useEffect(() => {
+    load();
+  }, [load]);
+
+  async function toggleEnabled(feed: ImportedFeed) {
+    if (!canEdit) return;
+    setBusyId(feed.id);
+    try {
+      const r = await fetch(`/api/staff/external-feeds/${feed.id}${qs}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isEnabled: !feed.isEnabled }),
+      });
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        throw new Error(d?.error ?? "Failed");
+      }
+      toast(feed.isEnabled ? "Feed disabled" : "Feed enabled", "success");
+      load();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed", "error");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function syncNow(feed: ImportedFeed) {
+    if (!canEdit) return;
+    setBusyId(feed.id);
+    try {
+      const r = await fetch(`/api/staff/external-feeds/${feed.id}/sync${qs}`, {
+        method: "POST",
+      });
+      const d = await r.json();
+      if (d.ok) {
+        toast(
+          d.status === "not_modified" ? "Already up to date" : "Synced",
+          "success",
+        );
+      } else {
+        toast(d.error ?? "Sync failed", "error");
+      }
+      load();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed", "error");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function removeFeed(feed: ImportedFeed) {
+    if (!canEdit) return;
+    if (
+      !window.confirm(
+        `Remove "${feed.providerLabel}"? Its busy events will stop blocking booking slots.`,
+      )
+    ) {
+      return;
+    }
+    setBusyId(feed.id);
+    try {
+      const r = await fetch(`/api/staff/external-feeds/${feed.id}${qs}`, {
+        method: "DELETE",
+      });
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        throw new Error(d?.error ?? "Failed");
+      }
+      toast("Feed removed", "success");
+      load();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed", "error");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  if (feeds === null) {
+    return <div className="h-20 animate-pulse rounded-xl bg-surface-inset/40" />;
+  }
+
+  return (
+    <div className="space-y-2">
+      {/* Required educational copy — Phase ICAL-3 spec. Non-removable. */}
+      <div className="flex items-start gap-1.5 rounded-lg bg-blue-50/60 px-2.5 py-2 text-[11px] leading-snug text-blue-900">
+        <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" strokeWidth={1.75} />
+        <div>
+          Read-only busy-time sync. ZentroMeet imports external calendar events
+          to prevent double-bookings. No Apple password required. Source
+          calendars are{" "}
+          <em className="not-italic underline decoration-blue-700/40">never</em>{" "}
+          modified.
+        </div>
+      </div>
+
+      {/* Feed list */}
+      {feeds.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-border bg-surface-inset/30 px-3 py-4 text-center text-[11.5px] text-ink-subtle">
+          No imported feeds yet. Paste an ICS URL below to start blocking slots
+          based on an external calendar.
+        </div>
+      ) : (
+        feeds.map((f) => (
+          <ImportedFeedRow
+            key={f.id}
+            feed={f}
+            busy={busyId === f.id}
+            canEdit={canEdit}
+            onToggle={() => toggleEnabled(f)}
+            onSync={() => syncNow(f)}
+            onRemove={() => removeFeed(f)}
+          />
+        ))
+      )}
+
+      {/* Add controls */}
+      {canEdit ? (
+        showAdd ? (
+          <AddFeedForm
+            qs={qs}
+            onCancel={() => setShowAdd(false)}
+            onAdded={() => {
+              setShowAdd(false);
+              load();
+            }}
+          />
+        ) : (
+          <button
+            type="button"
+            onClick={() => setShowAdd(true)}
+            className="inline-flex items-center gap-1 rounded-md border border-border bg-white px-2.5 py-1 text-[11px] font-medium text-ink hover:bg-surface-inset"
+          >
+            + Add ICS feed
+          </button>
+        )
+      ) : null}
+    </div>
+  );
+}
+
+function ImportedFeedRow({
+  feed,
+  busy,
+  canEdit,
+  onToggle,
+  onSync,
+  onRemove,
+}: {
+  feed: ImportedFeed;
+  busy: boolean;
+  canEdit: boolean;
+  onToggle: () => void;
+  onSync: () => void;
+  onRemove: () => void;
+}) {
+  const providerLabel: Record<ImportedFeed["providerKind"], string> = {
+    apple_icloud: "Apple iCloud",
+    outlook: "Outlook",
+    google: "Google",
+    exchange: "Exchange",
+    other: "Other",
+  };
+  const statusColor =
+    feed.lastSyncStatus === "ok" || feed.lastSyncStatus === "not_modified"
+      ? "text-emerald-700"
+      : feed.lastSyncStatus
+        ? "text-amber-700"
+        : "text-ink-subtle";
+  const statusLabel =
+    feed.lastSyncStatus === "ok"
+      ? "Synced"
+      : feed.lastSyncStatus === "not_modified"
+        ? "Up to date"
+        : feed.lastSyncStatus
+          ? feed.lastSyncStatus.replace(/_/g, " ")
+          : "Pending first sync";
+  return (
+    <div className="rounded-xl border border-border bg-surface-raised/60 p-3">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <div className="text-[13px] font-semibold tracking-tight text-ink truncate">
+              {feed.providerLabel}
+            </div>
+            <span className="inline-flex items-center rounded-full bg-slate-100 px-1.5 py-px text-[9px] font-semibold uppercase tracking-wide text-slate-700">
+              {providerLabel[feed.providerKind]}
+            </span>
+            {!feed.isEnabled ? (
+              <span className="inline-flex items-center rounded-full bg-slate-200 px-1.5 py-px text-[9px] font-semibold uppercase tracking-wide text-slate-700">
+                Disabled
+              </span>
+            ) : null}
+          </div>
+          <div className="mt-0.5 font-mono text-[10.5px] text-ink-subtle truncate">
+            {feed.urlPreview}
+          </div>
+          <div className={cn("mt-1 text-[10.5px] font-medium", statusColor)}>
+            {statusLabel}
+            {feed.lastSyncedAt ? (
+              <span className="ml-1 text-ink-subtle font-normal">
+                · {new Date(feed.lastSyncedAt).toLocaleString()}
+              </span>
+            ) : null}
+          </div>
+          {feed.lastError ? (
+            <div className="mt-1 text-[10.5px] text-red-700 line-clamp-2">
+              {feed.lastError}
+            </div>
+          ) : null}
+        </div>
+      </div>
+      <div className="mt-2 flex flex-wrap gap-1.5">
+        <button
+          type="button"
+          disabled={!canEdit || busy}
+          onClick={onSync}
+          className="inline-flex items-center gap-1 rounded-md border border-border bg-white px-2 py-0.5 text-[10.5px] font-medium text-ink hover:bg-surface-inset disabled:opacity-50"
+        >
+          <RefreshCw className="h-3 w-3" strokeWidth={2} />
+          Sync now
+        </button>
+        <button
+          type="button"
+          disabled={!canEdit || busy}
+          onClick={onToggle}
+          className="inline-flex items-center gap-1 rounded-md border border-border bg-white px-2 py-0.5 text-[10.5px] font-medium text-ink hover:bg-surface-inset disabled:opacity-50"
+        >
+          {feed.isEnabled ? "Disable" : "Enable"}
+        </button>
+        <button
+          type="button"
+          disabled={!canEdit || busy}
+          onClick={onRemove}
+          className="inline-flex items-center gap-1 rounded-md border border-red-200 bg-white px-2 py-0.5 text-[10.5px] font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
+        >
+          Remove
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function AddFeedForm({
+  qs,
+  onCancel,
+  onAdded,
+}: {
+  qs: string;
+  onCancel: () => void;
+  onAdded: () => void;
+}) {
+  const [url, setUrl] = React.useState("");
+  const [label, setLabel] = React.useState("");
+  const [submitting, setSubmitting] = React.useState(false);
+
+  async function submit() {
+    if (submitting) return;
+    if (!/^https?:\/\//.test(url.trim())) {
+      toast("URL must start with https://", "error");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const r = await fetch(`/api/staff/external-feeds${qs}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: url.trim(), label: label.trim() || undefined }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error ?? "Failed to add feed");
+      toast("Feed added — first sync complete", "success");
+      onAdded();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed", "error");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="rounded-xl border border-brand-accent/30 bg-brand-accent/5 p-3">
+      <div className="text-[11px] font-semibold uppercase tracking-[0.10em] text-brand-accent mb-2">
+        Add an imported feed
+      </div>
+      <div className="space-y-2">
+        <input
+          type="text"
+          value={label}
+          onChange={(e) => setLabel(e.target.value)}
+          placeholder="Label (optional, e.g. Apple iCloud personal)"
+          className="w-full rounded-md border border-border bg-white px-2 py-1 text-[11.5px]"
+        />
+        <input
+          type="url"
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          placeholder="https://... — paste an ICS / webcal URL"
+          className="w-full rounded-md border border-border bg-white px-2 py-1 text-[11.5px] font-mono"
+        />
+        <p className="text-[10.5px] leading-snug text-ink-subtle">
+          <strong>Apple iCloud:</strong> Calendar app → right-click calendar →
+          Share Calendar → enable Public Calendar → copy URL.{" "}
+          <strong>Outlook:</strong> outlook.com → Settings → Calendar → Shared
+          calendars → Publish → ICS link.{" "}
+          <strong>Google:</strong> Calendar settings → Settings for my calendars →
+          Integrate calendar → Public/Secret address in iCal format.
+        </p>
+        <div className="flex gap-1.5">
+          <button
+            type="button"
+            disabled={submitting || !url.trim()}
+            onClick={submit}
+            className="inline-flex items-center gap-1 rounded-md bg-brand-accent px-2.5 py-1 text-[11px] font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+          >
+            {submitting ? "Validating…" : "Add feed"}
+          </button>
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={submitting}
+            className="inline-flex items-center gap-1 rounded-md border border-border bg-white px-2.5 py-1 text-[11px] font-medium text-ink hover:bg-surface-inset"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

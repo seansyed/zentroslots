@@ -14,6 +14,11 @@ import {
   users,
 } from "@/db/schema";
 import { getExternalBusyForUser } from "@/lib/calendar/sync";
+// Phase ICAL-3 — read-only external ICS feed busy lookup. ADDITIVE:
+// returns [] when the user has no enabled feeds, so the engine's
+// behavior is byte-identical to pre-ICAL-3 for everyone who hasn't
+// added a feed.
+import { getExternalFeedBusyForUser } from "@/lib/calendar/externalFeeds/availabilityBridge";
 import { loadTenantFeatures } from "@/lib/features";
 import {
   readDefaultWorkspaceHours,
@@ -73,23 +78,41 @@ export async function getAvailableSlots(params: {
   // pre-feature behavior. Freebusy is also wrapped in try/catch
   // inside the orchestrator so a Google API failure can't break
   // availability.
-  const [existing, externalBusy, calendarBlocks, groupBlocks, features] =
-    await Promise.all([
-      getBookingsInRange(staffUserId, viewerDay),
-      getExternalBusyForUser(staffUserId, viewerDay.start, viewerDay.end),
-      getCalendarEventsInRange(staffUserId, viewerDay),
-      // Phase 17I-3B — when this staff is the HOST of a group session,
-      // the slot is blocked for public booking. Future multi-host work
-      // can union co-host ids the same way internal_meeting attendees
-      // are handled in getCalendarEventsInRange.
-      getGroupSessionsInRange(staffUserId, viewerDay),
-      loadTenantFeatures(staff.tenantId),
-    ]);
+  const [
+    existing,
+    externalBusy,
+    calendarBlocks,
+    groupBlocks,
+    // Phase ICAL-3 — imported external ICS feeds (Apple iCloud share
+    // URLs, published Outlook .ics, Google iCal URLs, etc.). Read-
+    // only busy source. Returns [] when the user has no enabled
+    // feeds, making the output byte-identical to pre-ICAL-3 for
+    // anyone who hasn't configured one.
+    importedFeedBlocks,
+    features,
+  ] = await Promise.all([
+    getBookingsInRange(staffUserId, viewerDay),
+    getExternalBusyForUser(staffUserId, viewerDay.start, viewerDay.end),
+    getCalendarEventsInRange(staffUserId, viewerDay),
+    // Phase 17I-3B — when this staff is the HOST of a group session,
+    // the slot is blocked for public booking. Future multi-host work
+    // can union co-host ids the same way internal_meeting attendees
+    // are handled in getCalendarEventsInRange.
+    getGroupSessionsInRange(staffUserId, viewerDay),
+    getExternalFeedBusyForUser(
+      staffUserId,
+      viewerDay.start,
+      viewerDay.end,
+      staff.tenantId,
+    ),
+    loadTenantFeatures(staff.tenantId),
+  ]);
   const combinedBusy: Interval[] = [
     ...existing,
     ...externalBusy,
     ...calendarBlocks,
     ...groupBlocks,
+    ...importedFeedBlocks,
   ];
 
   // Phase 16: tenant-level `bookingBuffers` gate. When OFF, the engine

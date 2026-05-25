@@ -624,6 +624,87 @@ export const staffCalendarFeedTokens = pgTable(
   }),
 );
 
+// ─── External Calendar Feeds (Phase ICAL-3) ─────────────────────────────
+//
+// Read-only inbound ICS feed import. Users paste shared/published
+// calendar URLs (Apple iCloud share URL, Outlook published .ics,
+// Google iCal URL, Exchange feed, etc.) and ZentroMeet:
+//   • periodically fetches the feed
+//   • parses RFC 5545 events
+//   • caches normalized busy windows in external_feed_events
+//   • blocks overlapping booking slots in the availability engine
+//
+// No CalDAV. No write-back. No Apple credentials. Feed URLs are
+// encrypted at rest via lib/crypto.ts. Migration 0058.
+
+export const externalCalendarFeeds = pgTable(
+  "external_calendar_feeds",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    providerLabel: varchar("provider_label", { length: 120 }).notNull(),
+    feedUrlEncrypted: text("feed_url_encrypted").notNull(),
+    normalizedFeedHash: varchar("normalized_feed_hash", { length: 64 }).notNull(),
+    providerKind: varchar("provider_kind", { length: 20 }).notNull().default("other"),
+    isEnabled: boolean("is_enabled").notNull().default(true),
+    lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
+    // 'ok' | 'error' | 'pending' | 'rate_limited' | 'fetch_failed' |
+    // 'parse_failed' | 'too_large' | 'ssrf_blocked'
+    lastSyncStatus: varchar("last_sync_status", { length: 30 }),
+    lastError: text("last_error"),
+    etag: varchar("etag", { length: 255 }),
+    lastModified: varchar("last_modified", { length: 64 }),
+    nextSyncAfter: timestamp("next_sync_after", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    userDedupe: uniqueIndex("external_calendar_feeds_user_dedupe").on(
+      t.tenantId,
+      t.userId,
+      t.normalizedFeedHash,
+    ),
+    activeIdx: index("external_calendar_feeds_active_idx").on(t.tenantId, t.userId),
+    dueIdx: index("external_calendar_feeds_due_idx").on(t.nextSyncAfter),
+  }),
+);
+
+export const externalFeedEvents = pgTable(
+  "external_feed_events",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    feedId: uuid("feed_id")
+      .notNull()
+      .references(() => externalCalendarFeeds.id, { onDelete: "cascade" }),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    sourceUid: varchar("source_uid", { length: 255 }).notNull(),
+    startAt: timestamp("start_at", { withTimezone: true }).notNull(),
+    endAt: timestamp("end_at", { withTimezone: true }).notNull(),
+    allDay: boolean("all_day").notNull().default(false),
+    summary: varchar("summary", { length: 200 }),
+    status: varchar("status", { length: 20 }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    userWindowIdx: index("external_feed_events_user_window_idx").on(
+      t.userId,
+      t.startAt,
+      t.endAt,
+    ),
+    feedIdx: index("external_feed_events_feed_idx").on(t.feedId),
+  }),
+);
+
 // ─── Availability Overrides ─────────────────────────────────────────────
 // Vacations, holidays, lunch breaks, custom one-off schedules.
 // Multiple rows per (user_id, date) supported for split-day schedules.
