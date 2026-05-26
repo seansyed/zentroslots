@@ -11,17 +11,26 @@ import { computeFinanceBundle } from "@/lib/admin-analytics/finance";
 import { fetchDunning } from "@/lib/admin-analytics/dunning";
 import { computeSubscriptionIntelligence } from "@/lib/admin-analytics/subscription-intelligence";
 import { computeReconReport } from "@/lib/admin-analytics/stripe-recon";
+import {
+  computeFinanceExecutiveKpis,
+  deriveFinanceInsights,
+} from "@/lib/admin-analytics/finance-intelligence";
 
 export const metadata = { title: "Financial Operations Center" };
 export const dynamic = "force-dynamic";
 
 /**
- * /admin/finance — SA-6 Financial Operations Center.
+ * /admin/finance — Financial Operations Center (executive cockpit).
  *
- * Server-renders all five sections in parallel for fast first paint.
+ * Server-renders all sections in parallel for fast first paint.
  * Per-section fatal isolation: any module that throws passes null;
  * the client renders an amber error placeholder for that section
  * and the others continue working normally.
+ *
+ * Executive hero KPIs (computeFinanceExecutiveKpis) + deterministic
+ * insights (deriveFinanceInsights) drive the top strip + per-chart
+ * insight chips. Every value is sourced from real DB queries; uses
+ * NULL → "—" rather than fabricating placeholders.
  */
 export default async function FinanceOperationsPage() {
   const session = await getSession();
@@ -30,12 +39,16 @@ export default async function FinanceOperationsPage() {
   }
   const me = await db.query.users.findFirst({ where: eq(users.id, session.sub) });
 
-  const [revenue, dunning, subIntel, recon] = await Promise.all([
+  const [revenue, dunning, subIntel, recon, execKpis] = await Promise.all([
     computeFinanceBundle().catch(() => null),
     fetchDunning().catch(() => null),
     computeSubscriptionIntelligence().catch(() => null),
     computeReconReport().catch(() => null),
+    computeFinanceExecutiveKpis().catch(() => null),
   ]);
+
+  const insights =
+    revenue && execKpis ? deriveFinanceInsights(revenue, execKpis, dunning) : [];
 
   return (
     <Shell
@@ -58,7 +71,9 @@ export default async function FinanceOperationsPage() {
       </p>
 
       <div className="mt-5">
-        <FinanceClient initial={{ revenue, dunning, subIntel, recon }} />
+        <FinanceClient
+          initial={{ revenue, dunning, subIntel, recon, execKpis, insights }}
+        />
       </div>
     </Shell>
   );

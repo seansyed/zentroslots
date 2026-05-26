@@ -47,12 +47,21 @@ import type { DunningPage, DunningTenant } from "@/lib/admin-analytics/dunning";
 import type { SubIntelBundle, SubIntelList } from "@/lib/admin-analytics/subscription-intelligence";
 import type { ReconReport, ReconFinding } from "@/lib/admin-analytics/stripe-recon";
 import type { ActivityEvent, ActivityPage } from "@/lib/admin-analytics/activity";
+import type {
+  FinanceExecutiveKpis,
+  FinanceInsight,
+} from "@/lib/admin-analytics/finance-intelligence";
+import FinanceExecutiveHero, {
+  FinanceInsightChip,
+} from "@/components/admin/FinanceExecutiveHero";
 
 type Bundle = {
   revenue: FinanceBundle | null;
   dunning: DunningPage | null;
   subIntel: SubIntelBundle | null;
   recon: ReconReport | null;
+  execKpis?: FinanceExecutiveKpis | null;
+  insights?: FinanceInsight[];
   generatedAt?: string;
 };
 
@@ -244,89 +253,272 @@ function TileGrid({ tiles }: { tiles: FinanceTile[] }) {
   );
 }
 
-function RevenueCharts({ data }: { data: FinanceBundle }) {
+// Cinematic chart tooltip — calm, executive depth.
+const CHART_TOOLTIP_STYLE: React.CSSProperties = {
+  borderRadius: 10,
+  border: "1px solid rgba(226, 232, 240, 0.9)",
+  background: "rgba(255, 255, 255, 0.96)",
+  boxShadow: "0 8px 24px rgba(15, 23, 42, 0.08)",
+  fontSize: 12,
+  padding: "8px 12px",
+};
+
+function insightFor(insights: FinanceInsight[] | undefined, surface: FinanceInsight["surface"]) {
+  if (!insights || insights.length === 0) return null;
+  return insights.find((i) => i.surface === surface) ?? null;
+}
+
+function RevenueCharts({
+  data,
+  insights,
+}: {
+  data: FinanceBundle;
+  insights?: FinanceInsight[];
+}) {
   const allZero = (arr: Array<{ value?: number; a?: number; b?: number }>) =>
     arr.every((p) => (p.value ?? 0) === 0 && (p.a ?? 0) === 0 && (p.b ?? 0) === 0);
 
   return (
     <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-      <ChartCard title="Collections" subtitle="Cash collected per month, last 12 months">
+      <ChartCard
+        title="Collections"
+        subtitle="Cash collected per month, last 12 months"
+        insight={insightFor(insights, "collections")}
+      >
         {allZero(data.collectionsTrend) ? (
-          <EmptyChart />
+          <EmptyChart kind="collections" />
         ) : (
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={data.collectionsTrend} margin={{ top: 4, right: 16, bottom: 0, left: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-              <XAxis dataKey="month" tick={{ fontSize: 11, fill: "#64748b" }} />
-              <YAxis tick={{ fontSize: 11, fill: "#64748b" }} tickFormatter={(v) => fmtCents(Number(v))} width={64} />
-              <Tooltip formatter={(v) => fmtCents(Number(v))} contentStyle={{ borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 12 }} />
-              <Line type="monotone" dataKey="value" stroke="#10b981" strokeWidth={2} dot={{ r: 3 }} />
+            <LineChart data={data.collectionsTrend} margin={{ top: 8, right: 18, bottom: 0, left: 0 }}>
+              <defs>
+                <linearGradient id="collectionsGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#10b981" stopOpacity={0.18} />
+                  <stop offset="100%" stopColor="#10b981" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="2 4" stroke="#f1f5f9" vertical={false} />
+              <XAxis
+                dataKey="month"
+                tick={{ fontSize: 10, fill: "#94a3b8" }}
+                axisLine={{ stroke: "#e2e8f0" }}
+                tickLine={false}
+              />
+              <YAxis
+                tick={{ fontSize: 10, fill: "#94a3b8" }}
+                tickFormatter={(v) => fmtCents(Number(v))}
+                width={64}
+                axisLine={false}
+                tickLine={false}
+              />
+              <Tooltip
+                formatter={(v) => fmtCents(Number(v))}
+                contentStyle={CHART_TOOLTIP_STYLE}
+                cursor={{ stroke: "#10b981", strokeWidth: 1, strokeOpacity: 0.4 }}
+              />
+              <Line
+                type="monotone"
+                dataKey="value"
+                stroke="#10b981"
+                strokeWidth={2}
+                fill="url(#collectionsGrad)"
+                dot={false}
+                activeDot={{ r: 4, strokeWidth: 2, stroke: "#ffffff" }}
+                isAnimationActive={true}
+                animationDuration={900}
+                animationEasing="ease-out"
+              />
             </LineChart>
           </ResponsiveContainer>
         )}
       </ChartCard>
 
-      <ChartCard title="MRR trend" subtitle="Cumulative paid subscription MRR per month">
+      <ChartCard
+        title="MRR trend"
+        subtitle="Cumulative paid subscription MRR per month"
+        insight={insightFor(insights, "mrr")}
+      >
         {allZero(data.mrrTrend) ? (
-          <EmptyChart />
+          <EmptyChart kind="mrr" />
         ) : (
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={data.mrrTrend} margin={{ top: 4, right: 16, bottom: 0, left: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-              <XAxis dataKey="month" tick={{ fontSize: 11, fill: "#64748b" }} />
-              <YAxis tick={{ fontSize: 11, fill: "#64748b" }} tickFormatter={(v) => fmtCents(Number(v))} width={64} />
-              <Tooltip formatter={(v) => fmtCents(Number(v))} contentStyle={{ borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 12 }} />
-              <Line type="monotone" dataKey="value" stroke="#359df3" strokeWidth={2} dot={{ r: 3 }} />
+            <LineChart data={data.mrrTrend} margin={{ top: 8, right: 18, bottom: 0, left: 0 }}>
+              <defs>
+                <linearGradient id="mrrGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#359df3" stopOpacity={0.2} />
+                  <stop offset="100%" stopColor="#359df3" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="2 4" stroke="#f1f5f9" vertical={false} />
+              <XAxis
+                dataKey="month"
+                tick={{ fontSize: 10, fill: "#94a3b8" }}
+                axisLine={{ stroke: "#e2e8f0" }}
+                tickLine={false}
+              />
+              <YAxis
+                tick={{ fontSize: 10, fill: "#94a3b8" }}
+                tickFormatter={(v) => fmtCents(Number(v))}
+                width={64}
+                axisLine={false}
+                tickLine={false}
+              />
+              <Tooltip
+                formatter={(v) => fmtCents(Number(v))}
+                contentStyle={CHART_TOOLTIP_STYLE}
+                cursor={{ stroke: "#359df3", strokeWidth: 1, strokeOpacity: 0.4 }}
+              />
+              <Line
+                type="monotone"
+                dataKey="value"
+                stroke="#359df3"
+                strokeWidth={2}
+                fill="url(#mrrGrad)"
+                dot={false}
+                activeDot={{ r: 4, strokeWidth: 2, stroke: "#ffffff" }}
+                isAnimationActive={true}
+                animationDuration={900}
+                animationEasing="ease-out"
+              />
             </LineChart>
           </ResponsiveContainer>
         )}
       </ChartCard>
 
-      <ChartCard title="Churn events" subtitle="Cancellations + downgrades per month">
+      <ChartCard
+        title="Churn events"
+        subtitle="Cancellations + downgrades per month"
+        insight={insightFor(insights, "churn")}
+      >
         {allZero(data.churnTrend) ? (
-          <EmptyChart />
+          <EmptyChart kind="churn" />
         ) : (
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={data.churnTrend} margin={{ top: 4, right: 16, bottom: 0, left: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-              <XAxis dataKey="month" tick={{ fontSize: 11, fill: "#64748b" }} />
-              <YAxis tick={{ fontSize: 11, fill: "#64748b" }} width={32} />
-              <Tooltip contentStyle={{ borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 12 }} />
-              <Bar dataKey="value" fill="#ef4444" radius={[4, 4, 0, 0]} />
+            <BarChart data={data.churnTrend} margin={{ top: 8, right: 18, bottom: 0, left: 0 }}>
+              <CartesianGrid strokeDasharray="2 4" stroke="#f1f5f9" vertical={false} />
+              <XAxis
+                dataKey="month"
+                tick={{ fontSize: 10, fill: "#94a3b8" }}
+                axisLine={{ stroke: "#e2e8f0" }}
+                tickLine={false}
+              />
+              <YAxis
+                tick={{ fontSize: 10, fill: "#94a3b8" }}
+                width={32}
+                axisLine={false}
+                tickLine={false}
+              />
+              <Tooltip
+                contentStyle={CHART_TOOLTIP_STYLE}
+                cursor={{ fill: "rgba(239, 68, 68, 0.06)" }}
+              />
+              <Bar
+                dataKey="value"
+                fill="#ef4444"
+                radius={[6, 6, 0, 0]}
+                isAnimationActive={true}
+                animationDuration={900}
+                animationEasing="ease-out"
+              />
             </BarChart>
           </ResponsiveContainer>
         )}
       </ChartCard>
 
-      <ChartCard title="Upgrades vs Downgrades" subtitle="Plan-transition events per month">
+      <ChartCard
+        title="Upgrades vs Downgrades"
+        subtitle="Plan-transition events per month"
+        insight={insightFor(insights, "mrr")}
+      >
         {allZero(data.upgradeDowngradeTrend) ? (
-          <EmptyChart />
+          <EmptyChart kind="plans" />
         ) : (
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={data.upgradeDowngradeTrend} margin={{ top: 4, right: 16, bottom: 0, left: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-              <XAxis dataKey="month" tick={{ fontSize: 11, fill: "#64748b" }} />
-              <YAxis tick={{ fontSize: 11, fill: "#64748b" }} width={32} />
-              <Tooltip contentStyle={{ borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 12 }} />
+            <BarChart data={data.upgradeDowngradeTrend} margin={{ top: 8, right: 18, bottom: 0, left: 0 }}>
+              <CartesianGrid strokeDasharray="2 4" stroke="#f1f5f9" vertical={false} />
+              <XAxis
+                dataKey="month"
+                tick={{ fontSize: 10, fill: "#94a3b8" }}
+                axisLine={{ stroke: "#e2e8f0" }}
+                tickLine={false}
+              />
+              <YAxis
+                tick={{ fontSize: 10, fill: "#94a3b8" }}
+                width={32}
+                axisLine={false}
+                tickLine={false}
+              />
+              <Tooltip
+                contentStyle={CHART_TOOLTIP_STYLE}
+                cursor={{ fill: "rgba(15, 23, 42, 0.04)" }}
+              />
               <Legend iconSize={8} wrapperStyle={{ fontSize: 11 }} />
-              <Bar dataKey="a" name="Upgrades" fill="#10b981" radius={[4, 4, 0, 0]} />
-              <Bar dataKey="b" name="Downgrades" fill="#f59e0b" radius={[4, 4, 0, 0]} />
+              <Bar
+                dataKey="a"
+                name="Upgrades"
+                fill="#10b981"
+                radius={[6, 6, 0, 0]}
+                isAnimationActive={true}
+                animationDuration={900}
+              />
+              <Bar
+                dataKey="b"
+                name="Downgrades"
+                fill="#f59e0b"
+                radius={[6, 6, 0, 0]}
+                isAnimationActive={true}
+                animationDuration={900}
+              />
             </BarChart>
           </ResponsiveContainer>
         )}
       </ChartCard>
 
-      <ChartCard title="Failed payments" subtitle="Stripe charge.failed per month" wide>
+      <ChartCard
+        title="Failed payments"
+        subtitle="Stripe charge.failed per month"
+        insight={insightFor(insights, "failures")}
+        wide
+      >
         {allZero(data.failedPaymentsTrend) ? (
-          <EmptyChart />
+          <EmptyChart kind="failures" />
         ) : (
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={data.failedPaymentsTrend} margin={{ top: 4, right: 16, bottom: 0, left: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-              <XAxis dataKey="month" tick={{ fontSize: 11, fill: "#64748b" }} />
-              <YAxis tick={{ fontSize: 11, fill: "#64748b" }} width={32} />
-              <Tooltip contentStyle={{ borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 12 }} />
-              <Line type="monotone" dataKey="value" stroke="#ef4444" strokeWidth={2} dot={{ r: 3 }} />
+            <LineChart data={data.failedPaymentsTrend} margin={{ top: 8, right: 18, bottom: 0, left: 0 }}>
+              <defs>
+                <linearGradient id="failedGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#ef4444" stopOpacity={0.2} />
+                  <stop offset="100%" stopColor="#ef4444" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="2 4" stroke="#f1f5f9" vertical={false} />
+              <XAxis
+                dataKey="month"
+                tick={{ fontSize: 10, fill: "#94a3b8" }}
+                axisLine={{ stroke: "#e2e8f0" }}
+                tickLine={false}
+              />
+              <YAxis
+                tick={{ fontSize: 10, fill: "#94a3b8" }}
+                width={32}
+                axisLine={false}
+                tickLine={false}
+              />
+              <Tooltip
+                contentStyle={CHART_TOOLTIP_STYLE}
+                cursor={{ stroke: "#ef4444", strokeWidth: 1, strokeOpacity: 0.4 }}
+              />
+              <Line
+                type="monotone"
+                dataKey="value"
+                stroke="#ef4444"
+                strokeWidth={2}
+                fill="url(#failedGrad)"
+                dot={false}
+                activeDot={{ r: 4, strokeWidth: 2, stroke: "#ffffff" }}
+                isAnimationActive={true}
+                animationDuration={900}
+                animationEasing="ease-out"
+              />
             </LineChart>
           </ResponsiveContainer>
         )}
@@ -340,25 +532,70 @@ function ChartCard({
   subtitle,
   children,
   wide,
+  insight,
 }: {
   title: string;
   subtitle: string;
   children: React.ReactNode;
   wide?: boolean;
+  insight?: FinanceInsight | null;
 }) {
   return (
-    <div className={`rounded-xl border border-slate-200 bg-white p-5 shadow-[0_1px_2px_rgba(15,23,42,0.04)] ${wide ? "lg:col-span-2" : ""}`}>
-      <h3 className="text-sm font-medium text-slate-900">{title}</h3>
-      <p className="mt-0.5 text-[12px] text-slate-500">{subtitle}</p>
-      <div className="mt-3 h-[200px]">{children}</div>
+    <div
+      className={`group rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-shadow hover:shadow-[0_4px_18px_rgba(15,23,42,0.06)] ${
+        wide ? "lg:col-span-2" : ""
+      }`}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h3 className="text-[13px] font-semibold tracking-tight text-slate-900">{title}</h3>
+          <p className="mt-0.5 text-[11px] text-slate-500">{subtitle}</p>
+        </div>
+        {insight ? <FinanceInsightChip insight={insight} /> : null}
+      </div>
+      <div className="mt-3 h-[210px]">{children}</div>
     </div>
   );
 }
 
-function EmptyChart() {
+const EMPTY_COPY: Record<
+  "collections" | "mrr" | "churn" | "plans" | "failures" | "generic",
+  { title: string; detail: string }
+> = {
+  collections: {
+    title: "No collections in this window",
+    detail: "When Stripe records a succeeded charge, it appears here within minutes.",
+  },
+  mrr: {
+    title: "MRR baseline forming",
+    detail: "Once a tenant moves to a paid plan, monthly recurring revenue plots here.",
+  },
+  churn: {
+    title: "No churn events — clean window",
+    detail: "Cancellations and downgrades from the audit log would appear here.",
+  },
+  plans: {
+    title: "No plan transitions yet",
+    detail: "Upgrades and downgrades fire on plan changes and appear here in the same month.",
+  },
+  failures: {
+    title: "No failed charges — clean window",
+    detail: "Stripe charge.failed events would appear here. Quiet is good.",
+  },
+  generic: {
+    title: "No data in this window yet",
+    detail: "Once events accumulate, the chart populates automatically.",
+  },
+};
+
+function EmptyChart({ kind = "generic" }: { kind?: keyof typeof EMPTY_COPY }) {
+  const copy = EMPTY_COPY[kind];
   return (
-    <div className="flex h-full items-center justify-center rounded-md border border-dashed border-slate-200 text-center text-[12px] text-slate-500">
-      No data in this window yet.
+    <div className="flex h-full flex-col items-center justify-center rounded-xl border border-dashed border-slate-200 bg-gradient-to-br from-slate-50/40 to-white px-4 text-center">
+      <div className="text-[12px] font-medium text-slate-700">{copy.title}</div>
+      <div className="mt-1 max-w-[280px] text-[11px] leading-snug text-slate-500">
+        {copy.detail}
+      </div>
     </div>
   );
 }
@@ -372,64 +609,204 @@ const RISK_STYLES: Record<DunningTenant["riskTier"], string> = {
   critical: "bg-rose-50 text-rose-700 ring-rose-200",
 };
 
+const ROW_TONE: Record<DunningTenant["riskTier"], { rail: string; row: string }> = {
+  recoverable: { rail: "before:bg-emerald-400/60", row: "" },
+  at_risk: { rail: "before:bg-amber-400/70", row: "" },
+  high_risk: { rail: "before:bg-orange-500/70", row: "bg-orange-50/20" },
+  critical: { rail: "before:bg-rose-500/80", row: "bg-rose-50/30" },
+};
+
+const RECOVERY_RING_TONE: Record<DunningTenant["riskTier"], string> = {
+  recoverable: "stroke-emerald-500",
+  at_risk: "stroke-amber-500",
+  high_risk: "stroke-orange-500",
+  critical: "stroke-rose-500",
+};
+
+function RecoveryRing({ pct, tier }: { pct: number; tier: DunningTenant["riskTier"] }) {
+  const radius = 14;
+  const stroke = 3;
+  const norm = radius - stroke / 2;
+  const circ = 2 * Math.PI * norm;
+  const dash = `${(circ * Math.max(0, Math.min(100, pct))) / 100} ${circ}`;
+  return (
+    <div className="relative inline-flex items-center justify-center">
+      <svg width={radius * 2 + 2} height={radius * 2 + 2} className="-rotate-90">
+        <circle
+          cx={radius + 1}
+          cy={radius + 1}
+          r={norm}
+          fill="none"
+          strokeWidth={stroke}
+          className="stroke-slate-100"
+        />
+        <circle
+          cx={radius + 1}
+          cy={radius + 1}
+          r={norm}
+          fill="none"
+          strokeWidth={stroke}
+          strokeLinecap="round"
+          strokeDasharray={dash}
+          className={`${RECOVERY_RING_TONE[tier]} transition-all duration-700`}
+        />
+      </svg>
+      <span
+        className="absolute text-[9px] font-semibold tabular-nums text-slate-700"
+      >
+        {pct}
+      </span>
+    </div>
+  );
+}
+
+function AgingBar({ daysSinceFailure }: { daysSinceFailure: number | null }) {
+  if (daysSinceFailure === null) return <span className="text-[11px] text-slate-400">—</span>;
+  // Visualize 15-day window
+  const pct = Math.min(100, (daysSinceFailure / 15) * 100);
+  const tone =
+    daysSinceFailure <= 3
+      ? "bg-emerald-400"
+      : daysSinceFailure <= 7
+      ? "bg-amber-400"
+      : daysSinceFailure <= 14
+      ? "bg-orange-500"
+      : "bg-rose-500";
+  return (
+    <div className="flex items-center gap-1.5">
+      <div className="h-1 w-12 overflow-hidden rounded-full bg-slate-100">
+        <div className={`h-full ${tone} transition-all duration-500`} style={{ width: `${pct}%` }} />
+      </div>
+      <span className="text-[11px] tabular-nums text-slate-600">
+        {daysSinceFailure}d
+      </span>
+    </div>
+  );
+}
+
 function DunningTable({
   data,
   onAction,
+  headerInsight,
 }: {
   data: DunningPage;
   onAction: (a: PendingAction) => void;
+  headerInsight?: FinanceInsight | null;
 }) {
   if (data.tenants.length === 0) {
     return (
-      <div className="rounded-xl border border-dashed border-slate-200 bg-white px-4 py-12 text-center">
-        <CheckCircle2 className="mx-auto h-7 w-7 text-emerald-500" />
-        <div className="mt-2 text-sm font-medium text-slate-900">No tenants in dunning</div>
-        <div className="mt-1 text-[12px] text-slate-500">
-          Nothing past due and no failed payments in last 30 days.
+      <div className="rounded-2xl border border-dashed border-emerald-200/70 bg-gradient-to-br from-emerald-50/30 via-white to-white px-6 py-12 text-center shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
+        <div className="mx-auto inline-flex h-12 w-12 items-center justify-center rounded-full bg-emerald-50 ring-1 ring-emerald-200/60">
+          <CheckCircle2 className="h-6 w-6 text-emerald-500" />
+        </div>
+        <div className="mt-3 text-sm font-semibold text-slate-900">No tenants in dunning</div>
+        <div className="mt-1 max-w-md mx-auto text-[12px] leading-snug text-slate-500">
+          Nothing past due and no failed payments in the last 30 days. Collections pipeline is clean —
+          this is the optimal state.
         </div>
       </div>
     );
   }
+
+  // Surface aggregate severity summary at top of table.
+  const counts = {
+    recoverable: data.tenants.filter((t) => t.riskTier === "recoverable").length,
+    at_risk: data.tenants.filter((t) => t.riskTier === "at_risk").length,
+    high_risk: data.tenants.filter((t) => t.riskTier === "high_risk").length,
+    critical: data.tenants.filter((t) => t.riskTier === "critical").length,
+  };
+  const recoverableMrr = data.tenants
+    .filter((t) => t.riskTier !== "critical")
+    .reduce((s, t) => s + t.mrrCents, 0);
+
   return (
-    <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
+    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
+      {/* Header strip */}
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 bg-gradient-to-r from-slate-50/80 to-white px-4 py-3">
+        <div className="flex flex-wrap items-center gap-2 text-[11px]">
+          <span className="rounded-full bg-emerald-50 px-2 py-0.5 font-medium text-emerald-700 ring-1 ring-emerald-200">
+            {counts.recoverable} recoverable
+          </span>
+          {counts.at_risk > 0 ? (
+            <span className="rounded-full bg-amber-50 px-2 py-0.5 font-medium text-amber-700 ring-1 ring-amber-200">
+              {counts.at_risk} at-risk
+            </span>
+          ) : null}
+          {counts.high_risk > 0 ? (
+            <span className="rounded-full bg-orange-50 px-2 py-0.5 font-medium text-orange-700 ring-1 ring-orange-200">
+              {counts.high_risk} high-risk
+            </span>
+          ) : null}
+          {counts.critical > 0 ? (
+            <span className="rounded-full bg-rose-50 px-2 py-0.5 font-medium text-rose-700 ring-1 ring-rose-200">
+              {counts.critical} critical
+            </span>
+          ) : null}
+          <span className="text-slate-500">·</span>
+          <span className="text-slate-600">
+            <span className="font-medium tabular-nums">{fmtCents(recoverableMrr)}</span>{" "}
+            recoverable MRR
+          </span>
+        </div>
+        {headerInsight ? <FinanceInsightChip insight={headerInsight} /> : null}
+      </div>
+
       <div className="overflow-x-auto">
         <table className="w-full">
-          <thead className="bg-slate-50 text-left text-[11px] font-medium uppercase tracking-wider text-slate-500">
+          <thead className="bg-slate-50/60 text-left text-[10px] font-medium uppercase tracking-wider text-slate-500">
             <tr>
-              <th className="px-3 py-2">Tenant</th>
-              <th className="px-3 py-2">Plan</th>
-              <th className="px-3 py-2 text-right">MRR</th>
-              <th className="px-3 py-2 text-right">Failures (30d)</th>
-              <th className="px-3 py-2">Last failure</th>
-              <th className="px-3 py-2">Risk</th>
-              <th className="px-3 py-2 text-right">Recovery</th>
-              <th className="px-3 py-2 text-right">Suspends in</th>
-              <th className="px-3 py-2 text-right">Actions</th>
+              <th className="px-3 py-2.5">Tenant</th>
+              <th className="px-3 py-2.5">Plan</th>
+              <th className="px-3 py-2.5 text-right">MRR</th>
+              <th className="px-3 py-2.5 text-right">Failures</th>
+              <th className="px-3 py-2.5">Aging</th>
+              <th className="px-3 py-2.5">Risk</th>
+              <th className="px-3 py-2.5">Recovery</th>
+              <th className="px-3 py-2.5 text-right">Suspends</th>
+              <th className="px-3 py-2.5 text-right">Actions</th>
             </tr>
           </thead>
           <tbody>
             {data.tenants.map((t) => (
-              <tr key={t.tenantId} className="border-t border-slate-100 text-[13px] hover:bg-slate-50/60">
-                <td className="px-3 py-2.5">
+              <tr
+                key={t.tenantId}
+                className={`relative border-t border-slate-100 text-[13px] transition-colors hover:bg-slate-50/60 before:absolute before:left-0 before:top-0 before:h-full before:w-[3px] ${ROW_TONE[t.riskTier].rail} ${ROW_TONE[t.riskTier].row}`}
+              >
+                <td className="px-3 py-3 pl-4">
                   <div className="font-medium text-slate-900">
                     <a href={`/admin/tenants/${t.tenantId}`} className="hover:underline">
                       {t.name}
                     </a>
                   </div>
-                  <div className="text-[11px] text-slate-500">/{t.slug}</div>
+                  <div className="text-[11px] text-slate-500">
+                    /{t.slug}
+                    {t.paymentMethodOnFile ? null : (
+                      <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-rose-50 px-1.5 py-0.5 text-[10px] font-medium text-rose-700 ring-1 ring-rose-200">
+                        no card
+                      </span>
+                    )}
+                  </div>
                 </td>
-                <td className="px-3 py-2.5">{t.plan ?? "—"}</td>
-                <td className="px-3 py-2.5 text-right tabular-nums">{fmtCents(t.mrrCents)}</td>
-                <td className="px-3 py-2.5 text-right tabular-nums">{t.failedPayments30d}</td>
-                <td className="px-3 py-2.5 text-[12px] text-slate-600">{timeAgo(t.lastFailureAt)}</td>
-                <td className="px-3 py-2.5">
+                <td className="px-3 py-3 text-[12px] text-slate-600">{t.plan ?? "—"}</td>
+                <td className="px-3 py-3 text-right tabular-nums">{fmtCents(t.mrrCents)}</td>
+                <td className="px-3 py-3 text-right tabular-nums">{t.failedPayments30d}</td>
+                <td className="px-3 py-3">
+                  <AgingBar daysSinceFailure={t.daysSinceFailure} />
+                </td>
+                <td className="px-3 py-3">
                   <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ${RISK_STYLES[t.riskTier]}`}>
                     {t.riskTier.replace("_", " ")}
                   </span>
                 </td>
-                <td className="px-3 py-2.5 text-right tabular-nums">{t.recoveryProbability}%</td>
-                <td className="px-3 py-2.5 text-right text-[12px] tabular-nums text-slate-600">
-                  {t.daysUntilSuspension === null ? "—" : t.daysUntilSuspension === 0 ? "now" : `${t.daysUntilSuspension}d`}
+                <td className="px-3 py-3">
+                  <RecoveryRing pct={t.recoveryProbability} tier={t.riskTier} />
+                </td>
+                <td className="px-3 py-3 text-right text-[12px] tabular-nums text-slate-600">
+                  {t.daysUntilSuspension === null
+                    ? "—"
+                    : t.daysUntilSuspension === 0
+                    ? <span className="font-medium text-rose-700">now</span>
+                    : `${t.daysUntilSuspension}d`}
                 </td>
                 <td className="px-3 py-2.5">
                   <div className="flex flex-wrap justify-end gap-1">
@@ -830,17 +1207,32 @@ export default function FinanceClient({ initial }: { initial: Bundle }) {
         </button>
       </div>
 
+      {/* Executive hero — animated KPI tiles + insight chips */}
+      {bundle.revenue && bundle.execKpis ? (
+        <section>
+          <FinanceExecutiveHero
+            bundle={bundle.revenue}
+            kpis={bundle.execKpis}
+            insights={bundle.insights ?? []}
+          />
+        </section>
+      ) : null}
+
       <section>
-        <div className="mb-3 flex items-center gap-2">
-          <h2 className="text-sm font-medium text-slate-900">Revenue operations</h2>
+        <div className="mb-3 flex items-baseline gap-2">
+          <h2 className="text-[15px] font-semibold tracking-tight text-slate-900">
+            Revenue operations
+          </h2>
           {bundle.revenue ? (
-            <span className="text-[11px] text-slate-400">{bundle.revenue.computedInMs}ms · cached 2min</span>
+            <span className="text-[11px] text-slate-400">
+              computed in {bundle.revenue.computedInMs}ms · cached 2min
+            </span>
           ) : null}
         </div>
         {bundle.revenue ? (
           <div className="space-y-4">
             <TileGrid tiles={bundle.revenue.tiles} />
-            <RevenueCharts data={bundle.revenue} />
+            <RevenueCharts data={bundle.revenue} insights={bundle.insights} />
           </div>
         ) : (
           <div className="rounded-xl border border-amber-200 bg-amber-50/40 p-4 text-[13px] text-amber-800">
@@ -850,20 +1242,32 @@ export default function FinanceClient({ initial }: { initial: Bundle }) {
       </section>
 
       <section>
-        <div className="mb-3 flex items-center gap-2">
-          <h2 className="text-sm font-medium text-slate-900">Dunning center</h2>
+        <div className="mb-3 flex items-baseline gap-2">
+          <h2 className="text-[15px] font-semibold tracking-tight text-slate-900">
+            Dunning center
+          </h2>
           {bundle.dunning ? (
             <span className="text-[11px] text-slate-400">
               {bundle.dunning.total} tenant{bundle.dunning.total === 1 ? "" : "s"} in dunning
             </span>
           ) : null}
         </div>
-        {bundle.dunning ? <DunningTable data={bundle.dunning} onAction={setPending} /> : <EmptyChart />}
+        {bundle.dunning ? (
+          <DunningTable
+            data={bundle.dunning}
+            onAction={setPending}
+            headerInsight={insightFor(bundle.insights, "dunning")}
+          />
+        ) : (
+          <EmptyChart />
+        )}
       </section>
 
       <section>
-        <div className="mb-3 flex items-center gap-2">
-          <h2 className="text-sm font-medium text-slate-900">Subscription intelligence</h2>
+        <div className="mb-3 flex items-baseline gap-2">
+          <h2 className="text-[15px] font-semibold tracking-tight text-slate-900">
+            Subscription intelligence
+          </h2>
         </div>
         {bundle.subIntel ? (
           <SubIntelSection data={bundle.subIntel} />
@@ -875,8 +1279,10 @@ export default function FinanceClient({ initial }: { initial: Bundle }) {
       </section>
 
       <section>
-        <div className="mb-3 flex items-center gap-2">
-          <h2 className="text-sm font-medium text-slate-900">Stripe reconciliation</h2>
+        <div className="mb-3 flex items-baseline gap-2">
+          <h2 className="text-[15px] font-semibold tracking-tight text-slate-900">
+            Stripe reconciliation
+          </h2>
           {bundle.recon ? (
             <span className="text-[11px] text-slate-400">
               {bundle.recon.findings.length} finding{bundle.recon.findings.length === 1 ? "" : "s"}
