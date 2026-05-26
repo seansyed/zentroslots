@@ -15,6 +15,7 @@ import {
   index,
   uniqueIndex,
   primaryKey,
+  decimal,
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 
@@ -2376,6 +2377,115 @@ export const exportAuditEvents = pgTable(
     exportedIdx: index("eae_exported_idx").on(t.exportedAt),
     tenantTimeIdx: index("eae_tenant_time_idx").on(t.tenantId, t.exportedAt),
   })
+);
+
+// ─── SA-10 — Admin analytics snapshot tables ────────────────────────────
+// Migration 0063. Pre-computed cross-tenant rollups so the super-admin
+// dashboard never has to re-scan source tables on every page load.
+// Populated by scripts/aggregate-admin-snapshots.ts.
+
+export const analyticsSnapshotsDaily = pgTable(
+  "analytics_snapshots_daily",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    snapshotDate: date("snapshot_date").notNull(),
+    totalTenants: integer("total_tenants").notNull().default(0),
+    activeTenants: integer("active_tenants").notNull().default(0),
+    payingTenants: integer("paying_tenants").notNull().default(0),
+    newTenants: integer("new_tenants").notNull().default(0),
+    churnedTenants: integer("churned_tenants").notNull().default(0),
+    totalBookings: integer("total_bookings").notNull().default(0),
+    bookingsCompleted: integer("bookings_completed").notNull().default(0),
+    bookingsNoShow: integer("bookings_no_show").notNull().default(0),
+    totalUsers: integer("total_users").notNull().default(0),
+    newUsers: integer("new_users").notNull().default(0),
+    activeUsersDau: integer("active_users_dau").notNull().default(0),
+    mrrCents: bigint("mrr_cents", { mode: "number" }).notNull().default(0),
+    arrCents: bigint("arr_cents", { mode: "number" }).notNull().default(0),
+    grossRevenueCents: bigint("gross_revenue_cents", { mode: "number" }).notNull().default(0),
+    refundsCents: bigint("refunds_cents", { mode: "number" }).notNull().default(0),
+    failedCharges: integer("failed_charges").notNull().default(0),
+    emailsSent: integer("emails_sent").notNull().default(0),
+    emailsFailed: integer("emails_failed").notNull().default(0),
+    smsSent: integer("sms_sent").notNull().default(0),
+    failedLogins: integer("failed_logins").notNull().default(0),
+    adminActions: integer("admin_actions").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    dateUnique: uniqueIndex("analytics_snapshots_daily_date_unique").on(t.snapshotDate),
+  }),
+);
+
+export const analyticsSnapshotsHourly = pgTable(
+  "analytics_snapshots_hourly",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    snapshotHour: timestamp("snapshot_hour", { withTimezone: true }).notNull(),
+    bookings: integer("bookings").notNull().default(0),
+    signups: integer("signups").notNull().default(0),
+    logins: integer("logins").notNull().default(0),
+    failedLogins: integer("failed_logins").notNull().default(0),
+    emailsSent: integer("emails_sent").notNull().default(0),
+    emailsFailed: integer("emails_failed").notNull().default(0),
+    webhookEvents: integer("webhook_events").notNull().default(0),
+    webhookFailures: integer("webhook_failures").notNull().default(0),
+    errorsTotal: integer("errors_total").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    hourUnique: uniqueIndex("analytics_snapshots_hourly_hour_unique").on(t.snapshotHour),
+  }),
+);
+
+export const tenantHealthSnapshots = pgTable(
+  "tenant_health_snapshots",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    snapshotDate: date("snapshot_date").notNull(),
+    healthScore: integer("health_score").notNull(),
+    riskLevel: varchar("risk_level", { length: 20 }).notNull(),
+    mrrCents: bigint("mrr_cents", { mode: "number" }).notNull().default(0),
+    bookings30d: integer("bookings_30d").notNull().default(0),
+    bookingsGrowthPct: decimal("bookings_growth_pct", { precision: 8, scale: 2 }),
+    failedLogins7d: integer("failed_logins_7d").notNull().default(0),
+    failedCharges30d: integer("failed_charges_30d").notNull().default(0),
+    lastActivityAt: timestamp("last_activity_at", { withTimezone: true }),
+    notes: jsonb("notes").notNull().default({}),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    tenantDateUnique: uniqueIndex("tenant_health_snapshots_tenant_date_unique").on(
+      t.tenantId,
+      t.snapshotDate,
+    ),
+    riskIdx: index("tenant_health_snapshots_risk_idx").on(t.riskLevel, t.snapshotDate),
+  }),
+);
+
+export const financialSnapshots = pgTable(
+  "financial_snapshots",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    snapshotDate: date("snapshot_date").notNull(),
+    plan: varchar("plan", { length: 40 }).notNull(),
+    activeSubscriptions: integer("active_subscriptions").notNull().default(0),
+    newSubscriptions: integer("new_subscriptions").notNull().default(0),
+    cancelledSubscriptions: integer("cancelled_subscriptions").notNull().default(0),
+    mrrCents: bigint("mrr_cents", { mode: "number" }).notNull().default(0),
+    grossRevenueCents: bigint("gross_revenue_cents", { mode: "number" }).notNull().default(0),
+    refundsCents: bigint("refunds_cents", { mode: "number" }).notNull().default(0),
+    netRevenueCents: bigint("net_revenue_cents", { mode: "number" }).notNull().default(0),
+    failedCharges: integer("failed_charges").notNull().default(0),
+    dunningActive: integer("dunning_active").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    datePlanUnique: uniqueIndex("financial_snapshots_date_plan_unique").on(t.snapshotDate, t.plan),
+  }),
 );
 
 // ─── Types ──────────────────────────────────────────────────────────────

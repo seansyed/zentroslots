@@ -9,6 +9,7 @@ import Sidebar, {
 } from "./Sidebar";
 import Topbar from "./Topbar";
 import GlobalCopilot from "./GlobalCopilot";
+import CommandPalette from "@/components/admin/CommandPalette";
 import { Drawer } from "@/components/ui/primitives";
 import { cn } from "@/lib/cn";
 
@@ -81,6 +82,13 @@ export default function Shell({
        *  app/api/tenant/copilot/brief/route.ts for the cross-module
        *  signal synthesis. */}
       <GlobalCopilot />
+
+      {/* SA-9 — Global Command Palette (Cmd+K / Ctrl+K). Super-admin
+       *  only — the palette item set is built for the /admin surface.
+       *  Tenant-side cmd-K already exists inside CalendarView; this
+       *  one targets cross-admin navigation, tenant lookup, and
+       *  quick actions. */}
+      {variant === "super" ? <CommandPalette /> : null}
     </div>
   );
 }
