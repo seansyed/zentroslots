@@ -139,6 +139,7 @@ function buildNav(
           { label: "Security",      href: "/admin/security",        icon: ShieldCheck },
           { label: "Intelligence",  href: "/admin/intelligence",    icon: Sparkles },
           { label: "Ops",           href: "/admin/ops",             icon: Activity },
+          { label: "Diagnostics",   href: "/admin/diagnostics",     icon: Activity },
           { label: "System health", href: "/admin/system-health",   icon: Activity },
           { label: "Audit logs",    href: "/admin#audit",           icon: ListChecks },
           // Legacy /admin/health page preserved for now — replaced

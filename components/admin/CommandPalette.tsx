@@ -190,6 +190,15 @@ const NAV_ITEMS: NavItem[] = [
     icon: Activity,
     keywords: ["ops", "diagnostics", "cron", "heartbeat", "stuck", "failures"],
   },
+  {
+    kind: "nav",
+    id: "diagnostics",
+    label: "Admin Diagnostics",
+    href: "/admin/diagnostics",
+    description: "Schema drift + KPI smoke + snapshot freshness",
+    icon: Activity,
+    keywords: ["diagnostics", "schema", "drift", "kpi", "smoke", "snapshot"],
+  },
 ];
 
 function tenantMatches(t: TenantItem, q: string): boolean {

@@ -38,6 +38,11 @@ import {
   users,
 } from "@/db/schema";
 import { memoize } from "./cache";
+import {
+  BILLING_STATUS,
+  SUBSCRIPTION_ACTIVE_STATES,
+  SUBSCRIPTION_STATUS,
+} from "./event-taxonomy";
 
 // ─── Public types ──────────────────────────────────────────────────
 
@@ -290,21 +295,30 @@ async function computeChurned(): Promise<KpiResult> {
 
 async function computeFailedPayments(): Promise<KpiResult> {
   return safe(async () => {
-    // billing_transactions schema has an event_type column carrying
-    // the Stripe event type. Failures live under
-    // `payment_intent.payment_failed` and `invoice.payment_failed`.
-    // We OR both via SQL like.
+    // billing_transactions schema (migration 0026):
+    //   transaction_type ∈ {booking_payment, subscription_payment,
+    //                       invoice_payment, refund}
+    //   status           ∈ {pending, succeeded, failed, refunded}
+    //
+    // Prior implementation queried `event_type` — that column does NOT
+    // exist on this table. Other modules (intelligence.ts, anomalies.ts,
+    // tenant-intelligence.ts) all correctly use `status='failed'`;
+    // this query was the lone drifter.
+    //
+    // Canonical constants now live in event-taxonomy.ts so future
+    // changes touch one file. See BILLING_STATUS.FAILED.
+    const failedStatus = BILLING_STATUS.FAILED;
     const [currRow, prevRow] = await Promise.all([
       db.execute(
         sql`SELECT COUNT(*)::int AS n
               FROM billing_transactions
-             WHERE event_type LIKE '%payment_failed%'
+             WHERE status = ${failedStatus}
                AND created_at >= NOW() - INTERVAL '30 days'`,
       ),
       db.execute(
         sql`SELECT COUNT(*)::int AS n
               FROM billing_transactions
-             WHERE event_type LIKE '%payment_failed%'
+             WHERE status = ${failedStatus}
                AND created_at >= NOW() - INTERVAL '60 days'
                AND created_at <  NOW() - INTERVAL '30 days'`,
       ),
