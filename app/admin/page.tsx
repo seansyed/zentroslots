@@ -6,6 +6,9 @@ import { getSession } from "@/lib/auth";
 import { isSuperAdminEmail } from "@/lib/super-admin";
 import Shell from "@/components/dashboard/Shell";
 import { Badge } from "@/components/ui/primitives";
+// SA-1 — Executive KPI layer (16 cross-tenant metrics).
+import { computeAllKpis } from "@/lib/admin-analytics/kpis";
+import ExecutiveKpiGrid from "@/components/admin/ExecutiveKpiGrid";
 
 export const metadata = { title: "Internal admin" };
 export const dynamic = "force-dynamic";
@@ -17,6 +20,22 @@ export default async function AdminPage() {
     redirect("/not-found-this-is-ok");
   }
   const me = await db.query.users.findFirst({ where: eq(users.id, session.sub) });
+
+  // SA-1 — Executive KPI bundle. Computed independently of the legacy
+  // section queries below so a failure here can't crash the page. If
+  // computeAllKpis itself throws (extreme — every metric is wrapped),
+  // we still render the rest of the dashboard.
+  let kpiBundle: Awaited<ReturnType<typeof computeAllKpis>> | null = null;
+  try {
+    kpiBundle = await computeAllKpis();
+  } catch (err) {
+    kpiBundle = null;
+    try {
+      console.error(
+        JSON.stringify({ evt: "admin_kpis_fatal", err: err instanceof Error ? err.message.slice(0, 200) : "unknown" }),
+      );
+    } catch {}
+  }
 
   const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
   const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
@@ -142,6 +161,28 @@ export default async function AdminPage() {
     >
       <div className="text-xs font-medium uppercase tracking-wider text-red-700">Internal — superuser only</div>
       <h1 className="mt-1 text-heading font-semibold text-ink">Operations</h1>
+
+      {/* SA-1 — Executive KPI layer. 16 platform-wide metrics computed
+          cross-tenant via lib/admin-analytics/kpis.ts (90s in-process
+          cache + per-KPI error isolation). Renders inline error chips
+          for any individual KPI that failed; the rest of the page
+          continues to render normally. */}
+      {kpiBundle ? (
+        <section className="mt-5">
+          <div className="mb-3 flex items-end justify-between">
+            <div>
+              <div className="text-xs font-medium uppercase tracking-wider text-slate-500">Executive overview</div>
+              <h2 className="mt-0.5 text-lg font-medium">Platform health, at a glance</h2>
+            </div>
+            <div className="text-[11px] text-slate-400">computed in {kpiBundle.computedInMs}ms · cached 90s</div>
+          </div>
+          <ExecutiveKpiGrid bundle={kpiBundle} />
+        </section>
+      ) : (
+        <section className="mt-5 rounded-xl border border-amber-200 bg-amber-50/40 p-4 text-sm text-amber-800">
+          KPI bundle failed to compute. Operations dashboard continues below.
+        </section>
+      )}
 
       {/* Revenue snapshot — local computation from plans + tenants. Stripe
           is not queried; if a tenant's status is wrong in our DB it'll
