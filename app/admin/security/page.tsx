@@ -13,17 +13,25 @@ import {
   fetchAuditRows,
   fetchPermissionEvents,
 } from "@/lib/admin-analytics/security";
+import {
+  computeSecurityMissionKpis,
+  deriveSecurityInsights,
+} from "@/lib/admin-analytics/security-intelligence";
 
 export const metadata = { title: "Security & Audit Operations" };
 export const dynamic = "force-dynamic";
 
 /**
- * /admin/security — SA-7 Security & Audit Operations Center.
+ * /admin/security — Security & Audit Operations Mission Control.
  *
- * Server-renders all four sections in parallel for fast first paint.
+ * Server-renders all sections in parallel for fast first paint.
  * Per-section fatal isolation: any module that throws passes null;
  * the client renders an amber error placeholder for that section
  * while the others continue working normally.
+ *
+ * Mission KPIs (computeSecurityMissionKpis) + deterministic insights
+ * (deriveSecurityInsights) drive the executive hero strip + chart-
+ * adjacent insight chips. NULL → "—" never fabricated.
  */
 export default async function SecurityCenterPage() {
   const session = await getSession();
@@ -32,12 +40,15 @@ export default async function SecurityCenterPage() {
   }
   const me = await db.query.users.findFirst({ where: eq(users.id, session.sub) });
 
-  const [kpis, ipIntel, audit, permissions] = await Promise.all([
+  const [kpis, ipIntel, audit, permissions, mission] = await Promise.all([
     computeSecurityKpis().catch(() => null),
     computeIpIntelligence().catch(() => null),
     fetchAuditRows({ limit: 50 }).catch(() => null),
     fetchPermissionEvents({ limit: 50 }).catch(() => null),
+    computeSecurityMissionKpis().catch(() => null),
   ]);
+
+  const insights = mission ? deriveSecurityInsights(mission) : [];
 
   return (
     <Shell
@@ -61,7 +72,7 @@ export default async function SecurityCenterPage() {
       </p>
 
       <div className="mt-5">
-        <SecurityClient initial={{ kpis, ipIntel, audit, permissions }} />
+        <SecurityClient initial={{ kpis, ipIntel, audit, permissions, mission, insights }} />
       </div>
     </Shell>
   );
