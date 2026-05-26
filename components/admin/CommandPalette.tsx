@@ -22,6 +22,7 @@ import {
   Briefcase,
   Building2,
   ChevronRight,
+  Clock,
   Command,
   CreditCard,
   Database,
@@ -199,24 +200,93 @@ const NAV_ITEMS: NavItem[] = [
     icon: Activity,
     keywords: ["diagnostics", "schema", "drift", "kpi", "smoke", "snapshot"],
   },
+  {
+    kind: "nav",
+    id: "simulation",
+    label: "Simulation Control",
+    href: "/admin/dev/simulation",
+    description: "Populate dashboards with synthetic SaaS telemetry",
+    icon: Sparkles,
+    keywords: ["simulation", "seed", "dev", "demo", "synthetic", "telemetry", "populate"],
+  },
 ];
 
+/**
+ * Subsequence fuzzy match — returns a score in [0, 1] or -1 if the
+ * query characters can't be matched in order against the haystack.
+ * Adjacent-character matches score higher than spread-out matches.
+ *
+ *   fuzzyScore("revenue", "rev")  → ~0.85
+ *   fuzzyScore("revenue", "rvn")  → ~0.55
+ *   fuzzyScore("revenue", "xyz")  → -1
+ */
+function fuzzyScore(haystack: string, needle: string): number {
+  if (!needle) return 0.0001;
+  const h = haystack.toLowerCase();
+  const n = needle.toLowerCase();
+  if (h.startsWith(n)) return 1; // strong prefix bonus
+  let hi = 0;
+  let score = 0;
+  let lastMatchAt = -1;
+  for (let ni = 0; ni < n.length; ni++) {
+    let found = -1;
+    while (hi < h.length) {
+      if (h[hi] === n[ni]) {
+        found = hi;
+        break;
+      }
+      hi++;
+    }
+    if (found === -1) return -1;
+    // Adjacency bonus: contiguous matches score higher.
+    const gap = lastMatchAt === -1 ? 1 : found - lastMatchAt;
+    score += gap === 1 ? 2 : 1 / gap;
+    lastMatchAt = found;
+    hi = found + 1;
+  }
+  return score / (h.length + n.length);
+}
+
+/** Best fuzzy score across all match-targets for a nav item.
+ *  Returns -1 when the query characters don't appear in any. */
+function navScore(n: NavItem, q: string): number {
+  if (!q) return 0.0001;
+  const targets = [n.label, n.description, ...n.keywords];
+  let best = -1;
+  for (const t of targets) {
+    const s = fuzzyScore(t, q);
+    if (s > best) best = s;
+  }
+  return best;
+}
+
 function tenantMatches(t: TenantItem, q: string): boolean {
-  const lower = q.toLowerCase();
   return (
-    t.name.toLowerCase().includes(lower) ||
-    t.slug.toLowerCase().includes(lower)
+    fuzzyScore(t.name, q) >= 0 || fuzzyScore(t.slug, q) >= 0
   );
 }
 
-function navMatches(n: NavItem, q: string): boolean {
-  if (!q) return true;
-  const lower = q.toLowerCase();
-  return (
-    n.label.toLowerCase().includes(lower) ||
-    n.description.toLowerCase().includes(lower) ||
-    n.keywords.some((k) => k.includes(lower))
-  );
+// ─── Recents (localStorage) ───────────────────────────────────────
+
+const RECENTS_KEY = "zm:cmdk:recents:v1";
+const MAX_RECENTS = 5;
+
+function loadRecents(): string[] {
+  try {
+    const raw = localStorage.getItem(RECENTS_KEY);
+    if (!raw) return [];
+    const arr = JSON.parse(raw);
+    if (Array.isArray(arr)) return arr.slice(0, MAX_RECENTS).filter((x) => typeof x === "string");
+  } catch {}
+  return [];
+}
+
+function pushRecent(id: string) {
+  try {
+    const existing = loadRecents().filter((x) => x !== id);
+    existing.unshift(id);
+    localStorage.setItem(RECENTS_KEY, JSON.stringify(existing.slice(0, MAX_RECENTS)));
+  } catch {}
 }
 
 export default function CommandPalette() {
@@ -306,13 +376,42 @@ export default function CommandPalette() {
     [router],
   );
 
-  const filteredNav = NAV_ITEMS.filter((n) => navMatches(n, query));
+  // Recents list (only meaningful when query is empty)
+  const [recentIds, setRecentIds] = React.useState<string[]>([]);
+  React.useEffect(() => {
+    if (open) setRecentIds(loadRecents());
+  }, [open]);
+
+  const recentNav: NavItem[] = React.useMemo(() => {
+    if (query.trim().length > 0) return [];
+    return recentIds
+      .map((id) => NAV_ITEMS.find((n) => n.id === id))
+      .filter((n): n is NavItem => !!n);
+  }, [recentIds, query]);
+
+  // Fuzzy-rank nav items when there's a query; otherwise show all
+  // (with recents pulled out into their own section).
+  const filteredNav = React.useMemo(() => {
+    const q = query.trim();
+    if (!q) {
+      // No query — show everything not already in Recents.
+      const recentSet = new Set(recentIds);
+      return NAV_ITEMS.filter((n) => !recentSet.has(n.id));
+    }
+    return NAV_ITEMS
+      .map((n) => ({ n, s: navScore(n, q) }))
+      .filter((x) => x.s >= 0)
+      .sort((a, b) => b.s - a.s)
+      .map((x) => x.n);
+  }, [query, recentIds]);
+
   const filteredActions = query
-    ? actions.filter((a) => a.label.toLowerCase().includes(query.toLowerCase()))
+    ? actions.filter((a) => fuzzyScore(a.label, query) >= 0)
     : actions;
 
-  // Flat list for keyboard navigation: [nav..., tenants..., actions...]
+  // Flat list for keyboard navigation: [recents..., nav..., tenants..., actions...]
   const flat: Array<NavItem | TenantItem | ActionItem> = [
+    ...recentNav,
     ...filteredNav,
     ...tenants,
     ...filteredActions,
@@ -325,6 +424,7 @@ export default function CommandPalette() {
   function activate(item: NavItem | TenantItem | ActionItem) {
     setOpen(false);
     if (item.kind === "nav") {
+      pushRecent(item.id);
       router.push(item.href);
     } else if (item.kind === "tenant") {
       router.push(`/admin/tenants/${item.id}`);
@@ -384,8 +484,30 @@ export default function CommandPalette() {
         </div>
 
         <div className="max-h-[60vh] overflow-y-auto py-2">
+          {recentNav.length > 0 ? (
+            <SectionLabel icon={Clock} title="Recent" />
+          ) : null}
+          {recentNav.map((item) => {
+            const idx = runningIdx++;
+            return (
+              <Row
+                key={`recent-${item.id}`}
+                selected={idx === selectedIdx}
+                onMouseEnter={() => setSelectedIdx(idx)}
+                onClick={() => activate(item)}
+              >
+                <item.icon className="h-4 w-4 text-slate-500" />
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-[13px] font-medium text-slate-900">{item.label}</div>
+                  <div className="truncate text-[11px] text-slate-500">{item.description}</div>
+                </div>
+                <ChevronRight className="h-3.5 w-3.5 text-slate-300" />
+              </Row>
+            );
+          })}
+
           {filteredNav.length > 0 ? (
-            <SectionLabel icon={Command} title="Navigation" />
+            <SectionLabel icon={Command} title={query.trim() ? "Best matches" : "Navigation"} />
           ) : null}
           {filteredNav.map((item) => {
             const idx = runningIdx++;

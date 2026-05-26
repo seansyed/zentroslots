@@ -102,3 +102,96 @@ export function Skeleton({
     />
   );
 }
+
+/**
+ * SectionFadeIn — drop-in for major dashboard sections. Slightly
+ * longer easing than FadeIn so the hierarchy feels intentional.
+ * Use this around <section> wrappers, NOT around every list item.
+ *
+ *   <SectionFadeIn>
+ *     <h2>Revenue</h2>
+ *     ...
+ *   </SectionFadeIn>
+ */
+export function SectionFadeIn({
+  children,
+  className,
+  delay = 0,
+}: {
+  children: React.ReactNode;
+  className?: string;
+  delay?: number;
+}) {
+  const reduced = useReducedMotion();
+  if (reduced) return <div className={className}>{children}</div>;
+  return (
+    <motion.div
+      className={className}
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{
+        duration: 0.32,
+        delay: (delay * STAGGER_BASE_MS) / 1000,
+        ease: [0.16, 1, 0.3, 1],
+      }}
+    >
+      {children}
+    </motion.div>
+  );
+}
+
+/**
+ * ListInsert — smoothly fade + slide a single row when it enters
+ * a virtualized list. Wrap each row in this component when items
+ * are streaming in (e.g. activity feed, audit explorer).
+ *
+ *   {rows.map((r) => (
+ *     <ListInsert key={r.id}>
+ *       <Row data={r} />
+ *     </ListInsert>
+ *   ))}
+ */
+export function ListInsert({
+  children,
+  className,
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
+  const reduced = useReducedMotion();
+  if (reduced) return <div className={className}>{children}</div>;
+  return (
+    <motion.div
+      className={className}
+      initial={{ opacity: 0, y: 4 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+    >
+      {children}
+    </motion.div>
+  );
+}
+
+/**
+ * HoverLift — wraps any child to add a subtle 1px translateY + soft
+ * shadow on hover. Use on KPI cards, tenant rows, and other "rest /
+ * hover" surfaces. Respects reduced-motion.
+ */
+export function HoverLift({
+  children,
+  className,
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
+  const reduced = useReducedMotion();
+  if (reduced) return <div className={className}>{children}</div>;
+  return (
+    <motion.div
+      className={className}
+      whileHover={{ y: -1, transition: { duration: 0.18, ease: [0.16, 1, 0.3, 1] } }}
+    >
+      {children}
+    </motion.div>
+  );
+}
