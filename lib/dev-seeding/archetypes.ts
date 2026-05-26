@@ -25,8 +25,8 @@ export type Archetype = {
   label: string;
   /** Names to randomize from. Picked via RNG, suffixed with a 2-digit id. */
   nameStems: readonly string[];
-  /** Default plan distribution. Sum to 1.0. */
-  planMix: { free: number; pro: number; business: number };
+  /** Default plan distribution across the 5-tier strategy. Sum to 1.0. */
+  planMix: { free: number; solo: number; pro: number; team: number; enterprise: number };
   /** Service catalog. */
   services: ReadonlyArray<{
     name: string;
@@ -58,7 +58,7 @@ export const ARCHETYPES: readonly Archetype[] = [
       "Capstone Bookkeeping",
       "Crestline Tax Pros",
     ],
-    planMix: { free: 0.2, pro: 0.55, business: 0.25 },
+    planMix: { free: 0.20, solo: 0.30, pro: 0.30, team: 0.15, enterprise: 0.05 },
     services: [
       { name: "Individual Tax Prep", durationMin: 60, priceCents: 35000 },
       { name: "Business Tax Filing", durationMin: 90, priceCents: 75000 },
@@ -82,7 +82,7 @@ export const ARCHETYPES: readonly Archetype[] = [
       "Brennan Partners",
       "Caldwell & Reeves",
     ],
-    planMix: { free: 0.1, pro: 0.5, business: 0.4 },
+    planMix: { free: 0.10, solo: 0.20, pro: 0.35, team: 0.25, enterprise: 0.10 },
     services: [
       { name: "Initial Consultation", durationMin: 30, priceCents: 0 },
       { name: "Estate Planning", durationMin: 90, priceCents: 50000 },
@@ -106,7 +106,7 @@ export const ARCHETYPES: readonly Archetype[] = [
       "Bloom & Glow",
       "Velora Wellness",
     ],
-    planMix: { free: 0.15, pro: 0.6, business: 0.25 },
+    planMix: { free: 0.15, solo: 0.25, pro: 0.35, team: 0.20, enterprise: 0.05 },
     services: [
       { name: "Hydrafacial", durationMin: 45, priceCents: 18500 },
       { name: "Botox Consultation", durationMin: 30, priceCents: 0 },
@@ -131,7 +131,7 @@ export const ARCHETYPES: readonly Archetype[] = [
       "Tangerine Beauty Bar",
       "Indigo Style House",
     ],
-    planMix: { free: 0.4, pro: 0.45, business: 0.15 },
+    planMix: { free: 0.40, solo: 0.30, pro: 0.20, team: 0.08, enterprise: 0.02 },
     services: [
       { name: "Haircut & Style", durationMin: 60, priceCents: 8500 },
       { name: "Color Service", durationMin: 120, priceCents: 18000 },
@@ -155,7 +155,7 @@ export const ARCHETYPES: readonly Archetype[] = [
       "Hollow Pine Studio",
       "Marble Lane Partners",
     ],
-    planMix: { free: 0.5, pro: 0.4, business: 0.1 },
+    planMix: { free: 0.50, solo: 0.35, pro: 0.12, team: 0.03, enterprise: 0.00 },
     services: [
       { name: "Discovery Call", durationMin: 30, priceCents: 0 },
       { name: "Strategy Session", durationMin: 60, priceCents: 25000 },
@@ -178,7 +178,7 @@ export const ARCHETYPES: readonly Archetype[] = [
       "Lighthouse & Co.",
       "Westbound Creative",
     ],
-    planMix: { free: 0.2, pro: 0.55, business: 0.25 },
+    planMix: { free: 0.20, solo: 0.30, pro: 0.30, team: 0.15, enterprise: 0.05 },
     services: [
       { name: "Project Kickoff", durationMin: 60, priceCents: 0 },
       { name: "Brand Strategy Session", durationMin: 90, priceCents: 45000 },
@@ -202,7 +202,7 @@ export const ARCHETYPES: readonly Archetype[] = [
       "Riverbend Family Practice",
       "Hillside Medical Group",
     ],
-    planMix: { free: 0.05, pro: 0.5, business: 0.45 },
+    planMix: { free: 0.05, solo: 0.10, pro: 0.30, team: 0.35, enterprise: 0.20 },
     services: [
       { name: "Routine Cleaning", durationMin: 45, priceCents: 12000 },
       { name: "Annual Checkup", durationMin: 30, priceCents: 18000 },
@@ -226,7 +226,7 @@ export const ARCHETYPES: readonly Archetype[] = [
       "Lift Athletic Coaching",
       "Bluebird Mindset",
     ],
-    planMix: { free: 0.55, pro: 0.35, business: 0.1 },
+    planMix: { free: 0.55, solo: 0.30, pro: 0.13, team: 0.02, enterprise: 0.00 },
     services: [
       { name: "Intro Session", durationMin: 30, priceCents: 0 },
       { name: "Weekly Session", durationMin: 60, priceCents: 12500 },

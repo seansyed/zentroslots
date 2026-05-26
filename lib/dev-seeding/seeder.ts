@@ -91,10 +91,18 @@ function slugFor(name: string, rng: Rng): string {
 
 function pickPlan(archetype: Archetype, rng: Rng): string {
   const r = rng.next();
-  const { free, pro } = archetype.planMix;
+  const { free, solo, pro, team } = archetype.planMix;
+  // Cumulative thresholds across the 5-tier strategy:
+  //   [0, free) → free
+  //   [free, free+solo) → solo
+  //   [free+solo, free+solo+pro) → pro
+  //   [free+solo+pro, free+solo+pro+team) → team
+  //   else → enterprise
   if (r < free) return "free";
-  if (r < free + pro) return "pro";
-  return "business";
+  if (r < free + solo) return "solo";
+  if (r < free + solo + pro) return "pro";
+  if (r < free + solo + pro + team) return "team";
+  return "enterprise";
 }
 
 function fakeName(rng: Rng): string {
@@ -470,7 +478,20 @@ async function seedActivityEvents(
 
   // ─── billing_transactions ─────────────────────────────────────
   if (tenantRow.plan !== "free") {
-    const monthlyAmount = tenantRow.plan === "business" ? 9900 : 3000;
+    // Plan-price map mirrors migration 0066 (cents). Seeder doesn't
+    // load plans table — that would be a second DB roundtrip per
+    // tenant — so we keep a small static map here. If marketing
+    // prices change, update both this map and the migration.
+    const monthlyAmount =
+      tenantRow.plan === "enterprise"
+        ? 25000
+        : tenantRow.plan === "team"
+        ? 10000
+        : tenantRow.plan === "pro"
+        ? 3000
+        : tenantRow.plan === "solo"
+        ? 1000
+        : 3000;
     for (let m = 0; m < Math.ceil(days / 30); m++) {
       const dayAgo = days - 1 - m * 30;
       const ts = new Date(Date.now() - dayAgo * 24 * 60 * 60_000);

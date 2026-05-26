@@ -73,23 +73,23 @@ const fmtCurrency = (cents: number) =>
     maximumFractionDigits: 0,
   }).format(cents / 100);
 
-/** Price formatter that handles the "custom pricing" sentinel (0). */
+/** Price formatter. The 'free' slug renders "Free forever".
+ *  Any other plan with priceMonthlyCents=0 AND priceYearlyCents=0
+ *  falls back to "Custom — contact sales" (kept as a fallback for
+ *  future-tier flexibility; not used by the current 5-tier strategy
+ *  since Enterprise has real prices). */
 function planPriceDisplay(plan: PlanRow, interval: "month" | "year"): {
   label: string;
   suffix: string;
   isCustom: boolean;
   isFree: boolean;
 } {
-  // Enterprise convention: priceMonthlyCents=0 AND priceYearlyCents=0
-  // means custom / contact sales. Free plan also has price=0 but is
-  // marked by slug.
   if (plan.slug === "free") return { label: "Free", suffix: "forever", isCustom: false, isFree: true };
   if (plan.priceMonthlyCents === 0 && plan.priceYearlyCents === 0) {
     return { label: "Custom", suffix: "contact sales", isCustom: true, isFree: false };
   }
   if (interval === "year") {
     const yearly = plan.priceYearlyCents || plan.priceMonthlyCents * 12;
-    // Display as monthly-equivalent for apples-to-apples comparison
     return {
       label: fmtCurrency(yearly / 12),
       suffix: "/mo, billed annually",
@@ -154,14 +154,19 @@ const PLAN_ACCENT: Record<string, { ring: string; gradient: string; pillBg: stri
     gradient: "from-white to-slate-50/40",
     pillBg: "bg-slate-100 text-slate-700",
   },
+  solo: {
+    ring: "border-slate-200",
+    gradient: "from-white to-slate-50/30",
+    pillBg: "bg-slate-100 text-slate-700",
+  },
   pro: {
-    ring: "border-sky-200",
-    gradient: "from-white to-sky-50/40",
+    ring: "border-sky-300",
+    gradient: "from-white via-sky-50/30 to-sky-50/60",
     pillBg: "bg-sky-100 text-sky-700",
   },
-  business: {
-    ring: "border-violet-300",
-    gradient: "from-white via-violet-50/30 to-violet-50/50",
+  team: {
+    ring: "border-violet-200",
+    gradient: "from-white to-violet-50/30",
     pillBg: "bg-violet-100 text-violet-700",
   },
   enterprise: {
@@ -442,30 +447,25 @@ type FeatureCategory = {
 };
 
 function buildFeatureMatrix(plans: PlanRow[]): FeatureCategory[] {
-  const get = (slug: string) => plans.find((p) => p.slug === slug);
   return [
     {
       label: "Scheduling",
       rows: [
         {
           feature: "Public booking page",
-          perPlan: { free: true, pro: true, business: true, enterprise: true },
+          perPlan: { free: true, solo: true, pro: true, team: true, enterprise: true },
         },
         {
           feature: "Active services",
-          perPlan: Object.fromEntries(
-            plans.map((p) => [p.slug, fmtLimit(p.quotaServices)]),
-          ),
+          perPlan: Object.fromEntries(plans.map((p) => [p.slug, fmtLimit(p.quotaServices)])),
         },
         {
           feature: "Bookings per month",
-          perPlan: Object.fromEntries(
-            plans.map((p) => [p.slug, fmtLimit(p.quotaBookingsPerMonth)]),
-          ),
+          perPlan: Object.fromEntries(plans.map((p) => [p.slug, fmtLimit(p.quotaBookingsPerMonth)])),
         },
         {
           feature: "Embed widget",
-          perPlan: { free: false, pro: true, business: true, enterprise: true },
+          perPlan: { free: false, solo: true, pro: true, team: true, enterprise: true },
         },
       ],
     },
@@ -474,23 +474,19 @@ function buildFeatureMatrix(plans: PlanRow[]): FeatureCategory[] {
       rows: [
         {
           feature: "Staff seats",
-          perPlan: Object.fromEntries(
-            plans.map((p) => [p.slug, fmtLimit(p.quotaStaff)]),
-          ),
+          perPlan: Object.fromEntries(plans.map((p) => [p.slug, fmtLimit(p.quotaStaff)])),
         },
         {
           feature: "Manager seats",
-          perPlan: Object.fromEntries(
-            plans.map((p) => [p.slug, fmtLimit(p.quotaManagers)]),
-          ),
+          perPlan: Object.fromEntries(plans.map((p) => [p.slug, fmtLimit(p.quotaManagers)])),
         },
         {
           feature: "Departments + routing",
-          perPlan: { free: false, pro: false, business: true, enterprise: true },
+          perPlan: { free: false, solo: false, pro: true, team: true, enterprise: true },
         },
         {
           feature: "Admin role overrides",
-          perPlan: { free: false, pro: false, business: true, enterprise: true },
+          perPlan: { free: false, solo: false, pro: false, team: true, enterprise: true },
         },
       ],
     },
@@ -499,19 +495,19 @@ function buildFeatureMatrix(plans: PlanRow[]): FeatureCategory[] {
       rows: [
         {
           feature: "Google Calendar",
-          perPlan: { free: true, pro: true, business: true, enterprise: true },
+          perPlan: { free: true, solo: true, pro: true, team: true, enterprise: true },
         },
         {
           feature: "Microsoft 365 + Outlook",
-          perPlan: { free: false, pro: true, business: true, enterprise: true },
+          perPlan: { free: false, solo: true, pro: true, team: true, enterprise: true },
         },
         {
           feature: "Google Meet",
-          perPlan: { free: true, pro: true, business: true, enterprise: true },
+          perPlan: { free: true, solo: true, pro: true, team: true, enterprise: true },
         },
         {
           feature: "Zoom",
-          perPlan: { free: false, pro: true, business: true, enterprise: true },
+          perPlan: { free: false, solo: true, pro: true, team: true, enterprise: true },
         },
       ],
     },
@@ -519,16 +515,16 @@ function buildFeatureMatrix(plans: PlanRow[]): FeatureCategory[] {
       label: "Branding & Domain",
       rows: [
         {
-          feature: "Custom branding",
-          perPlan: { free: false, pro: true, business: true, enterprise: true },
+          feature: "Branding removal",
+          perPlan: { free: false, solo: true, pro: true, team: true, enterprise: true },
         },
         {
           feature: "Custom domain",
-          perPlan: { free: false, pro: true, business: true, enterprise: true },
+          perPlan: { free: false, solo: true, pro: true, team: true, enterprise: true },
         },
         {
           feature: "White-label",
-          perPlan: { free: false, pro: false, business: false, enterprise: true },
+          perPlan: { free: false, solo: false, pro: false, team: false, enterprise: true },
         },
       ],
     },
@@ -536,20 +532,24 @@ function buildFeatureMatrix(plans: PlanRow[]): FeatureCategory[] {
       label: "Automation & Analytics",
       rows: [
         {
-          feature: "Reminder workflows",
-          perPlan: { free: false, pro: true, business: true, enterprise: true },
+          feature: "Analytics access",
+          perPlan: { free: false, solo: true, pro: true, team: true, enterprise: true },
         },
         {
-          feature: "Follow-up automations",
-          perPlan: { free: false, pro: false, business: true, enterprise: true },
+          feature: "Executive dashboard",
+          perPlan: { free: false, solo: false, pro: true, team: true, enterprise: true },
         },
         {
-          feature: "Executive analytics",
-          perPlan: { free: false, pro: false, business: true, enterprise: true },
+          feature: "Reports center",
+          perPlan: { free: false, solo: false, pro: true, team: true, enterprise: true },
         },
         {
-          feature: "Scheduled reports",
-          perPlan: { free: false, pro: false, business: true, enterprise: true },
+          feature: "Reminder automations",
+          perPlan: { free: false, solo: false, pro: true, team: true, enterprise: true },
+        },
+        {
+          feature: "Advanced reporting",
+          perPlan: { free: false, solo: false, pro: false, team: true, enterprise: true },
         },
       ],
     },
@@ -558,19 +558,23 @@ function buildFeatureMatrix(plans: PlanRow[]): FeatureCategory[] {
       rows: [
         {
           feature: "SSO / SAML",
-          perPlan: { free: false, pro: false, business: false, enterprise: true },
+          perPlan: { free: false, solo: false, pro: false, team: false, enterprise: true },
         },
         {
-          feature: "SLA + priority support",
-          perPlan: { free: false, pro: false, business: false, enterprise: true },
+          feature: "Enterprise SLA",
+          perPlan: { free: false, solo: false, pro: false, team: false, enterprise: true },
+        },
+        {
+          feature: "Priority support",
+          perPlan: { free: false, solo: false, pro: false, team: true, enterprise: true },
         },
         {
           feature: "Audit + governance exports",
-          perPlan: { free: false, pro: false, business: false, enterprise: true },
+          perPlan: { free: false, solo: false, pro: false, team: false, enterprise: true },
         },
         {
           feature: "Dedicated onboarding",
-          perPlan: { free: false, pro: false, business: false, enterprise: true },
+          perPlan: { free: false, solo: false, pro: false, team: false, enterprise: true },
         },
       ],
     },
@@ -760,7 +764,7 @@ export default function PlansLuxuryClient({
                 intel={intelBySlug.get(p.slug)}
                 diag={diagBySlug.get(p.slug)}
                 interval={interval}
-                isPopular={p.slug === "business"}
+                isPopular={p.slug === "pro"}
               />
             ))}
         </div>
