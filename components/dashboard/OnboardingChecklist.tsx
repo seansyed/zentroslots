@@ -1,34 +1,36 @@
 "use client";
 
 /**
- * OnboardingChecklist — premium activation workspace (Phase 4).
+ * OnboardingChecklist — plan-aware activation workspace.
  *
- * Replaces the plain checklist box with a Notion/Linear/Vercel-style
- * onboarding surface. Data contract is preserved exactly:
+ * Phase Onboarding-UX upgrade:
+ *   • Splits tasks into REQUIRED vs PREMIUM (capability-gated).
+ *     Free users see "Customize your booking page" as a Premium
+ *     card with a PRO badge + Upgrade CTA — it NEVER counts
+ *     against completion percentage.
+ *   • Completion math is plan-aware: a Free user with all 4
+ *     required tasks done sees "Workspace ready" at 100% even
+ *     though branding (PRO-only) is unfinished.
+ *   • Dismiss button persists to DB via /api/onboarding/dismiss
+ *     (replaces the localStorage-only one-shot). The dashboard
+ *     re-renders without the card and surfaces a tiny "Resume
+ *     setup" pill instead.
+ *   • Success state shown once all required done, with a copy-
+ *     booking-link CTA + soft "Unlock more" pointer (NOT an
+ *     aggressive upsell).
  *
- *   props.items: ChecklistItem[]   { id, label, href, done }
+ * Data contract additions (backward-compatible):
+ *   ChecklistItem:
+ *     id, label, href, done, requiredCapability?, category?
+ *   New props:
+ *     plan       (Plan)               — for capability gating
+ *     bookingUrl (string | undefined) — for the "Copy link" CTA
  *
- * The 5 known step ids are enriched here (icon, description, est. time,
- * category) via a local STEP_META map. Unknown ids degrade gracefully
- * to a generic "Setup" card so the component never crashes if the
- * server adds a new step.
- *
- * What changed vs Phase 1:
- *   - PremiumCard surface with hero-glow + corner brand glow
- *   - Stronger header hierarchy (eyebrow + title + sub) + circular %
- *   - Thicker animated progress bar with shimmer overlay
- *   - Steps grouped under FOUNDATION / BOOKING SETUP / ACTIVATION
- *   - Rich step cards (icon container + title + desc + time + CTA)
- *   - FadeIn staggered entrance
- *   - Onboarding InsightCard nudge ("Most teams finish in <5 min…")
- *   - Premium completion celebration (brand gradient, not green-50)
- *
- * What is preserved verbatim:
- *   - The {id, label, href, done} contract
- *   - The "checklist_complete_dismissed" localStorage one-shot
- *   - The "hide entirely when done && dismissed" behavior
- *   - All hrefs (caller-supplied, not overridden here)
+ * Existing 5-key STEP_META is reused. New "branding" task carries
+ * `requiredCapability: "customBranding"` upstream, so on Free
+ * plans it lands in the premium section automatically.
  */
+
 import * as React from "react";
 import Link from "next/link";
 import {
@@ -42,12 +44,20 @@ import {
   Sparkles,
   PartyPopper,
   X,
+  Lock,
+  Copy as CopyIcon,
   type LucideIcon,
 } from "lucide-react";
 
 import { PremiumCard, InsightCard } from "@/components/ui/Card";
 import { FadeIn } from "@/components/ui/Motion";
 import { cn } from "@/lib/cn";
+import {
+  cheapestPlanWithCapability,
+  type Plan,
+  type PlanCapability,
+} from "@/lib/plans";
+import { partitionByPlan } from "@/lib/onboarding/completion";
 
 // ─── Public contract ────────────────────────────────────────────────
 
@@ -56,6 +66,10 @@ export type ChecklistItem = {
   label: string;
   href: string;
   done: boolean;
+  /** When set, this task is REQUIRED only when the tenant's plan
+   *  has the capability. Otherwise it's surfaced as a Premium
+   *  card with an upgrade CTA and never counts toward completion. */
+  requiredCapability?: PlanCapability;
 };
 
 // ─── Step metadata (local enrichment, keyed by known ids) ───────────
@@ -65,6 +79,9 @@ type StepCategory = "foundation" | "booking" | "activation";
 type StepMeta = {
   icon: LucideIcon;
   description: string;
+  /** Description used when the task is rendered in the PREMIUM
+   *  section — emphasizes the marketing value. */
+  premiumDescription?: string;
   estimatedTime: string;
   category: StepCategory;
 };
@@ -78,25 +95,27 @@ const STEP_META: Record<string, StepMeta> = {
   },
   hours: {
     icon: Clock4,
-    description: "Define when customers can book you each week.",
-    estimatedTime: "2 min",
+    description: "Tell us when you're available to take bookings.",
+    estimatedTime: "1 min",
     category: "foundation",
   },
   service: {
     icon: Briefcase,
-    description: "Create the offering customers will book.",
+    description: "Define what customers can book with you.",
     estimatedTime: "2 min",
     category: "booking",
   },
   branding: {
     icon: Palette,
-    description: "Match your booking page to your brand.",
-    estimatedTime: "1 min",
+    description: "Add your logo, brand colors, and tagline.",
+    premiumDescription:
+      "Personalize colors, branding, and layout to match your business.",
+    estimatedTime: "2 min",
     category: "booking",
   },
   booking: {
     icon: Rocket,
-    description: "Share your booking link and accept your first appointment.",
+    description: "You're live! Watch your first booking come in.",
     estimatedTime: "—",
     category: "activation",
   },
@@ -104,8 +123,8 @@ const STEP_META: Record<string, StepMeta> = {
 
 const CATEGORY_LABELS: Record<StepCategory, { eyebrow: string; subtitle: string }> = {
   foundation: { eyebrow: "Foundation", subtitle: "Connect the essentials" },
-  booking:    { eyebrow: "Booking setup", subtitle: "Define what you offer" },
-  activation: { eyebrow: "Activation",   subtitle: "Go live and grow" },
+  booking: { eyebrow: "Booking setup", subtitle: "Define what you offer" },
+  activation: { eyebrow: "Activation", subtitle: "Go live and grow" },
 };
 
 const CATEGORY_ORDER: StepCategory[] = ["foundation", "booking", "activation"];
@@ -123,50 +142,64 @@ function metaFor(id: string): StepMeta {
 
 // ─── Component ──────────────────────────────────────────────────────
 
-const DISMISS_KEY = "checklist_complete_dismissed";
-
-export default function OnboardingChecklist({ items }: { items: ChecklistItem[] }) {
+export default function OnboardingChecklist({
+  items,
+  plan,
+  bookingUrl,
+}: {
+  items: ChecklistItem[];
+  plan: Plan;
+  /** Tenant booking URL. When provided, the success state shows a
+   *  Copy-link CTA. */
+  bookingUrl?: string;
+}) {
+  // Phase Onboarding-UX — server-persisted dismiss. We optimistically
+  // hide the card on click; the API call is fire-and-forget. The
+  // server-side render decides whether to show the card on the next
+  // page load.
   const [dismissed, setDismissed] = React.useState(false);
 
-  const done = items.filter((i) => i.done).length;
-  const total = items.length;
-  const pct = total > 0 ? Math.round((done / total) * 100) : 0;
-  const isComplete = total > 0 && done === total;
+  // Plan-aware partition. Free users see customBranding land in
+  // `premium`; paid users see it as a regular required task.
+  const partitioned = React.useMemo(
+    () => partitionByPlan(items, plan),
+    [items, plan],
+  );
+  const { required, premium, requiredDone, requiredTotal, isReady, pct } = partitioned;
 
-  // Hide entirely once everything is checked off (one-shot persistence) —
-  // preserves Phase 1 behavior bit-for-bit.
-  React.useEffect(() => {
-    if (isComplete) {
-      if (typeof window !== "undefined" && window.localStorage.getItem(DISMISS_KEY) === "1") {
-        setDismissed(true);
-      }
-    }
-  }, [isComplete]);
+  const handleDismiss = React.useCallback(() => {
+    setDismissed(true);
+    // Fire-and-forget. The dashboard reads the column on next
+    // render; transient network failures degrade to a one-tab
+    // hide (re-appears on hard refresh — acceptable for a UX
+    // dismissal).
+    fetch("/api/onboarding/dismiss", { method: "POST" }).catch(() => {
+      /* silent */
+    });
+  }, []);
+
+  if (dismissed) return null;
 
   // ── Completion celebration ──────────────────────────────────────
-  if (isComplete) {
-    if (dismissed) return null;
+  if (isReady) {
     return (
       <FadeIn className="mb-6">
         <CompletionCard
-          onDismiss={() => {
-            if (typeof window !== "undefined") {
-              window.localStorage.setItem(DISMISS_KEY, "1");
-            }
-            setDismissed(true);
-          }}
+          onDismiss={handleDismiss}
+          bookingUrl={bookingUrl}
+          hasPremiumOpportunities={premium.length > 0}
         />
       </FadeIn>
     );
   }
 
-  // ── Group items by category, preserving order ────────────────────
+  // ── Group REQUIRED items by category, preserving order ───────────
   const grouped: Record<StepCategory, ChecklistItem[]> = {
     foundation: [],
     booking: [],
     activation: [],
   };
-  for (const item of items) {
+  for (const item of required) {
     const cat = metaFor(item.id).category;
     grouped[cat].push(item);
   }
@@ -180,6 +213,17 @@ export default function OnboardingChecklist({ items }: { items: ChecklistItem[] 
           "bg-gradient-to-br from-brand-subtle/40 via-surface to-surface",
         )}
       >
+        {/* Dismiss button — anytime, persists to DB. */}
+        <button
+          type="button"
+          onClick={handleDismiss}
+          aria-label="Hide setup checklist"
+          className="absolute right-3 top-3 inline-flex h-7 w-7 items-center justify-center rounded-lg text-ink-subtle transition-colors hover:bg-surface-inset hover:text-ink"
+          title="Skip for now"
+        >
+          <X className="h-3.5 w-3.5" strokeWidth={2} />
+        </button>
+
         {/* Soft brand corner glow */}
         <div
           aria-hidden
@@ -191,7 +235,7 @@ export default function OnboardingChecklist({ items }: { items: ChecklistItem[] 
         />
 
         {/* Header */}
-        <div className="relative flex items-start justify-between gap-4">
+        <div className="relative flex items-start justify-between gap-4 pr-8">
           <div className="flex min-w-0 items-start gap-3">
             <div
               aria-hidden
@@ -212,7 +256,7 @@ export default function OnboardingChecklist({ items }: { items: ChecklistItem[] 
             </div>
           </div>
 
-          {/* Circular percentage */}
+          {/* Circular percentage — REQUIRED-only math */}
           <CircularProgress pct={pct} />
         </div>
 
@@ -220,8 +264,8 @@ export default function OnboardingChecklist({ items }: { items: ChecklistItem[] 
         <div className="relative mt-5">
           <div className="flex items-baseline justify-between text-[11px]">
             <span className="font-medium text-ink-muted">
-              <span className="tabular-nums text-ink">{done}</span> of{" "}
-              <span className="tabular-nums">{total}</span> steps complete
+              <span className="tabular-nums text-ink">{requiredDone}</span> of{" "}
+              <span className="tabular-nums">{requiredTotal}</span> required steps complete
             </span>
             <span className="font-semibold tabular-nums text-brand-accent">{pct}%</span>
           </div>
@@ -230,7 +274,6 @@ export default function OnboardingChecklist({ items }: { items: ChecklistItem[] 
               className="relative h-full rounded-full bg-gradient-to-r from-brand-accent via-brand-accent to-brand-hover shadow-[0_0_12px_rgba(53,157,243,0.45)] transition-[width] duration-700 ease-out"
               style={{ width: `${pct}%` }}
             >
-              {/* Shimmer sweep */}
               <div
                 aria-hidden
                 className="absolute inset-0 overflow-hidden rounded-full"
@@ -241,7 +284,7 @@ export default function OnboardingChecklist({ items }: { items: ChecklistItem[] 
           </div>
         </div>
 
-        {/* Grouped steps */}
+        {/* Grouped REQUIRED steps */}
         <div className="relative mt-6 space-y-5">
           {CATEGORY_ORDER.map((cat) => {
             const group = grouped[cat];
@@ -256,6 +299,30 @@ export default function OnboardingChecklist({ items }: { items: ChecklistItem[] 
             );
           })}
         </div>
+
+        {/* PREMIUM section — locked features that don't count */}
+        {premium.length > 0 ? (
+          <div className="relative mt-6 border-t border-border/60 pt-5">
+            <div className="mb-2.5 flex items-baseline justify-between">
+              <div className="flex items-baseline gap-2">
+                <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-amber-700">
+                  Unlock more
+                </span>
+                <span className="text-[11px] text-ink-muted">·</span>
+                <span className="text-[11px] text-ink-muted">
+                  Optional features available on paid plans
+                </span>
+              </div>
+            </div>
+            <ul className="grid gap-2 sm:grid-cols-2">
+              {premium.map((item, idx) => (
+                <FadeIn key={item.id} delay={idx} as="div">
+                  <PremiumStepCard item={item} />
+                </FadeIn>
+              ))}
+            </ul>
+          </div>
+        ) : null}
 
         {/* Insight nudge */}
         <div className="relative mt-6">
@@ -303,7 +370,7 @@ function CircularProgress({ pct }: { pct: number }) {
   );
 }
 
-// ─── Category section ───────────────────────────────────────────────
+// ─── Category section (REQUIRED tasks) ──────────────────────────────
 
 function CategorySection({
   eyebrow,
@@ -340,7 +407,7 @@ function CategorySection({
   );
 }
 
-// ─── Step card ──────────────────────────────────────────────────────
+// ─── Standard step card (REQUIRED task) ─────────────────────────────
 
 function StepCard({ item }: { item: ChecklistItem }) {
   const meta = metaFor(item.id);
@@ -359,7 +426,6 @@ function StepCard({ item }: { item: ChecklistItem }) {
       aria-label={done ? `${item.label} (complete)` : `${item.label} — set up`}
     >
       <div className="flex items-start gap-3">
-        {/* Icon container — swaps to check when done */}
         <div
           aria-hidden
           className={cn(
@@ -402,7 +468,6 @@ function StepCard({ item }: { item: ChecklistItem }) {
             {meta.description}
           </p>
 
-          {/* CTA row */}
           <div className="mt-2 flex items-center gap-1.5 text-[11px] font-medium">
             {done ? (
               <span className="text-emerald-700">Complete</span>
@@ -419,22 +484,90 @@ function StepCard({ item }: { item: ChecklistItem }) {
   );
 }
 
+// ─── Premium step card (PRO-only, locked) ───────────────────────────
+
+function PremiumStepCard({ item }: { item: ChecklistItem }) {
+  const meta = metaFor(item.id);
+  const Icon = meta.icon;
+  const cap = item.requiredCapability;
+  const cheapestPlan = cap ? cheapestPlanWithCapability(cap) : null;
+  const planLabel = cheapestPlan?.name ?? "Pro";
+
+  return (
+    <Link
+      href="/dashboard/settings/billing"
+      className="group relative block overflow-hidden rounded-xl border border-amber-200/70 bg-gradient-to-br from-amber-50/40 to-surface p-3.5 transition-all duration-200 ease-out hover:-translate-y-0.5 hover:border-amber-300 hover:shadow-soft"
+      aria-label={`${item.label} — upgrade to ${planLabel}`}
+    >
+      <div className="flex items-start gap-3">
+        <div
+          aria-hidden
+          className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-amber-100/80 text-amber-700 ring-1 ring-amber-200 transition-all duration-200 group-hover:scale-105"
+        >
+          <Icon className="h-[18px] w-[18px]" strokeWidth={1.75} />
+        </div>
+
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <div className="truncate text-[13px] font-semibold text-ink">
+              {item.label}
+            </div>
+            <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-100 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-amber-800">
+              <Lock className="h-2.5 w-2.5" strokeWidth={2.5} />
+              {planLabel}
+            </span>
+          </div>
+          <p className="mt-0.5 text-[11px] leading-relaxed text-ink-muted">
+            {meta.premiumDescription ?? meta.description}
+          </p>
+
+          <div className="mt-2 flex items-center gap-1.5 text-[11px] font-medium">
+            <span className="inline-flex items-center gap-1 text-amber-800 transition-transform duration-200 group-hover:translate-x-0.5">
+              Upgrade to {planLabel}
+              <ArrowRight className="h-3 w-3" strokeWidth={2.25} />
+            </span>
+          </div>
+        </div>
+      </div>
+    </Link>
+  );
+}
+
 // ─── Completion celebration ─────────────────────────────────────────
 
-function CompletionCard({ onDismiss }: { onDismiss: () => void }) {
+function CompletionCard({
+  onDismiss,
+  bookingUrl,
+  hasPremiumOpportunities,
+}: {
+  onDismiss: () => void;
+  bookingUrl?: string;
+  hasPremiumOpportunities: boolean;
+}) {
+  const [copied, setCopied] = React.useState(false);
+  const handleCopy = React.useCallback(async () => {
+    if (!bookingUrl) return;
+    try {
+      await navigator.clipboard.writeText(bookingUrl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      /* clipboard blocked; the link is still visible */
+    }
+  }, [bookingUrl]);
+
   return (
     <PremiumCard
       interactive={false}
-      className="relative overflow-hidden bg-gradient-to-br from-brand-subtle/60 via-surface to-surface"
+      className="relative overflow-hidden bg-gradient-to-br from-emerald-50/60 via-surface to-surface"
     >
-      {/* Confetti-style soft glows */}
       <div
         aria-hidden
-        className="pointer-events-none absolute -right-16 -top-16 h-48 w-48 rounded-full bg-brand-accent/15 blur-3xl"
+        className="pointer-events-none absolute -right-16 -top-16 h-48 w-48 rounded-full bg-emerald-400/20 blur-3xl"
       />
       <div
         aria-hidden
-        className="pointer-events-none absolute -left-16 bottom-0 h-40 w-40 rounded-full bg-emerald-400/10 blur-3xl"
+        className="pointer-events-none absolute -left-16 bottom-0 h-40 w-40 rounded-full bg-brand-accent/10 blur-3xl"
       />
 
       <button
@@ -449,20 +582,39 @@ function CompletionCard({ onDismiss }: { onDismiss: () => void }) {
       <div className="relative flex items-start gap-4">
         <div
           aria-hidden
-          className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-brand-accent to-brand-hover text-white shadow-[0_8px_24px_rgba(53,157,243,0.35)]"
+          className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-500 to-emerald-600 text-white shadow-[0_8px_24px_rgba(16,185,129,0.35)]"
         >
           <PartyPopper className="h-5 w-5" strokeWidth={1.75} />
         </div>
         <div className="min-w-0 flex-1">
-          <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-brand-accent">
+          <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-emerald-700">
             All set
           </div>
           <h2 className="mt-0.5 text-[17px] font-semibold tracking-tight text-ink">
-            Your workspace is ready
+            You&rsquo;re ready to accept bookings
           </h2>
           <p className="mt-1 text-[13px] leading-relaxed text-ink-muted">
-            Setup is complete. Share your booking link and start filling your calendar.
+            Workspace setup is complete. Share your booking link and start filling your calendar.
           </p>
+
+          {/* Copy booking link CTA */}
+          {bookingUrl ? (
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <div className="inline-flex items-center gap-2 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-[11px] font-mono text-ink-muted">
+                <span className="max-w-[280px] truncate">{bookingUrl}</span>
+                <button
+                  type="button"
+                  onClick={handleCopy}
+                  className="inline-flex items-center gap-1 rounded-md bg-brand-accent px-2 py-0.5 text-[10px] font-medium text-white hover:bg-brand-hover"
+                  title="Copy booking link"
+                >
+                  <CopyIcon className="h-2.5 w-2.5" strokeWidth={2.5} />
+                  {copied ? "Copied" : "Copy"}
+                </button>
+              </div>
+            </div>
+          ) : null}
+
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <Link
               href="/dashboard/calendar"
@@ -471,12 +623,15 @@ function CompletionCard({ onDismiss }: { onDismiss: () => void }) {
               Open calendar
               <ArrowRight className="h-3 w-3" strokeWidth={2.25} />
             </Link>
-            <Link
-              href="/dashboard/settings/branding"
-              className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-surface px-3 text-[12px] font-medium text-ink-muted transition-colors hover:bg-surface-inset hover:text-ink"
-            >
-              Customize booking page
-            </Link>
+            {/* Soft (NOT aggressive) upsell — only when premium tasks exist */}
+            {hasPremiumOpportunities ? (
+              <Link
+                href="/dashboard/settings/billing"
+                className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50/60 px-3 text-[12px] font-medium text-amber-800 transition-colors hover:bg-amber-50"
+              >
+                Unlock more features
+              </Link>
+            ) : null}
           </div>
         </div>
       </div>

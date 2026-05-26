@@ -8,7 +8,10 @@ import { getGoogleHealth } from "@/lib/calendar/connections";
 import DashboardBookings from "@/components/DashboardBookings";
 import Shell from "@/components/dashboard/Shell";
 import OnboardingChecklist, { type ChecklistItem } from "@/components/dashboard/OnboardingChecklist";
+import ResumeSetupPill from "@/components/dashboard/ResumeSetupPill";
 import { getDashboardChecklistSummary } from "@/lib/onboarding/integrity";
+import { getPlan } from "@/lib/plans";
+import { partitionByPlan } from "@/lib/onboarding/completion";
 import TenantAnnouncementBanner from "@/components/dashboard/TenantAnnouncementBanner";
 import DashboardHero from "@/components/dashboard/DashboardHero";
 import DashboardKpiGrid from "@/components/dashboard/DashboardKpiGrid";
@@ -263,8 +266,52 @@ export default async function DashboardPage(props: {
     { id: "service",  label: "Add at least one service",         href: "/dashboard/services",              done: checklistSummary.hasServices },
     { id: "hours",    label: "Set your weekly working hours",    href: "/dashboard/availability",          done: checklistSummary.hasAvailability },
     { id: "booking",  label: "Receive your first booking",       href: "/dashboard/calendar",              done: bookingCount > 0 },
-    { id: "branding", label: "Customize your booking page",      href: "/dashboard/settings/branding",     done: Boolean(tenant?.logoUrl || tenant?.tagline) },
+    // Phase Onboarding-UX — branding is plan-gated. On Free plans
+    // this lands in the PREMIUM section with an upgrade CTA and
+    // does NOT count toward completion. On Solo/Pro/Team/Enterprise
+    // it remains a regular required task (those plans have
+    // customBranding=true).
+    { id: "branding", label: "Customize your booking page",      href: "/dashboard/settings/branding",     done: Boolean(tenant?.logoUrl || tenant?.tagline), requiredCapability: "customBranding" },
   ];
+
+  // Phase Onboarding-UX — resolve the tenant plan + compute the
+  // plan-aware partition once (server-side) so we can decide whether
+  // to show the checklist, the success state, or the resume pill.
+  const tenantPlan = getPlan(tenant?.plan ?? null);
+  const checklistPartition = partitionByPlan(checklistItems, tenantPlan);
+
+  // Auto-completion: once every REQUIRED task is done AND we haven't
+  // already stamped completion, set onboardingCompletedAt. Fire-and-
+  // forget — failure to write doesn't break the render (the page
+  // already shows the success card via isReady).
+  if (
+    user.role === "admin" &&
+    tenant &&
+    !tenant.onboardingCompletedAt &&
+    checklistPartition.isReady
+  ) {
+    const stampAt = new Date();
+    await db
+      .update(tenants)
+      .set({ onboardingCompletedAt: stampAt, updatedAt: stampAt })
+      .where(eq(tenants.id, tenant.id))
+      .catch(() => {
+        /* non-fatal — UI still renders success */
+      });
+  }
+
+  // Booking URL for the success-card Copy CTA.
+  const bookingUrl = tenant?.slug
+    ? `${process.env.APP_BASE_URL ?? "https://app.zentromeet.com"}/u/${tenant.slug}`
+    : undefined;
+
+  // Decide visibility:
+  //   • dismissed && not ready → render the tiny "Resume setup" pill
+  //   • otherwise              → render the full checklist
+  const showResumePill = Boolean(
+    tenant?.onboardingDismissedAt && !checklistPartition.isReady,
+  );
+  const showChecklist = !showResumePill;
 
   // Google reconnect banner — appears when the orchestrator flipped
   // the encrypted connection into `needs_reconnect`. Sourced from the
@@ -298,7 +345,19 @@ export default async function DashboardPage(props: {
         </div>
       )}
 
-      <OnboardingChecklist items={checklistItems} />
+      {showResumePill ? (
+        <ResumeSetupPill
+          requiredDone={checklistPartition.requiredDone}
+          requiredTotal={checklistPartition.requiredTotal}
+        />
+      ) : null}
+      {showChecklist ? (
+        <OnboardingChecklist
+          items={checklistItems}
+          plan={tenantPlan}
+          bookingUrl={bookingUrl}
+        />
+      ) : null}
 
       {/* ── HERO ────────────────────────────────────────────────── */}
       <FadeIn delay={0} as="section">

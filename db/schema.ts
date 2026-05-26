@@ -76,6 +76,12 @@ export const tenants = pgTable(
     onboardingCompletedAt: timestamp("onboarding_completed_at", { withTimezone: true }),
     onboardingStartedAt: timestamp("onboarding_started_at", { withTimezone: true }),
     onboardingSkippedAt: timestamp("onboarding_skipped_at", { withTimezone: true }),
+    // Phase Onboarding-UX (migration 0061) — explicit "user closed
+    // the dashboard checklist" signal. Distinct from
+    // onboarding_skipped_at (wizard escape hatch). When set, the
+    // dashboard renders a tiny "Resume setup" pill instead of the
+    // full checklist until the user clicks resume.
+    onboardingDismissedAt: timestamp("onboarding_dismissed_at", { withTimezone: true }),
     onboardingProgress: jsonb("onboarding_progress").notNull().default({}),
 
     // Outbound webhook for operational alerts (Slack-compatible)

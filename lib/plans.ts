@@ -260,6 +260,77 @@ export function getPlan(id: string | null | undefined): Plan {
   return PLANS.free;
 }
 
+// ─── Capability helper (Phase Onboarding-UX) ───────────────────────────
+//
+// Single source of truth for "does this plan permit this feature?".
+// Components MUST use this helper rather than string-comparing plan
+// IDs (`plan === "free"`) so future plan rearrangements don't leak
+// into the UI. Three categories of capability:
+//
+//   1. Boolean limits        — customBranding, publicProfile, analytics
+//   2. Numeric > 0 limits    — maxStaff > 0, maxCustomDomains > 0, etc.
+//                              Free plan often has these at 0 ("feature
+//                              unavailable") so a > 0 check is the
+//                              honest "do you have any of it" question.
+//   3. Implicit (always on)  — anything not in this enum is always on
+//                              for every plan and the helper returns
+//                              true.
+//
+// Naming follows the field name on Plan.limits exactly so the
+// indirection cost is zero.
+
+export type PlanCapability =
+  | "customBranding"
+  | "publicProfile"
+  | "analytics"
+  | "customDomains"
+  | "extraStaff"
+  | "extraManagers"
+  | "extraLocations";
+
+export function hasCapability(plan: Plan, capability: PlanCapability): boolean {
+  switch (capability) {
+    case "customBranding":
+      return plan.limits.customBranding === true;
+    case "publicProfile":
+      return plan.limits.publicProfile === true;
+    case "analytics":
+      return plan.limits.analytics === true;
+    case "customDomains":
+      // Either unlimited (-1) or any positive cap.
+      return plan.limits.maxCustomDomains === -1 || plan.limits.maxCustomDomains > 0;
+    case "extraStaff":
+      // Can add more than 1 staff seat? (Free is typically 1.)
+      return plan.limits.maxStaff === -1 || plan.limits.maxStaff > 1;
+    case "extraManagers":
+      return plan.limits.maxManagers === -1 || plan.limits.maxManagers > 0;
+    case "extraLocations":
+      return plan.limits.maxLocations === -1 || plan.limits.maxLocations > 0;
+    default: {
+      // Exhaustiveness check: if a new capability is added to the
+      // union without a branch here, TS will flag this at build time.
+      const _exhaustive: never = capability;
+      return Boolean(_exhaustive);
+    }
+  }
+}
+
+/** Convenience: returns the cheapest plan that has the given
+ *  capability. Used by the upgrade-CTA component to render
+ *  "Available on <Plan name>". */
+export function cheapestPlanWithCapability(
+  capability: PlanCapability,
+): Plan | null {
+  // Iterate by PLAN_RANK ascending so we return the cheapest match.
+  const sorted = (Object.values(PLANS) as Plan[]).sort(
+    (a, b) => PLAN_RANK[a.id] - PLAN_RANK[b.id],
+  );
+  for (const p of sorted) {
+    if (hasCapability(p, capability)) return p;
+  }
+  return null;
+}
+
 // ─── Plan-tier comparison (Phase 16K) ──────────────────────────────
 // Tier ordering for "does the current plan meet the required tier?"
 // checks. Free < Solo < Pro < Team < Enterprise. The Feature Controls
