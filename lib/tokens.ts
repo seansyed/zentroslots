@@ -54,11 +54,34 @@ export async function verifyBookingToken(
 /**
  * Helper that builds the absolute URL for a public booking action.
  * Uses APP_BASE_URL so tokens work in emails sent from any env.
+ *
+ * If APP_BASE_URL is missing in production we'd silently embed
+ * `http://localhost:3001` links in customer-facing emails — which
+ * means the reschedule/cancel buttons would 404 once they leave the
+ * sender's machine. The dev fallback is fine for `npm run dev`, but
+ * in production we emit a loud warning so the operator sees it in
+ * pm2 logs before customers see broken links. This warning fires
+ * AT MOST ONCE per process lifetime — we don't spam the log per
+ * email send.
  */
+let appBaseUrlWarned = false;
 export function buildBookingActionUrl(
   token: string,
   action: BookingTokenKind
 ): string {
-  const base = (process.env.APP_BASE_URL ?? "http://localhost:3001").replace(/\/+$/, "");
+  const configured = process.env.APP_BASE_URL;
+  if (!configured && process.env.NODE_ENV === "production" && !appBaseUrlWarned) {
+    appBaseUrlWarned = true;
+    console.error(
+      JSON.stringify({
+        evt: "app_base_url_missing",
+        severity: "critical",
+        ts: new Date().toISOString(),
+        impact:
+          "Reschedule/cancel email links will point to http://localhost:3001 — set APP_BASE_URL in .env",
+      }),
+    );
+  }
+  const base = (configured ?? "http://localhost:3001").replace(/\/+$/, "");
   return `${base}/${action}/${encodeURIComponent(token)}`;
 }

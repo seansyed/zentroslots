@@ -30,7 +30,9 @@ import {
   renderDemoAutoresponder,
 } from "@/lib/email";
 
-const BRAND_NAME = process.env.BRAND_NAME ?? "ZentroBiz";
+// Defaults to "ZentroMeet". The legacy "ZentroBiz" string is a
+// pre-rename relic and must never appear in customer-facing email.
+const BRAND_NAME = process.env.BRAND_NAME ?? "ZentroMeet";
 
 /** Resolves the support inbox. Falls back to EMAIL_FROM so a misconfigured
  *  deploy still routes somewhere reachable rather than silently dropping

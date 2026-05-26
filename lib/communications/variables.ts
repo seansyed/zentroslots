@@ -42,20 +42,45 @@ export type TemplateContext = Partial<Record<TemplateVariable, string | null | u
 
 const VARIABLE_PATTERN = /\{\{\s*([a-z_]+)\s*\}\}/gi;
 
+/** HTML-escape a single substituted value when rendering INTO HTML.
+ *  Keeps the template author's literal HTML markup intact (the
+ *  template's static surrounding text), only escaping the substituted
+ *  customer/tenant fields. Used when `renderVariables` is called with
+ *  `{ escapeHtml: true }` — the engine sets this for HTML output. */
+function escapeHtmlValue(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 /**
  * Render `{{var}}` placeholders. Unknown / missing keys → empty string.
  * Preserves the original template format (line breaks, casing). Pure
  * function — no I/O. Safe to call from anywhere.
+ *
+ * When `options.escapeHtml` is true, substituted VALUES are HTML-escaped
+ * before insertion so a customer name like `<script>` cannot break the
+ * surrounding HTML markup or inject content into the email. The
+ * template author's literal HTML is unaffected — only the substituted
+ * field values are escaped. Default false preserves existing behavior
+ * for all current callers (text rendering, admin editor preview, etc).
  */
 export function renderVariables(
   template: string,
-  context: TemplateContext
+  context: TemplateContext,
+  options?: { escapeHtml?: boolean }
 ): string {
   if (!template) return "";
+  const escape = options?.escapeHtml === true;
   return template.replace(VARIABLE_PATTERN, (_match, rawKey: string) => {
     const key = rawKey.toLowerCase() as TemplateVariable;
     const value = context[key];
-    return value == null ? "" : String(value);
+    if (value == null) return "";
+    const str = String(value);
+    return escape ? escapeHtmlValue(str) : str;
   });
 }
 

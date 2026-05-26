@@ -85,7 +85,12 @@ function renderRow(
 ): ResolvedTemplate {
   return {
     subject: renderVariables(row.subject ?? "", context),
-    html: renderVariables(row.htmlContent ?? "", context),
+    // HTML rendering escapes substituted VALUES so a customer/tenant
+    // name with HTML characters (`<script>`, quotes) can't break the
+    // surrounding HTML or inject content. The template author's own
+    // literal HTML markup is preserved verbatim — only the
+    // {{substitutions}} are escaped. Text rendering is unchanged.
+    html: renderVariables(row.htmlContent ?? "", context, { escapeHtml: true }),
     text: renderVariables(row.textContent ?? "", context),
     source,
     templateId: row.id,

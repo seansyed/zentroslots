@@ -629,7 +629,11 @@ export function renderContactAutoresponder(args: {
   supportEmail: string;
   brandName?: string;
 }): { html: string; text: string; subject: string } {
-  const brand = args.brandName ?? "ZentroBiz";
+  // Default to "ZentroMeet" — the legacy "ZentroBiz" default predates
+  // the product rename. Callers should still set BRAND_NAME at the
+  // env layer (lib/notify-support.ts threads it through), but the
+  // ultimate fallback must NOT say ZentroBiz.
+  const brand = args.brandName ?? process.env.BRAND_NAME ?? "ZentroMeet";
   const subject = `We received your message — ${brand}`;
   const html = shell(`
     <h1>Thanks for reaching out, ${escape(args.name)}.</h1>
@@ -649,7 +653,11 @@ export function renderDemoAutoresponder(args: {
   supportEmail: string;
   brandName?: string;
 }): { html: string; text: string; subject: string } {
-  const brand = args.brandName ?? "ZentroBiz";
+  // Default to "ZentroMeet" — the legacy "ZentroBiz" default predates
+  // the product rename. Callers should still set BRAND_NAME at the
+  // env layer (lib/notify-support.ts threads it through), but the
+  // ultimate fallback must NOT say ZentroBiz.
+  const brand = args.brandName ?? process.env.BRAND_NAME ?? "ZentroMeet";
   const subject = `Your ${brand} demo request — next steps`;
   const html = shell(`
     <h1>Hi ${escape(args.name)} — your demo request is in.</h1>

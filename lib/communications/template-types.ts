@@ -183,9 +183,30 @@ function renderFollowup(p: BookingForEmail): { subject: string; html: string; te
 }
 
 /**
+ * HTML escape for inline interpolation. Customer/tenant/service names
+ * flow through these templates from the DB; we MUST escape them or a
+ * tenant with a name like `<script>alert(1)</script>` could break
+ * the rendered email. The {{token}} placeholders for review_url /
+ * claim_url / booking_link are URL-safe by construction (signed
+ * tokens / business URLs) but we escape them too as defense in depth.
+ */
+function escapeHtmlForTemplate(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+/**
  * Minimal HTML wrapper used by the new system templates. Email-client
  * safe (tables, inline styles). The four existing templates use the
  * pre-existing renderers in lib/email.ts.
+ *
+ * All interpolated fields are HTML-escaped — see escapeHtmlForTemplate.
+ * Callers may pass plain text containing user-controlled values; the
+ * escape happens here so callers don't have to remember to do it.
  */
 function simpleEmail(args: {
   heading: string;
@@ -193,10 +214,12 @@ function simpleEmail(args: {
   ctaLabel: string | null;
   ctaUrl: string | null;
 }): string {
+  const safeHeading = escapeHtmlForTemplate(args.heading);
+  const safeBody = escapeHtmlForTemplate(args.body);
   const ctaBlock =
     args.ctaLabel && args.ctaUrl
       ? `<tr><td style="padding:24px 0;text-align:center;">
-           <a href="${args.ctaUrl}" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;padding:12px 24px;border-radius:8px;font-weight:600;">${args.ctaLabel}</a>
+           <a href="${escapeHtmlForTemplate(args.ctaUrl)}" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;padding:12px 24px;border-radius:8px;font-weight:600;">${escapeHtmlForTemplate(args.ctaLabel)}</a>
          </td></tr>`
       : "";
   return `<!doctype html>
@@ -204,8 +227,8 @@ function simpleEmail(args: {
 <table cellpadding="0" cellspacing="0" width="100%"><tr><td align="center" style="padding:24px;">
   <table cellpadding="0" cellspacing="0" width="560" style="max-width:560px;background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;">
     <tr><td style="padding:24px;">
-      <h1 style="font-size:20px;margin:0 0 12px;">${args.heading}</h1>
-      <p style="font-size:14px;line-height:1.6;color:#334155;margin:0;">${args.body}</p>
+      <h1 style="font-size:20px;margin:0 0 12px;">${safeHeading}</h1>
+      <p style="font-size:14px;line-height:1.6;color:#334155;margin:0;">${safeBody}</p>
     </td></tr>
     ${ctaBlock}
   </table>
