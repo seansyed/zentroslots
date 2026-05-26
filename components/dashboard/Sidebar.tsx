@@ -132,6 +132,7 @@ function buildNav(
         id: "super-ops",
         label: "Operations",
         items: [
+          { label: "Revenue",       href: "/admin/revenue",         icon: BarChart3 },
           { label: "Audit logs",    href: "/admin#audit",           icon: ListChecks },
           { label: "System health", href: "/admin/health",          icon: Activity },
         ],
