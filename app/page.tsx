@@ -110,15 +110,13 @@ export default async function HomePage() {
         </div>
       </section>
 
-      {/* Testimonials placeholder */}
-      <section className="border-y bg-slate-50 py-16">
-        <div className="mx-auto max-w-3xl px-6 text-center">
-          <div className="text-3xl font-medium text-slate-700">
-            “We replaced four Calendly seats with one workspace.”
-          </div>
-          <div className="mt-3 text-sm text-slate-500">— Real testimonial coming soon</div>
-        </div>
-      </section>
+      {/*
+        Testimonials section removed: the previous fake quote with
+        a "Real testimonial coming soon" disclaimer was misleading
+        to visitors. When real testimonials exist, this is the spot
+        to add them back. Until then, the feature grid above + the
+        CTA below are sufficient social-proof-light surface.
+      */}
 
       {/* CTA */}
       <section className="mx-auto max-w-3xl px-6 py-20 text-center">
