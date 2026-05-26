@@ -120,9 +120,10 @@ function buildNav(
         id: "super-platform",
         label: "Platform",
         items: [
-          { label: "Overview",      href: "/admin",                 icon: LayoutDashboard },
-          { label: "Tenants",       href: "/admin/tenants",         icon: Briefcase },
-          { label: "Subscriptions", href: "/admin/subscriptions",   icon: CreditCard },
+          { label: "Overview",      href: "/admin",                          icon: LayoutDashboard },
+          { label: "Tenants",       href: "/admin/tenants",                  icon: Briefcase },
+          { label: "Intelligence",  href: "/admin/tenants/intelligence",     icon: ShieldCheck },
+          { label: "Subscriptions", href: "/admin/subscriptions",            icon: CreditCard },
           { label: "Plans",         href: "/admin/plans",           icon: Box },
           { label: "Promotions",    href: "/admin/promotions",      icon: Flag },
           { label: "Announcements", href: "/admin/announcements",   icon: Megaphone },
@@ -133,8 +134,11 @@ function buildNav(
         label: "Operations",
         items: [
           { label: "Revenue",       href: "/admin/revenue",         icon: BarChart3 },
+          { label: "System health", href: "/admin/system-health",   icon: Activity },
           { label: "Audit logs",    href: "/admin#audit",           icon: ListChecks },
-          { label: "System health", href: "/admin/health",          icon: Activity },
+          // Legacy /admin/health page preserved for now — replaced
+          // by /admin/system-health (SA-3) but the old URL still
+          // resolves so any external bookmarks keep working.
         ],
       },
     ];
