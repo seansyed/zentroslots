@@ -24,6 +24,7 @@ import {
   triggerAutomation,
   type AutomationEvent,
 } from "../lib/communications/engine";
+import { adminNotify } from "../lib/admin-notify";
 
 const WINDOW_MIN = 30;
 
@@ -85,9 +86,46 @@ async function processWindow(
 
       if (result.status === "failed") {
         console.error(`[reminders] send failed for ${b.id}:`, result.reason);
+        // Phase 3 — admin alert on reminder delivery failure. The
+        // dedupe key is the failure reason category (NOT the booking
+        // id) so a systemic problem (SES sandbox, invalid sender,
+        // network outage) collapses into 1 alert per cooldown
+        // window instead of 1 per booking. A genuine per-booking
+        // problem (rare custom-domain bounce) shows up as the next
+        // reason category. This is the exact pattern that would
+        // have caught the SES sandbox failures during the audit.
+        const reasonCategory = (result.reason ?? "unknown").split(":")[0]?.trim() ?? "unknown";
+        void adminNotify({
+          kind: "reminder_delivery_failure",
+          severity: "warning",
+          summary: `Reminder send failed (${reasonCategory})`,
+          details: result.reason ?? undefined,
+          tenantId: b.tenantId,
+          dedupeKey: `reminder_delivery_failure::${reasonCategory}::${b.tenantId}`,
+          metadata: {
+            bookingId: b.id,
+            eventType,
+            startAt: b.startAt.toISOString(),
+            reasonCategory,
+          },
+        });
       }
     } catch (err) {
       console.error(`[reminders] booking ${b.id} failed:`, err);
+      // Phase 3 — admin alert on uncaught exception in the loop.
+      // Critical severity because this means the engine itself blew
+      // up (a logic bug, missing schema column, DB pool exhausted,
+      // etc.) rather than the email provider returning an error
+      // — that's the "failed" path above.
+      void adminNotify({
+        kind: "worker_crash",
+        severity: "critical",
+        summary: "Reminder worker uncaught exception",
+        details: err instanceof Error ? err.message.slice(0, 500) : String(err).slice(0, 500),
+        tenantId: b.tenantId,
+        dedupeKey: `reminder_worker_crash::${b.tenantId}`,
+        metadata: { bookingId: b.id, eventType },
+      });
     }
   }
 }

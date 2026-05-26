@@ -15,6 +15,7 @@ import { generateUniqueSlug, getTenantBySlug } from "@/lib/tenant";
 import { assertCanAddStaff } from "@/lib/quotas";
 import { rateLimit } from "@/lib/rate-limit";
 import { ipFromHeaders } from "@/lib/audit";
+import { adminNotify } from "@/lib/admin-notify";
 
 export async function POST(req: NextRequest) {
   try {
@@ -43,6 +44,25 @@ export async function POST(req: NextRequest) {
         .values({ name: workspaceName, slug, plan: "free", active: true })
         .returning();
       tenantId = tenant.id;
+
+      // Phase 3 — admin alert on new tenant signup. Info severity:
+      // a healthy product signal, not an incident. Dedupe key uses
+      // tenant.id so duplicate POSTs (network retries) collapse.
+      // Fire-and-forget; the signup response is unaffected.
+      void adminNotify({
+        kind: "new_tenant_signup",
+        severity: "info",
+        summary: `New workspace: ${workspaceName}`,
+        tenantId: tenant.id,
+        tenantLabel: workspaceName,
+        dedupeKey: `new_tenant_signup::${tenant.id}`,
+        metadata: {
+          slug,
+          adminEmail: body.email,
+          adminName: body.name,
+          timezone: body.timezone,
+        },
+      });
     } else {
       if (!body.tenantSlug) {
         throw new HttpError(400, "tenantSlug is required for staff/client signup");

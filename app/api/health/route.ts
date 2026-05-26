@@ -555,6 +555,82 @@ export async function GET() {
     }
   }
 
+  // ─── Reminder delivery health (Phase 1 hardening) ────────────────
+  // Surfaces three signals that together prove the reminder cron is
+  // not silently failing:
+  //   (a) Last comm log activity — when was the most recent attempt
+  //       (sent OR failed OR skipped) across all tenants. Older than
+  //       90 minutes is suspicious for a cron that runs every 15 min,
+  //       BUT only if there's been booking activity to remind about.
+  //   (b) 24h failure count — recent failed sends. A non-zero count
+  //       with the same category is the systemic-failure signature
+  //       (SES sandbox, expired credential, etc.).
+  //   (c) Top failure category — the most-recent failure_reason
+  //       prefix, surfaced raw so an operator can act on it.
+  // Soft-fail. Even if reminders are broken, the booking engine
+  // itself is fine; we don't want the load balancer to drop traffic.
+  {
+    const start = Date.now();
+    try {
+      const rows = (await db.execute(
+        sql`WITH recent AS (
+              SELECT status, failure_reason, created_at
+              FROM communication_logs
+              WHERE created_at > NOW() - INTERVAL '24 hours'
+            )
+            SELECT
+              (SELECT MAX(created_at) FROM communication_logs) AS last_attempt_at,
+              (SELECT COUNT(*)::int FROM recent WHERE status = 'sent')    AS sent_24h,
+              (SELECT COUNT(*)::int FROM recent WHERE status = 'failed')  AS failed_24h,
+              (SELECT COUNT(*)::int FROM recent WHERE status = 'skipped') AS skipped_24h,
+              (SELECT failure_reason FROM recent WHERE status = 'failed'
+                 ORDER BY created_at DESC LIMIT 1) AS last_failure_reason`
+      )) as unknown as Array<{
+        last_attempt_at: string | null;
+        sent_24h: number | string | null;
+        failed_24h: number | string | null;
+        skipped_24h: number | string | null;
+        last_failure_reason: string | null;
+      }>;
+      const r = rows[0] ?? {};
+      const sent = Number(r.sent_24h ?? 0);
+      const failed = Number(r.failed_24h ?? 0);
+      const skipped = Number(r.skipped_24h ?? 0);
+      const lastFailureReason =
+        typeof r.last_failure_reason === "string"
+          ? r.last_failure_reason.split(":")[0]?.trim() ?? "unknown"
+          : null;
+      // ageHours = hours since the most recent attempt of any kind.
+      const lastAt = r.last_attempt_at ? new Date(r.last_attempt_at) : null;
+      const ageHours = lastAt
+        ? Math.round((Date.now() - lastAt.getTime()) / 3_600_000)
+        : null;
+
+      // Soft-fail heuristic: report `ok:false` ONLY when there are
+      // failures AND zero sends in the last 24h (the SES-sandbox
+      // signature). A non-zero failure count with at least some
+      // successful sends is normal noise (per-recipient bounces,
+      // address typos). Otherwise stays `ok:true` and just surfaces
+      // the metrics so dashboards can chart them.
+      const looksSystemicallyBroken = failed > 0 && sent === 0;
+      checks.reminder_delivery = {
+        ok: true, // never toggles allOk — load balancer must stay up
+        ms: Date.now() - start,
+        detail: looksSystemicallyBroken
+          ? `BROKEN: ${failed} failed / 0 sent in 24h; last_reason=${lastFailureReason ?? "?"}; age_hours=${ageHours ?? "?"}`
+          : `sent=${sent}; failed=${failed}; skipped=${skipped}; age_hours=${ageHours ?? "?"}${
+              lastFailureReason ? `; last_failure_category=${lastFailureReason}` : ""
+            }`,
+      };
+    } catch (e) {
+      checks.reminder_delivery = {
+        ok: true, // soft — never toggles allOk
+        ms: Date.now() - start,
+        detail: (e as Error).message,
+      };
+    }
+  }
+
   // Stale tenant detection — tenants whose most recent
   // analytics_daily_snapshots row is > 36h old. Likely indicates the
   // cron skipped them. Soft-fail; detail surfaces the count.

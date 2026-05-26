@@ -14,6 +14,7 @@ import {
 import { runPostConfirmationHooks } from "@/lib/billing/postBookingHooks";
 import { tryClaimStripeEvent } from "@/lib/billing/webhookIdempotency";
 import { applyTenantBillingMutation } from "@/lib/billing/planTransitions";
+import { adminNotify } from "@/lib/admin-notify";
 
 // Use Node runtime so we can read the raw body for signature verification.
 export const runtime = "nodejs";
@@ -50,6 +51,20 @@ export async function POST(req: NextRequest) {
     event = stripe.webhooks.constructEvent(raw, sig, secret);
   } catch (err) {
     console.error("Stripe webhook signature verification failed:", err);
+    // Phase 3 — alert ops on signature failures. Throttled per
+    // hour so a brute-force replay doesn't flood the inbox; we
+    // only need to see ONE per window to know something's wrong.
+    // Fire-and-forget; never blocks the 400 response.
+    void adminNotify({
+      kind: "stripe_webhook_error",
+      severity: "warning",
+      summary: "Stripe webhook signature verification failed",
+      details: err instanceof Error ? err.message.slice(0, 500) : "unknown",
+      metadata: {
+        ip: req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown",
+        userAgent: req.headers.get("user-agent")?.slice(0, 80) ?? "unknown",
+      },
+    });
     return NextResponse.json({ error: "Invalid signature" }, { status: 400 });
   }
 
@@ -207,6 +222,24 @@ export async function POST(req: NextRequest) {
             reason: pi.last_payment_error?.message?.slice(0, 200) ?? "payment_failed",
           });
         }
+        // Phase 3 — admin alert on payment failure. Dedupe key
+        // includes the bookingId so duplicate webhook deliveries
+        // don't double-alert. Severity = warning (recoverable —
+        // customer can retry checkout) rather than critical.
+        void adminNotify({
+          kind: "payment_failed",
+          severity: "warning",
+          summary: "Stripe payment_intent.payment_failed",
+          details: pi.last_payment_error?.message?.slice(0, 500) ?? undefined,
+          tenantId: resolvedTenantId ?? undefined,
+          dedupeKey: `payment_failed::${resolvedBookingId ?? piId}`,
+          metadata: {
+            bookingId: resolvedBookingId ?? undefined,
+            paymentIntentId: piId,
+            errorCode: pi.last_payment_error?.code ?? undefined,
+            declineCode: pi.last_payment_error?.decline_code ?? undefined,
+          },
+        });
         break;
       }
 
@@ -291,6 +324,36 @@ export async function POST(req: NextRequest) {
               .where(eq(tenants.id, tenantRow.id));
           },
         });
+        // Phase 3 — admin alert on new + updated subscriptions. We
+        // discriminate "new" vs "updated" using the event.type. The
+        // dedupeKey is keyed by stripe event id so the same event
+        // arriving twice never double-alerts (idempotency clause
+        // upstream already short-circuits, but defense in depth).
+        if (event.type === "customer.subscription.created") {
+          void adminNotify({
+            kind: "new_subscription",
+            severity: "info",
+            summary: `New subscription: ${planLabel ?? "unknown plan"}`,
+            tenantId: tenantRow.id,
+            dedupeKey: `new_subscription::${event.id}`,
+            metadata: {
+              plan: planLabel ?? "unrecognized",
+              subscriptionStatus: sub.status,
+              trialEnd: trialEnd?.toISOString() ?? undefined,
+              priceId,
+            },
+          });
+          if (trialEnd && trialEnd.getTime() > Date.now()) {
+            void adminNotify({
+              kind: "trial_started",
+              severity: "info",
+              summary: `Trial started for ${planLabel ?? "plan"}`,
+              tenantId: tenantRow.id,
+              dedupeKey: `trial_started::${event.id}`,
+              metadata: { plan: planLabel, trialEnd: trialEnd.toISOString() },
+            });
+          }
+        }
         break;
       }
 
@@ -330,6 +393,20 @@ export async function POST(req: NextRequest) {
                 updatedAt: new Date(),
               })
               .where(eq(tenants.id, tenantRow.id));
+          },
+        });
+        // Phase 3 — admin alert on cancellation. Warning severity:
+        // not catastrophic (existing customer pause), but worth
+        // surfacing so ops can reach out for retention if desired.
+        void adminNotify({
+          kind: "subscription_cancelled",
+          severity: "warning",
+          summary: "Subscription cancelled — tenant downgraded to free",
+          tenantId: tenantRow.id,
+          dedupeKey: `subscription_cancelled::${event.id}`,
+          metadata: {
+            stripeCustomerId: customerId,
+            stripeSubscriptionId: sub.id,
           },
         });
         break;
