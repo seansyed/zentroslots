@@ -299,10 +299,82 @@ async function sendViaSmtp(args: SendArgs, from: string): Promise<void> {
   });
 }
 
+// One-shot startup warning when EMAIL_FROM is missing in prod. Same
+// pattern as the APP_BASE_URL warning in lib/tokens.ts. Fires exactly
+// once per process so logs aren't spammed per send. The localhost
+// fallback is fine for `npm run dev`; in prod it would generate
+// unsigned-domain emails that SES rejects immediately.
+let emailFromWarned = false;
+
 export async function sendEmail(args: SendArgs): Promise<{ ok: boolean; reason?: string; provider?: Provider }> {
+  if (
+    !process.env.EMAIL_FROM &&
+    process.env.NODE_ENV === "production" &&
+    !emailFromWarned
+  ) {
+    emailFromWarned = true;
+    try {
+      console.error(
+        JSON.stringify({
+          evt: "email_from_missing",
+          severity: "critical",
+          ts: new Date().toISOString(),
+          impact:
+            "Outbound mail is using <no-reply@localhost> as From — SES will reject. Set EMAIL_FROM in .env.",
+        }),
+      );
+    } catch {}
+  }
   const from = args.from ?? process.env.EMAIL_FROM ?? "ZentroMeet <no-reply@localhost>";
   const provider = activeProvider();
   let result: { ok: boolean; reason?: string };
+
+  // ── SES deliverability hardening: pre-send suppression check ──────
+  // Addresses that previously bounced (permanent) or filed a spam
+  // complaint live in `email_suppressions` (populated by the SES SNS
+  // webhook). Resending to them degrades sender reputation across the
+  // SES account — one bad mailbox hurts every tenant. The check is a
+  // single indexed lookup; on DB error it fails-open so a downed DB
+  // never blocks the email path (SES would reject the bad address
+  // anyway). Skipped sends are logged structurally so admins can see
+  // *why* a customer didn't receive an email.
+  try {
+    const { isSuppressed } = await import("./email-suppression");
+    if (await isSuppressed(args.to)) {
+      const toDomain = args.to.split("@")[1] ?? "?";
+      try {
+        console.warn(
+          JSON.stringify({
+            evt: "email_skipped_suppressed",
+            provider,
+            subject: args.subject,
+            to_domain: toDomain,
+            ts: new Date().toISOString(),
+          }),
+        );
+      } catch {}
+      // Best-effort audit even for skipped sends so the dashboard can
+      // surface "we did NOT send X because address was suppressed".
+      if (args.audit) {
+        audit({
+          tenantId: args.audit.tenantId,
+          action: "email.skipped",
+          entityType: "communication",
+          entityId: args.audit.bookingId ?? undefined,
+          metadata: {
+            kind: args.audit.kind,
+            reason: "suppressed",
+            subject: args.subject,
+            to_domain: toDomain,
+          },
+        }).catch(() => undefined);
+      }
+      return { ok: false, reason: "suppressed", provider };
+    }
+  } catch {
+    // Suppression infrastructure unavailable (migration not yet
+    // applied, DB unreachable). Fall through to the normal send.
+  }
 
   try {
     switch (provider) {

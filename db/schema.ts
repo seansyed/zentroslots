@@ -1402,6 +1402,40 @@ export const communicationLogs = pgTable(
   })
 );
 
+// ─── Email suppression list (SES deliverability hardening) ──────────────
+// Permanent bounces + complaints from SES SNS notifications populate
+// this table. The sendEmail() pre-send check skips any address
+// matched here so we don't degrade SES sender reputation.
+//
+// Migration: 0062_email_suppressions.sql
+// Webhook:   app/api/webhooks/ses/route.ts
+// Helper:    lib/email-suppression.ts
+export const emailSuppressions = pgTable(
+  "email_suppressions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    emailLower: varchar("email_lower", { length: 320 }).notNull(),
+    /** 'bounce' | 'complaint' | 'manual' — see migration header */
+    kind: varchar("kind", { length: 20 }).notNull(),
+    /** SES bounce sub-type; only 'Permanent' should suppress */
+    bounceSubtype: varchar("bounce_subtype", { length: 40 }),
+    /** Free-form attribution ('ses-sns', 'manual:<userId>', etc) */
+    source: varchar("source", { length: 120 }).notNull().default("ses-sns"),
+    /** Diagnostic string from SES (last SMTP code, etc) */
+    reason: text("reason"),
+    firstSeenAt: timestamp("first_seen_at", { withTimezone: true }).notNull().defaultNow(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
+    eventCount: integer("event_count").notNull().default(1),
+    metadata: jsonb("metadata").notNull().default({}),
+  },
+  (t) => ({
+    // UPSERT key — one row per (address, kind)
+    emailKindUnique: uniqueIndex("idx_email_suppressions_email_kind").on(t.emailLower, t.kind),
+    emailIdx: index("idx_email_suppressions_email").on(t.emailLower),
+    kindTimeIdx: index("idx_email_suppressions_kind_time").on(t.kind, t.lastSeenAt),
+  })
+);
+
 // ─── Tenant feature toggles ─────────────────────────────────────────────
 // One row per tenant; absence = all defaults (everything on). Flags is a
 // jsonb blob: which keys are valid and what their defaults are is owned

@@ -631,6 +631,43 @@ export async function GET() {
     }
   }
 
+  // ─── Email suppression list (SES deliverability hardening) ──────
+  // Surfaces bounce/complaint signals captured by /api/webhooks/ses.
+  // A spike in bounce_24h is the earliest warning that list quality
+  // or sender reputation is at risk. SES will auto-pause the account
+  // at >5% bounce rate or >0.1% complaint rate — visibility here
+  // gives ops a chance to intervene before that happens.
+  // Soft-fail: never toggles allOk (the booking engine still works
+  // even if every email bounces).
+  {
+    const start = Date.now();
+    try {
+      const rows = (await db.execute(
+        sql`SELECT
+          (SELECT COUNT(*)::int FROM email_suppressions WHERE kind = 'bounce' AND last_seen_at > NOW() - INTERVAL '24 hours') AS bounce_24h,
+          (SELECT COUNT(*)::int FROM email_suppressions WHERE kind = 'complaint' AND last_seen_at > NOW() - INTERVAL '24 hours') AS complaint_24h,
+          (SELECT COUNT(*)::int FROM email_suppressions) AS total`,
+      )) as unknown as Array<{ bounce_24h: number | string | null; complaint_24h: number | string | null; total: number | string | null }>;
+      const r = rows[0] ?? {};
+      const bounce24h = Number(r.bounce_24h ?? 0);
+      const complaint24h = Number(r.complaint_24h ?? 0);
+      const total = Number(r.total ?? 0);
+      checks.email_suppressions = {
+        ok: true,
+        ms: Date.now() - start,
+        detail: `bounce_24h=${bounce24h}; complaint_24h=${complaint24h}; total=${total}`,
+      };
+    } catch (e) {
+      // Migration not yet applied → expected on first deploy.
+      // Soft-fail. Detail flagged so ops sees it.
+      checks.email_suppressions = {
+        ok: true,
+        ms: Date.now() - start,
+        detail: `migration_pending: ${(e as Error).message.slice(0, 80)}`,
+      };
+    }
+  }
+
   // Stale tenant detection — tenants whose most recent
   // analytics_daily_snapshots row is > 36h old. Likely indicates the
   // cron skipped them. Soft-fail; detail surfaces the count.
