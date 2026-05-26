@@ -1,33 +1,45 @@
 "use client";
 
 /**
- * SA-5 — Advanced Live Activity Center client.
+ * Activity Center — premium operational mission-control surface.
  *
- * Single full-page operations stream. Builds on the SA-3 feed plus:
- *   • Live Mode (5s poll, pause toggle, sound toggle, smooth insertion)
- *   • Search input (full-text against summary + raw action)
- *   • Tenant filter (paste/select a tenantId)
- *   • Time range filter (last 1h / 24h / 7d / 30d / all)
- *   • Severity filter (info / warning / critical)
- *   • Kind filter chips (24 supported kinds)
- *   • Anomaly banner (deterministic rules; only renders when ≥1 fires)
- *   • Grouped events (consecutive rows with same group key collapse)
- *   • Click row → metadata drawer (right-side sheet)
- *   • Keyboard: J/K navigate, Esc close drawer
+ * Builds on the original SA-5 live stream with:
+ *   • ActivityMissionHero — 8 executive KPIs + stream-health pulse rail
+ *   • Saved-view preset chips (All / Critical / Security / OAuth / Billing /
+ *     Delivery) for keyboard-driven incident triage
+ *   • Premium event cards with severity rail (left edge), category badges,
+ *     hover lift, urgency glow on critical
+ *   • Smooth-insertion animation when new events arrive in live mode
+ *   • Rich incident drawer with related-event preview + quick actions to
+ *     diagnostics / security / finance / audit
+ *   • Operational-calm empty state with health reassurance + recent
+ *     anomaly summary
  *
- * Initial data is server-rendered for fast first paint.
+ * Initial data still server-rendered for fast first paint.
+ * Live polling unchanged (5s tick, pause/sound toggles, visibility-aware).
  */
 
 import * as React from "react";
 import {
+  Activity,
   AlertTriangle,
+  Bell,
+  CheckCircle2,
   ChevronRight,
+  CircleDot,
   Clock,
+  CreditCard,
+  ExternalLink,
+  Eye,
   Filter,
+  KeyRound,
   Loader2,
   Pause,
   Play,
+  Radio,
   Search,
+  Shield,
+  Sparkles,
   Volume2,
   VolumeX,
   X,
@@ -36,11 +48,15 @@ import {
 
 import type { ActivityEvent, ActivityPage, ActivitySeverity } from "@/lib/admin-analytics/activity";
 import type { Anomaly, AnomalyReport } from "@/lib/admin-analytics/anomalies";
+import type {
+  ActivityMissionKpis,
+  ActivityPreset,
+} from "@/lib/admin-analytics/activity-presets";
+import { ACTIVITY_PRESETS, KIND_CATEGORY } from "@/lib/admin-analytics/activity-presets";
+import ActivityMissionHero from "@/components/admin/ActivityMissionHero";
 
-// Mirrored from lib/admin-analytics/activity.ts. Inlined here to keep
-// this client component free of server-only imports (the lib module
-// transitively pulls db/client.ts which Next.js can't ship to the
-// browser). Adding a new kind in both places is a one-line change.
+// ─── Local kind labels (mirrors lib/admin-analytics/activity.ts) ──
+
 const ACTIVITY_KIND_LABELS: Record<string, string> = {
   new_signup: "New signup",
   subscription_created: "Subscription created",
@@ -74,6 +90,7 @@ const ALL_KINDS = Object.keys(ACTIVITY_KIND_LABELS);
 type Initial = {
   feed: ActivityPage | null;
   anomalies: AnomalyReport | null;
+  mission: ActivityMissionKpis | null;
 };
 
 // ─── Time range presets ────────────────────────────────────────────
@@ -102,21 +119,91 @@ const SEV_CLS: Record<ActivitySeverity, string> = {
   critical: "bg-rose-50 text-rose-700 ring-rose-200",
 };
 
+const SEV_RAIL: Record<ActivitySeverity, string> = {
+  info: "before:bg-sky-400/50",
+  warning: "before:bg-amber-400/70",
+  critical: "before:bg-rose-500/80",
+};
+
+const SEV_HOVER_BG: Record<ActivitySeverity, string> = {
+  info: "hover:bg-sky-50/40",
+  warning: "hover:bg-amber-50/40",
+  critical: "hover:bg-rose-50/40",
+};
+
+const CATEGORY_STYLES: Record<
+  string,
+  { bg: string; text: string; ring: string; Icon: React.ComponentType<{ className?: string }> }
+> = {
+  security: { bg: "bg-rose-50", text: "text-rose-700", ring: "ring-rose-200", Icon: Shield },
+  auth: { bg: "bg-orange-50", text: "text-orange-700", ring: "ring-orange-200", Icon: KeyRound },
+  billing: {
+    bg: "bg-violet-50",
+    text: "text-violet-700",
+    ring: "ring-violet-200",
+    Icon: CreditCard,
+  },
+  infrastructure: {
+    bg: "bg-sky-50",
+    text: "text-sky-700",
+    ring: "ring-sky-200",
+    Icon: Radio,
+  },
+  tenant: { bg: "bg-emerald-50", text: "text-emerald-700", ring: "ring-emerald-200", Icon: Sparkles },
+  info: { bg: "bg-slate-50", text: "text-slate-600", ring: "ring-slate-200", Icon: CircleDot },
+};
+
+const PRESET_ICONS: Record<ActivityPreset["icon"], React.ComponentType<{ className?: string }>> = {
+  shield: Shield,
+  key: KeyRound,
+  zap: Zap,
+  bell: Bell,
+  "credit-card": CreditCard,
+  activity: Activity,
+};
+
+const PRESET_TONE: Record<
+  ActivityPreset["tone"],
+  { active: string; idle: string }
+> = {
+  neutral: {
+    active: "border-slate-900 bg-slate-900 text-white",
+    idle: "border-slate-200 bg-white text-slate-700 hover:border-slate-300",
+  },
+  primary: {
+    active: "border-sky-500 bg-sky-50 text-sky-800 ring-1 ring-sky-200",
+    idle: "border-slate-200 bg-white text-slate-700 hover:border-sky-200 hover:bg-sky-50/40",
+  },
+  warning: {
+    active: "border-amber-500 bg-amber-50 text-amber-900 ring-1 ring-amber-200",
+    idle: "border-slate-200 bg-white text-slate-700 hover:border-amber-200 hover:bg-amber-50/40",
+  },
+  critical: {
+    active: "border-rose-500 bg-rose-50 text-rose-900 ring-1 ring-rose-200",
+    idle: "border-slate-200 bg-white text-slate-700 hover:border-rose-200 hover:bg-rose-50/40",
+  },
+};
+
+function categoryFor(kind: string) {
+  return CATEGORY_STYLES[KIND_CATEGORY[kind] ?? "info"];
+}
+
 // ─── Anomaly banner ────────────────────────────────────────────────
 
 function AnomalyBanner({ anomalies }: { anomalies: Anomaly[] }) {
   if (anomalies.length === 0) return null;
   return (
-    <div className="rounded-xl border border-amber-200 bg-amber-50/40 p-3">
+    <div className="rounded-2xl border border-amber-200 bg-gradient-to-br from-amber-50/60 via-white to-white p-4 shadow-[0_1px_3px_rgba(15,23,42,0.04)]">
       <div className="flex items-center gap-2 text-[11px] font-medium uppercase tracking-wider text-amber-700">
         <AlertTriangle className="h-3.5 w-3.5" />
         Anomalies detected · {anomalies.length}
+        <span className="ml-auto text-slate-400">deterministic rules · NO ML</span>
       </div>
-      <ul className="mt-2 space-y-1.5">
+      <ul className="mt-3 space-y-2">
         {anomalies.map((a) => (
-          <li key={a.kind} className="flex items-start gap-2 text-[13px]">
+          <li key={a.kind} className="flex items-start gap-3 text-[13px]">
             <span
-              className={`mt-0.5 inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider ${
+              className={`mt-0.5 inline-flex shrink-0 items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider ring-1 ${
                 SEV_CLS[a.severity]
               }`}
             >
@@ -126,7 +213,9 @@ function AnomalyBanner({ anomalies }: { anomalies: Anomaly[] }) {
               <div className="font-medium text-slate-900">{a.label}</div>
               <div className="text-[12px] text-slate-600">{a.detail}</div>
             </div>
-            <span className="text-[11px] text-slate-500 whitespace-nowrap">{a.window}</span>
+            <span className="whitespace-nowrap rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600">
+              {a.window}
+            </span>
           </li>
         ))}
       </ul>
@@ -141,38 +230,61 @@ function EventCard({
   grouped,
   onClick,
   isNew,
+  focused,
 }: {
   event: ActivityEvent;
   grouped?: number;
   onClick: () => void;
   isNew: boolean;
+  focused: boolean;
 }) {
+  const cat = categoryFor(event.kind);
+  const isCritical = event.severity === "critical";
   return (
     <button
       type="button"
       onClick={onClick}
-      className={`group flex w-full items-start gap-3 border-b border-slate-100 px-4 py-3 text-left transition-all last:border-b-0 hover:bg-slate-50/60 ${
-        isNew ? "animate-pulse-once bg-sky-50/40" : ""
+      className={`group relative flex w-full items-start gap-3 border-b border-slate-100 px-4 py-3 pl-5 text-left transition-all duration-300 last:border-b-0 before:absolute before:left-0 before:top-0 before:h-full before:w-[3px] before:transition-opacity ${SEV_RAIL[event.severity]} ${SEV_HOVER_BG[event.severity]} ${
+        focused ? "bg-slate-50/40 ring-1 ring-inset ring-slate-200" : ""
+      } ${isNew ? "animate-[fadeInRow_500ms_ease-out] bg-sky-50/40" : ""} ${
+        isCritical ? "before:opacity-100" : "before:opacity-70"
       }`}
     >
+      {/* Severity pill */}
       <span
-        className={`mt-0.5 inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider ring-1 ${
+        className={`mt-0.5 inline-flex shrink-0 items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider ring-1 ${
           SEV_CLS[event.severity]
         }`}
       >
         {event.severity}
       </span>
+
       <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
-          <span className="truncate text-sm text-slate-900">{event.summary}</span>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="truncate text-[13px] font-medium text-slate-900">{event.summary}</span>
           {grouped && grouped > 1 ? (
             <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-600">
-              +{grouped - 1} similar
+              ×{grouped} clustered
+            </span>
+          ) : null}
+          {isNew ? (
+            <span className="inline-flex items-center gap-1 rounded-full bg-sky-100 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wider text-sky-700">
+              <span className="relative inline-flex h-1 w-1">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-sky-500 opacity-75" />
+                <span className="relative inline-flex h-1 w-1 rounded-full bg-sky-500" />
+              </span>
+              New
             </span>
           ) : null}
         </div>
-        <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-slate-500">
-          <span>{ACTIVITY_KIND_LABELS[event.kind] ?? event.kind}</span>
+        <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-slate-500">
+          {/* Category badge */}
+          <span
+            className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium ring-1 ${cat.bg} ${cat.text} ${cat.ring}`}
+          >
+            <cat.Icon className="h-2.5 w-2.5" />
+            {ACTIVITY_KIND_LABELS[event.kind] ?? event.kind}
+          </span>
           <span>·</span>
           <span title={event.ts}>{timeAgo(event.ts)}</span>
           {event.tenantId ? (
@@ -189,14 +301,22 @@ function EventCard({
           ) : null}
         </div>
       </div>
-      <ChevronRight className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-300 group-hover:text-slate-500" />
+      <ChevronRight className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-300 transition-colors group-hover:text-slate-500" />
     </button>
   );
 }
 
-// ─── Metadata drawer ───────────────────────────────────────────────
+// ─── Incident drawer ──────────────────────────────────────────────
 
-function EventDrawer({ event, onClose }: { event: ActivityEvent | null; onClose: () => void }) {
+function EventDrawer({
+  event,
+  related,
+  onClose,
+}: {
+  event: ActivityEvent | null;
+  related: ActivityEvent[];
+  onClose: () => void;
+}) {
   React.useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") onClose();
@@ -206,30 +326,51 @@ function EventDrawer({ event, onClose }: { event: ActivityEvent | null; onClose:
   }, [onClose]);
 
   if (!event) return null;
+  const cat = categoryFor(event.kind);
+
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-slate-900/30" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-50 flex justify-end bg-slate-900/30 backdrop-blur-[2px]"
+      onClick={onClose}
+    >
       <aside
-        className="h-full w-full max-w-xl overflow-y-auto bg-white shadow-2xl"
+        className="h-full w-full max-w-xl overflow-y-auto bg-white shadow-2xl animate-[slideInDrawer_220ms_ease-out]"
         onClick={(e) => e.stopPropagation()}
       >
-        <header className="sticky top-0 z-10 flex items-start justify-between gap-3 border-b border-slate-200 bg-white px-6 py-4">
-          <div className="min-w-0">
-            <div
-              className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider ring-1 ${
-                SEV_CLS[event.severity]
-              }`}
+        <header className="sticky top-0 z-10 border-b border-slate-200 bg-gradient-to-br from-white via-white to-slate-50/50 px-6 py-5">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <span
+                  className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider ring-1 ${
+                    SEV_CLS[event.severity]
+                  }`}
+                >
+                  {event.severity}
+                </span>
+                <span
+                  className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ${cat.bg} ${cat.text} ${cat.ring}`}
+                >
+                  <cat.Icon className="h-2.5 w-2.5" />
+                  {ACTIVITY_KIND_LABELS[event.kind] ?? event.kind}
+                </span>
+              </div>
+              <h2 className="mt-2 text-base font-semibold tracking-tight text-slate-900">
+                {event.summary}
+              </h2>
+              <div className="mt-1 text-[12px] text-slate-500">
+                <span>{new Date(event.ts).toLocaleString()}</span>
+                <span> · {timeAgo(event.ts)}</span>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-md p-1 text-slate-400 hover:bg-slate-100"
             >
-              {event.severity} · {ACTIVITY_KIND_LABELS[event.kind] ?? event.kind}
-            </div>
-            <h2 className="mt-1.5 text-base font-semibold text-slate-900">{event.summary}</h2>
-            <div className="mt-1 text-[12px] text-slate-500">
-              <span>{new Date(event.ts).toLocaleString()}</span>
-              <span> · {timeAgo(event.ts)}</span>
-            </div>
+              <X className="h-4 w-4" />
+            </button>
           </div>
-          <button type="button" onClick={onClose} className="rounded-md p-1 text-slate-400 hover:bg-slate-100">
-            <X className="h-4 w-4" />
-          </button>
         </header>
 
         <div className="space-y-5 px-6 py-5">
@@ -240,7 +381,10 @@ function EventDrawer({ event, onClose }: { event: ActivityEvent | null; onClose:
                 label="Tenant"
                 value={
                   event.tenantId ? (
-                    <a href={`/admin/tenants/${event.tenantId}`} className="text-sky-700 hover:underline">
+                    <a
+                      href={`/admin/tenants/${event.tenantId}`}
+                      className="text-sky-700 hover:underline"
+                    >
                       {event.tenantId.slice(0, 8)}…
                     </a>
                   ) : (
@@ -248,8 +392,14 @@ function EventDrawer({ event, onClose }: { event: ActivityEvent | null; onClose:
                   )
                 }
               />
-              <Field label="Actor" value={event.actorLabel ?? <span className="text-slate-400">—</span>} />
-              <Field label="IP" value={event.ipAddress ?? <span className="text-slate-400">—</span>} />
+              <Field
+                label="Actor"
+                value={event.actorLabel ?? <span className="text-slate-400">—</span>}
+              />
+              <Field
+                label="IP"
+                value={event.ipAddress ?? <span className="text-slate-400">—</span>}
+              />
               <Field
                 label="Entity"
                 value={
@@ -266,6 +416,20 @@ function EventDrawer({ event, onClose }: { event: ActivityEvent | null; onClose:
             </dl>
           </Section>
 
+          {/* Related events — same groupKey, ranked by time */}
+          {related.length > 0 ? (
+            <Section title={`Related events (${related.length})`}>
+              <ul className="divide-y divide-slate-100 rounded-xl border border-slate-200 bg-white text-[12px]">
+                {related.slice(0, 6).map((r) => (
+                  <li key={r.id} className="flex items-center justify-between px-3 py-2">
+                    <span className="min-w-0 flex-1 truncate text-slate-700">{r.summary}</span>
+                    <span className="ml-2 whitespace-nowrap text-slate-400">{timeAgo(r.ts)}</span>
+                  </li>
+                ))}
+              </ul>
+            </Section>
+          ) : null}
+
           {event.metadata && Object.keys(event.metadata).length > 0 ? (
             <Section title="Metadata">
               <pre className="overflow-auto rounded-md border border-slate-200 bg-slate-50 p-3 text-[11px] leading-relaxed text-slate-700">
@@ -275,17 +439,34 @@ function EventDrawer({ event, onClose }: { event: ActivityEvent | null; onClose:
           ) : null}
 
           <Section title="Quick actions">
-            <div className="flex flex-wrap gap-2">
+            <div className="grid grid-cols-2 gap-2">
               {event.tenantId ? (
                 <>
-                  <ActionLink href={`/admin/tenants/${event.tenantId}`} label="Open tenant" />
+                  <ActionLink
+                    href={`/admin/tenants/${event.tenantId}`}
+                    label="Open tenant"
+                    Icon={ExternalLink}
+                  />
                   <ActionLink
                     href={`/admin/activity?tenantId=${event.tenantId}`}
                     label="Filter by tenant"
+                    Icon={Filter}
                   />
                 </>
               ) : null}
-              <ActionLink href={`/admin/activity?kinds=${event.kind}`} label="Filter by kind" />
+              <ActionLink
+                href={`/admin/activity?kinds=${event.kind}`}
+                label="Filter by kind"
+                Icon={Filter}
+              />
+              <ActionLink href="/admin/diagnostics" label="Open diagnostics" Icon={Activity} />
+              {(KIND_CATEGORY[event.kind] === "billing" || event.kind === "payment_failed") ? (
+                <ActionLink href="/admin/finance" label="Open finance" Icon={CreditCard} />
+              ) : null}
+              {(KIND_CATEGORY[event.kind] === "security" ||
+                KIND_CATEGORY[event.kind] === "auth") ? (
+                <ActionLink href="/admin/security" label="Open security" Icon={Shield} />
+              ) : null}
             </div>
           </Section>
         </div>
@@ -297,7 +478,9 @@ function EventDrawer({ event, onClose }: { event: ActivityEvent | null; onClose:
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section>
-      <div className="mb-2 text-[11px] font-medium uppercase tracking-wider text-slate-500">{title}</div>
+      <div className="mb-2 text-[10px] font-medium uppercase tracking-wider text-slate-500">
+        {title}
+      </div>
       <div>{children}</div>
     </section>
   );
@@ -312,14 +495,84 @@ function Field({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
-function ActionLink({ href, label }: { href: string; label: string }) {
+function ActionLink({
+  href,
+  label,
+  Icon,
+}: {
+  href: string;
+  label: string;
+  Icon: React.ComponentType<{ className?: string }>;
+}) {
   return (
     <a
       href={href}
-      className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-[12px] font-medium text-slate-700 hover:bg-slate-50"
+      className="group inline-flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-[12px] font-medium text-slate-700 transition-all hover:-translate-y-0.5 hover:border-slate-300 hover:bg-slate-50 hover:shadow-[0_4px_12px_rgba(15,23,42,0.05)]"
     >
-      {label} <ChevronRight className="h-3 w-3" />
+      <span className="inline-flex items-center gap-2">
+        <Icon className="h-3 w-3 text-slate-400 group-hover:text-slate-600" />
+        {label}
+      </span>
+      <ChevronRight className="h-3 w-3 text-slate-300 group-hover:translate-x-0.5 group-hover:text-slate-500" />
     </a>
+  );
+}
+
+// ─── Operational-calm empty state ─────────────────────────────────
+
+function CalmEmptyState({
+  kpis,
+  anomalies,
+  hasFilters,
+}: {
+  kpis: ActivityMissionKpis | null;
+  anomalies: Anomaly[];
+  hasFilters: boolean;
+}) {
+  if (hasFilters) {
+    return (
+      <div className="px-4 py-14 text-center">
+        <div className="mx-auto inline-flex h-12 w-12 items-center justify-center rounded-full bg-slate-50 ring-1 ring-slate-200">
+          <Search className="h-5 w-5 text-slate-400" />
+        </div>
+        <div className="mt-3 text-sm font-semibold text-slate-900">No events match these filters</div>
+        <div className="mt-1 text-[12px] text-slate-500">
+          Try widening the time range or clearing the preset.
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="px-4 py-14 text-center">
+      <div className="mx-auto inline-flex h-14 w-14 items-center justify-center rounded-full bg-emerald-50 ring-1 ring-emerald-200/60">
+        <CheckCircle2 className="h-7 w-7 text-emerald-500" />
+      </div>
+      <div className="mt-3 text-sm font-semibold text-slate-900">All quiet — operations nominal</div>
+      <div className="mt-1 max-w-md mx-auto text-[12px] leading-snug text-slate-500">
+        No events in this window. The stream is healthy; activity will appear here within seconds of
+        an audit-log write.
+      </div>
+      {kpis ? (
+        <div className="mt-4 inline-flex flex-wrap items-center justify-center gap-2 text-[11px]">
+          <span className="rounded-full bg-emerald-50 px-2 py-0.5 font-medium text-emerald-700 ring-1 ring-emerald-200">
+            {kpis.eventsLastHour} events / 1h
+          </span>
+          <span className="rounded-full bg-slate-100 px-2 py-0.5 font-medium text-slate-700">
+            baseline {kpis.baselineEventsPerHour}/hr
+          </span>
+          {anomalies.length === 0 ? (
+            <span className="rounded-full bg-emerald-50 px-2 py-0.5 font-medium text-emerald-700 ring-1 ring-emerald-200">
+              0 anomalies
+            </span>
+          ) : (
+            <span className="rounded-full bg-amber-50 px-2 py-0.5 font-medium text-amber-700 ring-1 ring-amber-200">
+              {anomalies.length} anomalies
+            </span>
+          )}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -329,6 +582,8 @@ export default function ActivityCenter({ initial }: { initial: Initial }) {
   const [events, setEvents] = React.useState<ActivityEvent[]>(initial.feed?.events ?? []);
   const [cursor, setCursor] = React.useState<string | null>(initial.feed?.nextCursor ?? null);
   const [anomalies, setAnomalies] = React.useState<Anomaly[]>(initial.anomalies?.anomalies ?? []);
+  const [mission, setMission] = React.useState<ActivityMissionKpis | null>(initial.mission);
+
   const [search, setSearch] = React.useState("");
   const [debouncedSearch, setDebouncedSearch] = React.useState("");
   const [kinds, setKinds] = React.useState<string[]>([]);
@@ -336,6 +591,7 @@ export default function ActivityCenter({ initial }: { initial: Initial }) {
   const [tenantFilter, setTenantFilter] = React.useState("");
   const [rangeIdx, setRangeIdx] = React.useState(2); // Default "Last 7d"
   const [showFilter, setShowFilter] = React.useState(false);
+  const [activePresetId, setActivePresetId] = React.useState<string>("all");
 
   const [liveMode, setLiveMode] = React.useState(false);
   const [paused, setPaused] = React.useState(false);
@@ -355,6 +611,9 @@ export default function ActivityCenter({ initial }: { initial: Initial }) {
     if (k) setKinds(k.split(",").filter(Boolean));
     const t = sp.get("tenantId");
     if (t) setTenantFilter(t);
+    const preset = sp.get("preset");
+    if (preset) applyPreset(preset);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Debounced search input
@@ -417,6 +676,24 @@ export default function ActivityCenter({ initial }: { initial: Initial }) {
       window.clearInterval(id);
     };
   }, []);
+
+  // Mission KPI poll — refreshes on live mode tick + every 30s otherwise.
+  React.useEffect(() => {
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const res = await fetch("/api/admin/activity/mission", { cache: "no-store" });
+        if (!res.ok || cancelled) return;
+        const r = (await res.json()) as ActivityMissionKpis;
+        if (!cancelled) setMission(r);
+      } catch {}
+    };
+    const id = window.setInterval(refresh, liveMode ? 15_000 : 60_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [liveMode]);
 
   // Live mode poll
   React.useEffect(() => {
@@ -485,8 +762,7 @@ export default function ActivityCenter({ initial }: { initial: Initial }) {
     while (i < events.length) {
       const head = events[i];
       let j = i + 1;
-      // Only group when the timestamps are within 5 minutes — older
-      // events of the same kind should still be visible individually.
+      // Only group when the timestamps are within 5 minutes
       while (
         j < events.length &&
         events[j].groupKey === head.groupKey &&
@@ -500,8 +776,7 @@ export default function ActivityCenter({ initial }: { initial: Initial }) {
     return out;
   }, [events]);
 
-  // Filter by severity client-side (the server doesn't have a
-  // severity column; severity is derived in the classifier).
+  // Filter by severity client-side.
   const filtered = severity ? displayRows.filter((r) => r.event.severity === severity) : displayRows;
 
   async function loadMore() {
@@ -524,10 +799,82 @@ export default function ActivityCenter({ initial }: { initial: Initial }) {
     setKinds((prev) => (prev.includes(k) ? prev.filter((x) => x !== k) : [...prev, k]));
   }
 
+  function applyPreset(id: string) {
+    const preset = ACTIVITY_PRESETS.find((p) => p.id === id);
+    if (!preset) return;
+    setActivePresetId(id);
+    setKinds(preset.kinds);
+    setSeverity(preset.severity);
+  }
+
+  // Build related-events list for the drawer (same groupKey, exclude self).
+  const drawerRelated = React.useMemo(() => {
+    if (!drawerEvent) return [];
+    return events
+      .filter((e) => e.id !== drawerEvent.id && e.groupKey === drawerEvent.groupKey)
+      .slice(0, 12);
+  }, [drawerEvent, events]);
+
+  const hasActiveFilters =
+    debouncedSearch.length > 0 ||
+    kinds.length > 0 ||
+    severity !== "" ||
+    tenantFilter.trim().length > 0;
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
+      <style jsx global>{`
+        @keyframes fadeInRow {
+          0% {
+            opacity: 0;
+            transform: translateY(-6px);
+            background-color: rgba(14, 165, 233, 0.12);
+          }
+          100% {
+            opacity: 1;
+            transform: translateY(0);
+            background-color: rgba(14, 165, 233, 0.04);
+          }
+        }
+        @keyframes slideInDrawer {
+          from {
+            transform: translateX(20px);
+            opacity: 0;
+          }
+          to {
+            transform: translateX(0);
+            opacity: 1;
+          }
+        }
+      `}</style>
+
+      {/* Executive mission hero */}
+      {mission ? <ActivityMissionHero kpis={mission} liveOn={liveMode && !paused} /> : null}
+
+      {/* Preset chip row */}
+      <div className="flex flex-wrap items-center gap-1.5">
+        {ACTIVITY_PRESETS.map((p) => {
+          const Icon = PRESET_ICONS[p.icon];
+          const active = activePresetId === p.id;
+          const tone = PRESET_TONE[p.tone];
+          return (
+            <button
+              key={p.id}
+              type="button"
+              onClick={() => applyPreset(p.id)}
+              className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[12px] font-medium transition-all ${
+                active ? tone.active : tone.idle
+              }`}
+            >
+              <Icon className="h-3 w-3" />
+              {p.label}
+            </button>
+          );
+        })}
+      </div>
+
       {/* Sticky filter bar */}
-      <div className="sticky top-0 z-10 -mx-2 space-y-2 rounded-xl border border-slate-200 bg-white/95 px-3 py-2.5 shadow-[0_1px_2px_rgba(15,23,42,0.04)] backdrop-blur-sm">
+      <div className="sticky top-0 z-10 -mx-2 space-y-2 rounded-2xl border border-slate-200 bg-white/95 px-3 py-2.5 shadow-[0_1px_2px_rgba(15,23,42,0.04)] backdrop-blur-sm">
         <div className="flex flex-wrap items-center gap-2">
           <div className="relative">
             <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
@@ -575,7 +922,9 @@ export default function ActivityCenter({ initial }: { initial: Initial }) {
             <Filter className="h-3 w-3" />
             Kinds
             {kinds.length > 0 ? (
-              <span className="ml-1 rounded-full bg-slate-900 px-1.5 text-[10px] text-white">{kinds.length}</span>
+              <span className="ml-1 rounded-full bg-slate-900 px-1.5 text-[10px] text-white">
+                {kinds.length}
+              </span>
             ) : null}
           </button>
 
@@ -583,14 +932,26 @@ export default function ActivityCenter({ initial }: { initial: Initial }) {
             <button
               type="button"
               onClick={() => setLiveMode((v) => !v)}
-              className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[12px] font-medium ${
+              className={`relative inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[12px] font-medium transition-all ${
                 liveMode
-                  ? "border-emerald-300 bg-emerald-50 text-emerald-700"
+                  ? "border-emerald-300 bg-emerald-50 text-emerald-700 shadow-[0_0_0_3px_rgba(16,185,129,0.08)]"
                   : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
               }`}
             >
-              <Zap className={`h-3 w-3 ${liveMode ? "fill-emerald-500 text-emerald-500" : ""}`} />
+              {liveMode && !paused ? (
+                <span className="relative inline-flex h-2 w-2">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-500 opacity-75" />
+                  <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+                </span>
+              ) : (
+                <Zap className={`h-3 w-3 ${liveMode ? "fill-emerald-500 text-emerald-500" : ""}`} />
+              )}
               Live
+              {liveMode ? (
+                <span className="text-[10px] font-medium uppercase tracking-wider opacity-80">
+                  · 5s
+                </span>
+              ) : null}
             </button>
             {liveMode ? (
               <>
@@ -624,8 +985,10 @@ export default function ActivityCenter({ initial }: { initial: Initial }) {
                   key={k}
                   type="button"
                   onClick={() => toggleKind(k)}
-                  className={`rounded-full border px-2 py-0.5 text-[11px] ${
-                    active ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"
+                  className={`rounded-full border px-2 py-0.5 text-[11px] transition-colors ${
+                    active
+                      ? "border-slate-900 bg-slate-900 text-white"
+                      : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"
                   }`}
                 >
                   {ACTIVITY_KIND_LABELS[k]}
@@ -648,36 +1011,37 @@ export default function ActivityCenter({ initial }: { initial: Initial }) {
       <AnomalyBanner anomalies={anomalies} />
 
       {/* Stream */}
-      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
-        <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50/60 px-4 py-2.5">
-          <div className="flex items-center gap-2 text-sm font-medium text-slate-700">
+      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_1px_3px_rgba(15,23,42,0.04)]">
+        <div className="flex items-center justify-between border-b border-slate-100 bg-gradient-to-r from-slate-50/80 to-white px-4 py-2.5">
+          <div className="flex items-center gap-2 text-[13px] font-semibold tracking-tight text-slate-800">
             <Clock className="h-3.5 w-3.5 text-slate-500" />
             Activity stream
-            <span className="text-[11px] text-slate-500">
+            <span className="text-[11px] font-medium text-slate-500">
               · {events.length} loaded
               {liveMode ? (
-                <span className="ml-1 text-emerald-700">{paused ? "(paused)" : "(live, 5s)"}</span>
+                <span className="ml-1 text-emerald-700">
+                  {paused ? "(paused)" : "(live, 5s)"}
+                </span>
               ) : null}
             </span>
           </div>
-          <div className="text-[11px] text-slate-400">Keyboard: j/k navigate · enter open · esc close</div>
+          <div className="text-[10px] text-slate-400">
+            j/k navigate · enter open · esc close
+          </div>
         </div>
 
         {filtered.length === 0 ? (
-          <div className="px-4 py-14 text-center text-sm text-slate-500">No events match your filters.</div>
+          <CalmEmptyState kpis={mission} anomalies={anomalies} hasFilters={hasActiveFilters} />
         ) : (
           filtered.map(({ event, grouped }, idx) => (
-            <div
+            <EventCard
               key={event.id}
-              className={focusIdx === idx ? "bg-slate-50/40 ring-1 ring-inset ring-slate-200" : ""}
-            >
-              <EventCard
-                event={event}
-                grouped={grouped}
-                onClick={() => setDrawerEvent(event)}
-                isNew={newIds.has(event.id)}
-              />
-            </div>
+              event={event}
+              grouped={grouped}
+              onClick={() => setDrawerEvent(event)}
+              isNew={newIds.has(event.id)}
+              focused={focusIdx === idx}
+            />
           ))
         )}
 
@@ -689,16 +1053,19 @@ export default function ActivityCenter({ initial }: { initial: Initial }) {
               disabled={loadingMore}
               className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-3 py-1 text-[12px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
             >
-              {loadingMore ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ChevronRight className="h-3 w-3" />}
+              {loadingMore ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <ChevronRight className="h-3 w-3" />
+              )}
               Load more
             </button>
           </div>
         ) : null}
       </div>
 
-      <EventDrawer event={drawerEvent} onClose={() => setDrawerEvent(null)} />
+      <EventDrawer event={drawerEvent} related={drawerRelated} onClose={() => setDrawerEvent(null)} />
 
-      {/* Live-mode notification ping. Inline data URI = 0 network cost. */}
       <audio
         ref={audioRef}
         src="data:audio/wav;base64,UklGRl9vT19XQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA="
