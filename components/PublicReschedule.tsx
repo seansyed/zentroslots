@@ -10,6 +10,19 @@ type Info = {
   tenant?: { name: string };
 };
 
+/** Phase SMART-2 — workflow recommendation shape returned by the
+ *  /reschedule-recommendations endpoint. Mirrors the server-side
+ *  WorkflowRecommendation type. */
+type SmartRecommendation = {
+  time: string;
+  score: number;
+  labels: string[];
+  reasoning: string[];
+  deltaMinutes: number | null;
+  comparison: "earlier" | "same_day" | "different_day" | "first_available";
+};
+type SmartHeadline = { text: string; highlightSlot: string | null } | null;
+
 function todayInTz(timezone: string): string {
   return new Intl.DateTimeFormat("en-CA", {
     timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit",
@@ -27,6 +40,11 @@ export default function PublicReschedule({ token }: { token: string }) {
   const [loadingSlots, setLoadingSlots] = useState(false);
   const [picked, setPicked] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  // Phase SMART-2 — workflow recommendation overlay. Loads
+  // independently of the slot list; failure is silent (the slot
+  // picker still works, no Recommended banner appears).
+  const [recs, setRecs] = useState<SmartRecommendation[]>([]);
+  const [headline, setHeadline] = useState<SmartHeadline>(null);
 
   useEffect(() => {
     fetch(`/api/public/booking/${encodeURIComponent(token)}`)
@@ -37,6 +55,25 @@ export default function PublicReschedule({ token }: { token: string }) {
       })
       .catch((e) => setError(e instanceof Error ? e.message : "Failed"));
   }, [token]);
+
+  // Phase SMART-2 — fetch SMART-1-ranked alternatives once the
+  // booking + staff data has loaded. Independent of date picker —
+  // recommendations cover a 7-day forward window automatically.
+  useEffect(() => {
+    if (!info?.service || !info?.staff) return;
+    let cancelled = false;
+    fetch(`/api/public/booking/${encodeURIComponent(token)}/reschedule-recommendations`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (cancelled) return;
+        if (Array.isArray(d?.recommendations)) setRecs(d.recommendations);
+        if (d?.headline) setHeadline(d.headline);
+      })
+      .catch(() => {
+        /* silent — the slot picker still works */
+      });
+    return () => { cancelled = true; };
+  }, [info, token]);
 
   useEffect(() => {
     if (!info?.service || !info?.staff) return;
@@ -93,6 +130,73 @@ export default function PublicReschedule({ token }: { token: string }) {
           Current: {formatInTimeZone(info.booking.startAt, info.staff?.timezone ?? "UTC", "MMM d 'at' h:mm a zzz")}
         </div>
       </div>
+
+      {/* Phase SMART-2 — recommendation overlay. Renders only when
+          the server returned at least one decent alternative. Pure
+          additive — never hides or reorders the slot picker below. */}
+      {recs.length > 0 ? (
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50/60 p-4 shadow-sm">
+          {headline ? (
+            <div className="text-sm font-semibold text-emerald-900">
+              {headline.text}
+            </div>
+          ) : (
+            <div className="text-sm font-semibold text-emerald-900">
+              Smart suggestions
+            </div>
+          )}
+          <div className="mt-2 grid gap-1.5 sm:grid-cols-3">
+            {recs.map((r) => {
+              const tzLocal = info.staff?.timezone ?? tz;
+              const isHighlight = headline?.highlightSlot === r.time;
+              return (
+                <button
+                  key={r.time}
+                  type="button"
+                  onClick={() => {
+                    setDate(
+                      new Intl.DateTimeFormat("en-CA", {
+                        timeZone: tz,
+                        year: "numeric",
+                        month: "2-digit",
+                        day: "2-digit",
+                      }).format(new Date(r.time)),
+                    );
+                    setPicked(r.time);
+                  }}
+                  className={
+                    "group rounded-md border bg-white px-3 py-2 text-left text-[12.5px] transition-shadow hover:shadow " +
+                    (isHighlight
+                      ? "border-emerald-400 ring-1 ring-emerald-200"
+                      : "border-emerald-200")
+                  }
+                  title={r.reasoning.join(" · ")}
+                >
+                  <div className="font-semibold text-emerald-900">
+                    {formatInTimeZone(r.time, tzLocal, "EEE MMM d, h:mm a")}
+                  </div>
+                  <div className="mt-0.5 text-[10.5px] text-emerald-800">
+                    {r.comparison === "earlier"
+                      ? "Earlier than your current time"
+                      : r.comparison === "same_day"
+                        ? "Same day, different time"
+                        : r.comparison === "first_available"
+                          ? "Earliest available"
+                          : "Alternative day"}
+                  </div>
+                  <div className="mt-1 text-[10px] text-slate-500 line-clamp-2">
+                    {r.reasoning[0]}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+          <p className="mt-2 text-[10.5px] text-emerald-800/80">
+            Suggestions based on availability + your booking history.
+            Pick one above or browse all times below.
+          </p>
+        </div>
+      ) : null}
 
       <div className="rounded-lg border bg-white p-5 shadow-sm">
         <label className="block text-sm font-medium text-slate-700">Pick a new date</label>
