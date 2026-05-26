@@ -181,6 +181,15 @@ const NAV_ITEMS: NavItem[] = [
     icon: Activity,
     keywords: ["health", "workers", "cron", "integrations", "infra"],
   },
+  {
+    kind: "nav",
+    id: "ops",
+    label: "Operator Diagnostics",
+    href: "/admin/ops",
+    description: "Cron heartbeat + stuck queues + 24h failures",
+    icon: Activity,
+    keywords: ["ops", "diagnostics", "cron", "heartbeat", "stuck", "failures"],
+  },
 ];
 
 function tenantMatches(t: TenantItem, q: string): boolean {

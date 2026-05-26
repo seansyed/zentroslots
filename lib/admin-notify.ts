@@ -88,6 +88,8 @@ export type AdminAlertKind =
   | "queue_failure"
   | "reminder_delivery_failure"
   | "worker_crash"
+  | "payment_hold_backlog"   // SA-Stab: pending_payment bookings overdue
+  | "cron_missed_run"        // SA-Stab: cron not heard from in expected window
   // Security
   | "repeated_login_failures"
   | "fatal_exception";
@@ -177,6 +179,10 @@ const PER_KIND_COOLDOWN_MS: Partial<Record<AdminAlertKind, number>> = {
   queue_failure: 5 * 60_000,
   // Repeated logins: 1h — admin doesn't need per-attempt alerts.
   repeated_login_failures: 60 * 60_000,
+  // Stab wave — backlog / missed cron alerts get hourly windows so
+  // a chronic infra issue surfaces once an hour, not every tick.
+  payment_hold_backlog: 60 * 60_000,
+  cron_missed_run: 60 * 60_000,
   // Lifecycle events: 1 minute. These are usually 1x events but
   // protect against duplicate webhooks etc.
   new_tenant_signup: 60_000,

@@ -2466,6 +2466,29 @@ export const tenantHealthSnapshots = pgTable(
   }),
 );
 
+// ─── Stabilization Wave — cron_runs (migration 0064) ────────────────────
+// Per-tick observability for every cron worker. Driven by the
+// `withCronRun()` wrapper in lib/cronObservability.ts.
+
+export const cronRuns = pgTable(
+  "cron_runs",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    jobName: varchar("job_name", { length: 80 }).notNull(),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    durationMs: integer("duration_ms"),
+    status: varchar("status", { length: 20 }).notNull().default("running"),
+    detail: jsonb("detail").notNull().default({}),
+    host: varchar("host", { length: 120 }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    jobStartedIdx: index("cron_runs_job_started_idx").on(t.jobName, t.startedAt),
+    statusStartedIdx: index("cron_runs_status_started_idx").on(t.status, t.startedAt),
+  }),
+);
+
 export const financialSnapshots = pgTable(
   "financial_snapshots",
   {
