@@ -134,6 +134,8 @@ function buildNav(
         label: "Operations",
         items: [
           { label: "Revenue",       href: "/admin/revenue",         icon: BarChart3 },
+          { label: "Finance",       href: "/admin/finance",         icon: CreditCard },
+          { label: "Activity",      href: "/admin/activity",        icon: Activity },
           { label: "System health", href: "/admin/system-health",   icon: Activity },
           { label: "Audit logs",    href: "/admin#audit",           icon: ListChecks },
           // Legacy /admin/health page preserved for now — replaced
