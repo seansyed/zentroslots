@@ -7,24 +7,27 @@ import { getSession } from "@/lib/auth";
 import { isSuperAdminEmail } from "@/lib/super-admin";
 import Shell from "@/components/dashboard/Shell";
 import { computeRevenueSeries } from "@/lib/admin-analytics/revenue";
+import {
+  computeRevenueExecutiveKpis,
+  deriveRevenueInsights,
+} from "@/lib/admin-analytics/revenue-intelligence";
 import RevenueCharts from "@/components/admin/RevenueCharts";
+import RevenueExecutiveHero from "@/components/admin/RevenueExecutiveHero";
 
 export const metadata = { title: "Revenue analytics" };
 export const dynamic = "force-dynamic";
 
 /**
- * /admin/revenue — SA-2 revenue visualizations.
+ * /admin/revenue — Executive Analytics Center.
  *
- * Seven charts driven by cross-tenant aggregations from
- * billing_transactions, tenants, plans, audit_logs, and bookings.
- * No mock data: every series is built from real DB queries.
+ * Two parallel data fetches:
+ *   • computeRevenueSeries() — the 7 chart series (cross-tenant)
+ *   • computeRevenueExecutiveKpis() — hero strip (MRR, ARR, growth,
+ *     active subs, NRR proxy, trial conversion)
  *
- * Resilience: computeRevenueSeries() catches per-section errors
- * internally and surfaces them inside the bundle as `errors[key]`
- * — the page always renders; failed charts show an inline error
- * card. If the orchestrator itself throws (extreme case), we
- * fall through to a single-panel amber notice and the rest of
- * the super-admin navigation remains usable.
+ * Insights are derived deterministically from the same series + KPIs.
+ * NO LLM. NO fake metrics. When a number is uncomputable (low volume,
+ * no prior period, no recent trials), the UI renders "—".
  */
 export default async function RevenueAnalyticsPage() {
   const session = await getSession();
@@ -33,19 +36,12 @@ export default async function RevenueAnalyticsPage() {
   }
   const me = await db.query.users.findFirst({ where: eq(users.id, session.sub) });
 
-  let series: Awaited<ReturnType<typeof computeRevenueSeries>> | null = null;
-  try {
-    series = await computeRevenueSeries();
-  } catch (err) {
-    try {
-      console.error(
-        JSON.stringify({
-          evt: "admin_revenue_fatal",
-          err: err instanceof Error ? err.message.slice(0, 200) : "unknown",
-        }),
-      );
-    } catch {}
-  }
+  const [series, kpis] = await Promise.all([
+    computeRevenueSeries().catch(() => null),
+    computeRevenueExecutiveKpis().catch(() => null),
+  ]);
+
+  const insights = series && kpis ? deriveRevenueInsights(series, kpis) : [];
 
   return (
     <Shell
@@ -63,16 +59,24 @@ export default async function RevenueAnalyticsPage() {
       </div>
       <h1 className="mt-1 text-heading font-semibold text-ink">Revenue analytics</h1>
       <p className="mt-1 text-sm text-slate-600">
-        Cross-tenant revenue, signup, plan, and churn trends. Read-only — all values are
-        computed directly from production data on each page load (cached 3 minutes).
+        Cross-tenant revenue intelligence. Every metric is computed from real production data;
+        deterministic insights surface only when threshold conditions are met.
       </p>
 
-      {series ? (
+      {/* Executive hero — animated MRR / ARR / NRR / trial conv. + insight chips */}
+      {series && kpis ? (
         <div className="mt-6">
+          <RevenueExecutiveHero series={series} kpis={kpis} insights={insights} />
+        </div>
+      ) : null}
+
+      {/* Detailed charts with chart-adjacent insight chips */}
+      {series ? (
+        <div className="mt-8">
           <div className="mb-3 text-[11px] text-slate-400">
             computed in {series.computedInMs}ms · cached 3min
           </div>
-          <RevenueCharts data={series} />
+          <RevenueCharts data={series} insights={insights} />
         </div>
       ) : (
         <section className="mt-6 rounded-xl border border-amber-200 bg-amber-50/40 p-6 text-sm text-amber-800">

@@ -40,9 +40,37 @@ import {
 } from "recharts";
 
 import type { RevenueSeries } from "@/lib/admin-analytics/revenue";
+import type { RevenueInsight } from "@/lib/admin-analytics/revenue-intelligence";
 
 // Brand-tuned palette. Order = render order in donuts/legends.
 const PALETTE = ["#359df3", "#0ea5e9", "#06b6d4", "#10b981", "#a78bfa", "#f59e0b", "#ef4444", "#64748b"];
+
+// ─── Insight chip (chart-adjacent annotation) ───────────────────
+function InsightAnnotation({ insight }: { insight: RevenueInsight }) {
+  const tone =
+    insight.tone === "positive"
+      ? "bg-emerald-50 text-emerald-800 ring-emerald-200"
+      : insight.tone === "warning"
+      ? "bg-amber-50 text-amber-900 ring-amber-200"
+      : "bg-slate-50 text-slate-700 ring-slate-200";
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ${tone}`}
+      title={insight.detail}
+    >
+      <span
+        className={`inline-flex h-1 w-1 rounded-full ${
+          insight.tone === "positive"
+            ? "bg-emerald-500"
+            : insight.tone === "warning"
+            ? "bg-amber-500"
+            : "bg-slate-400"
+        }`}
+      />
+      {insight.label}
+    </span>
+  );
+}
 
 function fmtCurrency(cents: number): string {
   return new Intl.NumberFormat("en-US", {
@@ -66,6 +94,7 @@ function ChartSection({
   error,
   children,
   className,
+  insight,
 }: {
   title: string;
   subtitle?: string;
@@ -74,16 +103,18 @@ function ChartSection({
   error?: string;
   children: React.ReactNode;
   className?: string;
+  insight?: RevenueInsight | null;
 }) {
   return (
     <section
-      className={`rounded-xl border border-slate-200 bg-white p-5 shadow-[0_1px_2px_rgba(15,23,42,0.04)] ${className ?? ""}`}
+      className={`rounded-xl border border-slate-200 bg-white p-5 shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-shadow hover:shadow-[0_4px_16px_rgba(15,23,42,0.06)] ${className ?? ""}`}
     >
-      <div className="mb-3 flex items-end justify-between gap-3">
-        <div>
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <div className="min-w-0">
           <h3 className="text-sm font-medium text-slate-900">{title}</h3>
           {subtitle ? <p className="mt-0.5 text-[12px] text-slate-500">{subtitle}</p> : null}
         </div>
+        {insight ? <InsightAnnotation insight={insight} /> : null}
       </div>
       {error ? (
         <div className="flex h-[200px] items-center justify-center rounded-md border border-dashed border-rose-200 bg-rose-50/40 px-4 text-center">
@@ -108,11 +139,22 @@ function ChartSection({
 
 // ─── Public ──────────────────────────────────────────────────────
 
-export default function RevenueCharts({ data }: { data: RevenueSeries }) {
+export default function RevenueCharts({
+  data,
+  insights,
+}: {
+  data: RevenueSeries;
+  insights?: RevenueInsight[];
+}) {
   // Sanitize each section for emptiness — sums to zero across the
   // series means "no data" even when the array has 12 zero buckets.
   const isAllZero = (arr: Array<{ value?: number; a?: number; b?: number }>) =>
     arr.every((p) => (p.value ?? 0) === 0 && (p.a ?? 0) === 0 && (p.b ?? 0) === 0);
+
+  // Route insights to chart sections by `surface` key. Each section
+  // shows at most one insight in its top-right corner.
+  const insightFor = (surface: RevenueInsight["surface"]): RevenueInsight | null =>
+    insights?.find((i) => i.surface === surface) ?? null;
 
   return (
     <div className="space-y-4">
@@ -125,6 +167,7 @@ export default function RevenueCharts({ data }: { data: RevenueSeries }) {
             isEmpty={isAllZero(data.monthlyRevenue)}
             emptyHint="No completed billing transactions in the last 12 months."
             error={data.errors.monthlyRevenue}
+            insight={insightFor("monthly")}
           >
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={data.monthlyRevenue} margin={{ top: 8, right: 16, bottom: 0, left: 0 }}>
@@ -170,6 +213,7 @@ export default function RevenueCharts({ data }: { data: RevenueSeries }) {
           isEmpty={isAllZero(data.signupsByMonth)}
           emptyHint="No tenant signups recorded in the last 12 months."
           error={data.errors.signups}
+          insight={insightFor("signups")}
         >
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={data.signupsByMonth} margin={{ top: 8, right: 16, bottom: 0, left: 0 }}>
@@ -187,6 +231,7 @@ export default function RevenueCharts({ data }: { data: RevenueSeries }) {
           isEmpty={isAllZero(data.bookingsByMonth)}
           emptyHint="No bookings recorded yet."
           error={data.errors.bookings}
+          insight={insightFor("bookings")}
         >
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={data.bookingsByMonth} margin={{ top: 8, right: 16, bottom: 0, left: 0 }}>
@@ -211,6 +256,7 @@ export default function RevenueCharts({ data }: { data: RevenueSeries }) {
           isEmpty={data.planDistribution.length === 0 || data.planDistribution.every((s) => s.tenants === 0)}
           emptyHint="No active subscriptions to bucket yet."
           error={data.errors.planDistribution}
+          insight={insightFor("plans")}
         >
           <ResponsiveContainer width="100%" height="100%">
             <PieChart>
@@ -277,6 +323,7 @@ export default function RevenueCharts({ data }: { data: RevenueSeries }) {
         isEmpty={isAllZero(data.churnVsUpgrades)}
         emptyHint="No subscription-state-change audit events in the last 12 months."
         error={data.errors.churnVsUpgrades}
+        insight={insightFor("churn")}
       >
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={data.churnVsUpgrades} margin={{ top: 8, right: 16, bottom: 0, left: 0 }}>
