@@ -1,34 +1,50 @@
-import { desc } from "drizzle-orm";
-
-import { db } from "@/db/client";
-import { promotions } from "@/db/schema";
 import { AdminShell } from "../_shell";
-import PromotionsClient from "./PromotionsClient";
+import PromotionsLuxuryClient from "@/components/admin/PromotionsLuxuryClient";
+import {
+  computePromotionsKpis,
+  fetchEnrichedPromotions,
+} from "@/lib/admin-analytics/promotions-intelligence";
 
-export const metadata = { title: "Promotions — Super admin" };
-// Force dynamic — admin pages read live DB on every request and
-// must not be prerendered at build time.
+export const metadata = { title: "Promotions & Campaigns — Super admin" };
 export const dynamic = "force-dynamic";
 
+/**
+ * /admin/promotions — Growth Campaign Center.
+ *
+ * Two data fetches in parallel:
+ *   • Enriched promotions (real rows + derived flags: capUtilization,
+ *     expiringSoon, status, discountLabel)
+ *   • Campaign KPIs (active count, total redemptions, expiring soon,
+ *     top campaign, cap utilization across capped promos)
+ *
+ * All values are derived from real DB columns. No fabricated MRR,
+ * no fake conversion percentages. When a metric isn't computable
+ * from the available columns, the UI renders "—" rather than a
+ * made-up number.
+ */
 export default async function AdminPromotionsPage() {
-  const rows = await db.select().from(promotions).orderBy(desc(promotions.createdAt));
-  const serialized = rows.map((p) => ({
-    ...p,
-    startsAt: p.startsAt ? p.startsAt.toISOString() : null,
-    expiresAt: p.expiresAt ? p.expiresAt.toISOString() : null,
-    createdAt: p.createdAt.toISOString(),
-  }));
+  const [enriched, kpis] = await Promise.all([
+    fetchEnrichedPromotions().catch(() => []),
+    computePromotionsKpis().catch(() => null),
+  ]);
 
   return (
     <AdminShell
-      title="Promotions"
+      title="Promotions & campaigns"
       crumbs={[{ label: "Super-admin", href: "/admin" }, { label: "Promotions" }]}
     >
-      <p className="mt-2 max-w-2xl text-sm text-ink-muted">
-        Discount codes for marketing campaigns. Three kinds supported:
-        <strong> percent</strong> off, <strong> fixed amount</strong> off, or <strong> trial extension</strong>.
+      <div className="text-xs font-medium uppercase tracking-wider text-red-700">
+        Internal — superuser only
+      </div>
+      <h1 className="mt-1 text-heading font-semibold text-ink">Promotions &amp; Campaigns</h1>
+      <p className="mt-1 max-w-2xl text-sm text-ink-muted">
+        Growth operations: discount codes, trial extensions, winback offers, and referral
+        campaigns. Every campaign maps to a real promo code that the checkout flow recognizes.
       </p>
-      <PromotionsClient initial={serialized} />
+
+      <div className="mt-5">
+        <PromotionsLuxuryClient initial={enriched} kpis={kpis} />
+      </div>
     </AdminShell>
   );
 }

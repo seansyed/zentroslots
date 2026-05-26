@@ -2192,7 +2192,14 @@ export const promotions = pgTable(
     id: uuid("id").defaultRandom().primaryKey(),
     code: varchar("code", { length: 40 }).notNull(),
     description: text("description"),
-    // 'percent' | 'fixed' | 'trial_extension'
+    // Campaign kind. Existing: 'percent' | 'fixed' | 'trial_extension'.
+    // Campaign wave additions (varchar so no enum migration needed):
+    //   'free_month'        — comp one month at signup
+    //   'seat_expansion'    — bonus seats for the term
+    //   'annual_incentive'  — $/% off when switching to annual
+    //   'referral'          — partner / affiliate / influencer codes
+    //   'winback'           — re-activation discount for churned tenants
+    //   'seasonal'          — calendar-bounded promo (Black Friday etc.)
     kind: varchar("kind", { length: 20 }).notNull(),
     percentOff: smallint("percent_off"),
     amountOffCents: integer("amount_off_cents"),
@@ -2203,12 +2210,36 @@ export const promotions = pgTable(
     startsAt: timestamp("starts_at", { withTimezone: true }),
     expiresAt: timestamp("expires_at", { withTimezone: true }),
     active: boolean("active").notNull().default(true),
+
+    // ─── Campaign wave (migration 0067) — additive + nullable ─────
+    /** Explicit lifecycle: draft|scheduled|active|paused|expired|archived.
+     *  Derived states (expired) can also be reflected in this column
+     *  on the next API write so the UI doesn't need to recompute. */
+    status: varchar("status", { length: 20 }).notNull().default("active"),
+    /** Stripe Coupon id (cou_… on the Stripe side). NULL when the
+     *  promo hasn't been linked to Stripe yet. */
+    stripeCouponId: varchar("stripe_coupon_id", { length: 120 }),
+    /** Stripe Promotion Code id (promo_… on the Stripe side). */
+    stripePromotionCodeId: varchar("stripe_promotion_code_id", { length: 120 }),
+    /** jsonb array of plan slugs the promo applies to. Empty array
+     *  means "all plans". `applies_to_plan` mirrors target_plans[0]
+     *  for back-compat with single-plan validation callers. */
+    targetPlans: jsonb("target_plans").notNull().default([]),
+    /** Free-form campaign metadata (hypothesis, attribution source,
+     *  referral channel, internal notes). Never PII. */
+    metadata: jsonb("metadata").notNull().default({}),
+    /** Operator who created the campaign. */
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
     codeUnique: uniqueIndex("promotions_code_unique").on(t.code),
     activeIdx: index("promotions_active_idx").on(t.active),
     expiresIdx: index("promotions_expires_idx").on(t.expiresAt),
+    statusIdx: index("promotions_status_idx").on(t.status),
+    createdAtDescIdx: index("promotions_created_at_desc_idx").on(t.createdAt),
   })
 );
 
