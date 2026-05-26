@@ -44,7 +44,9 @@ export type TenantRow = {
   /** % growth, or null when prior period is zero. */
   bookingGrowthPct: number | null;
   googleConnected: boolean;
+  googleExpired: boolean;
   microsoftConnected: boolean;
+  microsoftExpired: boolean;
   zoomConnected: boolean;
   customDomain: string | null;
   /** Reminder success rate (last 30d, %). Null = no sends in window. */
@@ -60,6 +62,18 @@ export type TenantRow = {
    *  is no tickets table in this codebase. UI displays "—". Never
    *  fabricated. */
   supportTickets: number | null;
+  // ─── Tenant Intelligence luxury upgrade (2026-05-26) ───
+  /** Tenant primary color (hex) for avatar / chip tinting. */
+  primaryColor: string | null;
+  /** Optional uploaded logo URL. Falls back to initials in the UI. */
+  logoUrl: string | null;
+  /** Archetype id from onboarding_progress jsonb (cpa, law, medspa,
+   *  salon, consultant, agency, clinic, coach) — populated by the
+   *  dev-seeding simulator. NULL for real tenants. */
+  archetype: string | null;
+  /** Last 14 days of daily booking counts, oldest first. Drives the
+   *  per-row sparkline. Length is always 14 even on quiet days. */
+  bookingSparkline14d: number[];
 };
 
 export type TenantIntelPage = {
@@ -150,6 +164,20 @@ export async function fetchTenantIntelligence(query: TenantIntelQuery): Promise<
       const planFilter = query.plan ?? null;
       const statusFilter = query.status ?? null;
 
+      // SCHEMA-SAFE QUERY (tenant-intel hardening, 2026-05-26):
+      //   • Previous version referenced t.primary_domain which DOES
+      //     NOT EXIST on the tenants table — the column lives on the
+      //     tenant_domains side-table. That made the whole query throw
+      //     ("column primary_domain does not exist") and the page
+      //     collapsed to "No tenants match your filters."
+      //   • Custom-domain lookup now goes through a LATERAL subquery
+      //     against tenant_domains scoped to status='verified', so
+      //     tenants with no domain still appear (returns NULL).
+      //   • Every per-tenant subquery is independent — tenants never
+      //     disappear because they have no bookings, no comms, no
+      //     billing, no calendar. LEFT JOIN semantics preserved.
+      //   • Archetype tag (when present in onboarding_progress jsonb,
+      //     set by the simulation seeder) surfaces to the UI.
       const rows = (await db.execute(
         sql`SELECT
               t.id::text                     AS id,
@@ -160,7 +188,13 @@ export async function fetchTenantIntelligence(query: TenantIntelQuery): Promise<
               t.trial_end                    AS trial_end,
               t.created_at                   AS created_at,
               t.onboarding_completed_at      AS onboarding_completed_at,
-              t.primary_domain               AS custom_domain,
+              t.primary_color                AS primary_color,
+              t.logo_url                     AS logo_url,
+              t.onboarding_progress->>'archetype' AS archetype,
+              (SELECT host FROM tenant_domains td
+                 WHERE td.tenant_id = t.id AND td.status = 'verified'
+                 ORDER BY td.activated_at DESC NULLS LAST, td.id ASC
+                 LIMIT 1) AS custom_domain,
               COALESCE(p.price_monthly_cents, 0)::int AS price_monthly_cents,
               (SELECT COUNT(*)::int FROM users u  WHERE u.tenant_id = t.id) AS user_count,
               (SELECT COUNT(*)::int FROM bookings b WHERE b.tenant_id = t.id AND b.created_at >= NOW() - INTERVAL '30 days') AS bookings_30d,
@@ -172,7 +206,22 @@ export async function fetchTenantIntelligence(query: TenantIntelQuery): Promise<
               (SELECT COUNT(*)::int FROM calendar_connections cc WHERE cc.tenant_id = t.id AND cc.provider = 'microsoft' AND cc.status IN ('needs_reconnect','expired','error')) > 0 AS microsoft_expired,
               (SELECT COUNT(*)::int FROM communication_logs c WHERE c.tenant_id = t.id AND c.status='sent'   AND c.created_at >= NOW() - INTERVAL '30 days') AS reminders_sent_30d,
               (SELECT COUNT(*)::int FROM communication_logs c WHERE c.tenant_id = t.id AND c.status='failed' AND c.created_at >= NOW() - INTERVAL '30 days') AS reminders_failed_30d,
-              (SELECT COUNT(*)::int FROM billing_transactions bt WHERE bt.tenant_id = t.id AND bt.status='failed' AND bt.created_at >= NOW() - INTERVAL '30 days') AS failed_payments_30d
+              (SELECT COUNT(*)::int FROM billing_transactions bt WHERE bt.tenant_id = t.id AND bt.status='failed' AND bt.created_at >= NOW() - INTERVAL '30 days') AS failed_payments_30d,
+              -- Daily booking sparkline (last 14 days) for the row.
+              -- Returned as a Postgres int[] in chronological order
+              -- (oldest first). LEFT-aligned date_series LEFT JOIN
+              -- bookings makes zero-days appear as 0 instead of gaps.
+              ARRAY(
+                SELECT COALESCE(daily.n, 0)::int
+                  FROM generate_series(0, 13) AS gs(d)
+                  LEFT JOIN LATERAL (
+                    SELECT COUNT(*)::int AS n
+                      FROM bookings b
+                     WHERE b.tenant_id = t.id
+                       AND b.created_at::date = (CURRENT_DATE - (13 - gs.d))
+                  ) daily ON TRUE
+                  ORDER BY gs.d
+              ) AS booking_sparkline_14d
             FROM tenants t
             LEFT JOIN plans p ON p.slug = t.current_plan
            WHERE (${search}::text IS NULL OR t.name ILIKE ${search}::text OR t.slug ILIKE ${search}::text OR COALESCE(t.billing_email,'') ILIKE ${search}::text)
@@ -190,6 +239,9 @@ export async function fetchTenantIntelligence(query: TenantIntelQuery): Promise<
         trial_end: string | null;
         created_at: string;
         onboarding_completed_at: string | null;
+        primary_color: string | null;
+        logo_url: string | null;
+        archetype: string | null;
         custom_domain: string | null;
         price_monthly_cents: number;
         user_count: number;
@@ -203,6 +255,7 @@ export async function fetchTenantIntelligence(query: TenantIntelQuery): Promise<
         reminders_sent_30d: number;
         reminders_failed_30d: number;
         failed_payments_30d: number;
+        booking_sparkline_14d: number[] | null;
       }>;
 
       const computed: TenantRow[] = rows.map((r) => {
@@ -240,6 +293,13 @@ export async function fetchTenantIntelligence(query: TenantIntelQuery): Promise<
           active_users: Number(r.user_count),
         });
 
+        // Sparkline: ensure always 14 entries, numeric, non-negative.
+        const rawSpark = Array.isArray(r.booking_sparkline_14d) ? r.booking_sparkline_14d : [];
+        const sparkline = Array.from({ length: 14 }, (_, i) => {
+          const v = Number(rawSpark[i] ?? 0);
+          return Number.isFinite(v) && v >= 0 ? v : 0;
+        });
+
         return {
           id: r.id,
           name: r.name,
@@ -256,7 +316,9 @@ export async function fetchTenantIntelligence(query: TenantIntelQuery): Promise<
           bookingsPrior30d: bookingsPrior30,
           bookingGrowthPct: growthPct,
           googleConnected: r.google_connected,
+          googleExpired: r.google_expired,
           microsoftConnected: r.microsoft_connected,
+          microsoftExpired: r.microsoft_expired,
           zoomConnected: false, // Zoom not wired yet — see SA-3 integrations
           customDomain: r.custom_domain,
           reminderSuccessPct,
@@ -267,6 +329,10 @@ export async function fetchTenantIntelligence(query: TenantIntelQuery): Promise<
           churnProbabilityPct: risk.churnProbabilityPct,
           riskFactors: risk.factors,
           supportTickets: null,
+          primaryColor: r.primary_color,
+          logoUrl: r.logo_url,
+          archetype: r.archetype,
+          bookingSparkline14d: sparkline,
         };
       });
 

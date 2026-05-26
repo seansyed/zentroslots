@@ -76,6 +76,152 @@ function HealthBar({ score }: { score: number }) {
   );
 }
 
+// ─── Luxury primitives (2026-05-26) ─────────────────────────────────
+
+function tenantInitials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "•";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
+/** Soft tenant avatar — logo if present, else initials on tenant primary color. */
+function TenantAvatar({
+  name,
+  logoUrl,
+  primaryColor,
+  size = "md",
+}: {
+  name: string;
+  logoUrl: string | null;
+  primaryColor: string | null;
+  size?: "sm" | "md";
+}) {
+  const dim = size === "sm" ? "h-7 w-7" : "h-9 w-9";
+  const txt = size === "sm" ? "text-[10px]" : "text-[12px]";
+  if (logoUrl) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={logoUrl}
+        alt=""
+        className={`${dim} shrink-0 rounded-lg object-contain ring-1 ring-slate-200 bg-white`}
+      />
+    );
+  }
+  const color = primaryColor && /^#[0-9a-fA-F]{6}$/.test(primaryColor) ? primaryColor : "#359df3";
+  return (
+    <div
+      className={`${dim} shrink-0 inline-flex items-center justify-center rounded-lg font-semibold ${txt} text-white shadow-[inset_0_-2px_4px_rgba(0,0,0,0.12)]`}
+      style={{ background: `linear-gradient(135deg, ${color}, ${color}cc)` }}
+      aria-hidden
+    >
+      {tenantInitials(name)}
+    </div>
+  );
+}
+
+const ARCHETYPE_LABEL: Record<string, string> = {
+  cpa: "CPA",
+  law: "Law",
+  medspa: "Med Spa",
+  salon: "Salon",
+  consultant: "Consulting",
+  agency: "Agency",
+  clinic: "Clinic",
+  coach: "Coach",
+};
+
+/** Small label badge for archetype (only visible on simulated tenants today). */
+function ArchetypeBadge({ archetype }: { archetype: string | null }) {
+  if (!archetype) return null;
+  const label = ARCHETYPE_LABEL[archetype] ?? archetype;
+  return (
+    <span
+      className="inline-flex items-center rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-slate-600"
+      title={`Vertical: ${label}`}
+    >
+      {label}
+    </span>
+  );
+}
+
+/** 14-day daily-booking sparkline as inline SVG. Auto-scales to its
+ *  max value; flat zeros render as a faint baseline. */
+function BookingSparkline({ data }: { data: number[] }) {
+  const w = 64;
+  const h = 18;
+  const max = Math.max(...data, 1);
+  const step = data.length > 1 ? w / (data.length - 1) : w;
+  const points = data
+    .map((v, i) => {
+      const x = i * step;
+      const y = h - (v / max) * (h - 2) - 1;
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(" ");
+  const lastX = (data.length - 1) * step;
+  const lastY = h - (data[data.length - 1] / max) * (h - 2) - 1;
+  const total = data.reduce((a, b) => a + b, 0);
+  return (
+    <svg
+      width={w}
+      height={h}
+      viewBox={`0 0 ${w} ${h}`}
+      className="overflow-visible"
+      aria-label={`14-day bookings: ${total}`}
+    >
+      <polyline
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={1.5}
+        strokeLinejoin="round"
+        strokeLinecap="round"
+        className="text-sky-500"
+        points={points}
+      />
+      <circle cx={lastX} cy={lastY} r={2} className="fill-sky-500" />
+    </svg>
+  );
+}
+
+/** Integration status pill — shows green ring on healthy, amber on
+ *  needs-reconnect, neutral when not connected. */
+function IntegrationPill({
+  label,
+  connected,
+  expired,
+}: {
+  label: string;
+  connected: boolean;
+  expired: boolean;
+}) {
+  const cls = expired
+    ? "bg-amber-50 text-amber-800 ring-amber-200"
+    : connected
+    ? "bg-emerald-50 text-emerald-700 ring-emerald-200"
+    : "bg-slate-50 text-slate-500 ring-slate-200";
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium ring-1 ${cls}`}
+    >
+      <span
+        className={`inline-flex h-1.5 w-1.5 rounded-full ${
+          expired ? "bg-amber-500" : connected ? "bg-emerald-500" : "bg-slate-300"
+        }`}
+      />
+      {label}
+    </span>
+  );
+}
+
+/** Subtle row glow on hover — uses tenant primary color as tint. */
+function rowHoverStyle(primaryColor: string | null): React.CSSProperties {
+  // Use as a CSS custom property; the row CSS in className paints it.
+  const c = primaryColor && /^#[0-9a-fA-F]{6}$/.test(primaryColor) ? primaryColor : "#359df3";
+  return { ["--row-glow" as never]: `${c}10` } as React.CSSProperties;
+}
+
 const RISK_STYLES: Record<RiskLevel, string> = {
   low: "bg-emerald-50 text-emerald-700 ring-emerald-200",
   medium: "bg-amber-50 text-amber-700 ring-amber-200",
@@ -177,21 +323,59 @@ function TenantDrawer({
         className="h-full w-full max-w-2xl overflow-y-auto bg-white shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <header className="sticky top-0 z-10 flex items-start justify-between gap-3 border-b border-slate-200 bg-white px-6 py-4">
-          <div>
-            <div className="text-[11px] font-medium uppercase tracking-wider text-slate-500">
-              {row.plan ?? "—"} · {row.subscriptionStatus ?? "—"}
+        <header className="sticky top-0 z-10 border-b border-slate-200 bg-white px-6 py-4">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-start gap-3">
+              <TenantAvatar name={row.name} logoUrl={row.logoUrl} primaryColor={row.primaryColor} />
+              <div>
+                <div className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-slate-500">
+                  <span>{row.plan ?? "—"}</span>
+                  <span>·</span>
+                  <span>{row.subscriptionStatus ?? "—"}</span>
+                  <ArchetypeBadge archetype={row.archetype} />
+                </div>
+                <h2 className="mt-0.5 text-lg font-semibold text-slate-900">{row.name}</h2>
+                <div className="mt-1 flex flex-wrap items-center gap-3 text-[12px] text-slate-500">
+                  <span>/u/{row.slug}</span>
+                  <span>created {fmtDate(row.createdAt)}</span>
+                  {row.customDomain ? <span>· domain {row.customDomain}</span> : null}
+                </div>
+              </div>
             </div>
-            <h2 className="mt-0.5 text-lg font-semibold text-slate-900">{row.name}</h2>
-            <div className="mt-1 flex flex-wrap items-center gap-3 text-[12px] text-slate-500">
-              <span>/{row.slug}</span>
-              <span>created {fmtDate(row.createdAt)}</span>
-              {row.customDomain ? <span>· domain {row.customDomain}</span> : null}
-            </div>
+            <button type="button" onClick={onClose} className="rounded-md p-1 text-slate-400 hover:bg-slate-100">
+              <X className="h-4 w-4" />
+            </button>
           </div>
-          <button type="button" onClick={onClose} className="rounded-md p-1 text-slate-400 hover:bg-slate-100">
-            <X className="h-4 w-4" />
-          </button>
+
+          {/* Cross-link strip (T6) — quick contextual jumps into other
+              admin surfaces filtered to this tenant. Every link respects
+              the existing search-param contract of the target page. */}
+          <div className="mt-3 flex flex-wrap items-center gap-1.5">
+            <a
+              href={`/admin/finance?tenantId=${row.id}`}
+              className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-50"
+            >
+              Finance →
+            </a>
+            <a
+              href={`/admin/activity?tenantId=${row.id}`}
+              className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-50"
+            >
+              Activity →
+            </a>
+            <a
+              href={`/admin/security/audit?tenantId=${row.id}`}
+              className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-50"
+            >
+              Audit →
+            </a>
+            <a
+              href={`/admin/intelligence?tenantId=${row.id}`}
+              className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-50"
+            >
+              Insights →
+            </a>
+          </div>
         </header>
 
         <div className="space-y-5 px-6 py-5">
@@ -206,6 +390,45 @@ function TenantDrawer({
             <Stat label="Reminders" value={row.reminderSuccessPct === null ? "—" : `${row.reminderSuccessPct}%`} />
             <Stat label="Failed payments 30d" value={String(row.failedPayments30d)} />
           </div>
+
+          {/* 14-day booking timeline — sourced from the row's sparkline data */}
+          <Section title="14-day booking trend">
+            <div className="rounded-lg border border-slate-200 bg-gradient-to-br from-white to-slate-50/40 p-4">
+              <div className="flex items-end justify-between">
+                <div>
+                  <div className="text-[10px] font-medium uppercase tracking-wider text-slate-500">
+                    Daily bookings (oldest → today)
+                  </div>
+                  <div className="mt-0.5 text-[20px] font-semibold tabular-nums text-slate-900">
+                    {row.bookingSparkline14d.reduce((a, b) => a + b, 0)}
+                  </div>
+                </div>
+                <BookingSparkline data={row.bookingSparkline14d} />
+              </div>
+              <div className="mt-3 flex h-8 items-end gap-0.5">
+                {row.bookingSparkline14d.map((v, i) => {
+                  const max = Math.max(...row.bookingSparkline14d, 1);
+                  const h = Math.max(2, (v / max) * 32);
+                  return (
+                    <div
+                      key={i}
+                      className="flex-1 rounded-sm bg-gradient-to-t from-sky-500/30 to-sky-500 transition-all"
+                      style={{ height: `${h}px` }}
+                      title={`Day ${i + 1}: ${v}`}
+                    />
+                  );
+                })}
+              </div>
+            </div>
+          </Section>
+
+          {/* Integration health at a glance */}
+          <Section title="Integration health">
+            <div className="flex flex-wrap gap-2">
+              <IntegrationPill label="Google Calendar" connected={row.googleConnected} expired={row.googleExpired} />
+              <IntegrationPill label="Microsoft 365" connected={row.microsoftConnected} expired={row.microsoftExpired} />
+            </div>
+          </Section>
 
           {row.riskFactors.length > 0 ? (
             <div className="rounded-lg border border-amber-200 bg-amber-50/40 p-3">
@@ -692,8 +915,20 @@ export default function TenantIntelligenceClient({ initial }: { initial: TenantI
                       />
                     </td>
                     <td className="px-3 py-2.5">
-                      <div className="font-medium text-slate-900">{r.name}</div>
-                      <div className="text-[11px] text-slate-500">/{r.slug}</div>
+                      <div className="flex items-center gap-2.5">
+                        <TenantAvatar
+                          name={r.name}
+                          logoUrl={r.logoUrl}
+                          primaryColor={r.primaryColor}
+                        />
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            <span className="truncate font-medium text-slate-900">{r.name}</span>
+                            <ArchetypeBadge archetype={r.archetype} />
+                          </div>
+                          <div className="truncate text-[11px] text-slate-500">/u/{r.slug}</div>
+                        </div>
+                      </div>
                     </td>
                     <td className="px-3 py-2.5">
                       <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-700">
@@ -702,7 +937,12 @@ export default function TenantIntelligenceClient({ initial }: { initial: TenantI
                     </td>
                     <td className="px-3 py-2.5 text-right tabular-nums">{fmtCents(r.mrrCents)}</td>
                     <td className="px-3 py-2.5 text-right tabular-nums">{r.userCount}</td>
-                    <td className="px-3 py-2.5 text-right tabular-nums">{r.bookings30d}</td>
+                    <td className="px-3 py-2.5 text-right">
+                      <div className="flex items-center justify-end gap-2">
+                        <BookingSparkline data={r.bookingSparkline14d} />
+                        <span className="tabular-nums text-[12px] font-medium">{r.bookings30d}</span>
+                      </div>
+                    </td>
                     <td className="px-3 py-2.5 text-right">
                       <GrowthChip pct={r.bookingGrowthPct} />
                     </td>
@@ -711,10 +951,14 @@ export default function TenantIntelligenceClient({ initial }: { initial: TenantI
                       <PaymentBadge status={r.paymentStatus} />
                     </td>
                     <td className="px-3 py-2.5 text-center">
-                      <ConnectionDot on={r.googleConnected} />
+                      <div className="inline-flex items-center gap-1">
+                        <IntegrationPill label="G" connected={r.googleConnected} expired={r.googleExpired} />
+                      </div>
                     </td>
                     <td className="px-3 py-2.5 text-center">
-                      <ConnectionDot on={r.microsoftConnected} />
+                      <div className="inline-flex items-center gap-1">
+                        <IntegrationPill label="MS" connected={r.microsoftConnected} expired={r.microsoftExpired} />
+                      </div>
                     </td>
                     <td className="px-3 py-2.5 text-[12px] text-slate-600">{r.customDomain ?? "—"}</td>
                     <td className="px-3 py-2.5">
