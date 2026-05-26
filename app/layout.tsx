@@ -2,6 +2,7 @@ import "./globals.css";
 import type { Metadata } from "next";
 import { ToastHost } from "@/components/ui/primitives";
 import ImpersonationBanner from "@/components/ImpersonationBanner";
+import GAProvider from "@/components/analytics/GAProvider";
 
 const APP_BASE_URL = process.env.APP_BASE_URL ?? "http://localhost:3001";
 
@@ -54,6 +55,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <ImpersonationBanner />
         <main id="main" className="min-h-screen">{children}</main>
         <ToastHost />
+        {/* Phase GA4 — mounted at the root so both public marketing
+            routes (/, /pricing, /features, /for/[vertical]) and the
+            authenticated app shell (/dashboard/**, /u/[slug]/**) share
+            a single tracker. Renders nothing when the measurement ID
+            env var is absent, so this is safe in dev. */}
+        <GAProvider />
       </body>
     </html>
   );

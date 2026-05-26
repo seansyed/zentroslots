@@ -25,6 +25,8 @@
 import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
+import { trackEvent } from "@/lib/analytics/ga4/client";
+
 const OAUTH_ERROR_LABELS: Record<string, string> = {
   cancelled: "You cancelled the sign-in. No worries — try again any time.",
   state_mismatch:
@@ -54,6 +56,10 @@ function LoginPageInner() {
   const router = useRouter();
   const sp = useSearchParams();
   const [mode, setMode] = useState<"login" | "signup">("login");
+  // Phase GA4 — guard against double-firing signup_started when the
+  // user toggles mode back and forth between login and signup. We
+  // fire once per page lifecycle.
+  const [signupStartedFired, setSignupStartedFired] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
@@ -64,6 +70,16 @@ function LoginPageInner() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [oauthLoading, setOauthLoading] = useState<"google" | "microsoft" | null>(null);
+
+  // Phase GA4 — fire `signup_started` the first time the visitor
+  // enters signup mode (either by URL/state default or by clicking
+  // "Create one" at the bottom of the form). One fire per session.
+  useEffect(() => {
+    if (mode === "signup" && !signupStartedFired) {
+      trackEvent("signup_started");
+      setSignupStartedFired(true);
+    }
+  }, [mode, signupStartedFired]);
 
   // Surface OAuth-callback errors carried in the ?error= query string.
   useEffect(() => {
@@ -108,6 +124,14 @@ function LoginPageInner() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error ?? "Failed");
+      // Phase GA4 — fire `signup_completed` ONLY when the user came
+      // through the signup form (not the login form). The OAuth
+      // callbacks fire the same event for net-new identities, so
+      // GA4 sees a unified "signup_completed" funnel across all three
+      // entry surfaces (email/password, Google, Microsoft).
+      if (mode === "signup") {
+        trackEvent("signup_completed");
+      }
       router.push("/dashboard");
       router.refresh();
     } catch (e) {

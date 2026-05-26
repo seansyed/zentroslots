@@ -23,9 +23,10 @@ import { eq } from "drizzle-orm";
 import { CheckCircle2, Home } from "lucide-react";
 
 import { db } from "@/db/client";
-import { bookings, services, users } from "@/db/schema";
+import { bookings, services, tenants, users } from "@/db/schema";
 import BookingConfirmedStatus from "@/components/booking/BookingConfirmedStatus";
 import AddToCalendarButtons from "@/components/booking/AddToCalendarButtons";
+import BookingCompletedTracker from "@/components/analytics/BookingCompletedTracker";
 import { signBookingToken } from "@/lib/tokens";
 
 export const dynamic = "force-dynamic";
@@ -44,6 +45,13 @@ interface BookingSummary {
    *  AddToCalendarButtons component (Phase ICAL-1). Not surfaced
    *  in the rendered UI — server-side use only. */
   tenantId: string;
+  /** Phase GA4 — feeds the BookingCompletedTracker so it can split
+   *  conversion volume into "free" vs "paid" buckets WITHOUT sending
+   *  the exact price to Google. Categorical only. */
+  servicePrice: number;
+  /** Phase GA4 — public tenant slug (already in the booking URL —
+   *  not PII). Categorical aggregation key for GA4. */
+  tenantSlug: string | null;
 }
 
 async function lookupBooking(bookingId: string): Promise<BookingSummary | null> {
@@ -58,15 +66,24 @@ async function lookupBooking(bookingId: string): Promise<BookingSummary | null> 
       staffName: users.name,
       meetLink: bookings.meetLink,
       tenantId: bookings.tenantId,
+      servicePrice: services.price,
+      tenantSlug: tenants.slug,
     })
     .from(bookings)
     .leftJoin(services, eq(services.id, bookings.serviceId))
     .leftJoin(users, eq(users.id, bookings.staffUserId))
+    .leftJoin(tenants, eq(tenants.id, bookings.tenantId))
     .where(eq(bookings.id, bookingId))
     .limit(1);
   const r = row[0];
   if (!r || !r.serviceName || !r.staffName) return null;
-  return r as BookingSummary;
+  return {
+    ...r,
+    // Defensive — if the join misses (shouldn't, but cheap to guard),
+    // default the GA-only fields rather than 404-ing the page.
+    servicePrice: r.servicePrice ?? 0,
+    tenantSlug: r.tenantSlug ?? null,
+  } as BookingSummary;
 }
 
 function formatDate(start: Date): { day: string; time: string } {
@@ -182,6 +199,17 @@ export default async function PaymentConfirmedPage({
       <p className="mt-6 text-xs text-slate-500">
         A confirmation email is on its way.
       </p>
+
+      {/* Phase GA4 — fire `booking_completed` once per browser session
+          per booking ID. Renders nothing visually. We pass categorical
+          fields only: value_bucket ("free"|"paid" — never the price)
+          and service_name + tenant_slug. No customer identifiers. */}
+      <BookingCompletedTracker
+        bookingId={summary.id}
+        valueBucket={summary.servicePrice > 0 ? "paid" : "free"}
+        serviceName={summary.serviceName}
+        tenantSlug={summary.tenantSlug}
+      />
     </div>
   );
 }

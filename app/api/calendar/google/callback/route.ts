@@ -56,8 +56,14 @@ export async function GET(req: NextRequest) {
       ipAddress: ipFromHeaders(req.headers),
     });
 
+    // Phase GA4 — server-to-client event signal: GAProvider reads
+    // `?ga_event=` on next render, fires the event, then strips the
+    // param so it doesn't re-fire on back/forward navigation. We fire
+    // the provider-specific event (`google_connected`); the more
+    // general `calendar_connected` event name is reserved for non-OAuth
+    // calendar attachments (ICS subscription feeds).
     return NextResponse.redirect(
-      `${APP_BASE_URL}/dashboard/settings/calendar?connected=google`
+      `${APP_BASE_URL}/dashboard/settings/calendar?connected=google&ga_event=google_connected&ga_provider=google`
     );
   } catch (err) {
     return errorResponse(err);

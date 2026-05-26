@@ -152,6 +152,7 @@ export async function GET(req: NextRequest) {
 
   // Resolve identity → user/session.
   let resolvedUserId: string | null = null;
+  let isNewUser = false;
   try {
     const result = await findOrCreateUserForOAuth({
       email: claims.email,
@@ -164,6 +165,7 @@ export async function GET(req: NextRequest) {
       req,
     });
     resolvedUserId = result.userId;
+    isNewUser = result.isNewUser;
   } catch (e) {
     console.error("[oauth/google] session mint failed:", e);
     return loginError(req, "session_mint_failed");
@@ -192,7 +194,18 @@ export async function GET(req: NextRequest) {
   // Consume the `next` cookie if present; default to /dashboard.
   const nextCookie = req.cookies.get("zm_oauth_next")?.value;
   const nextPath = safeNextPath(nextCookie);
-  const res = NextResponse.redirect(publicUrl(req, nextPath));
+
+  // Phase GA4 — server-to-client event signal. New OAuth identity →
+  // `signup_completed`; returning user → no event (a login is not a
+  // conversion). GAProvider strips the param after firing, so no
+  // re-fire on back/forward navigation. We attach `ga_provider=google`
+  // so dashboards can split signup-by-provider.
+  const target = publicUrl(req, nextPath);
+  if (isNewUser) {
+    target.searchParams.set("ga_event", "signup_completed");
+    target.searchParams.set("ga_provider", "google");
+  }
+  const res = NextResponse.redirect(target);
   res.cookies.delete("zm_oauth_next");
   return res;
 }

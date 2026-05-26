@@ -74,7 +74,12 @@ export async function POST(req: NextRequest) {
         mode: "subscription",
         customer: customerId,
         line_items: [{ price: priceId, quantity: 1 }],
-        success_url: `${APP_BASE_URL}/dashboard/billing?status=success`,
+        // Phase GA4 — append `ga_event=subscription_started` so the
+        // landing page's GAProvider reads it once, fires the event,
+        // then strips the param. We also include plan + interval as
+        // categorical context (no PII, no Stripe IDs). The provider
+        // strips ALL `ga_*` params after firing so the URL stays clean.
+        success_url: `${APP_BASE_URL}/dashboard/billing?status=success&ga_event=subscription_started&ga_plan=${encodeURIComponent(body.plan)}&ga_interval=${encodeURIComponent(body.interval)}`,
         cancel_url: `${APP_BASE_URL}/dashboard/billing?status=cancelled`,
         allow_promotion_codes: true,
         metadata: { tenantId: tenant.id, plan: body.plan, interval: body.interval },

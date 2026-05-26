@@ -141,6 +141,7 @@ export async function GET(req: NextRequest) {
   }
 
   let resolvedUserId: string | null = null;
+  let isNewUser = false;
   try {
     const result = await findOrCreateUserForOAuth({
       email: rawEmail,
@@ -153,6 +154,7 @@ export async function GET(req: NextRequest) {
       req,
     });
     resolvedUserId = result.userId;
+    isNewUser = result.isNewUser;
   } catch (e) {
     console.error("[oauth/microsoft] session mint failed:", e);
     return loginError(req, "session_mint_failed");
@@ -182,7 +184,16 @@ export async function GET(req: NextRequest) {
 
   const nextCookie = req.cookies.get("zm_oauth_next")?.value;
   const nextPath = safeNextPath(nextCookie);
-  const res = NextResponse.redirect(publicUrl(req, nextPath));
+
+  // Phase GA4 — fire `signup_completed` only on net-new identities.
+  // Returning logins are NOT a conversion, so we don't tag them.
+  // GAProvider strips the params after firing, preserving clean URLs.
+  const target = publicUrl(req, nextPath);
+  if (isNewUser) {
+    target.searchParams.set("ga_event", "signup_completed");
+    target.searchParams.set("ga_provider", "microsoft");
+  }
+  const res = NextResponse.redirect(target);
   res.cookies.delete("zm_oauth_next");
   return res;
 }

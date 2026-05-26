@@ -22,6 +22,8 @@
 
 import { useState } from "react";
 
+import { trackEvent } from "@/lib/analytics/ga4/client";
+
 type Props = {
   planId: "free" | "solo" | "pro" | "team" | "enterprise";
   interval?: "month" | "year";
@@ -61,6 +63,14 @@ export default function BillingActions({
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error ?? "Checkout failed");
+      // Phase GA4 — fire `stripe_checkout_started` BEFORE the browser
+      // leaves the SPA for Stripe's hosted page. `transport_type:
+      // 'beacon'` (configured on initial config) ensures gtag flushes
+      // even when the page is about to unload. The corresponding
+      // `subscription_started` event fires when the user lands back
+      // on /dashboard/billing?status=success&ga_event=subscription_started
+      // — wired in app/api/billing/checkout/route.ts.
+      trackEvent("stripe_checkout_started", { plan: planId, interval });
       window.location.href = data.url;
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed");

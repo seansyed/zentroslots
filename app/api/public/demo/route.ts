@@ -15,6 +15,13 @@
  *   - Sends branded "thanks for your interest" autoresponder.
  *
  * Never throws.
+ *
+ * Phase GA4 — when a client-side demo form is added (it doesn't
+ * exist as of this writing), it MUST fire `trackEvent("demo_requested")`
+ * on a 200 response from this endpoint. The event name is part of
+ * the closed GA4EventName union in lib/analytics/ga4/types.ts. Do
+ * NOT add identifying fields (email/phone/company) — keep it
+ * categorical-only per docs/GA4_ANALYTICS.md.
  */
 
 import { NextRequest, NextResponse } from "next/server";

@@ -65,8 +65,11 @@ export async function GET(req: NextRequest) {
       ipAddress: ipFromHeaders(req.headers),
     });
 
+    // Phase GA4 — server-to-client event signal: GAProvider reads
+    // `?ga_event=` on next render, fires the event, then strips the
+    // param so it doesn't re-fire on back/forward navigation.
     return NextResponse.redirect(
-      `${APP_BASE_URL}/dashboard/settings/calendar?connected=microsoft`,
+      `${APP_BASE_URL}/dashboard/settings/calendar?connected=microsoft&ga_event=microsoft_connected&ga_provider=microsoft`,
     );
   } catch (err) {
     return errorResponse(err);

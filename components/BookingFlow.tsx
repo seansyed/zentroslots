@@ -23,6 +23,7 @@ import {
   type PublicForm,
 } from "@/components/booking/IntakeStep";
 import { Avatar } from "@/components/ui/Avatar";
+import { trackEvent } from "@/lib/analytics/ga4/client";
 
 type Props = {
   serviceId: string;
@@ -402,6 +403,14 @@ export default function BookingFlow({
       // Wave I — clear the intake draft cookie on successful submit.
       clearIntakeDraft();
       setStep("done");
+      // Phase GA4 — fire `booking_completed` for the FREE path. The
+      // paid path redirects to Stripe → /booking/confirmed where the
+      // server component fires the same event with full price/tenant
+      // context. We only reach this line when no checkoutUrl came
+      // back, so by construction value_bucket is "free". GAProvider's
+      // page_view already captured the booking page URL (which holds
+      // tenant + service slugs); we don't duplicate those here.
+      trackEvent("booking_completed", { value_bucket: "free" });
       toast("Booked. A confirmation is on its way.", "success");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Booking failed");
