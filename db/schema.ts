@@ -2252,19 +2252,47 @@ export const announcements = pgTable(
     body: text("body").notNull(),
     // 'info' | 'warning' | 'critical'
     severity: varchar("severity", { length: 20 }).notNull().default("info"),
-    // 'all' | plan slug
+    // 'all' | plan slug (legacy single-segment targeting — preserved
+    // for back-compat; new code uses audience_rules jsonb below)
     audience: varchar("audience", { length: 40 }).notNull().default("all"),
     linkUrl: text("link_url"),
     linkLabel: varchar("link_label", { length: 80 }),
     publishedAt: timestamp("published_at", { withTimezone: true }).notNull().defaultNow(),
     expiresAt: timestamp("expires_at", { withTimezone: true }),
     active: boolean("active").notNull().default(true),
+
+    // ─── Communications wave (migration 0068) — additive ──────────
+    /** Lifecycle: draft|scheduled|active|paused|expired|archived. */
+    status: varchar("status", { length: 20 }).notNull().default("active"),
+    /** Operational kind — see migration comment for enum-ish values. */
+    kind: varchar("kind", { length: 30 }).notNull().default("general"),
+    /** Enabled delivery channels jsonb array. Empty = default in_app. */
+    channels: jsonb("channels").notNull().default(["in_app"]),
+    /** Multi-dimensional audience rules jsonb. Empty = all tenants. */
+    audienceRules: jsonb("audience_rules").notNull().default({}),
+    /** Optional explicit scheduled-start. NULL → publish immediately. */
+    scheduledAt: timestamp("scheduled_at", { withTimezone: true }),
+    /** Engagement counters — incremented by the in-app reader. */
+    deliveryCount: integer("delivery_count").notNull().default(0),
+    viewCount: integer("view_count").notNull().default(0),
+    dismissCount: integer("dismiss_count").notNull().default(0),
+    clickCount: integer("click_count").notNull().default(0),
+    /** Audit trail. */
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    /** Free-form campaign metadata (attribution, hypothesis, A/B arm). */
+    metadata: jsonb("metadata").notNull().default({}),
+
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
     activeIdx: index("announcements_active_idx").on(t.active),
     audienceIdx: index("announcements_audience_idx").on(t.audience),
     publishedIdx: index("announcements_published_idx").on(t.publishedAt),
+    statusIdx: index("announcements_status_idx").on(t.status),
+    kindIdx: index("announcements_kind_idx").on(t.kind),
+    expiresIdx: index("announcements_expires_idx").on(t.expiresAt),
+    createdAtDescIdx: index("announcements_created_at_desc_idx").on(t.createdAt),
   })
 );
 
