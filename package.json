@@ -20,7 +20,8 @@
     "analytics:aggregate": "tsx scripts/aggregate-daily-analytics.ts",
     "scheduled-reports:generate": "tsx scripts/generate-scheduled-reports.ts",
     "governance:retention": "tsx scripts/run-governance-retention.ts",
-    "holds:expire": "tsx scripts/expire-payment-holds.ts"
+    "holds:expire": "tsx scripts/expire-payment-holds.ts",
+    "email:smoke": "tsx scripts/email-smoke-test.ts"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
