@@ -18,6 +18,7 @@
  *   ALLOW_DEV_SIMULATION=true npm run docs-demo:seed
  */
 
+import "dotenv/config";
 import { sql } from "drizzle-orm";
 
 import { db } from "@/db/client";

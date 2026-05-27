@@ -35,6 +35,7 @@
  *   to docs/operations/demo-tenant-credentials.json for record.
  */
 
+import "dotenv/config";
 import bcrypt from "bcryptjs";
 import { and, eq, sql } from "drizzle-orm";
 
