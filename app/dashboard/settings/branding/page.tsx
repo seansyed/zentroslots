@@ -57,6 +57,24 @@ export const dynamic = "force-dynamic";
 const APP_BASE_URL = process.env.APP_BASE_URL ?? "http://localhost:3001";
 
 export default async function BrandingPage() {
+  try {
+    return await renderBrandingPage();
+  } catch (err) {
+    // Production-debug: capture full stack to stderr so pm2 logs reveal
+    // the actual crash site instead of opaque "Something went wrong".
+    console.error(
+      JSON.stringify({
+        evt: "branding_page_render_error",
+        message: err instanceof Error ? err.message : String(err),
+        stack: err instanceof Error ? err.stack?.slice(0, 4000) : null,
+        ts: new Date().toISOString(),
+      }),
+    );
+    throw err;
+  }
+}
+
+async function renderBrandingPage() {
   const session = await getSession();
   if (!session) redirect("/dashboard/login");
   const user = await db.query.users.findFirst({ where: eq(users.id, session.sub) });

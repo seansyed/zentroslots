@@ -10,7 +10,27 @@ export default function GlobalError({
   reset: () => void;
 }) {
   useEffect(() => {
+    // Detailed client-side logging for production debug. Server-side
+    // errors carry only `digest` on the client (Next.js redacts the
+    // message + stack for security), so we POST a beacon to /api/log/
+    // client-error so operators can see what surface crashed.
     console.error("Page error:", error);
+    try {
+      const payload = {
+        message: error.message,
+        digest: error.digest,
+        stack: error.stack?.slice(0, 4000),
+        path: typeof window !== "undefined" ? window.location.pathname : null,
+        userAgent: typeof navigator !== "undefined" ? navigator.userAgent : null,
+        ts: new Date().toISOString(),
+      };
+      fetch("/api/log/client-error", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        keepalive: true,
+      }).catch(() => {});
+    } catch {}
   }, [error]);
 
   return (
