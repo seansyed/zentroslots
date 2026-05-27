@@ -394,37 +394,122 @@ function Field({ label, children, hint }: { label: string; children: React.React
   );
 }
 
+/** Convert a server announcement row → editor BuilderState. */
+function rowToBuilder(row: EnrichedAnnouncement): BuilderState {
+  // datetime-local inputs need "YYYY-MM-DDTHH:mm" (no Z, no seconds).
+  const toLocal = (iso: string | null | undefined): string => {
+    if (!iso) return "";
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return "";
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  };
+  const channels =
+    Array.isArray(row.channels) && row.channels.length > 0
+      ? row.channels.map((c) => String(c))
+      : ["in_app"];
+  const audienceRules =
+    row.audienceRules && typeof row.audienceRules === "object"
+      ? (row.audienceRules as AudienceRules)
+      : {};
+  return {
+    title: row.title ?? "",
+    body: row.body ?? "",
+    severity: (row.severity ?? "info") as BuilderState["severity"],
+    kind: row.kind ?? "general",
+    audience: row.audience ?? "all",
+    audienceRules,
+    channels,
+    linkUrl: row.linkUrl ?? "",
+    linkLabel: row.linkLabel ?? "",
+    scheduledAt: toLocal(row.scheduledAt),
+    expiresAt: toLocal(row.expiresAt),
+  };
+}
+
 function AnnouncementBuilderModal({
   open,
+  existing,
   onClose,
-  onCreated,
+  onSaved,
 }: {
   open: boolean;
+  /** When non-null, modal opens in EDIT mode pre-filled from this row. */
+  existing: EnrichedAnnouncement | null;
   onClose: () => void;
-  onCreated: () => void;
+  onSaved: () => void;
 }) {
+  const isEdit = existing !== null;
   const [form, setForm] = React.useState<BuilderState>(EMPTY_BUILDER);
+  const [initialForm, setInitialForm] = React.useState<BuilderState>(EMPTY_BUILDER);
+  const [status, setStatus] = React.useState<AnnouncementStatus>("active");
+  const [initialStatus, setInitialStatus] = React.useState<AnnouncementStatus>("active");
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [reach, setReach] = React.useState<{ reach: number; totalActive: number } | null>(null);
   const [reaching, setReaching] = React.useState(false);
 
+  // Open lifecycle: reset OR pre-fill based on mode
   React.useEffect(() => {
     if (open) {
-      setForm(EMPTY_BUILDER);
+      if (existing) {
+        const pre = rowToBuilder(existing);
+        setForm(pre);
+        setInitialForm(pre);
+        const s = (existing.status ?? "active") as AnnouncementStatus;
+        setStatus(s);
+        setInitialStatus(s);
+      } else {
+        setForm(EMPTY_BUILDER);
+        setInitialForm(EMPTY_BUILDER);
+        setStatus("active");
+        setInitialStatus("active");
+      }
       setError(null);
       setReach(null);
     }
-  }, [open]);
+  }, [open, existing]);
+
+  // Dirty detection — compared via JSON stringification (forms are small).
+  const dirty = React.useMemo(
+    () => JSON.stringify(form) !== JSON.stringify(initialForm) || status !== initialStatus,
+    [form, initialForm, status, initialStatus],
+  );
+
+  const handleClose = React.useCallback(() => {
+    if (busy) return;
+    if (dirty) {
+      if (!confirm("You have unsaved changes. Discard and close?")) return;
+    }
+    onClose();
+  }, [busy, dirty, onClose]);
 
   React.useEffect(() => {
     if (!open) return;
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") handleClose();
+      // Cmd/Ctrl+Enter = save
+      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+        e.preventDefault();
+        // Triggered via form ref below
+        const btn = document.getElementById("ann-save-btn") as HTMLButtonElement | null;
+        if (btn && !btn.disabled) btn.click();
+      }
     }
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+  }, [open, handleClose]);
+
+  // Browser-level guard for accidental nav/close while dirty.
+  React.useEffect(() => {
+    if (!open || !dirty) return;
+    function onBeforeUnload(e: BeforeUnloadEvent) {
+      e.preventDefault();
+      e.returnValue = "";
+    }
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [open, dirty]);
 
   // Debounced audience-reach preview
   React.useEffect(() => {
@@ -470,22 +555,35 @@ function AnnouncementBuilderModal({
     setError(null);
     setBusy(true);
     try {
-      // Existing /api/admin/announcements zod validator accepts the
-      // current shape. We pass the additive fields and rely on the DB
-      // defaults to land safe values when the server doesn't yet
-      // forward them.
+      const expiresIso = form.expiresAt ? new Date(form.expiresAt).toISOString() : null;
+      const scheduledIso = form.scheduledAt ? new Date(form.scheduledAt).toISOString() : null;
+
+      // Body shared between POST (create) and PATCH (edit). The
+      // server zod schemas accept all of these fields; un-supplied
+      // fields are ignored.
       const body: Record<string, unknown> = {
         title: form.title.trim(),
         body: form.body.trim(),
         severity: form.severity,
         audience: form.audience.trim() || "all",
+        kind: form.kind,
+        channels: form.channels.length > 0 ? form.channels : ["in_app"],
+        audienceRules: form.audienceRules ?? {},
+        status,
+        // Auto-flip active flag based on status for back-compat with
+        // the legacy boolean.
+        active: status === "active" || status === "scheduled",
         linkUrl: form.linkUrl.trim() || null,
         linkLabel: form.linkLabel.trim() || null,
-        active: true,
+        expiresAt: expiresIso,
+        scheduledAt: scheduledIso,
       };
-      if (form.expiresAt) body.expiresAt = new Date(form.expiresAt).toISOString();
-      const res = await fetch("/api/admin/announcements", {
-        method: "POST",
+
+      const url = isEdit
+        ? `/api/admin/announcements/${existing!.id}`
+        : "/api/admin/announcements";
+      const res = await fetch(url, {
+        method: isEdit ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
@@ -494,7 +592,10 @@ function AnnouncementBuilderModal({
         setError(data?.error ?? `HTTP ${res.status}`);
         return;
       }
-      onCreated();
+      // Reset dirty baseline so the close handler doesn't prompt.
+      setInitialForm(form);
+      setInitialStatus(status);
+      onSaved();
       onClose();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Request failed");
@@ -514,7 +615,7 @@ function AnnouncementBuilderModal({
   return (
     <div
       className="fixed inset-0 z-50 flex items-start justify-center bg-slate-900/40 pt-[6vh] backdrop-blur-sm"
-      onClick={onClose}
+      onClick={handleClose}
     >
       <div
         className="w-full max-w-3xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl"
@@ -523,14 +624,18 @@ function AnnouncementBuilderModal({
         <header className="flex items-center justify-between border-b border-slate-200 px-5 py-3">
           <div>
             <div className="text-[10px] font-medium uppercase tracking-wider text-slate-500">
-              New announcement
+              {isEdit ? "Edit announcement" : "New announcement"}
+              {dirty ? <span className="ml-1.5 text-amber-600">· unsaved changes</span> : null}
             </div>
-            <h3 className="mt-0.5 text-base font-semibold text-slate-900">Compose & target</h3>
+            <h3 className="mt-0.5 text-base font-semibold text-slate-900">
+              {isEdit ? form.title || "Untitled announcement" : "Compose & target"}
+            </h3>
           </div>
           <button
             type="button"
-            onClick={onClose}
+            onClick={handleClose}
             className="rounded-md p-1 text-slate-400 hover:bg-slate-100"
+            title="Close (Esc)"
           >
             <X className="h-4 w-4" />
           </button>
@@ -575,6 +680,31 @@ function AnnouncementBuilderModal({
                 </select>
               </Field>
             </div>
+
+            <Field label="Lifecycle status" hint="Draft = invisible. Scheduled = activates at scheduled time.">
+              <div className="grid grid-cols-3 gap-1 sm:grid-cols-6">
+                {(["draft", "scheduled", "active", "paused", "expired", "archived"] as const).map((s) => {
+                  const meta = STATUS_META[s];
+                  const on = status === s;
+                  return (
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() => setStatus(s)}
+                      className={`inline-flex items-center justify-center gap-1 rounded-md border px-2 py-1.5 text-[11px] font-medium transition-all ${
+                        on
+                          ? "border-slate-900 bg-slate-900 text-white"
+                          : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                      }`}
+                      title={meta.label}
+                    >
+                      <span className={`inline-block h-1.5 w-1.5 rounded-full ${meta.dot}`} />
+                      {meta.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </Field>
 
             <Field label="Title">
               <input
@@ -700,14 +830,24 @@ function AnnouncementBuilderModal({
               </Field>
             </div>
 
-            <Field label="Expires at" hint="Leave empty for no expiry">
-              <input
-                type="datetime-local"
-                value={form.expiresAt}
-                onChange={(e) => setForm({ ...form, expiresAt: e.target.value })}
-                className="w-full rounded-md border border-slate-200 px-3 py-1.5 text-[13px]"
-              />
-            </Field>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Scheduled at" hint="Required when status = Scheduled">
+                <input
+                  type="datetime-local"
+                  value={form.scheduledAt}
+                  onChange={(e) => setForm({ ...form, scheduledAt: e.target.value })}
+                  className="w-full rounded-md border border-slate-200 px-3 py-1.5 text-[13px]"
+                />
+              </Field>
+              <Field label="Expires at" hint="Leave empty for no expiry">
+                <input
+                  type="datetime-local"
+                  value={form.expiresAt}
+                  onChange={(e) => setForm({ ...form, expiresAt: e.target.value })}
+                  className="w-full rounded-md border border-slate-200 px-3 py-1.5 text-[13px]"
+                />
+              </Field>
+            </div>
 
             {error ? (
               <div className="rounded-md border border-rose-200 bg-rose-50/60 px-3 py-2 text-[12px] text-rose-800">
@@ -770,24 +910,28 @@ function AnnouncementBuilderModal({
           </aside>
         </div>
 
-        <footer className="flex items-center justify-between border-t border-slate-200 bg-slate-50/60 px-5 py-3">
-          <div className="text-[11px] text-slate-500">Sends use the existing announcement infrastructure.</div>
+        <footer className="sticky bottom-0 flex items-center justify-between border-t border-slate-200 bg-slate-50/80 px-5 py-3 backdrop-blur-sm">
+          <div className="text-[11px] text-slate-500">
+            {isEdit ? "Editing existing announcement · changes apply on save." : "Sends use the existing announcement infrastructure."}
+            <span className="ml-2 text-slate-400">⌘+Enter to save · Esc to close</span>
+          </div>
           <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={onClose}
+              onClick={handleClose}
               className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-[12px] font-medium text-slate-700 hover:bg-slate-50"
             >
               Cancel
             </button>
             <button
+              id="ann-save-btn"
               type="button"
               onClick={submit}
-              disabled={busy || !form.title.trim() || !form.body.trim()}
+              disabled={busy || !form.title.trim() || !form.body.trim() || (isEdit && !dirty)}
               className="inline-flex items-center gap-1.5 rounded-md bg-slate-900 px-3 py-1.5 text-[12px] font-medium text-white shadow-sm hover:bg-slate-800 disabled:opacity-50"
             >
               {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
-              Publish announcement
+              {isEdit ? "Save changes" : "Publish announcement"}
             </button>
           </div>
         </footer>
@@ -810,7 +954,9 @@ export default function AnnouncementsLuxuryClient({
   const [statusFilter, setStatusFilter] = React.useState<AnnouncementStatus | "all">("all");
   const [kindFilter, setKindFilter] = React.useState<string>("all");
   const [sevFilter, setSevFilter] = React.useState<string>("all");
-  const [creating, setCreating] = React.useState(false);
+  // Editor target: null = closed, "new" = create mode, row = edit mode.
+  // (Was `creating: boolean` — extended for the dual-mode editor.)
+  const [editor, setEditor] = React.useState<EnrichedAnnouncement | "new" | null>(null);
 
   function refresh() {
     window.location.reload();
@@ -847,7 +993,7 @@ export default function AnnouncementsLuxuryClient({
         </div>
         <button
           type="button"
-          onClick={() => setCreating(true)}
+          onClick={() => setEditor("new")}
           className="inline-flex items-center gap-1.5 rounded-md bg-slate-900 px-3 py-1.5 text-[12px] font-medium text-white shadow-sm transition-all hover:-translate-y-px hover:bg-slate-800"
         >
           <Plus className="h-3 w-3" />
@@ -973,7 +1119,7 @@ export default function AnnouncementsLuxuryClient({
             icon={<MessageSquare />}
             title="No announcements yet"
             description="Compose your first announcement to reach tenants with release notes, maintenance windows, or engagement nudges. Audience targeting + delivery channels are configurable per send."
-            cta={{ label: "Create announcement", onClick: () => setCreating(true) }}
+            cta={{ label: "Create announcement", onClick: () => setEditor("new") }}
             tone="info"
           />
         ) : (
@@ -990,7 +1136,7 @@ export default function AnnouncementsLuxuryClient({
             <AnnouncementCard
               key={a.id}
               a={a}
-              onEdit={() => (window.location.href = `/admin/announcements/${a.id}`)}
+              onEdit={() => setEditor(a)}
               onArchive={() => {
                 if (confirm(`Archive "${a.title}"?`)) {
                   void fetch(`/api/admin/announcements/${a.id}`, {
@@ -1005,7 +1151,12 @@ export default function AnnouncementsLuxuryClient({
         </div>
       )}
 
-      <AnnouncementBuilderModal open={creating} onClose={() => setCreating(false)} onCreated={refresh} />
+      <AnnouncementBuilderModal
+        open={editor !== null}
+        existing={editor && editor !== "new" ? editor : null}
+        onClose={() => setEditor(null)}
+        onSaved={refresh}
+      />
     </div>
   );
 }
