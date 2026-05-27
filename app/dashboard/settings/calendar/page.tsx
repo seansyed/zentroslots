@@ -43,30 +43,15 @@ export const dynamic = "force-dynamic";
 export default async function CalendarInfrastructurePage(props: {
   searchParams: Promise<{ connected?: string; error?: string }>;
 }) {
-  try {
-    return await renderCalendarPage(props);
-  } catch (err) {
-    console.error(
-      JSON.stringify({
-        evt: "calendar_page_render_error",
-        message: err instanceof Error ? err.message : String(err),
-        stack: err instanceof Error ? err.stack?.slice(0, 4000) : null,
-        ts: new Date().toISOString(),
-      }),
-    );
-    throw err;
-  }
-}
-
-async function renderCalendarPage(props: {
-  searchParams: Promise<{ connected?: string; error?: string }>;
-}) {
   const session = await getSession();
   if (!session) redirect("/dashboard/login");
   const user = await db.query.users.findFirst({ where: eq(users.id, session.sub) });
   if (!user) redirect("/dashboard/login");
   const tenant = await db.query.tenants.findFirst({ where: eq(tenants.id, user.tenantId) });
-  if (!tenant) redirect("/dashboard");
+  // Stale-session safety: if the JWT points at a tenant that was wiped,
+  // send the visitor back to login so they mint a fresh session
+  // pointing at their current tenant.
+  if (!tenant) redirect("/dashboard/login");
 
   const managerial = isManagerial(user.role);
 

@@ -57,30 +57,17 @@ export const dynamic = "force-dynamic";
 const APP_BASE_URL = process.env.APP_BASE_URL ?? "http://localhost:3001";
 
 export default async function BrandingPage() {
-  try {
-    return await renderBrandingPage();
-  } catch (err) {
-    // Production-debug: capture full stack to stderr so pm2 logs reveal
-    // the actual crash site instead of opaque "Something went wrong".
-    console.error(
-      JSON.stringify({
-        evt: "branding_page_render_error",
-        message: err instanceof Error ? err.message : String(err),
-        stack: err instanceof Error ? err.stack?.slice(0, 4000) : null,
-        ts: new Date().toISOString(),
-      }),
-    );
-    throw err;
-  }
-}
-
-async function renderBrandingPage() {
   const session = await getSession();
   if (!session) redirect("/dashboard/login");
   const user = await db.query.users.findFirst({ where: eq(users.id, session.sub) });
-  if (!user || user.role !== "admin") redirect("/dashboard");
+  // Stale-session safety (2026-05-27): if the JWT references a user.id
+  // that no longer exists (e.g. after a DB cleanup), send the visitor
+  // back to login to mint a fresh session instead of bouncing them to
+  // /dashboard where the same lookup would fail again.
+  if (!user) redirect("/dashboard/login");
+  if (user.role !== "admin") redirect("/dashboard");
   const tenant = await db.query.tenants.findFirst({ where: eq(tenants.id, user.tenantId) });
-  if (!tenant) redirect("/dashboard");
+  if (!tenant) redirect("/dashboard/login");
 
   const allowed = planFeature(tenant.currentPlan, "customBranding");
   const plan = getPlan(tenant.currentPlan);
