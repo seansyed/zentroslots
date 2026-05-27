@@ -1,19 +1,46 @@
-import Link from "next/link";
+/**
+ * Global 404 — served by Next.js for every unmatched route across the
+ * App Router (deep links, refreshes on stale paths, mistyped URLs).
+ *
+ * Auth-aware routing:
+ *   • If a valid session cookie is present  → primary CTA = /dashboard
+ *   • Otherwise                              → primary CTA = /dashboard/login
+ *
+ * Why server-side: getSession() reads the JWT cookie via next/headers,
+ * which is only available in server components. We resolve the CTA
+ * target once and hand it down to the client experience for the
+ * interactive bits (window.history.back, focus, animation).
+ *
+ * Safety:
+ *   • Pure server component — no DB writes, no API calls
+ *   • Wrapped in try/catch so a cookie-decode failure never breaks the
+ *     404 page itself (the whole point of this surface is to never
+ *     leave a visitor stranded)
+ *   • Additive: this file replaces the existing minimal NotFound,
+ *     does not touch middleware, layouts, or any other route
+ */
 
-export default function NotFound() {
-  return (
-    <div className="mx-auto flex min-h-[60vh] max-w-md flex-col items-center justify-center px-6 text-center">
-      <div className="text-6xl font-semibold text-slate-300">404</div>
-      <h1 className="mt-3 text-xl font-semibold">Page not found</h1>
-      <p className="mt-2 text-sm text-slate-600">
-        The link may be expired, mistyped, or no longer available.
-      </p>
-      <Link
-        href="/"
-        className="mt-6 rounded-md bg-brand-accent px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
-      >
-        Back to home
-      </Link>
-    </div>
-  );
+import { getSession } from "@/lib/auth";
+import NotFoundExperience from "@/components/system/NotFoundExperience";
+
+export const metadata = {
+  title: "Page not found · ZentroMeet",
+  description: "The page you’re looking for may have been moved, deleted, or never existed.",
+};
+
+export default async function NotFound() {
+  let authed = false;
+  try {
+    const session = await getSession();
+    authed = Boolean(session?.sub);
+  } catch {
+    // Session decode failure → treat as unauthenticated. We must never
+    // throw from this surface — it's the last-resort recovery page.
+    authed = false;
+  }
+
+  const primaryHref = authed ? "/dashboard" : "/dashboard/login";
+  const primaryLabel = authed ? "Go to dashboard" : "Sign in to ZentroMeet";
+
+  return <NotFoundExperience primaryHref={primaryHref} primaryLabel={primaryLabel} />;
 }
