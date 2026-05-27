@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
+import { confirmAction } from "@/components/ui/primitives";
 
 type Promo = {
   id: string;
@@ -80,7 +81,16 @@ function PromoRow({ p, onChanged }: { p: Promo; onChanged: () => void }) {
     }
   }
   async function remove() {
-    if (!confirm(`Delete promotion ${p.code}? This cannot be undone.`)) return;
+    if (
+      !(await confirmAction({
+        title: `Delete promotion ${p.code}?`,
+        body: "This action can't be undone. Redemption history is preserved for audit, but the code itself stops working immediately.",
+        variant: "danger",
+        confirmLabel: "Delete promotion",
+      }))
+    ) {
+      return;
+    }
     setBusy(true);
     try {
       await fetch(`/api/admin/promotions/${p.id}`, { method: "DELETE" });

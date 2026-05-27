@@ -30,7 +30,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
-import { Avatar, Button, toast } from "@/components/ui/primitives";
+import { Avatar, Button, toast, confirmAction } from "@/components/ui/primitives";
 import { PremiumCard } from "@/components/ui/Card";
 import { cn } from "@/lib/cn";
 
@@ -431,7 +431,14 @@ export default function CalendarConnectionsClient({
 
   async function forceDisconnect(c: ConnectionRow) {
     const label = c.userName ?? c.userEmail ?? "this staff member";
-    if (!confirm(`Force-disconnect ${prettyProvider(c.provider)} for ${label}?\n\nThis is an incident-recovery action. The owner can reconnect from their Staff Profile afterwards.`)) {
+    if (
+      !(await confirmAction({
+        title: `Force-disconnect ${prettyProvider(c.provider)} for ${label}?`,
+        body: "This is an incident-recovery action. Calendar sync stops immediately. The owner can reconnect from their Staff Profile afterwards.",
+        variant: "danger",
+        confirmLabel: "Force disconnect",
+      }))
+    ) {
       return;
     }
     setBusyId(c.id);

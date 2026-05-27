@@ -60,6 +60,7 @@ import {
   Drawer,
   Skeleton,
   toast,
+  confirmAction,
 } from "@/components/ui/primitives";
 import { PremiumCard, MetricCard } from "@/components/ui/Card";
 import { FadeIn } from "@/components/ui/Motion";
@@ -2300,7 +2301,16 @@ function ServiceDrawer({
 
   async function remove() {
     if (!svc) return;
-    if (!window.confirm("Delete this service? Past bookings keep it; future visibility ends.")) return;
+    if (
+      !(await confirmAction({
+        title: "Delete this service?",
+        body: "Past bookings keep their service reference for audit. New customers can no longer book this service.",
+        variant: "danger",
+        confirmLabel: "Delete service",
+      }))
+    ) {
+      return;
+    }
     setBusy(true);
     try {
       const res = await fetch(`/api/services/${svc.id}`, { method: "DELETE" });

@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
+import { confirmAction } from "@/components/ui/primitives";
 
 type Announcement = {
   id: string;
@@ -56,7 +57,16 @@ export default function AnnouncementsClient({ initial }: { initial: Announcement
 function AnnouncementCard({ a, onChanged }: { a: Announcement; onChanged: () => void }) {
   const [busy, setBusy] = React.useState(false);
   async function remove() {
-    if (!confirm(`Delete "${a.title}"? This is permanent.`)) return;
+    if (
+      !(await confirmAction({
+        title: "Delete this announcement?",
+        body: `"${a.title}" will be removed permanently. This action can't be undone.`,
+        variant: "danger",
+        confirmLabel: "Delete announcement",
+      }))
+    ) {
+      return;
+    }
     setBusy(true);
     try {
       await fetch(`/api/admin/announcements/${a.id}`, { method: "DELETE" });

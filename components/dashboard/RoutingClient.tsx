@@ -30,7 +30,7 @@ import {
   XCircle,
 } from "lucide-react";
 
-import { Badge, Button, Card, Skeleton, toast } from "@/components/ui/primitives";
+import { Badge, Button, Card, Skeleton, toast, confirmAction } from "@/components/ui/primitives";
 
 // ─── Page contract ────────────────────────────────────────────────────
 
@@ -1967,10 +1967,18 @@ function RuleEditor({
 
   async function remove() {
     if (!rule) return;
-    if (!confirm(scope === "tenant"
-      ? "Remove tenant default? Bookings fall back to legacy round-robin."
-      : "Remove this service override? Service inherits tenant default."))
+    if (
+      !(await confirmAction({
+        title: scope === "tenant" ? "Remove tenant routing default?" : "Remove this service override?",
+        body: scope === "tenant"
+          ? "Bookings fall back to legacy round-robin assignment."
+          : "This service inherits the tenant default going forward.",
+        variant: "warning",
+        confirmLabel: "Remove rule",
+      }))
+    ) {
       return;
+    }
     setSaving(true);
     try {
       const res = await fetch(`/api/tenant/routing-rules?id=${rule.id}`, { method: "DELETE" });

@@ -40,7 +40,7 @@ import {
   ExternalLink,
 } from "lucide-react";
 
-import { Drawer, toast } from "@/components/ui/primitives";
+import { Drawer, toast, confirmAction } from "@/components/ui/primitives";
 import { InsightCard } from "@/components/ui/Card";
 import { STATUS_LABEL, STATUS_DOT, type Status } from "@/lib/status-colors";
 import { cn } from "@/lib/cn";
@@ -101,6 +101,14 @@ export default function AppointmentDrawer({
 
   async function cancel() {
     if (!booking) return;
+    const ok = await confirmAction({
+      title: "Cancel this appointment?",
+      body: `${booking.clientName} will be notified by email. This action can't be undone.`,
+      variant: "danger",
+      confirmLabel: "Cancel appointment",
+      cancelLabel: "Keep it",
+    });
+    if (!ok) return;
     setBusy(true);
     try {
       const res = await fetch(`/api/bookings/${booking.id}/cancel`, { method: "POST" });

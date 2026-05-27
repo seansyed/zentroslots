@@ -54,7 +54,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-import { Drawer } from "@/components/ui/primitives";
+import { Drawer, confirmAction } from "@/components/ui/primitives";
 import {
   AlertCircle,
   ArrowRight,
@@ -1613,11 +1613,15 @@ function ManageDrawer({
   async function onDelete() {
     if (!provider) return;
     if (
-      !confirm(
-        `Permanently delete this ${providerDisplayName(provider.provider)} ${provider.mode} connection? This cannot be undone — past bookings keep their payment_provider_id audit reference but no new bookings can route here.`,
-      )
-    )
+      !(await confirmAction({
+        title: `Permanently delete this ${providerDisplayName(provider.provider)} ${provider.mode} connection?`,
+        body: "This can't be undone. Past bookings keep their payment_provider_id audit reference, but no new bookings can route through this connection.",
+        variant: "danger",
+        confirmLabel: "Delete connection",
+      }))
+    ) {
       return;
+    }
     setBusy(true);
     setError(null);
     try {

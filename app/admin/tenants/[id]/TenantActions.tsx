@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
+import { confirmAction } from "@/components/ui/primitives";
 
 type Op =
   | { op: "suspend" }
@@ -48,7 +49,16 @@ export default function TenantActions({
   }
 
   async function impersonate() {
-    if (!confirm("Impersonate this tenant? You'll be logged in as their admin and every action is audit-logged.")) return;
+    if (
+      !(await confirmAction({
+        title: "Impersonate this tenant?",
+        body: "You'll be logged in as their admin. Every action you take is audit-logged and visible to the tenant.",
+        variant: "warning",
+        confirmLabel: "Impersonate",
+      }))
+    ) {
+      return;
+    }
     setBusy(true);
     setErr(null);
     try {
@@ -80,8 +90,14 @@ export default function TenantActions({
         {active ? (
           <button
             disabled={busy}
-            onClick={() => {
-              if (confirm("Suspend this tenant? Users will be locked out.")) call({ op: "suspend" });
+            onClick={async () => {
+              const ok = await confirmAction({
+                title: "Suspend this tenant?",
+                body: "All users in this workspace will be locked out immediately. You can reactivate them at any time.",
+                variant: "danger",
+                confirmLabel: "Suspend tenant",
+              });
+              if (ok) call({ op: "suspend" });
             }}
             className="rounded-md border border-red-300 bg-white px-3 py-1.5 font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
           >

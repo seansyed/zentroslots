@@ -24,7 +24,7 @@ import {
   X,
 } from "lucide-react";
 
-import { Badge, Button, Card, Skeleton, toast } from "@/components/ui/primitives";
+import { Badge, Button, Card, Skeleton, toast, confirmAction } from "@/components/ui/primitives";
 
 // ─── Data types (unchanged from prior implementation) ─────────────────
 
@@ -615,7 +615,16 @@ function RuleEditor({
 
   async function remove() {
     if (!rule) return;
-    if (!confirm("Remove this rule? Falls back to the next-most-specific rule, or to legacy behavior.")) return;
+    if (
+      !(await confirmAction({
+        title: "Remove this booking rule?",
+        body: "Future bookings fall back to the next-most-specific rule, or to legacy behavior.",
+        variant: "danger",
+        confirmLabel: "Remove rule",
+      }))
+    ) {
+      return;
+    }
     setSaving(true);
     try {
       const res = await fetch(`/api/tenant/booking-rules?id=${rule.id}`, { method: "DELETE" });

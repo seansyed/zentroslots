@@ -25,6 +25,7 @@
  */
 
 import * as React from "react";
+import { confirmAction } from "@/components/ui/primitives";
 import {
   AlertTriangle,
   Boxes,
@@ -862,12 +863,14 @@ export default function SimulationClient({ initial }: { initial: StatusResp }) {
             <button
               type="button"
               disabled={!data.enabled || busy !== null}
-              onClick={() => {
-                if (
-                  confirm(
-                    "Reset wipes every row tagged with the seed marker. Real customer data is never touched. Proceed?",
-                  )
-                ) {
+              onClick={async () => {
+                const ok = await confirmAction({
+                  title: "Reset synthetic simulation footprint?",
+                  body: "Every row tagged with the seed marker will be wiped. Real customer data is never touched.",
+                  variant: "danger",
+                  confirmLabel: "Reset footprint",
+                });
+                if (ok) {
                   void post({ action: "reset" }, "reset");
                 }
               }}

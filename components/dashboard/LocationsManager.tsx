@@ -32,6 +32,7 @@ import {
   Drawer,
   Skeleton,
   toast,
+  confirmAction,
 } from "@/components/ui/primitives";
 import { PremiumCard } from "@/components/ui/Card";
 import { FadeIn } from "@/components/ui/Motion";
@@ -965,7 +966,16 @@ function LocationDrawer({
 
   async function archive() {
     if (!loc) return;
-    if (!window.confirm("Archive this location? Past bookings keep their reference; new bookings can't choose it until you reactivate.")) return;
+    if (
+      !(await confirmAction({
+        title: "Archive this location?",
+        body: "Past bookings keep their reference. New bookings can't choose this location until you reactivate it.",
+        variant: "warning",
+        confirmLabel: "Archive location",
+      }))
+    ) {
+      return;
+    }
     setBusy(true);
     try {
       const r = await fetch(`/api/locations/${loc.id}`, { method: "DELETE" });

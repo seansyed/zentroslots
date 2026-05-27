@@ -12,6 +12,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { confirmAction } from "@/components/ui/primitives";
 import {
   AlertCircle,
   Check,
@@ -275,7 +276,16 @@ export default function IntakeFormsClient({
   }
 
   async function deleteForm(id: string) {
-    if (!confirm("Delete this form? This cannot be undone.")) return;
+    if (
+      !(await confirmAction({
+        title: "Delete this intake form?",
+        body: "Past submissions stay in the audit trail. The form itself will no longer be available to services or new bookings.",
+        variant: "danger",
+        confirmLabel: "Delete form",
+      }))
+    ) {
+      return;
+    }
     try {
       const res = await fetch(`/api/tenant/intake-forms/${id}`, { method: "DELETE" });
       const data = await res.json();

@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Badge, Button, Card, toast } from "@/components/ui/primitives";
+import { Badge, Button, Card, toast, confirmAction } from "@/components/ui/primitives";
 
 type ProviderRow = {
   id: string;
@@ -140,7 +140,16 @@ function ProviderForm({
   }
 
   async function disconnect() {
-    if (!confirm("Disconnect SMS provider? Outgoing SMS will stop until you reconnect.")) return;
+    if (
+      !(await confirmAction({
+        title: "Disconnect SMS provider?",
+        body: "Outgoing SMS messages will stop immediately. You can reconnect at any time.",
+        variant: "danger",
+        confirmLabel: "Disconnect",
+      }))
+    ) {
+      return;
+    }
     setBusy(true);
     try {
       const res = await fetch("/api/tenant/sms", { method: "DELETE" });

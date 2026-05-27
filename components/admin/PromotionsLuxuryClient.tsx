@@ -24,6 +24,7 @@
  */
 
 import * as React from "react";
+import { confirmAction } from "@/components/ui/primitives";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -845,13 +846,19 @@ export default function PromotionsLuxuryClient({
                 window.location.href = `/admin/promotions/${p.id}`;
               }}
               onArchive={() => {
-                if (confirm(`Archive promo "${p.code}"?`)) {
+                void confirmAction({
+                  title: `Archive promo "${p.code}"?`,
+                  body: "The code stops working immediately. Redemption history is kept for audit.",
+                  variant: "warning",
+                  confirmLabel: "Archive promo",
+                }).then((ok: boolean) => {
+                  if (!ok) return;
                   void fetch(`/api/admin/promotions/${p.id}`, {
                     method: "PATCH",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ active: false }),
                   }).then(() => refresh());
-                }
+                });
               }}
             />
           ))}

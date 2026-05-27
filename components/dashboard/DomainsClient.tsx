@@ -39,7 +39,7 @@ import {
 } from "lucide-react";
 
 import { PremiumCard } from "@/components/ui/Card";
-import { toast } from "@/components/ui/primitives";
+import { toast, confirmAction } from "@/components/ui/primitives";
 import { cn } from "@/lib/cn";
 import { usePlanCapabilities } from "@/components/billing/CapabilityProvider";
 
@@ -181,7 +181,14 @@ export default function DomainsClient({
   }
 
   async function removeDomain(id: string, host: string) {
-    if (typeof window !== "undefined" && !window.confirm(`Remove ${host}? Routing will stop immediately.`)) {
+    if (
+      !(await confirmAction({
+        title: `Remove ${host}?`,
+        body: "Custom-domain routing stops immediately. Visitors hitting this host will see a 404.",
+        variant: "danger",
+        confirmLabel: "Remove domain",
+      }))
+    ) {
       return;
     }
     try {

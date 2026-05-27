@@ -23,6 +23,7 @@
  */
 
 import * as React from "react";
+import { confirmAction } from "@/components/ui/primitives";
 import {
   AlertCircle,
   AlertTriangle,
@@ -476,10 +477,17 @@ function AnnouncementBuilderModal({
     [form, initialForm, status, initialStatus],
   );
 
-  const handleClose = React.useCallback(() => {
+  const handleClose = React.useCallback(async () => {
     if (busy) return;
     if (dirty) {
-      if (!confirm("You have unsaved changes. Discard and close?")) return;
+      const ok = await confirmAction({
+        title: "Discard unsaved changes?",
+        body: "You have edits that haven't been saved. Closing now will lose them.",
+        variant: "warning",
+        confirmLabel: "Discard changes",
+        cancelLabel: "Keep editing",
+      });
+      if (!ok) return;
     }
     onClose();
   }, [busy, dirty, onClose]);
@@ -1138,13 +1146,19 @@ export default function AnnouncementsLuxuryClient({
               a={a}
               onEdit={() => setEditor(a)}
               onArchive={() => {
-                if (confirm(`Archive "${a.title}"?`)) {
+                void confirmAction({
+                  title: `Archive "${a.title}"?`,
+                  body: "The announcement is hidden from new audiences. You can reactivate it from the list.",
+                  variant: "warning",
+                  confirmLabel: "Archive",
+                }).then((ok) => {
+                  if (!ok) return;
                   void fetch(`/api/admin/announcements/${a.id}`, {
                     method: "PATCH",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ active: false }),
                   }).then(() => refresh());
-                }
+                });
               }}
             />
           ))}

@@ -24,7 +24,7 @@ import {
   XCircle,
 } from "lucide-react";
 
-import { Badge, Card, Skeleton, toast } from "@/components/ui/primitives";
+import { Badge, Card, Skeleton, toast, confirmAction } from "@/components/ui/primitives";
 
 // ─── Types (unchanged contract with /api/tenant/waitlists) ───────────
 
@@ -139,10 +139,18 @@ export default function WaitlistsClient() {
   React.useEffect(() => { refresh(); }, [refresh]);
 
   async function action(id: string, kind: "cancel" | "expire_hold") {
-    if (!confirm(kind === "cancel"
-      ? "Remove this customer from the waitlist?"
-      : "Force-expire this reservation hold? The slot reopens to the next eligible customer."))
+    if (
+      !(await confirmAction({
+        title: kind === "cancel" ? "Remove from waitlist?" : "Force-expire this reservation hold?",
+        body: kind === "cancel"
+          ? "This customer is removed from the waitlist. They won't be notified when slots open."
+          : "The slot is released and offered to the next eligible customer on the waitlist.",
+        variant: "warning",
+        confirmLabel: kind === "cancel" ? "Remove customer" : "Expire hold",
+      }))
+    ) {
       return;
+    }
     try {
       const res = await fetch("/api/tenant/waitlists", {
         method: "PATCH",

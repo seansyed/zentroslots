@@ -70,6 +70,7 @@ import {
   Modal,
   Skeleton,
   toast,
+  confirmAction,
 } from "@/components/ui/primitives";
 import { PremiumCard, MetricCard } from "@/components/ui/Card";
 import { FadeIn } from "@/components/ui/Motion";
@@ -3271,7 +3272,14 @@ function CalendarConnectionsSection({
 
   async function disconnect(connectionId: string) {
     if (!canEdit) return;
-    if (!window.confirm("Disconnect this calendar? Booking sync for this staff will stop until they reconnect.")) {
+    if (
+      !(await confirmAction({
+        title: "Disconnect this calendar?",
+        body: "Booking sync for this staff member stops until they reconnect from their Staff Profile.",
+        variant: "danger",
+        confirmLabel: "Disconnect",
+      }))
+    ) {
       return;
     }
     setBusyId(connectionId);
@@ -3428,9 +3436,12 @@ function AppleCalendarSubscriptionRow({
   async function generateOrRotate(kind: "generate" | "rotate") {
     if (!canEdit) return;
     if (kind === "rotate") {
-      const ok = window.confirm(
-        "Regenerate the feed URL? Your existing iPhone/Mac subscription will stop syncing until you re-subscribe with the new URL.",
-      );
+      const ok = await confirmAction({
+        title: "Regenerate the feed URL?",
+        body: "Your existing iPhone or Mac calendar subscription will stop syncing until you re-subscribe with the new URL.",
+        variant: "warning",
+        confirmLabel: "Regenerate URL",
+      });
       if (!ok) return;
     }
     setBusy(kind);
@@ -3461,9 +3472,12 @@ function AppleCalendarSubscriptionRow({
 
   async function revoke() {
     if (!canEdit) return;
-    const ok = window.confirm(
-      "Revoke the feed URL? Your Apple Calendar subscription will stop receiving updates.",
-    );
+    const ok = await confirmAction({
+      title: "Revoke the feed URL?",
+      body: "Your Apple Calendar subscription will stop receiving updates. You can issue a new URL afterwards.",
+      variant: "danger",
+      confirmLabel: "Revoke URL",
+    });
     if (!ok) return;
     setBusy("revoke");
     try {
@@ -3766,9 +3780,12 @@ function ImportedCalendarFeedsSection({
   async function removeFeed(feed: ImportedFeed) {
     if (!canEdit) return;
     if (
-      !window.confirm(
-        `Remove "${feed.providerLabel}"? Its busy events will stop blocking booking slots.`,
-      )
+      !(await confirmAction({
+        title: `Remove "${feed.providerLabel}"?`,
+        body: "Its busy events will stop blocking booking slots. You can re-import the feed at any time.",
+        variant: "warning",
+        confirmLabel: "Remove feed",
+      }))
     ) {
       return;
     }

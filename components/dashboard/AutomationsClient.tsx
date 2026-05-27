@@ -4,7 +4,7 @@ import * as React from "react";
 import Link from "next/link";
 import { Lock, Sparkles, Heart, TrendingUp, Zap } from "lucide-react";
 
-import { Badge, Button, Card, Skeleton, toast } from "@/components/ui/primitives";
+import { Badge, Button, Card, Skeleton, toast, confirmAction } from "@/components/ui/primitives";
 import { useCapability } from "@/components/billing/CapabilityProvider";
 import {
   PremiumLockedExperience,
@@ -331,7 +331,16 @@ function ReviewRuleEditor({
 
   async function remove() {
     if (!rule) return;
-    if (!confirm("Remove this review-request rule?")) return;
+    if (
+      !(await confirmAction({
+        title: "Remove this review-request rule?",
+        body: "Customers will no longer be asked for a review after their appointment.",
+        variant: "danger",
+        confirmLabel: "Remove rule",
+      }))
+    ) {
+      return;
+    }
     setSaving(true);
     try {
       const res = await fetch(`/api/tenant/automations?kind=review&id=${rule.id}`, { method: "DELETE" });
@@ -479,7 +488,16 @@ function FollowupRuleEditor({
   }
 
   async function remove() {
-    if (!confirm("Remove this follow-up rule?")) return;
+    if (
+      !(await confirmAction({
+        title: "Remove this follow-up rule?",
+        body: "Existing scheduled follow-ups stay queued. New appointments won't trigger this rule.",
+        variant: "danger",
+        confirmLabel: "Remove rule",
+      }))
+    ) {
+      return;
+    }
     setSaving(true);
     try {
       const res = await fetch(`/api/tenant/automations?kind=followup&id=${rule.id}`, { method: "DELETE" });

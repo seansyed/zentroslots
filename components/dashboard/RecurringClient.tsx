@@ -26,7 +26,7 @@ import {
   XCircle,
 } from "lucide-react";
 
-import { Badge, Button, Card, Skeleton, toast } from "@/components/ui/primitives";
+import { Badge, Button, Card, Skeleton, toast, confirmAction } from "@/components/ui/primitives";
 import { useCapability } from "@/components/billing/CapabilityProvider";
 import {
   PremiumLockedExperience,
@@ -125,9 +125,16 @@ export default function RecurringClient() {
   React.useEffect(() => { refresh(); }, [refresh]);
 
   async function actionSeries(id: string, action: "pause" | "resume" | "cancel") {
-    if (action === "cancel" && !confirm(
-      "Cancel this series? Already-booked occurrences remain on the calendar — cancel them individually if needed.",
-    )) return;
+    if (action === "cancel") {
+      const ok = await confirmAction({
+        title: "Cancel this recurring series?",
+        body: "Already-booked occurrences stay on the calendar. Cancel them individually if needed.",
+        variant: "danger",
+        confirmLabel: "Cancel series",
+        cancelLabel: "Keep it",
+      });
+      if (!ok) return;
+    }
     try {
       const res = await fetch("/api/tenant/booking-series", {
         method: "PATCH",
@@ -994,7 +1001,18 @@ function OccurrencesPanel({
   React.useEffect(() => { load(); }, [load]);
 
   async function action(occId: string, kind: "skip" | "cancel") {
-    if (!confirm(`${kind === "skip" ? "Skip" : "Cancel"} this occurrence?`)) return;
+    if (
+      !(await confirmAction({
+        title: `${kind === "skip" ? "Skip" : "Cancel"} this occurrence?`,
+        body: kind === "skip"
+          ? "This single occurrence is removed from the schedule. The series continues normally."
+          : "This single occurrence is cancelled. The series continues normally.",
+        variant: "warning",
+        confirmLabel: kind === "skip" ? "Skip occurrence" : "Cancel occurrence",
+      }))
+    ) {
+      return;
+    }
     try {
       const res = await fetch(`/api/tenant/booking-series/${seriesId}/occurrences/${occId}`, {
         method: "PATCH",

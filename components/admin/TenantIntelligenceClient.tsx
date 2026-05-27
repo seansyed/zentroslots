@@ -20,6 +20,7 @@
  */
 
 import * as React from "react";
+import { confirmAction } from "@/components/ui/primitives";
 import {
   CheckCircle2,
   ChevronDown,
@@ -289,9 +290,12 @@ function TenantDrawer({
   async function runAction(op: string, extra: Record<string, unknown> = {}) {
     if (!row) return;
     if (
-      !window.confirm(
-        `Confirm: ${op.replace(/_/g, " ")} for "${row.name}"?\n\nThis action is audit-logged.`,
-      )
+      !(await confirmAction({
+        title: `${op.replace(/_/g, " ")} "${row.name}"?`,
+        body: "This action is audit-logged. You can review it from the Activity Center.",
+        variant: "warning",
+        confirmLabel: "Continue",
+      }))
     ) {
       return;
     }
@@ -714,9 +718,12 @@ export default function TenantIntelligenceClient({ initial }: { initial: TenantI
   async function runBulkAction(op: string) {
     if (selected.size === 0) return;
     if (
-      !window.confirm(
-        `Confirm: ${op.replace(/_/g, " ")} for ${selected.size} tenant${selected.size === 1 ? "" : "s"}?\n\nThis action is audit-logged.`,
-      )
+      !(await confirmAction({
+        title: `${op.replace(/_/g, " ")} ${selected.size} tenant${selected.size === 1 ? "" : "s"}?`,
+        body: "This action is audit-logged. You can review every change from the Activity Center.",
+        variant: "warning",
+        confirmLabel: "Continue",
+      }))
     ) {
       return;
     }

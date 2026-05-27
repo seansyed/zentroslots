@@ -61,7 +61,7 @@ import {
   RotateCcw,
 } from "lucide-react";
 
-import { Avatar, toast } from "@/components/ui/primitives";
+import { Avatar, toast, confirmAction } from "@/components/ui/primitives";
 import { PremiumCard, InsightCard, SectionHeader } from "@/components/ui/Card";
 import { FadeIn } from "@/components/ui/Motion";
 import { cn } from "@/lib/cn";
@@ -218,7 +218,16 @@ export default function TasksClient({
       toast("Preview · Sample tasks can't be deleted.", "info");
       return;
     }
-    if (!window.confirm("Delete this task?")) return;
+    if (
+      !(await confirmAction({
+        title: "Delete this task?",
+        body: "The task is removed permanently. This action can't be undone.",
+        variant: "danger",
+        confirmLabel: "Delete task",
+      }))
+    ) {
+      return;
+    }
     setRows((cur) => cur?.filter((x) => x.id !== t.id) ?? null);
     try {
       const r = await fetch(`/api/tasks/${t.id}`, { method: "DELETE" });

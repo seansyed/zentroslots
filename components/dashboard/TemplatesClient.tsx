@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Badge, Button, Card, Skeleton, toast } from "@/components/ui/primitives";
+import { Badge, Button, Card, Skeleton, toast, confirmAction } from "@/components/ui/primitives";
 import { hasWarnings, lintHtmlTemplate, type LintFinding } from "@/lib/communications/html-lint";
 
 // Kept in sync with lib/communications/template-types.ts. The API
@@ -154,10 +154,20 @@ export default function TemplatesClient({ currentUserEmail }: { currentUserEmail
       const params = new URLSearchParams({ type });
       if (scopeServiceId) params.set("serviceId", scopeServiceId);
       const target = labelFor(type).title;
-      const msg = scopeServiceId
-        ? `Revert "${target}" to inherit from business default?`
-        : `Revert "${target}" to the system default? Your customizations will be lost.`;
-      if (!confirm(msg)) return;
+      if (
+        !(await confirmAction({
+          title: scopeServiceId
+            ? `Revert "${target}" to inherit from business default?`
+            : `Revert "${target}" to the system default?`,
+          body: scopeServiceId
+            ? "The service override is deleted. This template now follows the business default."
+            : "Your customizations are discarded. The template returns to ZentroMeet's built-in copy.",
+          variant: "warning",
+          confirmLabel: "Revert template",
+        }))
+      ) {
+        return;
+      }
       try {
         const res = await fetch(`/api/tenant/communications/templates?${params.toString()}`, {
           method: "DELETE",
@@ -456,9 +466,16 @@ function TemplateEditor({
   const hasLintWarnings = hasWarnings(lintFindings);
 
   // Wrap onClose with the dirty-state confirmation prompt.
-  const confirmClose = React.useCallback(() => {
+  const confirmClose = React.useCallback(async () => {
     if (dirty) {
-      if (!confirm("Discard unsaved changes to this template?")) return;
+      const ok = await confirmAction({
+        title: "Discard unsaved changes?",
+        body: "You have edits to this template that haven't been saved.",
+        variant: "warning",
+        confirmLabel: "Discard changes",
+        cancelLabel: "Keep editing",
+      });
+      if (!ok) return;
     }
     onClose();
   }, [dirty, onClose]);
@@ -530,10 +547,20 @@ function TemplateEditor({
   }
 
   async function restoreDefaults() {
-    const confirmMsg = serviceId
-      ? `Restore "${meta.title}" for ${serviceName ?? "this service"} to inherit from your business default? The service override will be deleted.`
-      : `Restore "${meta.title}" to the system default? Your customizations will be discarded.`;
-    if (!confirm(confirmMsg)) return;
+    if (
+      !(await confirmAction({
+        title: serviceId
+          ? `Restore "${meta.title}" for ${serviceName ?? "this service"}?`
+          : `Restore "${meta.title}" to the system default?`,
+        body: serviceId
+          ? "The service override is deleted. This service inherits the business default going forward."
+          : "Your customizations are discarded. The template returns to ZentroMeet's built-in copy.",
+        variant: "warning",
+        confirmLabel: "Restore default",
+      }))
+    ) {
+      return;
+    }
     try {
       const params = new URLSearchParams({ type: initial.templateType });
       if (serviceId) params.set("serviceId", serviceId);

@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
+import { confirmAction } from "@/components/ui/primitives";
 
 type PlanRow = {
   id: string;
@@ -108,7 +109,16 @@ function PlanCard({ plan, onChanged }: { plan: PlanRow; onChanged: () => void })
   }
 
   async function archive() {
-    if (!confirm(`Archive plan "${plan.name}"? Tenants already on it stay; new signups won't see it.`)) return;
+    if (
+      !(await confirmAction({
+        title: `Archive plan "${plan.name}"?`,
+        body: "Tenants already on this plan stay subscribed. New signups won't see it as an option.",
+        variant: "warning",
+        confirmLabel: "Archive plan",
+      }))
+    ) {
+      return;
+    }
     setBusy(true);
     try {
       await fetch(`/api/admin/plans/${plan.id}`, { method: "DELETE" });
