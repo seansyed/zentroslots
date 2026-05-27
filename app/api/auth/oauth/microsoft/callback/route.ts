@@ -23,10 +23,15 @@ import { NextRequest, NextResponse } from "next/server";
 
 import {
   buildCallbackUrl,
+  buildMobileErrorUrl,
+  buildMobileSuccessUrl,
   consumeOAuthStateCookie,
   enrichUserProfileFromOAuth,
   findOrCreateUserForOAuth,
+  isMobileOAuthFlow,
   issueOAuthSession,
+  MOBILE_OAUTH_COOKIE,
+  mintMobileOAuthToken,
   publicUrl,
   safeNextPath,
 } from "@/lib/auth/oauth";
@@ -62,6 +67,12 @@ type MicrosoftIdTokenClaims = {
 };
 
 function loginError(req: NextRequest, code: string): NextResponse {
+  // Mobile flow → deep-link the error back to the native app.
+  if (isMobileOAuthFlow(req)) {
+    const res = NextResponse.redirect(buildMobileErrorUrl(code));
+    res.cookies.delete(MOBILE_OAUTH_COOKIE);
+    return res;
+  }
   // Public-host redirect — see google/callback/route.ts for the
   // reverse-proxy rationale.
   const target = publicUrl(req, "/dashboard/login");
@@ -140,19 +151,32 @@ export async function GET(req: NextRequest) {
     return loginError(req, "missing_email");
   }
 
+  const mobile = isMobileOAuthFlow(req);
   let resolvedUserId: string | null = null;
   let isNewUser = false;
+  let mobileToken: string | null = null;
+  let mobileUser: { id: string; email: string; name: string } | null = null;
   try {
     const result = await findOrCreateUserForOAuth({
       email: rawEmail,
       name: claims?.name ?? null,
       provider: "microsoft",
     });
-    await issueOAuthSession({
-      userId: result.userId,
-      provider: "microsoft",
-      req,
-    });
+    if (mobile) {
+      const minted = await mintMobileOAuthToken({
+        userId: result.userId,
+        provider: "microsoft",
+        req,
+      });
+      mobileToken = minted.token;
+      mobileUser = { id: minted.user.id, email: minted.user.email, name: minted.user.name };
+    } else {
+      await issueOAuthSession({
+        userId: result.userId,
+        provider: "microsoft",
+        req,
+      });
+    }
     resolvedUserId = result.userId;
     isNewUser = result.isNewUser;
   } catch (e) {
@@ -180,6 +204,20 @@ export async function GET(req: NextRequest) {
     }).catch((e) => {
       console.warn("[oauth/microsoft] profile enrichment failed (non-fatal):", e);
     });
+  }
+
+  // Mobile flow: deep-link the token back to the native app.
+  if (mobile && mobileToken && mobileUser) {
+    const target = buildMobileSuccessUrl({
+      token: mobileToken,
+      userId: mobileUser.id,
+      email: mobileUser.email,
+      name: mobileUser.name,
+    });
+    const res = NextResponse.redirect(target);
+    res.cookies.delete(MOBILE_OAUTH_COOKIE);
+    res.cookies.delete("zm_oauth_next");
+    return res;
   }
 
   const nextCookie = req.cookies.get("zm_oauth_next")?.value;

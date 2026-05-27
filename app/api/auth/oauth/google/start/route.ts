@@ -16,6 +16,8 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   buildCallbackUrl,
   generateOAuthState,
+  MOBILE_OAUTH_COOKIE,
+  mobileOAuthCookieOptions,
   safeNextPath,
   setOAuthStateCookie,
 } from "@/lib/auth/oauth";
@@ -38,6 +40,12 @@ export async function GET(req: NextRequest) {
   // send the user back where they intended after auth.
   const url = new URL(req.url);
   const next = safeNextPath(url.searchParams.get("next"));
+  // Phase 1A mobile flow — when the native app initiates auth via
+  // WebBrowser.openAuthSessionAsync() it appends ?mobile=1. We stash a
+  // cookie so the callback can branch to a zentromeet:// deep link
+  // instead of setting an httpOnly session cookie. See
+  // lib/auth/oauth.ts → mobile section.
+  const mobile = url.searchParams.get("mobile") === "1";
 
   // CSRF state: random 32-byte cookie + same value as ?state= param.
   const state = generateOAuthState();
@@ -75,5 +83,8 @@ export async function GET(req: NextRequest) {
     path: "/",
     maxAge: 600,
   });
+  if (mobile) {
+    res.cookies.set(MOBILE_OAUTH_COOKIE, "1", mobileOAuthCookieOptions());
+  }
   return res;
 }

@@ -20,6 +20,8 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   buildCallbackUrl,
   generateOAuthState,
+  MOBILE_OAUTH_COOKIE,
+  mobileOAuthCookieOptions,
   safeNextPath,
   setOAuthStateCookie,
 } from "@/lib/auth/oauth";
@@ -40,6 +42,8 @@ export async function GET(req: NextRequest) {
 
   const url = new URL(req.url);
   const next = safeNextPath(url.searchParams.get("next"));
+  // Phase 1A mobile flow — see google/start for full rationale.
+  const mobile = url.searchParams.get("mobile") === "1";
 
   const state = generateOAuthState();
   await setOAuthStateCookie("microsoft", state);
@@ -65,5 +69,8 @@ export async function GET(req: NextRequest) {
     path: "/",
     maxAge: 600,
   });
+  if (mobile) {
+    res.cookies.set(MOBILE_OAUTH_COOKIE, "1", mobileOAuthCookieOptions());
+  }
   return res;
 }

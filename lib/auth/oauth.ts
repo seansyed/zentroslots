@@ -306,6 +306,136 @@ export function safeNextPath(raw: string | null | undefined): string {
   return raw;
 }
 
+// ─── Mobile OAuth flow (Phase 1A — 2026-05-27) ────────────────────────
+//
+// The web app uses an httpOnly session cookie after OAuth. Mobile can't
+// share cookies with the in-app browser cross-origin, so we issue a
+// raw JWT and deep-link it back to the native app.
+//
+// Flow:
+//   1. Native app opens /api/auth/oauth/{provider}/start?mobile=1 in
+//      WebBrowser.openAuthSessionAsync().
+//   2. Start route sets `zm_oauth_mobile=1` cookie (10min TTL,
+//      mirrors the existing `zm_oauth_next` cookie pattern).
+//   3. Provider redirects to callback. Callback consumes the cookie;
+//      if mobile, mints a token WITHOUT setting a session cookie, and
+//      redirects to `zentromeet://oauth/callback?token=…&userId=…&…`.
+//   4. WebBrowser detects the custom scheme + closes; native app
+//      parses the URL and stashes the token in SecureStore.
+//
+// Token shape is identical to web (createTokenWithJti) so the API
+// accepts it as `Authorization: Bearer …` via the existing
+// getSession() path (which reads from cookie OR Authorization header).
+
+export const MOBILE_OAUTH_COOKIE = "zm_oauth_mobile";
+export const MOBILE_OAUTH_SCHEME = "zentromeet";
+
+/** Set the mobile-flow cookie when the start route receives ?mobile=1.
+ *  Caller is responsible for attaching the returned cookie options to
+ *  the existing NextResponse. */
+export function mobileOAuthCookieOptions() {
+  return {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax" as const,
+    path: "/",
+    maxAge: 600, // 10 minutes — same TTL as zm_oauth_next + state cookie
+  };
+}
+
+/** True if the current request started from the mobile flow. Callbacks
+ *  check this to decide between a /dashboard redirect (web) and a
+ *  zentromeet:// deep link (mobile). */
+export function isMobileOAuthFlow(req: NextRequest): boolean {
+  return req.cookies.get(MOBILE_OAUTH_COOKIE)?.value === "1";
+}
+
+/** Mint a session JWT for an OAuth-authenticated user WITHOUT setting
+ *  the httpOnly session cookie. Mobile callers receive the raw token
+ *  via deep link and send it as `Authorization: Bearer …` on every
+ *  subsequent request.
+ *
+ *  Records the same session_audit_events + audit row as web login so
+ *  the security dashboard treats mobile sessions identically. */
+export async function mintMobileOAuthToken(args: {
+  userId: string;
+  provider: OAuthProvider;
+  req: NextRequest;
+}): Promise<{ token: string; jti: string; user: { id: string; email: string; name: string; tenantId: string } }> {
+  const user = await db.query.users.findFirst({ where: eq(users.id, args.userId) });
+  if (!user) throw new Error("oauth: user vanished between lookup and mobile token mint");
+
+  const { token, jti } = await createTokenWithJti({
+    sub: user.id,
+    role: user.role,
+    email: user.email,
+    tenantId: user.tenantId,
+  });
+
+  const ip = ipFromHeaders(args.req.headers);
+  const userAgent = userAgentFromHeaders(args.req.headers);
+
+  try {
+    await db
+      .update(users)
+      .set({
+        lastLoginAt: new Date(),
+        lastLoginIp: ip,
+        lastLoginUserAgent: userAgent,
+      })
+      .where(eq(users.id, user.id));
+  } catch (e) {
+    console.error("[oauth] mobile last-login bookkeeping failed:", e);
+  }
+
+  await recordSessionEvent({
+    tenantId: user.tenantId,
+    userId: user.id,
+    eventType: "login",
+    sessionJti: jti,
+    ipAddress: ip,
+    userAgent,
+    deviceLabel: deviceLabelFor(userAgent),
+    metadata: { provider: args.provider, method: "oauth", surface: "mobile" },
+  });
+
+  audit({
+    tenantId: user.tenantId,
+    action: "auth.login",
+    actorUserId: user.id,
+    actorLabel: user.name,
+    ipAddress: ip,
+    metadata: { provider: args.provider, method: "oauth", surface: "mobile" },
+  });
+
+  return { token, jti, user: { id: user.id, email: user.email, name: user.name, tenantId: user.tenantId } };
+}
+
+/** Build a mobile deep-link URL the callback redirects to on success.
+ *  Token is URL-encoded; userId/email/name are appended as separate
+ *  params so the mobile app can render a friendly post-login state
+ *  without an immediate /api/auth/me round-trip. */
+export function buildMobileSuccessUrl(args: {
+  token: string;
+  userId: string;
+  email: string;
+  name: string | null;
+}): string {
+  const params = new URLSearchParams({
+    token: args.token,
+    userId: args.userId,
+    email: args.email,
+  });
+  if (args.name) params.set("name", args.name);
+  return `${MOBILE_OAUTH_SCHEME}://oauth/callback?${params.toString()}`;
+}
+
+/** Build a mobile deep-link URL for the error path. Mobile login screen
+ *  parses ?error= and shows the matching OAUTH_ERROR_LABELS message. */
+export function buildMobileErrorUrl(code: string): string {
+  return `${MOBILE_OAUTH_SCHEME}://oauth/callback?error=${encodeURIComponent(code)}`;
+}
+
 // ─── Profile enrichment (Phase 17I-8) ─────────────────────────────────
 //
 // After identity is resolved AND a session is minted, optionally pull

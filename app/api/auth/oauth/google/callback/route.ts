@@ -21,10 +21,15 @@ import { NextRequest, NextResponse } from "next/server";
 
 import {
   buildCallbackUrl,
+  buildMobileErrorUrl,
+  buildMobileSuccessUrl,
   consumeOAuthStateCookie,
   enrichUserProfileFromOAuth,
   findOrCreateUserForOAuth,
+  isMobileOAuthFlow,
   issueOAuthSession,
+  MOBILE_OAUTH_COOKIE,
+  mintMobileOAuthToken,
   publicUrl,
   safeNextPath,
 } from "@/lib/auth/oauth";
@@ -58,6 +63,13 @@ type GoogleIdTokenClaims = {
 };
 
 function loginError(req: NextRequest, code: string): NextResponse {
+  // Mobile flow → deep-link the error back into the native app so the
+  // login screen can render the OAUTH_ERROR_LABELS message.
+  if (isMobileOAuthFlow(req)) {
+    const res = NextResponse.redirect(buildMobileErrorUrl(code));
+    res.cookies.delete(MOBILE_OAUTH_COOKIE);
+    return res;
+  }
   // IMPORTANT: build the redirect against the PUBLIC host (Caddy/nginx
   // forwarded host), NOT req.url — req.url resolves to the internal
   // http://localhost:3001 origin behind the proxy and would land
@@ -151,19 +163,34 @@ export async function GET(req: NextRequest) {
   }
 
   // Resolve identity → user/session.
+  const mobile = isMobileOAuthFlow(req);
   let resolvedUserId: string | null = null;
   let isNewUser = false;
+  let mobileToken: string | null = null;
+  let mobileUser: { id: string; email: string; name: string } | null = null;
   try {
     const result = await findOrCreateUserForOAuth({
       email: claims.email,
       name: claims.name ?? null,
       provider: "google",
     });
-    await issueOAuthSession({
-      userId: result.userId,
-      provider: "google",
-      req,
-    });
+    if (mobile) {
+      // Mobile flow: mint a raw JWT, no cookie. Native app sends it
+      // back as `Authorization: Bearer …` on every request.
+      const minted = await mintMobileOAuthToken({
+        userId: result.userId,
+        provider: "google",
+        req,
+      });
+      mobileToken = minted.token;
+      mobileUser = { id: minted.user.id, email: minted.user.email, name: minted.user.name };
+    } else {
+      await issueOAuthSession({
+        userId: result.userId,
+        provider: "google",
+        req,
+      });
+    }
     resolvedUserId = result.userId;
     isNewUser = result.isNewUser;
   } catch (e) {
@@ -189,6 +216,22 @@ export async function GET(req: NextRequest) {
     }).catch((e) => {
       console.warn("[oauth/google] profile enrichment failed (non-fatal):", e);
     });
+  }
+
+  // Mobile flow: deep-link the token back into the native app. The
+  // in-app WebBrowser detects the custom scheme + closes; the mobile
+  // app parses the URL and stashes the token in SecureStore.
+  if (mobile && mobileToken && mobileUser) {
+    const target = buildMobileSuccessUrl({
+      token: mobileToken,
+      userId: mobileUser.id,
+      email: mobileUser.email,
+      name: mobileUser.name,
+    });
+    const res = NextResponse.redirect(target);
+    res.cookies.delete(MOBILE_OAUTH_COOKIE);
+    res.cookies.delete("zm_oauth_next");
+    return res;
   }
 
   // Consume the `next` cookie if present; default to /dashboard.
