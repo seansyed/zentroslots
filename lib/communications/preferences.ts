@@ -43,6 +43,7 @@ import {
   type GateDecision,
   type SchedulingEmailKind,
 } from "@/lib/communications/email-rules";
+import { isDemoTenant, logDemoSuppression } from "@/lib/demo-safe";
 
 // Re-export the type + canonical normalizer so callers have one import.
 export { normalizePrefs };
@@ -90,6 +91,17 @@ export type GateResult =
  */
 export async function gateSchedulingEmail(input: GateInput): Promise<GateResult> {
   const prefs = await loadCustomerPrefs(input.tenantId, input.email);
+  // Migration 0070 — demo tenants suppress ALL scheduling email,
+  // overriding manual-resend escape hatch too. The docs-demo
+  // workspace must never produce outbound mail under any circumstance.
+  if (await isDemoTenant(input.tenantId)) {
+    logDemoSuppression({
+      surface: "email",
+      tenantId: input.tenantId,
+      context: { kind: input.kind },
+    });
+    return { allowed: false, prefs, reason: "demo_tenant" };
+  }
   if (input.override) {
     return { allowed: true, prefs, overridden: true };
   }

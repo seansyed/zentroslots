@@ -19,6 +19,7 @@ import { and, eq } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import { pushDeliveries, pushTokens, type bookings } from "@/db/schema";
+import { isDemoTenant, logDemoSuppression } from "@/lib/demo-safe";
 
 export type PushEventType =
   | "booking_created"
@@ -83,6 +84,17 @@ function formatRelativeBrief(d: Date): string {
  */
 export async function enqueueBookingPush(args: EnqueueArgs): Promise<{ enqueued: number }> {
   try {
+    // Demo tenants never enqueue push deliveries — keeps the docs-demo
+    // workspace from buzzing real devices owned by demo accounts.
+    if (await isDemoTenant(args.tenantId)) {
+      logDemoSuppression({
+        surface: "push",
+        tenantId: args.tenantId,
+        context: { event: args.event, booking_id: args.booking.id },
+      });
+      return { enqueued: 0 };
+    }
+
     const tokens = await db
       .select({ token: pushTokens.expoToken })
       .from(pushTokens)

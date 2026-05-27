@@ -124,6 +124,7 @@ import {
   updateEvent as zoomUpdateEvent,
 } from "./zoom";
 import { notifyReconnectRequired } from "./notifyReconnect";
+import { isDemoTenant, logDemoSuppression } from "@/lib/demo-safe";
 
 // ─── Retry policy ──────────────────────────────────────────────────────
 // Wave A — retry-with-backoff for transient + rate_limit failures.
@@ -828,6 +829,16 @@ export async function onBookingCreated(args: {
    *  `videoConference`. */
   videoProviderHint?: string | null;
 }): Promise<SyncResult> {
+  // Migration 0070 — demo tenants never sync to external calendars.
+  if (await isDemoTenant(args.booking.tenantId)) {
+    logDemoSuppression({
+      surface: "calendar",
+      tenantId: args.booking.tenantId,
+      context: { op: "onBookingCreated", booking_id: args.booking.id },
+    });
+    return { status: "skipped", reason: "no_connection" };
+  }
+
   // Wave D — pick the CALENDAR host (google or microsoft); zoom never
   // returned here. The result.provider will be whichever of those
   // owns the calendar event for this booking.
@@ -1006,6 +1017,16 @@ export async function onBookingRescheduled(args: {
   staff: User;
   serviceName: string;
 }): Promise<SyncResult> {
+  // Migration 0070 — demo tenants never sync to external calendars.
+  if (await isDemoTenant(args.booking.tenantId)) {
+    logDemoSuppression({
+      surface: "calendar",
+      tenantId: args.booking.tenantId,
+      context: { op: "onBookingRescheduled", booking_id: args.booking.id },
+    });
+    return { status: "skipped", reason: "no_connection" };
+  }
+
   // Wave C — reschedule must hit the SAME provider that created the
   // event. Honor externalEventProvider; fall back to "google" for
   // pre-Wave-C bookings where the column is null.
@@ -1146,6 +1167,16 @@ export async function onBookingCancelled(args: {
   booking: typeof bookings.$inferSelect;
   staff: User;
 }): Promise<SyncResult> {
+  // Migration 0070 — demo tenants never sync to external calendars.
+  if (await isDemoTenant(args.booking.tenantId)) {
+    logDemoSuppression({
+      surface: "calendar",
+      tenantId: args.booking.tenantId,
+      context: { op: "onBookingCancelled", booking_id: args.booking.id },
+    });
+    return { status: "skipped", reason: "no_connection" };
+  }
+
   // Wave D — delete the side-car meeting FIRST, then the calendar
   // event. Order doesn't strictly matter because both are idempotent
   // (404 = success), but doing side-car first means if the calendar

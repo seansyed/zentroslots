@@ -28,7 +28,9 @@
     "admin:snapshots:daily": "AGG_MODE=daily tsx scripts/aggregate-admin-snapshots.ts",
     "admin:snapshots:tenant": "AGG_MODE=tenant tsx scripts/aggregate-admin-snapshots.ts",
     "admin:snapshots:finance": "AGG_MODE=finance tsx scripts/aggregate-admin-snapshots.ts",
-    "admin:snapshots:all": "AGG_MODE=all tsx scripts/aggregate-admin-snapshots.ts"
+    "admin:snapshots:all": "AGG_MODE=all tsx scripts/aggregate-admin-snapshots.ts",
+    "docs-demo:seed": "tsx scripts/seed-docs-demo.ts",
+    "docs-demo:reset": "tsx scripts/reset-docs-demo.ts"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

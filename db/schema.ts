@@ -90,6 +90,14 @@ export const tenants = pgTable(
     // Plan-gated: when true and plan allows, embed footer hides "Powered by"
     hidePoweredBy: boolean("hide_powered_by").notNull().default(false),
 
+    // Migration 0070 — demo / documentation tenant flag. When true,
+    // the workspace is a non-production demo environment used for
+    // screenshots, KB, onboarding intelligence, and contextual help.
+    // Outbound side effects (email, push, calendar sync) are
+    // suppressed by lib/demo-safe.ts. Admin rollups exclude these
+    // rows so KPIs aren't skewed. Seeded by scripts/seed-docs-demo.ts.
+    isDemo: boolean("is_demo").notNull().default(false),
+
     // Wave H — feature flag for the tenant-owned payment vault (migration
     // 0050). When false (default), paid bookings continue to flow through
     // the legacy platform-charge code path. When true, the booking POST

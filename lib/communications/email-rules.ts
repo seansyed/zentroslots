@@ -47,7 +47,12 @@ export type GateDecision =
         // Phase 2A — per-event reasons
         | "confirmations_disabled"
         | "cancellations_disabled"
-        | "waitlist_disabled";
+        | "waitlist_disabled"
+        // Migration 0070 — demo tenant suppression. When the booking's
+        // tenant is flagged is_demo=true, all scheduling emails are
+        // silently dropped so the docs-demo workspace never sends real
+        // mail. Logged via lib/demo-safe.ts logDemoSuppression.
+        | "demo_tenant";
     };
 
 /**
