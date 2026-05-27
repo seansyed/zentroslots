@@ -214,7 +214,12 @@ export const createGroupSessionSchema = z.object({
 
 export const slotsQuerySchema = z.object({
   serviceId: z.string().uuid(),
-  staffUserId: z.string().uuid(),
+  // "any" is an operator-only fan-out mode used by the mobile Quick
+  // Create sheet (which routes the booking POST via staffUserId="auto"
+  // and needs union-availability across all eligible staff). Every
+  // existing caller passes a concrete uuid and continues to work
+  // byte-identically — the union path is opt-in.
+  staffUserId: z.union([z.string().uuid(), z.literal("any")]),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   timezone: z.string().min(1),
 });
