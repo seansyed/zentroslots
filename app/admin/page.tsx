@@ -8,7 +8,7 @@ import Shell from "@/components/dashboard/Shell";
 import { Badge } from "@/components/ui/primitives";
 // SA-1 — Executive KPI layer (16 cross-tenant metrics).
 import { computeAllKpis } from "@/lib/admin-analytics/kpis";
-import ExecutiveKpiGrid from "@/components/admin/ExecutiveKpiGrid";
+import OverviewExperience from "@/components/admin/OverviewExperience";
 
 export const metadata = { title: "Internal admin" };
 export const dynamic = "force-dynamic";
@@ -162,89 +162,40 @@ export default async function AdminPage() {
       <div className="text-xs font-medium uppercase tracking-wider text-red-700">Internal — superuser only</div>
       <h1 className="mt-1 text-heading font-semibold text-ink">Operations</h1>
 
-      {/* SA-1 — Executive KPI layer. 16 platform-wide metrics computed
-          cross-tenant via lib/admin-analytics/kpis.ts (90s in-process
-          cache + per-KPI error isolation). Renders inline error chips
-          for any individual KPI that failed; the rest of the page
-          continues to render normally. */}
-      {kpiBundle ? (
-        <section className="mt-5">
-          <div className="mb-3 flex items-end justify-between">
-            <div>
-              <div className="text-xs font-medium uppercase tracking-wider text-slate-500">Executive overview</div>
-              <h2 className="mt-0.5 text-lg font-medium">Platform health, at a glance</h2>
-            </div>
-            <div className="text-[11px] text-slate-400">computed in {kpiBundle.computedInMs}ms · cached 90s</div>
-          </div>
-          <ExecutiveKpiGrid bundle={kpiBundle} />
-        </section>
-      ) : (
-        <section className="mt-5 rounded-xl border border-amber-200 bg-amber-50/40 p-4 text-sm text-amber-800">
-          KPI bundle failed to compute. Operations dashboard continues below.
-        </section>
-      )}
-
-      {/* Revenue snapshot — local computation from plans + tenants. Stripe
-          is not queried; if a tenant's status is wrong in our DB it'll
-          show wrong here, but the source of truth for invoicing is still
-          Stripe itself. */}
-      <h2 className="mt-6 text-lg font-medium">Revenue snapshot</h2>
-      <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-4">
-        <Stat label="MRR (active subs)" value={formatCents(mrrCents)} />
-        <Stat label="ARR estimate" value={formatCents(mrrCents * 12)} />
-        <Stat label="Trial → paid (30d)" value={trialConversionPct != null ? `${trialConversionPct}%` : "—"} />
-        <Stat label="Tenants joined (30d)" value={String(Number(tenantsNew30d?.n ?? 0))} />
-      </div>
-
-      <h2 className="mt-8 text-lg font-medium">Plan distribution</h2>
-      <div className="mt-3 overflow-hidden rounded-lg border bg-white shadow-sm">
-        <table className="w-full text-sm">
-          <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
-            <tr>
-              <th className="px-4 py-2">Plan</th>
-              <th className="px-4 py-2 text-right">Tenants</th>
-              <th className="px-4 py-2 text-right">Active</th>
-              <th className="px-4 py-2 text-right">Trialing</th>
-              <th className="px-4 py-2 text-right">Past due</th>
-              <th className="px-4 py-2 text-right">$ / mo</th>
-            </tr>
-          </thead>
-          <tbody>
-            {Object.entries(planTotals).sort(([, a], [, b]) => b - a).map(([plan, total]) => {
+      <div className="mt-5">
+        <OverviewExperience
+          kpis={kpiBundle}
+          totalTenants={allTenants.length}
+          totalUsers={Number(usersTotal?.n ?? 0)}
+          totalBookings={Number(bookingsTotal?.n ?? 0)}
+          bookings7d={Number(recentBookings?.n ?? 0)}
+          emailSent7d={Number(emailSent?.n ?? 0)}
+          emailFailures7d={Number(emailFailures?.n ?? 0)}
+          expiredGoogleCount={expiredGoogleTenants.length}
+          mrrCents={mrrCents}
+          trialingNow={trialingTotal}
+          pastDueNow={pastDueTotal}
+          tenantsNew30d={Number(tenantsNew30d?.n ?? 0)}
+          trialConversionPct={trialConversionPct}
+          planRows={Object.entries(planTotals)
+            .sort(([, a], [, b]) => b - a)
+            .map(([plan, total]) => {
               const active = tenantPlanDistribution.find((r) => r.plan === plan && r.status === "active");
-              const trial  = tenantPlanDistribution.find((r) => r.plan === plan && r.status === "trialing");
-              const past   = tenantPlanDistribution.find((r) => r.plan === plan && r.status === "past_due");
-              const price  = priceBySlug.get(plan) ?? 0;
-              return (
-                <tr key={plan} className="border-t">
-                  <td className="px-4 py-2 font-medium">{plan}</td>
-                  <td className="px-4 py-2 text-right tabular-nums">{total}</td>
-                  <td className="px-4 py-2 text-right tabular-nums">{Number(active?.n ?? 0)}</td>
-                  <td className="px-4 py-2 text-right tabular-nums">{Number(trial?.n ?? 0)}</td>
-                  <td className="px-4 py-2 text-right tabular-nums">{Number(past?.n ?? 0)}</td>
-                  <td className="px-4 py-2 text-right text-xs text-ink-muted">{formatCents(price)}</td>
-                </tr>
-              );
+              const trial = tenantPlanDistribution.find((r) => r.plan === plan && r.status === "trialing");
+              const past = tenantPlanDistribution.find((r) => r.plan === plan && r.status === "past_due");
+              const priceCents = priceBySlug.get(plan) ?? 0;
+              const activeCount = Number(active?.n ?? 0);
+              return {
+                plan,
+                total,
+                active: activeCount,
+                trialing: Number(trial?.n ?? 0),
+                pastDue: Number(past?.n ?? 0),
+                priceCents,
+                mrrCents: priceCents * activeCount,
+              };
             })}
-          </tbody>
-        </table>
-      </div>
-
-      <h2 className="mt-10 text-lg font-medium">Footprint</h2>
-      <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-5">
-        <Stat label="Tenants" value={String(allTenants.length)} />
-        <Stat label="Users (total)" value={String(Number(usersTotal?.n ?? 0))} />
-        <Stat label="Bookings (total)" value={String(Number(bookingsTotal?.n ?? 0))} />
-        <Stat label="Trialing now" value={String(trialingTotal)} />
-        <Stat label="Past-due" value={String(pastDueTotal)} />
-      </div>
-
-      {/* Ops health — 7-day rolling window */}
-      <h2 className="mt-10 text-lg font-medium">7-day ops health</h2>
-      <div className="mt-3 grid grid-cols-3 gap-3">
-        <Stat label="Bookings (7d)"     value={String(Number(recentBookings?.n ?? 0))} />
-        <Stat label="Emails sent (7d)"  value={String(Number(emailSent?.n ?? 0))} />
-        <Stat label="Email failures (7d)" value={String(Number(emailFailures?.n ?? 0))} />
+        />
       </div>
 
       {/* Integration health — tenants whose Google connection broke */}
@@ -342,17 +293,6 @@ export default async function AdminPage() {
   );
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-lg border bg-white p-4 shadow-sm">
-      <div className="text-xs uppercase tracking-wider text-slate-500">{label}</div>
-      <div className="mt-1 text-2xl font-semibold">{value}</div>
-    </div>
-  );
-}
-
-function formatCents(cents: number): string {
-  // Whole-dollar rendering — admin dashboard, no need for cent precision
-  // and easier to scan.
-  return "$" + Math.round(cents / 100).toLocaleString();
-}
+// Stat + formatCents removed — premium executive layer now handled by
+// <OverviewExperience />. The legacy table sections below still render
+// raw values inline.
