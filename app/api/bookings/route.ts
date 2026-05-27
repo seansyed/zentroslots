@@ -12,6 +12,7 @@ import { createBookingSchema } from "@/lib/validation";
 import { getAvailableSlots } from "@/lib/availability";
 import { onBookingCreated, revalidateBeforeBooking } from "@/lib/calendar/sync";
 import { triggerAutomation } from "@/lib/communications/engine";
+import { enqueueBookingPush } from "@/lib/push/enqueue";
 import { validateBookingRules } from "@/lib/booking-rules/validateBookingRules";
 import { assignStaff } from "@/lib/routing/assignStaff";
 import { simulateAssignment } from "@/lib/routing/simulate";
@@ -749,6 +750,17 @@ export async function POST(req: NextRequest) {
         }
       })();
     }
+
+    // Push notification fan-out — Phase 1C. Fire-and-forget so a
+    // push enqueue failure never delays the API response. The
+    // assigned staff's push_tokens get a booking_created event;
+    // worker scripts/run-push-deliveries.ts delivers within ~60s.
+    void enqueueBookingPush({
+      tenantId,
+      booking: row,
+      serviceName: service.name,
+      event: "booking_created",
+    });
 
     return NextResponse.json(row);
   } catch (err) {

@@ -6,6 +6,7 @@ import { bookings, services, tenants, users } from "@/db/schema";
 import { errorResponse, isManagerial, requireUser, HttpError } from "@/lib/auth";
 import { isFeatureEnabled } from "@/lib/features";
 import { onBookingCancelled } from "@/lib/calendar/sync";
+import { enqueueBookingPush } from "@/lib/push/enqueue";
 import { releaseSlot } from "@/lib/waitlists/releaseSlot";
 import { notifySlotAvailable } from "@/lib/waitlists/notifications";
 import { renderCancellation, sendEmail, type BookingForEmail } from "@/lib/email";
@@ -167,6 +168,24 @@ export async function POST(
       text: `❌ Booking cancelled: ${updated.clientName} (${updated.startAt.toISOString()})`,
       metadata: { event: "booking.cancelled", bookingId: updated.id },
     });
+
+    // Phase 1C — push notification fan-out (fire-and-forget).
+    // Look up the service name for a friendly push body; fall back to
+    // "Appointment" so a missing service row never blocks delivery.
+    try {
+      const svc = await db.query.services.findFirst({
+        where: eq(services.id, updated.serviceId),
+        columns: { name: true },
+      });
+      void enqueueBookingPush({
+        tenantId: caller.tenantId,
+        booking: updated,
+        serviceName: svc?.name ?? "Appointment",
+        event: "booking_cancelled",
+      });
+    } catch (pushErr) {
+      console.error("[push] cancel enqueue failed:", pushErr);
+    }
 
     return NextResponse.json(updated);
   } catch (err) {

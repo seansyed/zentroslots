@@ -2548,6 +2548,70 @@ export const cronRuns = pgTable(
   }),
 );
 
+// ─── Push notifications (Phase 1C — 2026-05-27) ─────────────────────
+//
+// push_tokens         — one row per (user, device).
+// push_deliveries     — outbox queue + delivery audit log. Worker
+//                       consumes pending rows every minute and pushes
+//                       to https://exp.host/--/api/v2/push/send.
+//
+// See db/migrations/0069_push_notifications.sql.
+
+export const pushTokens = pgTable(
+  "push_tokens",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    expoToken: varchar("expo_token", { length: 200 }).notNull(),
+    platform: varchar("platform", { length: 10 }),
+    deviceLabel: varchar("device_label", { length: 120 }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+  },
+  (t) => ({
+    userTokenUniq: uniqueIndex("push_tokens_user_token_uniq").on(t.userId, t.expoToken),
+    tenantIdx: index("push_tokens_tenant_idx").on(t.tenantId),
+    tokenIdx: index("push_tokens_token_idx").on(t.expoToken),
+  }),
+);
+
+export const pushDeliveries = pgTable(
+  "push_deliveries",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    expoToken: varchar("expo_token", { length: 200 }).notNull(),
+    eventType: varchar("event_type", { length: 40 }).notNull(),
+    bookingId: uuid("booking_id").references(() => bookings.id, { onDelete: "set null" }),
+    title: varchar("title", { length: 200 }).notNull(),
+    body: varchar("body", { length: 500 }).notNull(),
+    dataPayload: jsonb("data_payload").notNull().default({}),
+    status: varchar("status", { length: 20 }).notNull().default("pending"),
+    attemptCount: integer("attempt_count").notNull().default(0),
+    lastError: text("last_error"),
+    expoReceiptId: varchar("expo_receipt_id", { length: 80 }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    nextRetryAt: timestamp("next_retry_at", { withTimezone: true }).notNull().defaultNow(),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+    finalizedAt: timestamp("finalized_at", { withTimezone: true }),
+  },
+  (t) => ({
+    tenantIdx: index("push_deliveries_tenant_idx").on(t.tenantId, t.createdAt),
+    bookingIdx: index("push_deliveries_booking_idx").on(t.bookingId),
+  }),
+);
+
 export const financialSnapshots = pgTable(
   "financial_snapshots",
   {
