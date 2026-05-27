@@ -26,7 +26,16 @@ import { serviceSchema } from "@/lib/validation";
 export async function GET(req: NextRequest) {
   try {
     const tenantId = await getTenantId();
-    if (!tenantId) return NextResponse.json([]);
+    if (!tenantId) {
+      // Diagnostic: every other listing endpoint 401s here; we silently
+      // return [] to preserve the public booking-page contract. Log the
+      // anonymous miss so we can correlate empty-list reports against
+      // expected unauth'd browsing.
+      console.log(
+        `[services-GET] anonymous request → returning [] | path=${req.nextUrl.pathname}`,
+      );
+      return NextResponse.json([]);
+    }
 
     const includeAll = req.nextUrl.searchParams.get("include") === "all";
 
@@ -61,6 +70,25 @@ export async function GET(req: NextRequest) {
 
     const serviceIds = rows.map((r) => r.id);
     if (serviceIds.length === 0) {
+      // Diagnostic: separate the "tenant truly has no services" case
+      // from "tenant has services but all are inactive". Helps triage
+      // mobile reports of "no services found" — if a follow-up query
+      // with include=all comes through and returns rows, we know the
+      // operator just needs to re-activate.
+      if (!includeAll) {
+        const [totalRow] = await db
+          .select({ c: sql<number>`count(*)::int` })
+          .from(services)
+          .where(eq(services.tenantId, tenantId));
+        const total = Number(totalRow?.c ?? 0);
+        console.log(
+          `[services-GET] tenant=${tenantId.slice(0, 8)} active=0 total=${total} includeAll=false → likely all-paused, mobile should re-fetch with ?include=all`,
+        );
+      } else {
+        console.log(
+          `[services-GET] tenant=${tenantId.slice(0, 8)} active=0 total=0 includeAll=true → tenant has zero services`,
+        );
+      }
       return NextResponse.json([]);
     }
 
@@ -117,6 +145,11 @@ export async function GET(req: NextRequest) {
       .groupBy(bookings.serviceId);
     const bookingMap = new Map(bookingCounts.map((b) => [b.serviceId, Number(b.c)]));
 
+    const activeCount = rows.filter((r) => r.isActive === 1).length;
+    console.log(
+      `[services-GET] tenant=${tenantId.slice(0, 8)} returned=${rows.length} active=${activeCount} inactive=${rows.length - activeCount} includeAll=${includeAll}`,
+    );
+
     return NextResponse.json(
       rows.map((s) => {
         const svcStaff = byService.get(s.id) ?? [];
@@ -140,6 +173,7 @@ export async function GET(req: NextRequest) {
       })
     );
   } catch (err) {
+    console.error("[services-GET] error:", err instanceof Error ? err.message : err);
     return errorResponse(err);
   }
 }
