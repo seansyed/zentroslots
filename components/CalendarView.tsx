@@ -174,13 +174,16 @@ export default function CalendarView({
   // calendar feels alive instead of empty. Demo rows are visually
   // identical but click-locked (no drawer, no API hits). The user can
   // hide samples; preference persists in localStorage.
-  const [demoHidden, setDemoHidden] = React.useState(false);
+  // Production safety (2026-05-27): demo is OPT-IN, not OPT-OUT.
+  // To preview the showcase calendar, open devtools console and run:
+  //   localStorage.setItem("calendar_demo_shown", "1"); location.reload()
+  const [demoShown, setDemoShown] = React.useState(false);
   React.useEffect(() => {
-    if (typeof window !== "undefined" && window.localStorage.getItem("calendar_demo_hidden") === "1") {
-      setDemoHidden(true);
+    if (typeof window !== "undefined" && window.localStorage.getItem("calendar_demo_shown") === "1") {
+      setDemoShown(true);
     }
   }, []);
-  const isDemoActive = bookings.length === 0 && !demoHidden;
+  const isDemoActive = demoShown && bookings.length === 0;
   React.useEffect(() => {
     if (isDemoActive) {
       setBookingState(buildDemoBookings(new Date(), timezone));
@@ -191,9 +194,9 @@ export default function CalendarView({
 
   function dismissDemo() {
     if (typeof window !== "undefined") {
-      window.localStorage.setItem("calendar_demo_hidden", "1");
+      window.localStorage.removeItem("calendar_demo_shown");
     }
-    setDemoHidden(true);
+    setDemoShown(false);
   }
 
   // ─── Filters ──────────────────────────────────────────────────────────
@@ -386,7 +389,7 @@ export default function CalendarView({
             timezone={timezone}
           />
 
-          {bookings.length === 0 && demoHidden ? (
+          {bookings.length === 0 && !demoShown ? (
             <CalendarEmptyState />
           ) : isFilteredEmpty ? (
             <FilteredEmptyState onClear={() => setFilters({})} />

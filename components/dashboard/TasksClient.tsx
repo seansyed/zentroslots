@@ -146,10 +146,13 @@ export default function TasksClient({
   // dismissed the preview, the workspace fills with a realistic
   // operational sample so every premium surface (cards, buckets,
   // pulse, insight, filters) has something to render.
-  const [demoHidden, setDemoHidden] = React.useState(false);
+  // Production safety (2026-05-27): demo is OPT-IN, not OPT-OUT.
+  // To preview the showcase task queue, open devtools console and run:
+  //   localStorage.setItem("tasks_demo_shown", "1"); location.reload()
+  const [demoShown, setDemoShown] = React.useState(false);
   React.useEffect(() => {
-    if (typeof window !== "undefined" && window.localStorage.getItem("tasks_demo_hidden") === "1") {
-      setDemoHidden(true);
+    if (typeof window !== "undefined" && window.localStorage.getItem("tasks_demo_shown") === "1") {
+      setDemoShown(true);
     }
   }, []);
 
@@ -172,7 +175,7 @@ export default function TasksClient({
   // tenants count as operationally empty — the workspace shouldn't
   // read as abandoned just because there's a record of past work.
   const openRealCount = rows ? rows.filter((t) => t.status === "open").length : 0;
-  const isDemoActive = rows !== null && openRealCount === 0 && !demoHidden;
+  const isDemoActive = demoShown && rows !== null && openRealCount === 0;
   const effectiveRows: Task[] = React.useMemo(
     () => (isDemoActive ? buildDemoTasks(myUserId, allStaff) : (rows ?? [])),
     [isDemoActive, rows, myUserId, allStaff],
@@ -180,9 +183,9 @@ export default function TasksClient({
 
   function dismissDemo() {
     if (typeof window !== "undefined") {
-      window.localStorage.setItem("tasks_demo_hidden", "1");
+      window.localStorage.removeItem("tasks_demo_shown");
     }
-    setDemoHidden(true);
+    setDemoShown(false);
   }
 
   async function toggleStatus(t: Task) {

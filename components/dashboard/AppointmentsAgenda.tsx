@@ -127,16 +127,25 @@ export default function AppointmentsAgenda({
   const [drawer, setDrawer] = React.useState<DrawerBooking | null>(null);
 
   // Demo population: when a tenant has no real bookings and isn't
-  // filtering, the page fills with a realistic preview timeline so the
-  // entire premium agenda surface feels actively used. Mode flips off
-  // automatically the moment a real booking arrives.
-  const [demoHidden, setDemoHidden] = React.useState(false);
+  // filtering, the page can fill with a realistic preview timeline so
+  // the premium agenda surface feels actively used.
+  //
+  // Production safety (2026-05-27): the demo is now OPT-IN, not OPT-OUT.
+  // Newly-signed-up tenants must NEVER see fabricated client names —
+  // even with the "Sample timeline / None of these are real" banner it
+  // read as a real auto-generation. To preview the demo, open devtools
+  // console and run:
+  //   localStorage.setItem("appointments_demo_shown", "1"); location.reload()
+  // To turn it off again:
+  //   localStorage.removeItem("appointments_demo_shown"); location.reload()
+  // The demo flips off automatically the moment a real booking arrives.
+  const [demoShown, setDemoShown] = React.useState(false);
   React.useEffect(() => {
-    if (typeof window !== "undefined" && window.localStorage.getItem("appointments_demo_hidden") === "1") {
-      setDemoHidden(true);
+    if (typeof window !== "undefined" && window.localStorage.getItem("appointments_demo_shown") === "1") {
+      setDemoShown(true);
     }
   }, []);
-  const isDemoActive = initialRows.length === 0 && !currentStatus && !demoHidden;
+  const isDemoActive = demoShown && initialRows.length === 0 && !currentStatus;
   React.useEffect(() => {
     if (isDemoActive) {
       setRows(buildDemoAppointments(new Date(), timezone));
@@ -147,9 +156,9 @@ export default function AppointmentsAgenda({
 
   function dismissDemo() {
     if (typeof window !== "undefined") {
-      window.localStorage.setItem("appointments_demo_hidden", "1");
+      window.localStorage.removeItem("appointments_demo_shown");
     }
-    setDemoHidden(true);
+    setDemoShown(false);
   }
 
   function setStatusFilter(s: string) {
