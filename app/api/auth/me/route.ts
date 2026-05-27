@@ -1,7 +1,12 @@
-import { NextResponse } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
+import { eq } from "drizzle-orm";
+import { z } from "zod";
+
 import { errorResponse, requireUser } from "@/lib/auth";
 import { getTenantById } from "@/lib/tenant";
 import { isGoogleConnected } from "@/lib/calendar/connections";
+import { db } from "@/db/client";
+import { users } from "@/db/schema";
 
 export async function GET() {
   try {
@@ -29,6 +34,99 @@ export async function GET() {
       // profile picture instead of always falling back to initials.
       // Null when no avatar has been uploaded (initials path).
       avatarUrl: user.avatarUrl ?? null,
+      googleConnected,
+      tenant: tenant
+        ? {
+            id: tenant.id,
+            name: tenant.name,
+            slug: tenant.slug,
+            plan: tenant.plan,
+            active: tenant.active,
+          }
+        : null,
+    });
+  } catch (err) {
+    return errorResponse(err);
+  }
+}
+
+/**
+ * Phase 2G — self-service profile patch.
+ *
+ * Lets any authenticated user edit their OWN name + timezone from the
+ * mobile app (and the web app, when we get to inline editing there).
+ * Deliberately narrow scope:
+ *
+ *   • Only the calling user's row (`eq(users.id, user.id)`). No way to
+ *     update someone else even by accident — there is no `id` field in
+ *     the request schema. Admin/manager edits still go through the
+ *     existing PATCH /api/staff/[id] route which has tenant + role gating.
+ *
+ *   • Only two fields. Role, tenant, email, password — all the
+ *     security-sensitive surfaces — are intentionally excluded.
+ *     Adding more here is a deliberate decision (and probably wants
+ *     a separate endpoint with stricter checks, like fresh-session
+ *     verification).
+ *
+ *   • Returns the same shape as GET so the client can swap the cache
+ *     entry without a refetch.
+ */
+
+const patchSchema = z
+  .object({
+    name: z.string().trim().min(1).max(120).optional(),
+    timezone: z.string().trim().min(1).max(64).optional(),
+  })
+  .refine((v) => v.name !== undefined || v.timezone !== undefined, {
+    message: "At least one field is required",
+  });
+
+export async function PATCH(req: NextRequest) {
+  try {
+    const user = await requireUser();
+    const body = await req.json().catch(() => ({}));
+    const parsed = patchSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: "Invalid request", issues: parsed.error.issues },
+        { status: 400 },
+      );
+    }
+
+    const patch: { name?: string; timezone?: string } = {};
+    if (parsed.data.name !== undefined) patch.name = parsed.data.name;
+    if (parsed.data.timezone !== undefined) patch.timezone = parsed.data.timezone;
+
+    const [updated] = await db
+      .update(users)
+      .set(patch)
+      .where(eq(users.id, user.id))
+      .returning({
+        id: users.id,
+        email: users.email,
+        name: users.name,
+        role: users.role,
+        timezone: users.timezone,
+        avatarUrl: users.avatarUrl,
+      });
+
+    if (!updated) {
+      // Row vanished between requireUser() and the update — implausible
+      // outside of a concurrent deletion, but cleaner to surface than
+      // a silent 200 with no body.
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
+    }
+
+    const tenant = await getTenantById(user.tenantId);
+    const googleConnected = await isGoogleConnected(user.id);
+
+    return NextResponse.json({
+      id: updated.id,
+      email: updated.email,
+      name: updated.name,
+      role: updated.role,
+      timezone: updated.timezone,
+      avatarUrl: updated.avatarUrl ?? null,
       googleConnected,
       tenant: tenant
         ? {
