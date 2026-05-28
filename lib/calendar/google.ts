@@ -23,10 +23,32 @@ import type {
   ExternalEventResult,
 } from "./types";
 
+// OAuth scopes — MUST be a subset of what's listed on the Google OAuth
+// consent screen verbatim. The consent screen lists exactly:
+//   • openid
+//   • profile
+//   • email
+//   • https://www.googleapis.com/auth/calendar.readonly
+//   • https://www.googleapis.com/auth/calendar.events
+//
+// We omit `profile` here because the calendar tile only needs the user's
+// email address to label "Connected as foo@bar.com"; it does not display
+// the user's name or picture. `openid + email` is the OIDC-standard
+// pairing that lets `oauth2.userinfo.get()` return `email`.
+//
+// IMPORTANT: do NOT use the legacy long-form scope
+// `https://www.googleapis.com/auth/userinfo.email` — Google's verification
+// pipeline expects runtime scopes to match the consent screen listing
+// EXACTLY, and the consent screen renders the short form `email`.
+//
+// Google Meet conference creation does NOT require an extra scope —
+// `calendar.events` alone is sufficient to insert events with
+// `conferenceData.createRequest.conferenceSolutionKey.type = "hangoutsMeet"`.
 const OAUTH_SCOPES = [
-  "https://www.googleapis.com/auth/calendar.events",
+  "openid",
+  "email",
   "https://www.googleapis.com/auth/calendar.readonly",
-  "https://www.googleapis.com/auth/userinfo.email",
+  "https://www.googleapis.com/auth/calendar.events",
 ];
 
 export function oauthClient() {

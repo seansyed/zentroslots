@@ -61,7 +61,12 @@ Validate by hitting `/api/billing/state` after login — `stripeConfigured: true
 1. Google Cloud Console → APIs & Services → Credentials → Create OAuth client (Web app)
 2. Authorized redirect URI: `{APP_BASE_URL}/api/google/callback`
 3. Enable APIs: **Google Calendar API**
-4. OAuth consent screen → Add scopes: `calendar.events`, `userinfo.email`
+4. OAuth consent screen → Add scopes (exact strings, must match runtime requests):
+   - `openid`
+   - `profile`
+   - `email`
+   - `https://www.googleapis.com/auth/calendar.readonly`
+   - `https://www.googleapis.com/auth/calendar.events`
 5. Add yourself as a test user until verified
 6. Paste client ID + secret into env
 
