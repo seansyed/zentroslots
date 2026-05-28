@@ -14,28 +14,118 @@ type Notif = {
   createdAt: string;
 };
 
-const POLL_INTERVAL_MS = 30_000;
+// Polling cadence. 20s is the sweet spot — fast enough that a "new
+// booking just landed" badge appears within one breath, slow enough that
+// idle tabs don't generate noise. Live signals below (focus, visibility,
+// custom invalidate event, cross-tab storage event) bypass this cadence
+// so the badge usually updates instantly anyway.
+const POLL_INTERVAL_MS = 20_000;
+
+/**
+ * Cross-component invalidation hook — any component that mutates the
+ * notification state (creates a booking, marks something read, etc.)
+ * can call `invalidateNotificationCount()` to trigger every mounted bell
+ * to refetch immediately. Decoupled from React Query so it works from
+ * server-action callbacks and plain fetches alike.
+ *
+ *   import { invalidateNotificationCount } from "@/components/dashboard/NotificationBell";
+ *   await fetch("/api/something-that-creates-a-notification", { method: "POST" });
+ *   invalidateNotificationCount();
+ */
+const INVALIDATE_EVENT = "zentromeet:notifications:invalidate";
+
+/** Broadcast invalidation to OTHER tabs in the same browser. localStorage
+ *  writes fire `storage` events on every other tab; the writing tab does
+ *  NOT receive its own storage event (this is intentional cross-tab
+ *  signalling, not a self-signal). */
+function broadcastCrossTabInvalidate() {
+  try {
+    localStorage.setItem(INVALIDATE_EVENT, String(Date.now()));
+  } catch {
+    // private mode / disk full / storage disabled — fine, just degrade.
+  }
+}
+
+/**
+ * Trigger every mounted bell to refetch its unread count immediately.
+ * Call this from any component that just mutated something likely to
+ * have produced a notification (booking created, customer messaged the
+ * tenant, etc.). Covers both same-tab (custom event) and other tabs
+ * (storage event).
+ */
+export function invalidateNotificationCount() {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new Event(INVALIDATE_EVENT));
+  broadcastCrossTabInvalidate();
+}
 
 export default function NotificationBell() {
   const [open, setOpen] = React.useState(false);
   const [unread, setUnread] = React.useState(0);
   const [items, setItems] = React.useState<Notif[] | null>(null);
 
+  // Guard against state updates after unmount + against overlapping
+  // fetches racing each other's setState (focus + interval + custom
+  // event can all fire within the same ms during a tab-return).
+  const mountedRef = React.useRef(true);
+  const inflightRef = React.useRef(false);
+  React.useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
   const pollUnread = React.useCallback(async () => {
+    if (inflightRef.current) return;
+    inflightRef.current = true;
     try {
       const r = await fetch("/api/notifications/unread-count", { cache: "no-store" });
+      if (!r.ok) return;
       const d = await r.json();
+      if (!mountedRef.current) return;
       setUnread(typeof d.count === "number" ? d.count : 0);
     } catch {
-      // best-effort
+      // best-effort — silent; we'll try again on the next tick.
+    } finally {
+      inflightRef.current = false;
     }
   }, []);
 
-  // Initial + interval polling.
+  // Initial fetch + periodic polling.
   React.useEffect(() => {
     pollUnread();
     const t = setInterval(pollUnread, POLL_INTERVAL_MS);
     return () => clearInterval(t);
+  }, [pollUnread]);
+
+  // Live signals — refetch immediately when:
+  //   • the tab regains focus (operator returned from another window)
+  //   • the page becomes visible (operator returned from another tab)
+  //   • another component dispatches the invalidate event (mutation hook)
+  //   • another tab in the same browser writes the storage signal
+  //     (cross-tab sync — keeps both bells in step when an op is
+  //     juggling two windows)
+  // Each handler is dead-cheap; pollUnread itself is in-flight-guarded
+  // so even if all four fire in the same tick, we only hit the API once.
+  React.useEffect(() => {
+    const onFocus = () => pollUnread();
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") pollUnread();
+    };
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === INVALIDATE_EVENT) pollUnread();
+    };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener(INVALIDATE_EVENT, pollUnread);
+    window.addEventListener("storage", onStorage);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener(INVALIDATE_EVENT, pollUnread);
+      window.removeEventListener("storage", onStorage);
+    };
   }, [pollUnread]);
 
   // Load list when opening.
@@ -52,7 +142,11 @@ export default function NotificationBell() {
     setItems((cur) => cur?.map((i) => ({ ...i, readAt: i.readAt ?? new Date().toISOString() })) ?? null);
     try {
       await fetch("/api/notifications", { method: "PATCH" });
+      // Sync other tabs' bells (this tab already has the optimistic 0).
+      broadcastCrossTabInvalidate();
     } catch {
+      // PATCH lost — recover the true count rather than leaving the
+      // optimistic 0 lying around.
       pollUnread();
     }
   }
@@ -64,6 +158,7 @@ export default function NotificationBell() {
     setUnread((n) => Math.max(0, n - 1));
     try {
       await fetch(`/api/notifications/${id}`, { method: "PATCH" });
+      broadcastCrossTabInvalidate();
     } catch {
       pollUnread();
     }

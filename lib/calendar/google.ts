@@ -127,7 +127,33 @@ function calendarClient(refreshToken: string) {
   return google.calendar({ version: "v3", auth: client });
 }
 
-/** Create an event. Returns the provider event id + Meet link (if asked). */
+/** Create an event. Returns the provider event id + Meet link (if asked).
+ *
+ * Customer notifications:
+ *   The customer-facing booking confirmation goes via our branded SES
+ *   pipeline (lib/communications/engine.ts → triggerAutomation) with the
+ *   .ics file attached. We do NOT also want Google to fire its own
+ *   native "you've been invited" email — that produced duplicate
+ *   confirmations (one branded, one from Google). Hence
+ *   `sendUpdates: "none"`. The event still:
+ *     • appears on the organizer's Google Calendar (because we created
+ *       it via their OAuth)
+ *     • appears on the customer's calendar once they open the .ics
+ *       attached to our SES email
+ *     • produces a working Meet link (Meet creation does NOT require
+ *       sendUpdates)
+ *
+ * Attendees:
+ *   The organizer is the calendar OWNER (the authenticated user) — they
+ *   are implicitly the event organizer, NOT an attendee. Pushing them
+ *   into `attendees[]` makes them show up as a guest on their OWN event
+ *   (per RFC 5545 + Google's UI), which leaks the workspace owner /
+ *   super-admin email into the customer-visible guest list and triggers
+ *   Google to send the organizer a redundant attendee invitation. So
+ *   `attendees[]` contains only the booking's external party (the
+ *   customer). The `organizer` field is auto-populated by Google from
+ *   the calendar we authenticated against.
+ */
 export async function createEvent(args: {
   refreshToken: string;
   calendarId: string;
@@ -138,14 +164,13 @@ export async function createEvent(args: {
   const res = await cal.events.insert({
     calendarId: args.calendarId || "primary",
     conferenceDataVersion: args.draft.videoConference ? 1 : 0,
-    sendUpdates: "all",
+    sendUpdates: "none",
     requestBody: {
       summary: args.draft.summary,
       description: args.draft.description,
       start: { dateTime: args.draft.startAt.toISOString(), timeZone: "UTC" },
       end: { dateTime: args.draft.endAt.toISOString(), timeZone: "UTC" },
       attendees: [
-        { email: args.draft.organizerEmail },
         { email: args.draft.attendeeEmail, displayName: args.draft.attendeeName },
       ],
       conferenceData: args.draft.videoConference
@@ -164,7 +189,12 @@ export async function createEvent(args: {
   };
 }
 
-/** Patch an existing event (used on reschedule). Idempotent server-side. */
+/** Patch an existing event (used on reschedule). Idempotent server-side.
+ *
+ *  `sendUpdates: "none"` — matches createEvent: the customer is informed
+ *  via our SES reschedule template (with updated .ics), not via Google's
+ *  native "this event has been rescheduled" email. Keeps comms branded
+ *  and single-channel. */
 export async function updateEvent(args: {
   refreshToken: string;
   calendarId: string;
@@ -177,7 +207,7 @@ export async function updateEvent(args: {
   await cal.events.patch({
     calendarId: args.calendarId || "primary",
     eventId: args.eventId,
-    sendUpdates: "all",
+    sendUpdates: "none",
     requestBody: {
       start: { dateTime: args.startAt.toISOString(), timeZone: "UTC" },
       end: { dateTime: args.endAt.toISOString(), timeZone: "UTC" },
@@ -187,7 +217,11 @@ export async function updateEvent(args: {
 }
 
 /** Cancel/delete an event. Returns success even if the event is already
- *  gone (404) — that's the desired end state. */
+ *  gone (404) — that's the desired end state.
+ *
+ *  `sendUpdates: "none"` — same rationale as createEvent: the customer's
+ *  cancellation notice comes from our SES pipeline with a CANCEL-method
+ *  .ics attached, not from Google's "the event has been cancelled" email. */
 export async function deleteEvent(args: {
   refreshToken: string;
   calendarId: string;
@@ -198,7 +232,7 @@ export async function deleteEvent(args: {
     await cal.events.delete({
       calendarId: args.calendarId || "primary",
       eventId: args.eventId,
-      sendUpdates: "all",
+      sendUpdates: "none",
     });
   } catch (err) {
     if (classifyError(err) === "not_found") return; // idempotent
