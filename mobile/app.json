@@ -10,13 +10,11 @@
     "scheme": "zentromeet",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
-
     "splash": {
       "image": "./assets/splash.png",
       "resizeMode": "contain",
       "backgroundColor": "#f5faff"
     },
-
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.zentromeet.app",
@@ -24,7 +22,9 @@
       "config": {
         "usesNonExemptEncryption": false
       },
-      "associatedDomains": ["applinks:app.zentromeet.com"],
+      "associatedDomains": [
+        "applinks:app.zentromeet.com"
+      ],
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "NSCameraUsageDescription": "ZentroMeet does not access your camera. This permission string is required by the system but the feature is not used.",
@@ -35,7 +35,6 @@
         "NSUserTrackingUsageDescription": "ZentroMeet does not track you across other apps or websites."
       }
     },
-
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
@@ -54,7 +53,10 @@
         {
           "action": "VIEW",
           "autoVerify": true,
-          "category": ["BROWSABLE", "DEFAULT"],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ],
           "data": [
             {
               "scheme": "zentromeet",
@@ -65,7 +67,10 @@
         {
           "action": "VIEW",
           "autoVerify": true,
-          "category": ["BROWSABLE", "DEFAULT"],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ],
           "data": [
             {
               "scheme": "https",
@@ -76,18 +81,15 @@
         }
       ]
     },
-
     "web": {
       "bundler": "metro",
       "output": "single",
       "favicon": "./assets/favicon.png"
     },
-
     "plugins": [
       "expo-router",
       "expo-font",
       "expo-secure-store",
-      "expo-web-browser",
       [
         "expo-notifications",
         {
@@ -97,12 +99,10 @@
         }
       ]
     ],
-
     "experiments": {
       "typedRoutes": true,
       "baseUrl": "/mobile"
     },
-
     "extra": {
       "apiBaseUrl": "https://app.zentromeet.com",
       "privacyPolicyUrl": "https://app.zentromeet.com/legal/privacy",
@@ -111,7 +111,11 @@
       "router": {
         "origin": false
       },
-      "_easComment": "Run `npx eas init` once — the CLI writes extra.eas.projectId and the top-level `owner` field here automatically. Don't set them by hand."
-    }
+      "_easComment": "Run `npx eas init` once — the CLI writes extra.eas.projectId and the top-level `owner` field here automatically. Don't set them by hand.",
+      "eas": {
+        "projectId": "015c17c4-5ba8-4a4f-9516-1022329068c5"
+      }
+    },
+    "owner": "seansyed"
   }
 }
