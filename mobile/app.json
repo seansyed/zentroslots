@@ -9,7 +9,7 @@
     "icon": "./assets/icon.png",
     "scheme": "zentromeet",
     "userInterfaceStyle": "light",
-    "newArchEnabled": true,
+    "newArchEnabled": false,
     "splash": {
       "image": "./assets/splash.png",
       "resizeMode": "contain",
