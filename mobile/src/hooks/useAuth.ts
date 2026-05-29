@@ -122,10 +122,18 @@ export function useAuth() {
   const signInWithPassword = useCallback(
     async (email: string, password: string) => {
       const res = await authApi.login(email, password);
-      // The axios interceptor in api/client.ts captured the Set-Cookie
-      // header — but on mobile we ALSO prefer the explicit token if
-      // the server echoes one. Either way, signIn() persists.
-      const tokenToStore = res.token ?? "cookie:captured";
+      // The axios response interceptor already captured Set-Cookie and
+      // wrote it into the auth store synchronously. Read it back so we
+      // don't clobber it with a placeholder. Priority order:
+      //   1. Explicit token in response body (rare; only if the backend
+      //      echoes one — most session-cookie backends don't).
+      //   2. The captured cookie from the interceptor (the common path).
+      //   3. Empty string as last-resort sentinel — request interceptor
+      //      will then attach no Authorization/Cookie header and the
+      //      next API call will 401 cleanly, surfacing as "session
+      //      expired" so the user knows to retry.
+      const capturedToken = useAuthStore.getState().sessionToken;
+      const tokenToStore = res.token ?? capturedToken ?? "";
       await signInToStore({ user: res.user, token: tokenToStore });
       return res.user;
     },

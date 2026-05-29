@@ -106,6 +106,16 @@ api.interceptors.response.use(
       if (cookie) {
         // Fire-and-forget — store will pick it up on next request.
         void storage.setItem(STORAGE_KEYS.sessionToken, cookie);
+        // ALSO propagate to the in-memory auth store SYNCHRONOUSLY so
+        // the very next request (and signIn() downstream) sees the real
+        // cookie instead of waiting for the SecureStore write to flush.
+        // Without this, the "cookie:captured" placeholder in useAuth
+        // overwrites the cookie before any request can use it.
+        try {
+          useAuthStore.setState({ sessionToken: cookie });
+        } catch {
+          /* store may not be initialized; SecureStore write covers it */
+        }
       }
     }
     // Every successful response is a connectivity heartbeat — clear the
