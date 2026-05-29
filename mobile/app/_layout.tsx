@@ -90,12 +90,13 @@ function useAuthGate() {
       router.replace(firstRun.seen ? "/(tabs)" : "/onboarding");
       return;
     }
-    if (isAuthed && !firstRun.seen && !inOnboarding && segments[0] === "(tabs)") {
-      // Authed user landed somewhere inside the tabs without going
-      // through onboarding (e.g. deep-link cold start). Send them
-      // through the flow once.
-      router.replace("/onboarding");
-    }
+    // REMOVED: the "send back to onboarding from inside tabs" redirect
+    // caused an infinite loop. markSeen()'s SecureStore write is async,
+    // so by the time the (tabs) screen mounted, firstRun.seen was still
+    // false in React state and this redirect bounced the user back to
+    // /onboarding, where Skip would route them to (tabs) again, etc.
+    // Onboarding still shows on the FIRST authed visit via the gate
+    // above. If they reach (tabs) by any means, let them stay.
   }, [hydrated, sessionToken, segments, router, firstRun.hydrated, firstRun.seen]);
 }
 
