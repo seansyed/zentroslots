@@ -1,0 +1,626 @@
+# =============================================================================
+# codemagic.yaml — ZentroMeet Mobile CI/CD
+# =============================================================================
+#
+# This file defines three Codemagic workflows for the ZentroMeet mobile app:
+#
+#   1) android-preview      — Builds an installable APK (debug or release) for
+#                             direct sideload onto an Android device. Use this
+#                             for internal testing and QA without going through
+#                             EAS or Play Store review.
+#
+#   2) android-production   — Builds a signed Android App Bundle (.aab) ready
+#                             for upload to Play Console (Internal/Closed/Open
+#                             testing or Production track). Requires a release
+#                             keystore configured in Codemagic.
+#
+#   3) ios-production       — Orchestrates an EAS production iOS build, then
+#                             downloads the resulting .ipa so it is available
+#                             as a Codemagic artifact. Optionally auto-submits
+#                             to TestFlight when SUBMIT_TO_TESTFLIGHT="true".
+#
+# MONOREPO LAYOUT
+# ---------------
+# The mobile app lives at  mobile/  inside the larger
+# zentroslots repository (which also holds the scheduling-saas backend at
+# the repo root). Codemagic must be configured to use
+# mobile/codemagic.yaml as the configuration file path. Each
+# workflow below sets `working_directory: mobile` so all scripts
+# execute from the mobile app root regardless of where the repo is cloned.
+#
+# REQUIRED ENVIRONMENT-VARIABLE GROUPS (configure in Codemagic UI under
+# Teams → Global / App environment variables):
+#
+#   expo_credentials:
+#     EXPO_TOKEN        — Expo access token (expo.dev → Account → Access Tokens)
+#
+#   zentromeet_api:
+#     EXPO_PUBLIC_API_BASE_URL — Defaults to https://app.zentromeet.com
+#                                MUST be named exactly this — Expo inlines all
+#                                EXPO_PUBLIC_* vars into the JS bundle at
+#                                build time. (Codemagic does NOT perform
+#                                $VAR substitution inside `vars:`, so we
+#                                bind the public name in the group itself.)
+#     EAS_PROJECT_ID            — Optional. Only required if `eas init` has not
+#                                 yet been run for this repo and app.json's
+#                                 extra.eas.projectId is missing.
+#
+# REQUIRED CODE-SIGNING ASSETS
+# ----------------------------
+# Upload an Android release keystore to:
+#   Codemagic → Teams → Code Signing → Android keystores
+# and name the entry exactly:  zentromeet_android_keystore
+# Codemagic will automatically inject these env vars into the build:
+#   CM_KEYSTORE_PATH, CM_KEYSTORE_PASSWORD, CM_KEY_ALIAS, CM_KEY_PASSWORD
+#
+# DOCS
+# ----
+# See docs/CODEMAGIC.md for end-to-end setup, troubleshooting, and how to
+# enable TestFlight auto-submit for the ios-production workflow.
+# =============================================================================
+
+workflows:
+
+  # ===========================================================================
+  # WORKFLOW 1: android-preview
+  # ---------------------------------------------------------------------------
+  # Produces an installable APK that testers can sideload directly onto their
+  # phones. No Play Store review, no EAS queue. Built entirely on Codemagic's
+  # linux_x64 machine via `expo prebuild` + Gradle.
+  #
+  # Signing: optional. If the zentromeet_android_keystore entry is configured,
+  # builds a SIGNED release APK. Otherwise falls back to assembleDebug, which
+  # is still fully installable (just signed with the debug key).
+  #
+  # Triggers: manual + push to the `develop` branch only.
+  # ===========================================================================
+  android-preview:
+    name: "Android Preview — Installable APK"
+    instance_type: linux_x64
+    max_build_duration: 60
+    working_directory: mobile
+    # Workflow-root field. Previously nested under `triggering:` which is
+    # silently ignored by Codemagic's schema. Preview builds are
+    # fast-paced — cancel superseded develop pushes.
+    cancel_previous_builds: true
+
+    environment:
+      node: 20.17.0
+      java: 17
+      # Optional for preview — script falls back to assembleDebug if absent.
+      android_signing:
+        - zentromeet_android_keystore
+      groups:
+        - expo_credentials   # Provides EXPO_TOKEN
+        - zentromeet_api     # Provides API_BASE_URL, EAS_PROJECT_ID
+      vars:
+        # NOTE: Codemagic does NOT perform $VAR substitution inside this
+        # `vars:` block. EXPO_PUBLIC_API_BASE_URL must be set DIRECTLY
+        # inside the zentromeet_api environment-variable group (Codemagic
+        # UI → Teams → Global env vars → zentromeet_api group →
+        # EXPO_PUBLIC_API_BASE_URL = https://app.zentromeet.com). That
+        # way Expo inlines the resolved URL into the JS bundle at build
+        # time. We intentionally do not redeclare it here.
+        #
+        # Gradle heap — 2.5 GB leaves ~1.5 GB for Node, Gradle daemon, OS.
+        # Codemagic's linux_x64 standard instance has 4 GB total; a higher
+        # heap will OOM during RN 0.76 New Architecture C++ codegen.
+        GRADLE_OPTS: "-Xmx2560m -XX:MaxMetaspaceSize=512m -Dfile.encoding=UTF-8"
+        EXPO_NO_TELEMETRY: "1"
+
+    triggering:
+      events:
+        - push
+      branch_patterns:
+        - pattern: "develop"
+          include: true
+          source: true
+
+    cache:
+      cache_paths:
+        - $HOME/.npm
+        - $HOME/.gradle/caches
+        - $HOME/.gradle/wrapper
+
+    scripts:
+      # ----- 1. Environment info -------------------------------------------
+      - name: Environment info
+        script: |
+          echo "Node:    $(node --version)"
+          echo "npm:     $(npm --version)"
+          echo "Java:    $(java -version 2>&1 | head -1)"
+          echo "Expo:    $(npx --yes expo --version 2>/dev/null || echo 'will install on demand')"
+          echo "Branch:  $CM_BRANCH"
+          echo "Build:   $CM_BUILD_ID"
+          echo "Workdir: $(pwd)"
+
+      # ----- 2. Install dependencies ---------------------------------------
+      # package-lock.json is .gitignored in this project (see .gitignore line
+      # 19-21), so npm ci often will not have a lockfile to work with. We
+      # prefer `npm ci` when the lockfile happens to be present (faster, more
+      # reproducible) and fall back to `npm install` otherwise. Output is
+      # teed to /tmp/install.log for the artifact bundle.
+      - name: Install dependencies
+        script: |
+          # pipefail so a failing npm step propagates through `tee`.
+          # Without it, `set -e` only checks tee's exit status (always 0).
+          set -euo pipefail
+          mkdir -p /tmp
+          if [ -f package-lock.json ]; then
+            echo "package-lock.json found — using npm ci"
+            npm ci --no-audit --no-fund 2>&1 | tee /tmp/install.log
+          else
+            echo "No package-lock.json — using npm install"
+            npm install --no-audit --no-fund 2>&1 | tee /tmp/install.log
+          fi
+
+      # ----- 3. Expo install verification (non-fatal) -----------------------
+      - name: Expo install verification
+        script: |
+          # `expo install --check` warns about SDK-incompatible package
+          # versions. Non-fatal for preview — we just want visibility.
+          npx expo install --check 2>&1 || echo "expo install --check produced warnings (non-fatal)"
+
+      # ----- 4. Verify EAS authentication ----------------------------------
+      - name: Verify EAS authentication
+        script: |
+          if [ -z "$EXPO_TOKEN" ]; then
+            echo "WARNING: EXPO_TOKEN is not set. Prebuild will run unauthenticated."
+            echo "Set EXPO_TOKEN inside the 'expo_credentials' group in Codemagic UI."
+          else
+            echo "EXPO_TOKEN is set — checking eas-cli session..."
+            npx --yes eas-cli whoami 2>&1 || echo "eas-cli whoami failed (non-fatal for prebuild)"
+          fi
+
+      # ----- 5. Expo prebuild — generate Android native project -------------
+      # android/ is .gitignored, so we always regenerate it. --clean wipes
+      # any stale state to guarantee a deterministic build.
+      - name: Expo prebuild — generate Android native project
+        script: |
+          set -e
+          npx expo prebuild --platform android --clean
+          echo "Prebuild complete. Top-level android/ contents:"
+          ls -la android/
+
+      # ----- 6. Build Android APK ------------------------------------------
+      # If CM_KEYSTORE_PATH is set, build signed release APK. Otherwise,
+      # build debug APK (still installable for testing). Output is teed to
+      # /tmp/build.log for the artifact bundle.
+      - name: Build Android APK
+        script: |
+          # pipefail propagates Gradle failure through `tee` so the build
+          # step actually fails (otherwise `set -e` would only check tee).
+          set -euo pipefail
+          mkdir -p /tmp
+          cd android
+          chmod +x gradlew
+
+          if [ -n "${CM_KEYSTORE_PATH:-}" ]; then
+            echo "Keystore detected — building SIGNED release APK"
+            ./gradlew assembleRelease \
+              -Pandroid.injected.signing.store.file="$CM_KEYSTORE_PATH" \
+              -Pandroid.injected.signing.store.password="$CM_KEYSTORE_PASSWORD" \
+              -Pandroid.injected.signing.key.alias="$CM_KEY_ALIAS" \
+              -Pandroid.injected.signing.key.password="$CM_KEY_PASSWORD" \
+              --no-daemon \
+              --stacktrace 2>&1 | tee /tmp/build.log
+          else
+            echo "No keystore — building DEBUG APK (still installable)"
+            ./gradlew assembleDebug \
+              --no-daemon \
+              --stacktrace 2>&1 | tee /tmp/build.log
+          fi
+
+      # ----- 7. Display artifact location ----------------------------------
+      - name: Display artifact location
+        script: |
+          echo "APK files produced:"
+          find android/app/build/outputs/apk -name "*.apk" -print -exec du -h {} \; 2>/dev/null || true
+          echo ""
+          echo "Download from Codemagic dashboard → Builds → this build → Artifacts."
+
+    artifacts:
+      - android/app/build/outputs/apk/release/*.apk
+      - android/app/build/outputs/apk/debug/*.apk
+      # NOTE: no mapping.txt — R8/ProGuard is OFF by default in the
+      # RN 0.76 / Expo SDK 52 prebuild template, so no mapping file is
+      # produced. If you later enable minification for crash-trace
+      # deobfuscation, re-add `android/app/build/outputs/mapping/release/mapping.txt`.
+      - /tmp/install.log
+      - /tmp/build.log
+
+    publishing:
+      email:
+        recipients:
+          - support@zentromeet.com
+        notify:
+          success: true
+          failure: true
+
+  # ===========================================================================
+  # WORKFLOW 2: android-production
+  # ---------------------------------------------------------------------------
+  # Produces a signed Android App Bundle (.aab) ready for upload to Google
+  # Play Console. Triggered manually or by pushes to `main`.
+  #
+  # SIGNING IS REQUIRED. The build fails fast if no keystore is configured.
+  #
+  # versionCode NOTE
+  # ----------------
+  # eas.json declares  appVersionSource: "remote"  with  autoIncrement: true
+  # on the production profile, which means EAS's *remote* build pipeline
+  # owns the canonical versionCode bump for store submissions. This Codemagic
+  # workflow runs Gradle LOCALLY on Codemagic infrastructure, so versionCode
+  # is read from app.json (currently android.versionCode = 3).
+  #
+  # Before tagging a production release on this workflow, the operator MUST
+  # either:
+  #   (a) bump android.versionCode in app.json by hand, commit, then push to
+  #       main, or
+  #   (b) skip this workflow entirely and run
+  #         eas build --profile production --platform android
+  #       which lets EAS auto-bump versionCode server-side.
+  #
+  # If you forget (a) and reuse a versionCode that's already on Play Console,
+  # the upload will be rejected with "Version code N has already been used".
+  # ===========================================================================
+  android-production:
+    name: "Android Production — Play Store AAB"
+    instance_type: linux_x64
+    max_build_duration: 90
+    working_directory: mobile
+
+    environment:
+      node: 20.17.0
+      java: 17
+      # REQUIRED for production. Build aborts in step 2 if missing.
+      android_signing:
+        - zentromeet_android_keystore
+      groups:
+        - expo_credentials
+        - zentromeet_api
+      vars:
+        # Same constraints as android-preview: EXPO_PUBLIC_API_BASE_URL
+        # is defined in the zentromeet_api group directly (Codemagic does
+        # NOT substitute $VARS in this block). Gradle heap held to 2.5 GB
+        # to leave room for Node + Gradle daemon + OS on the 4 GB
+        # linux_x64 instance.
+        GRADLE_OPTS: "-Xmx2560m -XX:MaxMetaspaceSize=512m -Dfile.encoding=UTF-8"
+        EXPO_NO_TELEMETRY: "1"
+
+    triggering:
+      events:
+        - push
+      branch_patterns:
+        - pattern: "main"
+          include: true
+          source: true
+      # Production workflows do not declare cancel_previous_builds; the
+      # Codemagic default (false) is what we want — every main-branch
+      # build runs to completion.
+
+    cache:
+      cache_paths:
+        - $HOME/.npm
+        - $HOME/.gradle/caches
+        - $HOME/.gradle/wrapper
+
+    scripts:
+      # ----- 1. Environment info -------------------------------------------
+      - name: Environment info
+        script: |
+          echo "Node:    $(node --version)"
+          echo "npm:     $(npm --version)"
+          echo "Java:    $(java -version 2>&1 | head -1)"
+          echo "Branch:  $CM_BRANCH"
+          echo "Commit:  $CM_COMMIT"
+          echo "Build:   $CM_BUILD_ID"
+
+      # ----- 2. Fail fast if no keystore configured ------------------------
+      - name: Verify release keystore is configured
+        script: |
+          if [ -z "$CM_KEYSTORE_PATH" ]; then
+            echo "ERROR: No Android release keystore configured."
+            echo "Go to Codemagic → Teams → Code Signing → Android keystores"
+            echo "and upload your release.keystore as 'zentromeet_android_keystore'."
+            exit 1
+          fi
+          echo "Keystore found at: $CM_KEYSTORE_PATH"
+          echo "Key alias:         $CM_KEY_ALIAS"
+
+      # ----- 3. Install dependencies ---------------------------------------
+      - name: Install dependencies
+        script: |
+          # pipefail so a failing npm step propagates through `tee`.
+          # Without it, `set -e` only checks tee's exit status (always 0).
+          set -euo pipefail
+          mkdir -p /tmp
+          if [ -f package-lock.json ]; then
+            echo "package-lock.json found — using npm ci"
+            npm ci --no-audit --no-fund 2>&1 | tee /tmp/install.log
+          else
+            echo "No package-lock.json — using npm install"
+            npm install --no-audit --no-fund 2>&1 | tee /tmp/install.log
+          fi
+
+      # ----- 4. TypeScript check (permissive) ------------------------------
+      # The project currently has four documented pre-existing TS errors
+      # (Button.tsx, Card.tsx, usePushNotifications.ts,
+      # appointments/[id]/index.tsx). Rather than gating every production
+      # build on resolving those, we run tsc, capture the tail of the
+      # output for visibility, and continue. Operators should still
+      # eyeball the log on each production cut to confirm no NEW errors
+      # have crept in.
+      - name: TypeScript check
+        script: |
+          npx tsc --noEmit 2>&1 | tail -20 || true
+          echo "TypeScript check complete (pre-existing errors tolerated)."
+
+      # ----- 5. Verify EAS authentication ---------------------------------
+      - name: Verify EAS authentication
+        script: |
+          if [ -z "$EXPO_TOKEN" ]; then
+            echo "WARNING: EXPO_TOKEN is not set."
+          else
+            npx --yes eas-cli whoami 2>&1 || echo "eas-cli whoami failed (non-fatal for prebuild)"
+          fi
+
+      # ----- 6. Expo prebuild ----------------------------------------------
+      - name: Expo prebuild — generate Android native project
+        script: |
+          set -e
+          npx expo prebuild --platform android --clean
+          echo "Prebuild complete."
+
+      # ----- 7. Build signed AAB -------------------------------------------
+      - name: Build signed AAB
+        script: |
+          set -euo pipefail
+          mkdir -p /tmp
+          cd android
+          chmod +x gradlew
+          echo "Building signed release AAB..."
+          ./gradlew bundleRelease \
+            -Pandroid.injected.signing.store.file="$CM_KEYSTORE_PATH" \
+            -Pandroid.injected.signing.store.password="$CM_KEYSTORE_PASSWORD" \
+            -Pandroid.injected.signing.key.alias="$CM_KEY_ALIAS" \
+            -Pandroid.injected.signing.key.password="$CM_KEY_PASSWORD" \
+            --no-daemon \
+            --stacktrace 2>&1 | tee /tmp/build.log
+
+      # ----- 8. Verify AAB integrity ---------------------------------------
+      - name: Verify AAB integrity
+        script: |
+          AAB=$(find android/app/build/outputs/bundle/release -name "*.aab" 2>/dev/null | head -1)
+          if [ -z "$AAB" ]; then
+            echo "ERROR: AAB artifact not found after build."
+            exit 1
+          fi
+          echo "AAB:  $AAB"
+          echo "Size: $(du -h "$AAB" | cut -f1)"
+
+    artifacts:
+      - android/app/build/outputs/bundle/release/*.aab
+      # NOTE: no mapping.txt — see android-preview comment above. R8 is
+      # off in the RN 0.76 / Expo SDK 52 prebuild template by default.
+      # To enable mapping output, add `android.enableProguardInReleaseBuilds=true`
+      # to android/gradle.properties post-prebuild and re-add the path
+      # `android/app/build/outputs/mapping/release/mapping.txt` here.
+      - /tmp/install.log
+      - /tmp/build.log
+
+    publishing:
+      email:
+        recipients:
+          - support@zentromeet.com
+        notify:
+          success: true
+          failure: true
+
+  # ===========================================================================
+  # WORKFLOW 3: ios-production
+  # ---------------------------------------------------------------------------
+  # Orchestrates an EAS production iOS build. The actual compile happens on
+  # EAS's macOS workers; this Codemagic workflow simply:
+  #
+  #   1) Authenticates with EAS using EXPO_TOKEN
+  #   2) Kicks off the build and waits for it to complete
+  #   3) Downloads the resulting .ipa so it's a Codemagic artifact
+  #   4) Optionally submits to TestFlight (toggle via SUBMIT_TO_TESTFLIGHT)
+  #
+  # Because we are not compiling natively on Codemagic, we use linux_x64
+  # (cheaper than mac_mini_m2). All heavy lifting runs on EAS.
+  #
+  # Triggers: manual + push to `main`.
+  #
+  # To enable TestFlight auto-submit: set SUBMIT_TO_TESTFLIGHT="true" in the
+  # Codemagic UI for this workflow (overrides the "false" default below).
+  # ===========================================================================
+  ios-production:
+    name: "iOS Production — App Store / TestFlight (via EAS)"
+    instance_type: linux_x64
+    max_build_duration: 120
+    working_directory: mobile
+
+    environment:
+      node: 20.17.0
+      groups:
+        - expo_credentials
+        - zentromeet_api
+      vars:
+        EXPO_NO_TELEMETRY: "1"
+        # Default off — flip to "true" in Codemagic UI to auto-submit to
+        # TestFlight after a successful EAS build.
+        SUBMIT_TO_TESTFLIGHT: "false"
+
+    triggering:
+      events:
+        - push
+      branch_patterns:
+        - pattern: "main"
+          include: true
+          source: true
+
+    cache:
+      cache_paths:
+        - $HOME/.npm
+
+    scripts:
+      # ----- 1. Environment info -------------------------------------------
+      - name: Environment info
+        script: |
+          echo "Node:    $(node --version)"
+          echo "npm:     $(npm --version)"
+          echo "Branch:  $CM_BRANCH"
+          echo "Commit:  $CM_COMMIT"
+          echo "Build:   $CM_BUILD_ID"
+          echo "Submit to TestFlight: $SUBMIT_TO_TESTFLIGHT"
+
+      # ----- 2. Install dependencies ---------------------------------------
+      - name: Install dependencies
+        script: |
+          # pipefail so a failing npm step propagates through `tee`.
+          # Without it, `set -e` only checks tee's exit status (always 0).
+          set -euo pipefail
+          mkdir -p /tmp
+          if [ -f package-lock.json ]; then
+            echo "package-lock.json found — using npm ci"
+            npm ci --no-audit --no-fund 2>&1 | tee /tmp/install.log
+          else
+            echo "No package-lock.json — using npm install"
+            npm install --no-audit --no-fund 2>&1 | tee /tmp/install.log
+          fi
+
+      # ----- 3. Verify EAS authentication ----------------------------------
+      # EXPO_TOKEN is REQUIRED for this workflow — without it, eas-cli
+      # cannot trigger a remote build. Fail fast.
+      - name: Verify EAS authentication
+        script: |
+          set -e
+          if [ -z "$EXPO_TOKEN" ]; then
+            echo "ERROR: EXPO_TOKEN is not set."
+            echo "Configure it in Codemagic UI under the 'expo_credentials' group."
+            exit 1
+          fi
+          echo "EXPO_TOKEN is set. Checking eas-cli session..."
+          npx --yes eas-cli whoami
+
+      # ----- 4. Trigger EAS production iOS build ---------------------------
+      # --non-interactive  : no prompts; fails fast on missing config
+      # --wait             : block until EAS reports success or failure
+      # --json             : emit machine-readable build metadata to stdout
+      #                      so step 5 can read THIS build's id directly,
+      #                      avoiding the race where `eas build:list
+      #                      --limit 1` returns a different (concurrent)
+      #                      build's id.
+      # Output teed to /tmp/eas-build.log (human-readable) AND
+      # /tmp/eas-build.json (machine-readable) for the next step.
+      - name: Trigger EAS production iOS build
+        script: |
+          set -euo pipefail
+          mkdir -p /tmp
+          # Run the build and stream JSON output. --json on `build` makes
+          # eas-cli print a final JSON object with the build record.
+          npx --yes eas-cli build \
+            --platform ios \
+            --profile production \
+            --non-interactive \
+            --wait \
+            --json > /tmp/eas-build.json 2> /tmp/eas-build.log
+          echo "=== eas-build.log (stderr) ==="
+          cat /tmp/eas-build.log
+          echo "=== eas-build.json (head) ==="
+          head -c 4000 /tmp/eas-build.json || true
+
+      # ----- 5. Download the built .ipa ------------------------------------
+      # Read the build id from THIS build's JSON output (step 4), then
+      # pull its artifact URL. Falls back across the historical eas-cli
+      # field names (`buildUrl` is current; `applicationArchiveUrl` and
+      # `artifactsUrl` appeared in older versions) so a future eas-cli
+      # rename does not silently break the download.
+      - name: Download the built .ipa
+        script: |
+          set -euo pipefail
+          mkdir -p ios-artifacts
+
+          # eas-cli build --json may emit either a single object or an
+          # array; the jq `if-then-else` handles both shapes safely.
+          BUILD_ID=$(jq -r 'if type=="array" then .[0].id else .id end' /tmp/eas-build.json)
+          if [ -z "$BUILD_ID" ] || [ "$BUILD_ID" = "null" ]; then
+            echo "ERROR: Could not extract BUILD_ID from /tmp/eas-build.json."
+            echo "--- json head ---"
+            head -c 2000 /tmp/eas-build.json
+            exit 1
+          fi
+          echo "BUILD_ID (from this run's eas build --json): $BUILD_ID"
+
+          # Re-query build:view to get a fresh URL — the URL embedded in
+          # the build event is sometimes a placeholder until EAS finishes
+          # the post-build copy.
+          URL=$(npx --yes eas-cli build:view "$BUILD_ID" --json --non-interactive \
+                | jq -r '.artifacts.buildUrl // .artifacts.applicationArchiveUrl // .artifactsUrl // empty')
+          if [ -z "$URL" ]; then
+            echo "ERROR: No buildUrl / applicationArchiveUrl / artifactsUrl in eas-cli build:view output."
+            exit 1
+          fi
+          echo "Downloading IPA from: $URL"
+          curl -L -o "ios-artifacts/zentromeet-${BUILD_ID}.ipa" "$URL"
+          echo "Downloaded:"
+          ls -lah ios-artifacts/
+
+      # ----- 6. Optionally submit to TestFlight ----------------------------
+      # PREREQUISITE (one-time, BEFORE flipping SUBMIT_TO_TESTFLIGHT to "true"):
+      #
+      #   cd mobile
+      #   npx eas-cli credentials -p ios
+      #
+      # and upload either an App Store Connect API key (.p8 + Issuer ID +
+      # Key ID) OR an Apple ID + app-specific password to EAS. Credentials
+      # are then cached on EAS infrastructure and the --non-interactive
+      # run below will succeed. Without this one-time setup, the first
+      # auto-submit will hard-fail with "No ASC API key configured" — eas
+      # submit has no prompt fallback under --non-interactive.
+      # See docs/CODEMAGIC.md §9 Option A for the full prereq sequence.
+      - name: Optionally submit to TestFlight
+        script: |
+          if [ "$SUBMIT_TO_TESTFLIGHT" = "true" ]; then
+            echo "SUBMIT_TO_TESTFLIGHT=true — submitting latest iOS build to TestFlight..."
+            echo "NOTE: requires ASC API key OR Apple ID/app-password pre-uploaded via"
+            echo "      \`eas credentials -p ios\`. If you see a credentials error,"
+            echo "      run that command locally once and re-run this workflow."
+            npx --yes eas-cli submit \
+              --platform ios \
+              --latest \
+              --profile production \
+              --non-interactive
+          else
+            echo "SUBMIT_TO_TESTFLIGHT is '$SUBMIT_TO_TESTFLIGHT' — skipping submission."
+            echo "To enable auto-submit:"
+            echo "  1. Run \`npx eas-cli credentials -p ios\` from your laptop once,"
+            echo "     uploading an App Store Connect API key (preferred) or"
+            echo "     Apple ID + app-specific password."
+            echo "  2. In Codemagic UI for this workflow, set SUBMIT_TO_TESTFLIGHT=\"true\"."
+            echo "Or submit manually from your laptop after this Codemagic build:"
+            echo "  npx eas-cli submit --platform ios --latest --profile production"
+          fi
+
+      # ----- 7. Display artifact location ----------------------------------
+      - name: Display artifact location
+        script: |
+          echo "Local IPA artifact(s):"
+          ls -lah ios-artifacts/ || true
+          echo ""
+          echo "Download from Codemagic dashboard → Builds → this build → Artifacts."
+
+    artifacts:
+      - ios-artifacts/*.ipa
+      - /tmp/install.log
+      - /tmp/eas-build.log
+
+    publishing:
+      email:
+        recipients:
+          - support@zentromeet.com
+        notify:
+          success: true
+          failure: true

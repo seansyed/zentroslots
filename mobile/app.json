@@ -1,0 +1,117 @@
+{
+  "expo": {
+    "name": "ZentroMeet",
+    "slug": "zentromeet-mobile",
+    "version": "0.3.0",
+    "description": "Mobile command center for ZentroMeet — manage bookings, confirm appointments, message customers, and run your schedule from anywhere.",
+    "primaryColor": "#359df3",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "scheme": "zentromeet",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#f5faff"
+    },
+
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.zentromeet.app",
+      "buildNumber": "3",
+      "config": {
+        "usesNonExemptEncryption": false
+      },
+      "associatedDomains": ["applinks:app.zentromeet.com"],
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSCameraUsageDescription": "ZentroMeet does not access your camera. This permission string is required by the system but the feature is not used.",
+        "NSMicrophoneUsageDescription": "ZentroMeet does not access your microphone. This permission string is required by the system but the feature is not used.",
+        "NSPhotoLibraryUsageDescription": "ZentroMeet does not access your photo library.",
+        "NSContactsUsageDescription": "ZentroMeet does not access your contacts.",
+        "NSLocationWhenInUseUsageDescription": "ZentroMeet does not use your location.",
+        "NSUserTrackingUsageDescription": "ZentroMeet does not track you across other apps or websites."
+      }
+    },
+
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#359df3"
+      },
+      "package": "com.zentromeet.app",
+      "versionCode": 3,
+      "permissions": [
+        "INTERNET",
+        "POST_NOTIFICATIONS",
+        "VIBRATE",
+        "WAKE_LOCK",
+        "RECEIVE_BOOT_COMPLETED"
+      ],
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "category": ["BROWSABLE", "DEFAULT"],
+          "data": [
+            {
+              "scheme": "zentromeet",
+              "host": "oauth"
+            }
+          ]
+        },
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "category": ["BROWSABLE", "DEFAULT"],
+          "data": [
+            {
+              "scheme": "https",
+              "host": "app.zentromeet.com",
+              "pathPrefix": "/m"
+            }
+          ]
+        }
+      ]
+    },
+
+    "web": {
+      "bundler": "metro",
+      "output": "single",
+      "favicon": "./assets/favicon.png"
+    },
+
+    "plugins": [
+      "expo-router",
+      "expo-font",
+      "expo-secure-store",
+      "expo-web-browser",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#359df3",
+          "defaultChannel": "default"
+        }
+      ]
+    ],
+
+    "experiments": {
+      "typedRoutes": true,
+      "baseUrl": "/mobile"
+    },
+
+    "extra": {
+      "apiBaseUrl": "https://app.zentromeet.com",
+      "privacyPolicyUrl": "https://app.zentromeet.com/legal/privacy",
+      "termsUrl": "https://app.zentromeet.com/legal/terms",
+      "supportEmail": "support@zentromeet.com",
+      "router": {
+        "origin": false
+      },
+      "_easComment": "Run `npx eas init` once — the CLI writes extra.eas.projectId and the top-level `owner` field here automatically. Don't set them by hand."
+    }
+  }
+}

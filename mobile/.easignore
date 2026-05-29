@@ -1,0 +1,27 @@
+# ─── EAS upload exclusions ──────────────────────────────────────
+# Files EAS Build should NOT upload to the cloud builders. EAS reads
+# .gitignore by default; this file adds extra paths on top.
+
+# Already in .gitignore but listed here as documentation:
+node_modules/
+android/
+ios/
+dist/
+web-build/
+.expo/
+
+# Generated PNG placeholders are kept in-repo (they MUST be uploaded
+# so the build can reference them). Just listing here as a reminder.
+# assets/  ← do NOT add
+
+# Local logs / IDE clutter
+*.log
+.DS_Store
+.idea/
+.vscode/
+
+# Local env — eas.json's `env` block is the canonical source for
+# build-time variables, NOT the local .env.
+.env
+.env.local
+.env.*.local

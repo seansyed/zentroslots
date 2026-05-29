@@ -1,0 +1,39 @@
+# Expo
+.expo/
+.expo-shared/
+dist/
+web-build/
+
+# Native
+android/
+ios/
+*.apk
+*.aab
+*.ipa
+*.xcworkspace
+*.xcodeproj
+.gradle/
+
+# Dependencies
+node_modules/
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Misc
+.DS_Store
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.idea/
+.vscode/
+*.tsbuildinfo
+
+# EAS
+eas-build.log
