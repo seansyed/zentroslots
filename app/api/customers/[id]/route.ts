@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull, or, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "@/db/client";
@@ -32,6 +32,19 @@ export async function GET(
     });
     if (!customer) throw new HttpError(404, "Customer not found");
 
+    // Booking history match — two channels in priority order:
+    //   1. Linked: bookings.customer_id = this customer's id
+    //   2. Email fallback: bookings with NO customer_id but whose
+    //      client_email matches this customer's email. These are
+    //      orphans from public-booking flows where upsertCustomer
+    //      either hadn't been added yet or silently failed during the
+    //      best-effort post-create chain. Adding them here makes the
+    //      timeline trustworthy without a backfill migration.
+    //
+    // We keep `customer_id IS NULL` on the fallback so we never steal
+    // bookings that DO have an explicit (different) customer link —
+    // important if a single email is reused across multiple records.
+    const customerEmail = (customer.email ?? "").trim().toLowerCase();
     const history = await db
       .select({
         id: bookings.id,
@@ -46,7 +59,20 @@ export async function GET(
       .from(bookings)
       .innerJoin(services, eq(services.id, bookings.serviceId))
       .innerJoin(users, eq(users.id, bookings.staffUserId))
-      .where(and(eq(bookings.tenantId, caller.tenantId), eq(bookings.customerId, id)))
+      .where(
+        and(
+          eq(bookings.tenantId, caller.tenantId),
+          customerEmail
+            ? or(
+                eq(bookings.customerId, id),
+                and(
+                  isNull(bookings.customerId),
+                  sql`lower(${bookings.clientEmail}) = ${customerEmail}`,
+                ),
+              )
+            : eq(bookings.customerId, id),
+        ),
+      )
       .orderBy(desc(bookings.startAt))
       .limit(100);
 
