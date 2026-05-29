@@ -235,39 +235,61 @@ function AuthBoot({ children }: { children: React.ReactNode }) {
   const hydratePresence = usePresenceStore((s) => s.hydrate);
 
   React.useEffect(() => {
-    hydrate();
-    // Hydrate local presence from SecureStore once at boot — fire and
-    // forget; the UI defaults to "available" until this resolves.
-    void hydratePresence();
-    // Rehydrate the TanStack Query cache from AsyncStorage so cold-start
-    // shows last-known appointments while the network catches up. Fire
-    // and forget — empty cache is a perfectly fine starting point.
-    void hydrateQueryCache(queryClient);
-    // Rehydrate the telemetry buffer so a post-crash relaunch still
-    // shows the trail leading up to the crash.
-    void hydrateTelemetry();
-    track("info", "App boot", "info");
-    // Start writing snapshots back to disk on every successful query.
-    const teardownPersistence = wireUpPersistence(queryClient);
-    // Phase 3 — start batched telemetry remote sink. Flushes the
-    // in-app ring buffer to the backend every 60s plus on app
-    // background, so beta crashes show up in pm2 logs even when
-    // the operator never re-opens the app.
-    const teardownSink = startTelemetrySink();
+    // EVERY init call gets its own try/catch so a single broken module
+    // (e.g. expo-secure-store, AsyncStorage, expo-notifications) can't
+    // take down the entire boot. Each failure is silently downgraded —
+    // we'd rather render a possibly-degraded UI than hang on splash.
+    try { hydrate(); } catch (e) { console.warn("[boot] hydrate failed:", e); }
+    try { void hydratePresence(); } catch (e) { console.warn("[boot] hydratePresence failed:", e); }
+    try { void hydrateQueryCache(queryClient); } catch (e) { console.warn("[boot] hydrateQueryCache failed:", e); }
+    try { void hydrateTelemetry(); } catch (e) { console.warn("[boot] hydrateTelemetry failed:", e); }
+    try { track("info", "App boot", "info"); } catch {}
+
+    let teardownPersistence: (() => void) | undefined;
+    let teardownSink: (() => void) | undefined;
+    try { teardownPersistence = wireUpPersistence(queryClient); } catch (e) { console.warn("[boot] wireUpPersistence failed:", e); }
+    try { teardownSink = startTelemetrySink(); } catch (e) { console.warn("[boot] startTelemetrySink failed:", e); }
+
+    // Hard fallback — if hydrate() fails silently (no throw, no resolve)
+    // force hydrated=true after 3s so the UI can at least render the
+    // login screen. Better than an infinite null render.
+    const hydrationTimeout = setTimeout(() => {
+      try {
+        const { useAuthStore: store } = require("@/store/authStore");
+        if (!store.getState().hydrated) {
+          console.warn("[boot] hydrate timeout — forcing hydrated=true");
+          store.setState({ hydrated: true });
+        }
+      } catch {}
+    }, 3000);
+
     return () => {
-      teardownPersistence();
-      teardownSink();
+      clearTimeout(hydrationTimeout);
+      try { teardownPersistence?.(); } catch {}
+      try { teardownSink?.(); } catch {}
     };
   }, [hydrate, hydratePresence]);
 
-  // Hide splash once BOTH hydration + fonts complete. We don't gate
-  // hydration on fonts — render the system font in the meantime so
-  // a slow font load never blocks UI.
+  // Hide splash once hydration completes. Don't gate on fonts — RN
+  // falls back to the system font and Public Sans finishes loading in
+  // the background. Gating on both was causing infinite splash hangs
+  // when font load races with auth init.
   React.useEffect(() => {
-    if (hydrated && fontsLoaded) {
+    if (hydrated) {
       SplashScreen.hideAsync().catch(() => {});
     }
-  }, [hydrated, fontsLoaded]);
+  }, [hydrated]);
+
+  // BULLETPROOF splash dismissal — fires after 5 seconds regardless of
+  // hydration state. If something is broken so badly that hydration
+  // never completes, the user at least sees the actual UI (or the
+  // ErrorBoundary fallback) instead of an infinite Z splash.
+  React.useEffect(() => {
+    const splashTimeout = setTimeout(() => {
+      SplashScreen.hideAsync().catch(() => {});
+    }, 5000);
+    return () => clearTimeout(splashTimeout);
+  }, []);
 
   useAuthGate();
   useOAuthDeepLink();
