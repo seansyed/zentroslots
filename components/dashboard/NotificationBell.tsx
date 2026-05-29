@@ -81,11 +81,49 @@ export default function NotificationBell() {
     inflightRef.current = true;
     try {
       const r = await fetch("/api/notifications/unread-count", { cache: "no-store" });
-      if (!r.ok) return;
+      if (!r.ok) {
+        // 401 / 500 — we'll try again. Log if debug is on so an operator
+        // can see "the API never returned 200" without instrumenting.
+        if (
+          typeof window !== "undefined" &&
+          typeof localStorage !== "undefined" &&
+          localStorage.getItem("zentromeet:bell:debug") === "1"
+        ) {
+          // eslint-disable-next-line no-console
+          console.debug("[NotificationBell] fetch !ok", r.status, r.statusText);
+        }
+        return;
+      }
       const d = await r.json();
       if (!mountedRef.current) return;
-      setUnread(typeof d.count === "number" ? d.count : 0);
-    } catch {
+      const next = typeof d.count === "number" ? d.count : 0;
+      setUnread(next);
+      // Optional diagnostic — gated so production console stays clean.
+      // Enable via DevTools:
+      //   localStorage.setItem("zentromeet:bell:debug", "1")
+      // Then refresh. Each fetch prints the resolved count.
+      if (
+        typeof window !== "undefined" &&
+        typeof localStorage !== "undefined" &&
+        localStorage.getItem("zentromeet:bell:debug") === "1"
+      ) {
+        // eslint-disable-next-line no-console
+        console.debug(
+          "[NotificationBell] count=%d badge=%s payload=%o",
+          next,
+          next > 0 ? "shown" : "hidden",
+          d,
+        );
+      }
+    } catch (e) {
+      if (
+        typeof window !== "undefined" &&
+        typeof localStorage !== "undefined" &&
+        localStorage.getItem("zentromeet:bell:debug") === "1"
+      ) {
+        // eslint-disable-next-line no-console
+        console.debug("[NotificationBell] fetch threw", e);
+      }
       // best-effort — silent; we'll try again on the next tick.
     } finally {
       inflightRef.current = false;
@@ -165,25 +203,59 @@ export default function NotificationBell() {
   }
 
   return (
-    <div className="relative">
+    // overflow-visible on the wrapper is explicit so a parent flex/grid
+    // can't accidentally clip the badge that hangs over the button edge.
+    <div className="relative overflow-visible">
       <Tooltip label={unread > 0 ? `${unread} unread` : "Notifications"}>
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
-          aria-label="Notifications"
+          aria-label={unread > 0 ? `Notifications, ${unread} unread` : "Notifications"}
           aria-expanded={open}
-          className="relative inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-muted hover:bg-surface-inset hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-accent"
+          // Diagnostic attributes — inspect the bell in DevTools to see
+          // the resolved unread count and render-condition state at a
+          // glance. Helps distinguish "API returned 0" from "badge is
+          // being clipped by some ancestor".
+          data-unread-count={unread}
+          data-badge-state={unread > 0 ? "shown" : "hidden"}
+          className="relative inline-flex h-8 w-8 items-center justify-center overflow-visible rounded-md text-ink-muted hover:bg-surface-inset hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-accent"
         >
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4" aria-hidden>
             <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M13.73 21a2 2 0 0 1-3.46 0" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
           {unread > 0 && (
-            <span className="absolute -right-0.5 -top-0.5 inline-flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-semibold text-white">
+            <span
+              data-bell-badge
+              aria-hidden="true"
+              // Visibility hardening:
+              //   • h-[18px] min-w-[18px] — slightly larger than the previous
+              //     h-4 (16px) so single-digit counts read cleanly on
+              //     hi-DPI screens
+              //   • ring-2 ring-surface — surface-colored halo so the red
+              //     pill always pops off the topbar's translucent glass,
+              //     no matter how busy the underlying gradient is
+              //   • z-10 + shadow-sm — explicit stacking + faint lift so
+              //     no sibling content can paint over it
+              //   • pointer-events-none — clicks pass through to the
+              //     button beneath
+              //   • leading-none — vertical centering looks exact at 10px
+              className="pointer-events-none absolute -right-1 -top-1 z-10 inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold leading-none text-white shadow-sm ring-2 ring-surface"
+            >
               {unread > 9 ? "9+" : unread}
             </span>
           )}
         </button>
       </Tooltip>
+      {/* Live region — screen readers announce count changes without
+          stealing focus. Hidden visually; aria-live="polite" ensures
+          assistive tech picks up updates. */}
+      <span
+        role="status"
+        aria-live="polite"
+        className="sr-only"
+      >
+        {unread > 0 ? `${unread} unread notifications` : ""}
+      </span>
 
       {open && (
         <>
