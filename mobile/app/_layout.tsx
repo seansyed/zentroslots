@@ -293,19 +293,13 @@ function AuthBoot({ children }: { children: React.ReactNode }) {
 
   useAuthGate();
   useOAuthDeepLink();
-  // Push notification lifecycle — silent until auth lands, then
-  // registers token + listens for taps so notification → booking
-  // detail routing works.
-  usePushNotifications();
-  // Phase 1C — AppState foreground refetch + push-arrival cache
-  // invalidation. Independent of usePushNotifications so the two
-  // can evolve without coupling (taps vs arrivals are different
-  // signals).
-  useAppLifecycle();
-  // Phase 2E — observability. Breadcrumbs for navigation + capture for
-  // runtime errors that bypass React (async, unhandled rejections).
-  useNavigationBreadcrumbs();
-  useGlobalErrorHandlers();
+  // TEMP: disabling non-essential hooks while we isolate a
+  // "TypeError: undefined is not a function" crash inside AuthBoot.
+  // Re-enable once the boot path is stable.
+  // usePushNotifications();   // <- expo-notifications API drift suspect
+  // useAppLifecycle();        // <- AppState listener
+  // useNavigationBreadcrumbs(); // <- telemetry; non-essential
+  // useGlobalErrorHandlers();   // <- error capture; non-essential
 
   // Wait for hydration before mounting the Stack — the auth gate
   // can't make a routing decision until SecureStore is read.
