@@ -5,8 +5,6 @@
     "appVersionSource": "remote"
   },
   "build": {
-    "_comment_": "Three profiles in increasing degrees of polish: development (dev-client for hot reload on a real device), preview (installable APK + simulator build for QA on a real phone without a debug bundler), production (store-bound aab + ipa). Channel maps to runtime updates so each profile pulls a separate OTA stream.",
-
     "development": {
       "developmentClient": true,
       "distribution": "internal",
@@ -22,9 +20,7 @@
         "simulator": true
       }
     },
-
     "preview": {
-      "_comment_": "Real-device QA target. Distribution=internal gives a hosted install URL + QR code; no Play Store / TestFlight review needed. Android builds an APK (sideloadable). iOS builds an .ipa that registered UDIDs can install via Expo's install link (you'll be prompted to register a device the first time).",
       "distribution": "internal",
       "channel": "preview",
       "env": {
@@ -36,12 +32,11 @@
       },
       "ios": {
         "simulator": false,
-        "resourceClass": "m-medium"
+        "resourceClass": "medium",
+        "image": "latest"
       }
     },
-
     "production": {
-      "_comment_": "Store-bound. Android emits an .aab for Play Store internal track upload; iOS emits an .ipa pushed to TestFlight via the EAS Submit flow. Auto-increment lets EAS bump versionCode / buildNumber each time so the store doesn't reject duplicate uploads.",
       "distribution": "store",
       "channel": "production",
       "autoIncrement": true,
@@ -50,23 +45,19 @@
       },
       "android": {
         "buildType": "app-bundle",
-        "resourceClass": "m-medium"
+        "resourceClass": "medium"
       },
       "ios": {
-        "resourceClass": "m-medium"
+        "resourceClass": "medium",
+        "image": "latest"
       }
     }
   },
-
   "submit": {
-    "_comment_": "`eas submit -p ios` / `-p android` after a production build uploads to App Store Connect / Play Console. Credentials prompted interactively on first run, then cached on EAS servers. Leave the appleId / ascAppId blank here so the CLI prompts on demand — safer than committing identifiers.",
     "production": {
       "android": {
         "track": "internal",
         "releaseStatus": "draft"
-      },
-      "ios": {
-        "ascAppId": ""
       }
     }
   }
