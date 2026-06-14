@@ -193,7 +193,7 @@ function LoginPageInner() {
           <div className="relative flex items-center justify-between text-[11px] text-slate-400">
             <span>© {new Date().getFullYear()} ZentroMeet · enterprise scheduling platform</span>
             <span className="inline-flex items-center gap-2">
-              <a href="https://zentromeet.com/security" className="hover:text-slate-600">Security</a>
+              <a href="https://zentromeet.com/terms" className="hover:text-slate-600">Terms</a>
               <span className="text-slate-300">·</span>
               <a href="https://zentromeet.com/privacy" className="hover:text-slate-600">Privacy</a>
             </span>

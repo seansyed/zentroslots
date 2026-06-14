@@ -76,13 +76,13 @@ export async function computeRevenueExecutiveKpis(): Promise<RevenueExecutiveKpi
               ), 0) AS active_subscribers,
               COALESCE((
                 SELECT SUM(amount_cents)::bigint FROM billing_transactions
-                 WHERE status = 'succeeded'
+                 WHERE status = 'paid'
                    AND created_at >= date_trunc('month', NOW() - INTERVAL '1 month')
                    AND created_at <  date_trunc('month', NOW())
               ), 0) AS prior_month_revenue_cents,
               COALESCE((
                 SELECT SUM(amount_cents)::bigint FROM billing_transactions
-                 WHERE status = 'succeeded'
+                 WHERE status = 'paid'
                    AND created_at >= date_trunc('month', NOW())
               ), 0) AS current_month_revenue_cents,
               COALESCE((

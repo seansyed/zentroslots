@@ -15,10 +15,11 @@
 import { and, eq, sql } from "drizzle-orm";
 
 import { db } from "@/db/client";
-import { availability, services, tenants } from "@/db/schema";
+import { availability, services, serviceStaff, tenants } from "@/db/schema";
 
 export type ActivationBlocker =
   | "no_services"
+  | "no_staff"
   | "no_availability"
   | "tenant_missing"
   | "tenant_inactive";
@@ -48,15 +49,22 @@ export async function checkActivationIntegrity(
   // EXISTS short-circuits on first row, unlike COUNT(*) which scans.
   const [row] = await db.execute<{
     has_services: boolean;
+    has_bookable_staff: boolean;
     has_availability: boolean;
   }>(sql`
     SELECT
       EXISTS(SELECT 1 FROM ${services} WHERE ${services.tenantId} = ${tenantId}) AS has_services,
+      EXISTS(SELECT 1 FROM ${serviceStaff} WHERE ${serviceStaff.tenantId} = ${tenantId}) AS has_bookable_staff,
       EXISTS(SELECT 1 FROM ${availability} WHERE ${availability.userId} = ${userId}) AS has_availability
   `);
 
   const blockers: ActivationBlocker[] = [];
   if (!row?.has_services) blockers.push("no_services");
+  // A service with no staff is unbookable — every public booking surface
+  // inner-joins serviceStaff. Block completion so a tenant can never be
+  // stamped "live & ready to take bookings" with a booking page nobody
+  // can actually use.
+  else if (!row?.has_bookable_staff) blockers.push("no_staff");
   if (!row?.has_availability) blockers.push("no_availability");
 
   return blockers.length === 0 ? { ok: true } : { ok: false, blockers };
@@ -91,6 +99,7 @@ export async function getDashboardChecklistSummary(
  */
 export const ACTIVATION_BLOCKER_COPY: Record<ActivationBlocker, string> = {
   no_services: "Add at least one service before finishing setup.",
+  no_staff: "Assign a staff member to a service so it can be booked.",
   no_availability: "Set your weekly availability before finishing setup.",
   tenant_missing: "Workspace not found — please sign in again.",
   tenant_inactive: "This workspace is inactive — contact support.",

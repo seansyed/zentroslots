@@ -5,7 +5,7 @@ Production checklist. Skim before going live; every box must be ticked.
 ## 1. Database
 
 - [ ] Postgres 16+ with `btree_gist` extension available
-- [ ] Apply migrations in order: `0000` → `0005`
+- [ ] Apply migrations in order: `0000` → `0070` (full set in `db/migrations/`; note `0046` and `0049` are intentionally absent from the sequence)
 - [ ] Verify constraints:
   - `bookings_no_overlap` (EXCLUDE) present
   - `availability_overrides_shape` CHECK present
@@ -29,8 +29,11 @@ SELECT count(*) FROM pg_indexes WHERE schemaname='public';
 | `APP_BASE_URL` | yes | Absolute URL, used in emails + OAuth + sitemap |
 | `STRIPE_SECRET_KEY` | recommended | Without it, billing routes return 503 |
 | `STRIPE_WEBHOOK_SECRET` | required if Stripe on | Webhook signature verification |
-| `STRIPE_PRICE_PRO` | required if Stripe on | Stripe Price ID for Pro |
-| `STRIPE_PRICE_TEAM` | required if Stripe on | Stripe Price ID for Team |
+| `STRIPE_PRICE_SOLO_MONTH` / `_YEAR` | required if Stripe on | Stripe Price IDs for Solo (note the `_MONTH`/`_YEAR` suffix — see `.env.example`) |
+| `STRIPE_PRICE_PRO_MONTH` / `_YEAR` | required if Stripe on | Stripe Price IDs for Pro |
+| `STRIPE_PRICE_TEAM_MONTH` / `_YEAR` | required if Stripe on | Stripe Price IDs for Team |
+| `STRIPE_PRICE_ENTERPRISE_MONTH` / `_YEAR` | required if Stripe on | Stripe Price IDs for Enterprise |
+| `STRIPE_PRICE_PRO` / `STRIPE_PRICE_TEAM` | optional | Legacy monthly-only fallbacks for pre-Phase-16 subscriptions |
 | `GOOGLE_CLIENT_ID` | optional | Google OAuth + Calendar |
 | `GOOGLE_CLIENT_SECRET` | optional | Google OAuth + Calendar |
 | `GOOGLE_REDIRECT_URI` | optional | Must match Google console exactly |
@@ -84,7 +87,13 @@ Validate by hitting `/api/billing/state` after login — `stripeConfigured: true
 - [ ] `.ics` attachment displays as "Add to calendar" in Gmail/Apple Mail
 - [ ] If using a transactional provider (Resend / Postmark / SES), swap `SMTP_HOST` to the provider's relay
 
-## 7. Reminders cron
+## 7. Scheduled jobs (cron)
+
+> ⚠️ Reminders are only ONE of ~17 scheduled jobs. Register the COMPLETE
+> set from **`docs/operations/cron-manifest.md`** — in particular
+> `calendar:webhook-renew` (calendar sync silently dies without it),
+> `holds:expire`, `waitlists:expire`, `automations:run`, `push:deliver`,
+> `recurring:materialize`, and the analytics/admin-snapshot jobs.
 
 - Linux: `*/15 * * * * cd /app && /usr/bin/node node_modules/.bin/tsx scripts/send-reminders.ts >> /var/log/reminders.log 2>&1`
 - Windows Server: Task Scheduler → trigger every 15 minutes → action: `npm run reminders:send`

@@ -105,7 +105,7 @@ function HeroTile({
     critical: { border: "border-rose-200", gradient: "from-white to-rose-50/40" },
   } as const;
   const t = tones[tone];
-  const Tag: keyof JSX.IntrinsicElements = onClick ? "button" : "div";
+  const Tag: keyof React.JSX.IntrinsicElements = onClick ? "button" : "div";
 
   return (
     <Tag

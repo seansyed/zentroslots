@@ -6,7 +6,7 @@ import { PLANS, formatPrice } from "@/lib/plans";
 
 export const metadata: Metadata = {
   title: "Pricing",
-  description: "Simple, predictable pricing. Free tier, 14-day trial on paid plans, no credit card to start.",
+  description: "Simple, predictable pricing. Start on the Free plan with no credit card; upgrade anytime and cancel anytime.",
   openGraph: { title: "Pricing — ZentroMeet" },
 };
 
@@ -54,7 +54,7 @@ export default function PricingPage() {
                 >
                   {p.id === "free" ? "Sign up free" :
                    p.id === "enterprise" ? "Contact sales" :
-                   "Start 14-day trial"}
+                   "Get started"}
                 </Link>
               </div>
             </div>
@@ -68,7 +68,7 @@ export default function PricingPage() {
           <h2 className="text-2xl font-semibold">FAQ</h2>
           <div className="mt-6 space-y-6">
             <Faq q="Can I switch plans?" a="Yes. Upgrades take effect immediately. Downgrades happen at the end of the billing period." />
-            <Faq q="Is there a free trial?" a="Pro and Team include a 14-day trial — no credit card needed to start." />
+            <Faq q="Is there a free plan?" a="Yes — the Free plan lets you start with no credit card. Paid plans bill immediately when you upgrade, and you can cancel anytime." />
             <Faq q="What happens if I exceed my plan limits?" a="Workspaces see a friendly upsell on the booking endpoint. Existing bookings are never deleted." />
             <Faq q="Do you support Outlook?" a="Not yet — Google Meet is built-in. Outlook is on the roadmap." />
           </div>

@@ -89,7 +89,7 @@ export async function computeBillingValidation(): Promise<BillingValidationRepor
                        MIN(created_at) AS first_at,
                        MAX(created_at) AS last_at
                   FROM billing_transactions
-                 WHERE status = 'succeeded'
+                 WHERE status = 'paid'
                    AND created_at > NOW() - INTERVAL '30 days'
                  GROUP BY tenant_id, date_trunc('hour', created_at), amount_cents
                 HAVING COUNT(*) > 1
@@ -166,7 +166,7 @@ export async function computeBillingValidation(): Promise<BillingValidationRepor
           (await db.execute(
             sql`SELECT t.id::text AS tenant_id, t.name, t.plan, t.subscription_status,
                        (SELECT MAX(created_at) FROM billing_transactions
-                          WHERE tenant_id = t.id AND status='succeeded') AS last_charge_at
+                          WHERE tenant_id = t.id AND status='paid') AS last_charge_at
                   FROM tenants t
                  WHERE t.active = true
                    AND t.plan <> 'free'
@@ -174,7 +174,7 @@ export async function computeBillingValidation(): Promise<BillingValidationRepor
                    AND NOT EXISTS (
                          SELECT 1 FROM billing_transactions
                           WHERE tenant_id = t.id
-                            AND status='succeeded'
+                            AND status='paid'
                             AND created_at > NOW() - INTERVAL '60 days'
                        )
                    AND t.created_at < NOW() - INTERVAL '60 days'
@@ -285,7 +285,7 @@ export async function computeBillingValidation(): Promise<BillingValidationRepor
                    AND NOT EXISTS (
                          SELECT 1 FROM billing_transactions bt2
                           WHERE bt2.tenant_id = bt.tenant_id
-                            AND bt2.status = 'succeeded'
+                            AND bt2.status = 'paid'
                             AND bt2.created_at > bt.created_at
                        )
                  GROUP BY bt.tenant_id
