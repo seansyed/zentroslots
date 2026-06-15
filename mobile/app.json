@@ -41,7 +41,7 @@
         "backgroundColor": "#359df3"
       },
       "package": "com.zentromeet.app",
-      "versionCode": 3,
+      "versionCode": 4,
       "permissions": [
         "INTERNET",
         "POST_NOTIFICATIONS",
@@ -113,8 +113,7 @@
       ]
     ],
     "experiments": {
-      "typedRoutes": true,
-      "baseUrl": "/mobile"
+      "typedRoutes": true
     },
     "extra": {
       "apiBaseUrl": "https://app.zentromeet.com",

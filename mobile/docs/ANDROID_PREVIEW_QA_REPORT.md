@@ -219,3 +219,53 @@ APK URL:                  PENDING (Codemagic -> Builds -> Artifacts)
 DEVICE QA:                PENDING — physical Android device required
 READY FOR PRODUCTION AAB: NO — gated on a real APK installed + tested on a physical device
 ```
+
+---
+
+# UPDATE — Release-APK white screen fix (boot hardening), 2026-06-15
+
+**Symptom:** the first physical-device preview APK installed but opened to a permanent **white blank screen** (P0).
+
+**Log availability:** the referenced `zm-crash.txt` was **not present** on this machine (searched repo, Downloads, Documents, Desktop, user profile), so I could not read the device log. Per the task's explicit directive, the unsafe boot-time side effects were removed **regardless** — the fix below eliminates the entire white-screen *class*, not just one line.
+
+**Root cause (code-evident, highest confidence):** `mobile/src/hooks/usePushNotifications.ts` called `Notifications.setNotificationHandler(...)` as a **module-import-time side effect**. `app/_layout.tsx` imports that module, so the native call ran during **bundle evaluation — before React (and the ErrorBoundary) mounts**. In a **release** build (which strips the dev red-box), if the native module isn't ready/available the root-layout import throws → React never mounts → white screen with no recoverable surface. (Dev/Expo Go masked it; this was the first real release APK.)
+
+**Boot phase:** before React mounts → **not catchable by the ErrorBoundary** (which only catches render-phase errors). That's why it was white, not the recovery screen.
+
+**Fixes (all in `mobile/`):**
+- **Notification init:** removed the top-level `setNotificationHandler`; it now runs via a **run-once, never-throws, retryable** wrapper (`src/lib/safeInit.ts → createRunOnceSafe`) from a **post-mount effect** in `usePushNotifications`. Push stays fully enabled; it can no longer crash boot.
+- **Other hooks (kept enabled, made fail-open):** `useNavigationBreadcrumbs` telemetry wrapped in try/catch; `useAppLifecycle`'s `addNotificationReceivedListener` attach wrapped so a notifications-unavailable failure returns a no-op cleanup instead of bubbling. `usePushNotifications`/`useGlobalErrorHandlers` were already guarded. **No hook disabled.**
+- **Boot fallback:** `_layout.tsx` no longer returns `null` while hydrating — it renders a **branded loading screen** (`BootLoading`), so if the native splash dismisses before hydration the user sees a styled loader, never white. The existing **ErrorBoundary** already provides a recoverable error screen with **Retry**; added a safe **"Reset app data & sign out"** action (clears the persisted session so a corrupt stored session can't replay).
+- **baseUrl:** removed `experiments.baseUrl: "/mobile"` from `app.json` — it's a **web-hosting-only** setting and a known expo-router native white-screen footgun; native must not search a non-existent `/mobile` path. (If the web export is revived, set the base URL at export time instead.)
+
+**Tests:** `mobile/tests/safeInit.test.ts` (4, passing via `tsx --test`): run-once on success; throwing init is contained (fail-open, no throw); retry after failure can succeed then no-ops; throwing reporter is swallowed. (Full RN/component tests need a `jest-expo` setup not currently configured — deferred.)
+
+**Validation (this commit):** `tsc --noEmit` 0 errors · `expo-doctor` 18/18 · `expo export --platform android` OK · `expo prebuild --platform android --clean` OK (manifest correct; sensitive perms still blocked). `android.versionCode` 3 → **4** (so the corrected APK is distinguishable). Generated `android/`/`dist/` cleaned (not committed).
+
+```
+ROOT CAUSE:               import-time Notifications.setNotificationHandler() ran during bundle eval,
+                          before React/ErrorBoundary mounted -> release build threw -> white screen
+DEVICE ERROR:             NOT AVAILABLE (zm-crash.txt not found on this machine; not fabricated). Root
+                          cause from code analysis; fix removes the entire white-screen class.
+SOURCE FILE:              mobile/src/hooks/usePushNotifications.ts (module-top setNotificationHandler)
+BOOT PHASE:               pre-React-mount (bundle evaluation) -> ErrorBoundary CANNOT catch
+FIX:                      move native init off import into guarded post-mount run-once; branded boot
+                          loader instead of null; fail-open optional hooks; drop web-only baseUrl
+NOTIFICATION INIT:        createRunOnceSafe wrapper, called from a post-mount effect; never throws; retryable
+OTHER HOOKS:              all kept ENABLED; made fail-open (none disabled)
+BASE URL:                 removed experiments.baseUrl "/mobile" (web-only; broke native routing)
+BOOT FALLBACK:            BootLoading branded screen + ErrorBoundary Retry + "Reset app data & sign out"
+TESTS:                    mobile/tests/safeInit.test.ts (4 passing)
+TYPECHECK:                PASS (0 errors)
+EXPO DOCTOR:              PASS (18/18)
+EXPORT:                   PASS (android bundle)
+PREBUILD:                 PASS (manifest verified)
+VERSION CODE:             4  (was 3)
+COMMIT:                   (this push to main)
+CODEMAGIC BUILD:          PENDING — owner re-runs android-preview (no Codemagic API/UI access here)
+APK:                      PENDING (new build, versionCode 4)
+DEVICE RETEST:            PENDING — physical Android device required (cannot run here)
+P0 STATUS:                FIX APPLIED + LOCALLY VALIDATED; NOT marked resolved until the rebuilt APK
+                          visibly opens on the physical device (per the rule)
+READY FOR FURTHER QA:     YES once the versionCode-4 APK is built + installed
+```

@@ -31,24 +31,47 @@ import * as Notifications from "expo-notifications";
 import { pushTokensApi } from "@/api/pushTokens";
 import { STORAGE_KEYS, storage } from "@/lib/storage";
 import { useAuthStore } from "@/store/authStore";
+import { track } from "@/lib/telemetry";
+import { createRunOnceSafe } from "@/lib/safeInit";
 
-// Foreground: show banners + play sound even while the app is open.
-// Subtle UX policy — matches Slack / Linear behavior so the user
-// doesn't miss real-time booking changes while staring at the app.
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    // `shouldShowAlert` is the legacy key still required by the
-    // NotificationBehavior type in expo-notifications (SDK 52); the
-    // newer `shouldShowBanner`/`shouldShowList` refine iOS 14+ behavior.
-    // Include all three so the type is satisfied and behavior is correct
-    // across OS versions.
-    shouldShowAlert: true,
-    shouldShowBanner: true,
-    shouldShowList: true,
-    shouldPlaySound: false,
-    shouldSetBadge: true,
-  }),
-});
+// IMPORTANT: never touch an expo-notifications API at module-import time.
+// `Notifications.setNotificationHandler(...)` previously ran here as a
+// top-level side effect. In a RELEASE build that executes during bundle
+// evaluation — BEFORE React (and the ErrorBoundary) mounts — so if the
+// native module is not ready/available the root-layout import throws and
+// the app shows a permanent WHITE SCREEN with no recoverable surface
+// (release strips the dev red-box). We instead install the handler from a
+// guarded, run-once effect AFTER mount (see the hook below). Push stays
+// fully enabled; it simply can no longer crash boot.
+// Run-once, never-throws, retryable. The arrow is NOT invoked at import —
+// only when installNotificationHandler() is called from the hook's
+// post-mount effect, so the native call can never crash bundle evaluation.
+const installNotificationHandler = createRunOnceSafe(
+  () => {
+    Notifications.setNotificationHandler({
+      handleNotification: async () => ({
+        // `shouldShowAlert` is the legacy key still required by the
+        // NotificationBehavior type in expo-notifications (SDK 52); the
+        // newer `shouldShowBanner`/`shouldShowList` refine iOS 14+ behavior.
+        shouldShowAlert: true,
+        shouldShowBanner: true,
+        shouldShowList: true,
+        shouldPlaySound: false,
+        shouldSetBadge: true,
+      }),
+    });
+  },
+  (e) => {
+    // Fail-open: a notification-subsystem failure must NOT block render.
+    try {
+      track("runtime", "setNotificationHandler failed (non-fatal)", "warn", {
+        error: String((e as Error)?.message ?? e),
+      });
+    } catch {
+      /* telemetry must never throw on the boot path */
+    }
+  },
+);
 
 const PUSH_TOKEN_STORAGE_KEY = "expo_push_token";
 
@@ -119,6 +142,13 @@ function parsePayload(notification: Notifications.Notification | null | undefine
 export function usePushNotifications() {
   const router = useRouter();
   const isAuthed = useAuthStore((s) => Boolean(s.sessionToken && s.user));
+
+  // ── Install the foreground handler AFTER mount (run-once, guarded) ──
+  // This replaces the old module-import-time call so a notification API
+  // failure can never white-screen boot.
+  React.useEffect(() => {
+    installNotificationHandler();
+  }, []);
 
   // ── Registration: runs once when auth lands ───────────────────────
   React.useEffect(() => {

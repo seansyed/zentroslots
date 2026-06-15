@@ -99,26 +99,36 @@ export function useAppLifecycle(): void {
   // doesn't tap — so the in-app appointment list / detail stays
   // truthful without waiting for a focus event.
   React.useEffect(() => {
-    const sub = Notifications.addNotificationReceivedListener((notification) => {
-      try {
-        const raw = notification.request.content.data ?? {};
-        const type = isBookingPushType(raw.type) ? raw.type : null;
-        const bookingId = typeof raw.bookingId === "string" ? raw.bookingId : null;
-        if (!type) return;
+    // Fail-open: attaching the listener is a native call (expo-notifications).
+    // If the native module is unavailable it must not bubble out of the
+    // effect — return a no-op cleanup instead.
+    let sub: { remove: () => void } | null = null;
+    try {
+      sub = Notifications.addNotificationReceivedListener((notification) => {
+        try {
+          const raw = notification.request.content.data ?? {};
+          const type = isBookingPushType(raw.type) ? raw.type : null;
+          const bookingId = typeof raw.bookingId === "string" ? raw.bookingId : null;
+          if (!type) return;
 
-        // Always invalidate the list — a new/cancelled/rescheduled
-        // booking changes its position or status in the agenda.
-        void queryClient.invalidateQueries({ queryKey: queryKeys.appointments() });
+          // Always invalidate the list — a new/cancelled/rescheduled
+          // booking changes its position or status in the agenda.
+          void queryClient.invalidateQueries({ queryKey: queryKeys.appointments() });
 
-        if (bookingId) {
-          void queryClient.invalidateQueries({
-            queryKey: queryKeys.appointment(bookingId),
-          });
+          if (bookingId) {
+            void queryClient.invalidateQueries({
+              queryKey: queryKeys.appointment(bookingId),
+            });
+          }
+        } catch {
+          // Listener must never throw — silently ignore malformed payloads.
         }
-      } catch {
-        // Listener must never throw — silently ignore malformed payloads.
-      }
-    });
-    return () => sub.remove();
+      });
+    } catch {
+      sub = null;
+    }
+    return () => {
+      try { sub?.remove(); } catch { /* noop */ }
+    };
   }, [queryClient]);
 }

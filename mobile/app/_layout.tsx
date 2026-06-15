@@ -15,6 +15,7 @@
  */
 
 import * as React from "react";
+import { ActivityIndicator, StyleSheet, View } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { Stack, useRouter, useSegments } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
@@ -31,6 +32,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { QueryClientProvider } from "@tanstack/react-query";
 
 import { OfflineBanner } from "@/components/ui/OfflineBanner";
+import { AppText } from "@/components/ui/Text";
 import { ErrorBoundary } from "@/components/util/ErrorBoundary";
 import { useAppLifecycle } from "@/hooks/useAppLifecycle";
 import { consumeOAuthDeepLink, oauthErrorMessage } from "@/hooks/useAuth";
@@ -109,8 +111,14 @@ function useAuthGate() {
 function useNavigationBreadcrumbs() {
   const segments = useSegments();
   React.useEffect(() => {
-    const path = "/" + segments.join("/");
-    track("navigation", path, "info");
+    // Fail-open: a breadcrumb is diagnostics-only and must never throw on
+    // the render/commit path.
+    try {
+      const path = "/" + segments.join("/");
+      track("navigation", path, "info");
+    } catch {
+      /* ignore — non-essential telemetry */
+    }
   }, [segments]);
 }
 
@@ -311,11 +319,41 @@ function AuthBoot({ children }: { children: React.ReactNode }) {
   useNavigationBreadcrumbs();
   useGlobalErrorHandlers();
 
-  // Wait for hydration before mounting the Stack — the auth gate
-  // can't make a routing decision until SecureStore is read.
-  if (!hydrated) return null;
+  // Wait for hydration before mounting the Stack — the auth gate can't
+  // make a routing decision until SecureStore is read. Render a BRANDED
+  // loading screen (never `null`) so that if the native splash dismisses
+  // before hydration completes, the user sees a styled loading state
+  // instead of a blank white screen.
+  if (!hydrated) return <BootLoading />;
   return <>{children}</>;
 }
+
+/**
+ * Branded full-screen loading state shown during auth-boot hydration (and
+ * as the visible floor if hydration is slow). Deliberately dependency-free
+ * and synchronous so it can never itself fail to render.
+ */
+function BootLoading() {
+  return (
+    <View style={bootStyles.root}>
+      <ActivityIndicator size="large" color={colors.brand} />
+      <AppText variant="body" color="muted" style={bootStyles.label}>
+        Loading ZentroMeet…
+      </AppText>
+    </View>
+  );
+}
+
+const bootStyles = StyleSheet.create({
+  root: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.surfaceSubtle,
+    gap: 12,
+  },
+  label: { marginTop: 8 },
+});
 
 export default function RootLayout() {
   return (

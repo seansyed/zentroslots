@@ -18,6 +18,7 @@ import { Ionicons } from "@expo/vector-icons";
 
 import { AppText } from "@/components/ui/Text";
 import { track } from "@/lib/telemetry";
+import { storage, STORAGE_KEYS } from "@/lib/storage";
 import { colors, radius, spacing } from "@/theme";
 
 type Props = {
@@ -46,6 +47,25 @@ export class ErrorBoundary extends React.Component<Props, State> {
 
   reset = () => {
     this.setState({ error: null, errorInfo: null });
+  };
+
+  // Safe recovery: drop the persisted session so the next render / cold
+  // start lands on the login screen instead of replaying a corrupt stored
+  // session. Best-effort; never throws. Does not touch server state.
+  clearSessionAndReset = () => {
+    void (async () => {
+      try {
+        await Promise.all([
+          storage.deleteItem(STORAGE_KEYS.sessionToken),
+          storage.deleteItem(STORAGE_KEYS.sessionCookie),
+          storage.deleteItem(STORAGE_KEYS.userId),
+          storage.deleteItem(STORAGE_KEYS.userEmail),
+        ]);
+      } catch {
+        /* best-effort */
+      }
+      this.reset();
+    })();
   };
 
   render() {
@@ -82,6 +102,19 @@ export class ErrorBoundary extends React.Component<Props, State> {
               style={{ color: colors.inkOnBrand, marginLeft: 8 }}
             >
               Try again
+            </AppText>
+          </Pressable>
+
+          {/* Secondary recovery — clears the locally-saved session so the
+              next launch starts clean. Safe: no server-side change. */}
+          <Pressable
+            onPress={this.clearSessionAndReset}
+            style={styles.secondaryButton}
+            accessibilityRole="button"
+            accessibilityLabel="Reset app data and sign out"
+          >
+            <AppText variant="body" color="muted">
+              Reset app data &amp; sign out
             </AppText>
           </Pressable>
 
@@ -128,5 +161,10 @@ const styles = StyleSheet.create({
     borderRadius: radius.full,
     backgroundColor: colors.brand,
     marginTop: spacing.xl,
+  },
+  secondaryButton: {
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+    marginTop: spacing.md,
   },
 });
