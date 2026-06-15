@@ -220,6 +220,42 @@ export default function SettingsScreen() {
     },
   ];
 
+  // Management — native CRUD for the operational catalog. Departments /
+  // Services / Locations are managerial (admin|manager); Working Hours is
+  // shown to everyone (staff edit their OWN schedule, managers edit any).
+  // Backend enforces write-authz regardless of what the UI shows.
+  const isManager = profile?.role === "admin" || profile?.role === "manager";
+  const managementRows: Row[] = [
+    ...(isManager
+      ? ([
+          {
+            icon: "git-branch-outline",
+            label: "Departments",
+            description: "Group services & staff",
+            onPress: () => router.push("/settings/management/departments"),
+          },
+          {
+            icon: "briefcase-outline",
+            label: "Services",
+            description: "Catalog · duration · price · bookability",
+            onPress: () => router.push("/settings/management/services"),
+          },
+          {
+            icon: "location-outline",
+            label: "Locations",
+            description: "In-person & virtual meeting places",
+            onPress: () => router.push("/settings/management/locations"),
+          },
+        ] as Row[])
+      : []),
+    {
+      icon: "time-outline",
+      label: "Working Hours",
+      description: isManager ? "Weekly schedule · staff availability" : "Your weekly availability",
+      onPress: () => router.push("/settings/management/working-hours"),
+    },
+  ];
+
   return (
     <ScreenContainer scrollable>
       {/* Compact PageHeader — keeps the bell + avatar reachable from
@@ -295,6 +331,21 @@ export default function SettingsScreen() {
             tone={row.tone}
             accessory={row.accessory}
             trailingIcon="open-outline"
+            onPress={row.onPress}
+          />
+        ))}
+      </SettingsGroup>
+
+      <View style={styles.groupGap} />
+      <SettingsGroup title="Management">
+        {managementRows.map((row) => (
+          <SettingsRow
+            key={row.label}
+            icon={row.icon}
+            label={row.label}
+            description={row.description}
+            tone={row.tone}
+            accessory={row.accessory}
             onPress={row.onPress}
           />
         ))}

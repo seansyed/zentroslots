@@ -44,39 +44,21 @@ import { AppText } from "@/components/ui/Text";
 import { useCustomers } from "@/hooks/useCustomers";
 import { useProfile } from "@/hooks/useProfile";
 import { useServices } from "@/hooks/useServices";
+import { MonthCalendar } from "@/components/ui/MonthCalendar";
+import { addDays, dayLabel, isoDateLocal, startOfDay } from "@/lib/dates";
 import { queryKeys } from "@/lib/query";
 import { track } from "@/lib/telemetry";
-import { colors, layout, radius, spacing, typography } from "@/theme";
+import { colors, layout, radius, spacing } from "@/theme";
 
 import type { Customer } from "@/api/customers";
 import type { Service } from "@/api/services";
 
 // ─── Helpers ──────────────────────────────────────────────────────
+// Date helpers live in @/lib/dates (Hermes-safe — no Intl timezone
+// formatting; the previous Intl.DateTimeFormat path silently sent the wrong
+// day on Hermes for operators east of UTC). The picked calendar day is sent
+// literally as YYYY-MM-DD; the backend interprets it in the tenant timezone.
 
-function isoDateInZone(date: Date, timezone: string): string {
-  try {
-    return new Intl.DateTimeFormat("en-CA", {
-      timeZone: timezone,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-    }).format(date);
-  } catch {
-    return date.toISOString().slice(0, 10);
-  }
-}
-function addDays(d: Date, n: number): Date {
-  const x = new Date(d);
-  x.setDate(x.getDate() + n);
-  return x;
-}
-function isSameDay(a: Date, b: Date): boolean {
-  return (
-    a.getFullYear() === b.getFullYear() &&
-    a.getMonth() === b.getMonth() &&
-    a.getDate() === b.getDate()
-  );
-}
 function formatTime(iso: string): string {
   const d = new Date(iso);
   let h = d.getHours();
@@ -88,20 +70,14 @@ function formatTime(iso: string): string {
 
 // ─── Screen ───────────────────────────────────────────────────────
 
-const DATE_STRIP_DAYS = 14;
-
 export default function QuickCreateScreen() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const profileQ = useProfile();
   const timezone = profileQ.data?.timezone ?? "UTC";
 
-  // Today (frozen for the session — strip doesn't shift mid-flow)
-  const today = React.useMemo(() => {
-    const t = new Date();
-    t.setHours(0, 0, 0, 0);
-    return t;
-  }, []);
+  // Today (frozen for the session — calendar doesn't shift mid-flow)
+  const today = React.useMemo(() => startOfDay(new Date()), []);
 
   // Form state
   const [customer, setCustomer] = React.useState<Customer | null>(null);
@@ -164,10 +140,17 @@ export default function QuickCreateScreen() {
   // Date is normalized to the TENANT's timezone via isoDateInZone
   // (not the device's local TZ) so a Sunday in PST stays a Sunday in
   // EST/UTC/etc. — matches what BookingFlow.tsx does on the web.
-  const slotDateIso = React.useMemo(
-    () => isoDateInZone(selectedDate, timezone),
-    [selectedDate, timezone],
-  );
+  // Send the PICKED calendar day literally (Hermes-safe; no Intl tz
+  // conversion). The backend interprets it in the tenant/staff timezone.
+  const slotDateIso = React.useMemo(() => isoDateLocal(selectedDate), [selectedDate]);
+
+  // Booking horizon: clamp date navigation to the service's maxAdvanceDays
+  // (server truth). Null/0 → open-ended forward nav (MonthCalendar bounds the
+  // UI). We use this ONLY to disable out-of-range days, never to filter slots.
+  const maxDate = React.useMemo(() => {
+    const days = service?.maxAdvanceDays ?? null;
+    return days && days > 0 ? addDays(today, days) : null;
+  }, [service?.maxAdvanceDays, today]);
 
   const slotsQ = useQuery({
     queryKey: ["slots", service?.id ?? null, slotDateIso, timezone] as const,
@@ -215,16 +198,54 @@ export default function QuickCreateScreen() {
       : "Couldn't load availability"
     : null;
 
-  // Reset slot when date changes
+  // Reset slot + any in-flight "next opening" scan when date/service changes.
   React.useEffect(() => {
     setSelectedSlot(null);
+    setNextOpening(null);
+    setScanning(false);
+    scanSeq.current++; // cancels a scan still running for the old date
   }, [selectedDate, service]);
 
-  // Date strip
-  const dateStrip = React.useMemo(
-    () => Array.from({ length: DATE_STRIP_DAYS }, (_, i) => addDays(today, i)),
-    [today],
-  );
+  // ── "Find next opening" scan ──────────────────────────────────────
+  // When a day is empty, probe forward (up to 60 days, respecting the
+  // horizon) for the first day that has availability. Pure-server truth —
+  // each probe is the same /api/slots call. Surfaces a one-tap jump so the
+  // operator isn't stuck guessing which day is open.
+  const [nextOpening, setNextOpening] = React.useState<Date | null>(null);
+  const [scanning, setScanning] = React.useState(false);
+  const scanSeq = React.useRef(0);
+
+  const findNextOpening = React.useCallback(async () => {
+    if (!service) return;
+    const seq = ++scanSeq.current;
+    setScanning(true);
+    setNextOpening(null);
+    try {
+      const horizonDays = service.maxAdvanceDays && service.maxAdvanceDays > 0
+        ? service.maxAdvanceDays
+        : 60;
+      const span = Math.min(horizonDays, 60);
+      for (let i = 1; i <= span; i++) {
+        if (seq !== scanSeq.current) return; // superseded by a newer scan
+        const probe = addDays(selectedDate, i);
+        if (maxDate && probe.getTime() > maxDate.getTime()) break;
+        const found = await appointmentsApi.slots({
+          serviceId: service.id,
+          staffUserId: "any",
+          date: isoDateLocal(probe),
+          timezone,
+        });
+        if (seq !== scanSeq.current) return;
+        if (found.length > 0) {
+          setNextOpening(probe);
+          return;
+        }
+      }
+      setNextOpening(null);
+    } finally {
+      if (seq === scanSeq.current) setScanning(false);
+    }
+  }, [service, selectedDate, maxDate, timezone]);
 
   // Filter customers: prefer the search result, otherwise show recent (by lastAppointmentAt)
   const customerOptions = React.useMemo(() => {
@@ -265,6 +286,15 @@ export default function QuickCreateScreen() {
     },
     onError: (err) => {
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
+      // Slot raced — someone else booked it between fetch and confirm. Clear
+      // the selection, refresh availability, and prompt for another time
+      // (the server is authoritative; we never force a conflicting insert).
+      if (err instanceof ApiError && (err.status === 409 || err.status === 422)) {
+        setSelectedSlot(null);
+        void slotsQ.refetch();
+        setError("That time was just taken — please pick another.");
+        return;
+      }
       const msg =
         err instanceof ApiError ? err.message :
         err instanceof Error ? err.message : "Couldn't create booking";
@@ -517,56 +547,21 @@ export default function QuickCreateScreen() {
           )}
         </SectionFade>
 
-        {/* ── Step 3: Date ─────────────────────────────────────────── */}
+        {/* ── Step 3: Date — full month picker, horizon-aware ──────── */}
         <SectionFade delay={120} style={{ marginTop: spacing.xl }}>
           <StepLabel n={3} label="Date" complete={Boolean(selectedDate)} />
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.dateStripContent}
-          >
-            {dateStrip.map((d) => {
-              const active = isSameDay(d, selectedDate);
-              const isToday = isSameDay(d, today);
-              return (
-                <Pressable
-                  key={d.toISOString()}
-                  onPress={() => {
-                    void Haptics.selectionAsync().catch(() => {});
-                    setSelectedDate(d);
-                  }}
-                  style={[styles.dateChip, active && styles.dateChipActive]}
-                >
-                  <AppText
-                    style={{
-                      ...typography.micro,
-                      color: active ? colors.inkOnBrand : colors.inkSubtle,
-                      letterSpacing: 0.4,
-                    }}
-                  >
-                    {d.toLocaleDateString(undefined, { weekday: "short" }).toUpperCase()}
-                  </AppText>
-                  <AppText
-                    variant="h4"
-                    style={{
-                      color: active ? colors.inkOnBrand : colors.ink,
-                      marginTop: 2,
-                    }}
-                  >
-                    {d.getDate()}
-                  </AppText>
-                  {isToday ? (
-                    <View
-                      style={[
-                        styles.todayDot,
-                        { backgroundColor: active ? colors.inkOnBrand : colors.brand },
-                      ]}
-                    />
-                  ) : null}
-                </Pressable>
-              );
-            })}
-          </ScrollView>
+          <MonthCalendar
+            selectedDate={selectedDate}
+            onSelectDate={setSelectedDate}
+            minDate={today}
+            maxDate={maxDate}
+            today={today}
+          />
+          {service?.maxAdvanceDays && service.maxAdvanceDays > 0 ? (
+            <AppText variant="micro" color="subtle" style={{ marginTop: spacing.sm, textAlign: "center" }}>
+              Bookable up to {service.maxAdvanceDays} days ahead
+            </AppText>
+          ) : null}
         </SectionFade>
 
         {/* ── Step 4: Slot ─────────────────────────────────────────── */}
@@ -585,38 +580,106 @@ export default function QuickCreateScreen() {
               ))}
             </View>
           ) : slotsError ? (
-            <Card>
-              <AppText variant="small" color="danger">{slotsError}</AppText>
+            <Card style={styles.errorBanner}>
+              <View style={{ flexDirection: "row", alignItems: "center" }}>
+                <Ionicons name="cloud-offline-outline" size={18} color={colors.dangerInk} />
+                <AppText variant="small" style={{ color: colors.dangerInk, marginLeft: spacing.sm, flex: 1 }}>
+                  {slotsError}
+                </AppText>
+              </View>
+              <Pressable
+                onPress={() => {
+                  void Haptics.selectionAsync().catch(() => {});
+                  void slotsQ.refetch();
+                }}
+                style={styles.retryBtn}
+                accessibilityRole="button"
+                accessibilityLabel="Retry loading times"
+              >
+                <Ionicons name="refresh" size={14} color={colors.brand} />
+                <AppText variant="smallStrong" style={{ color: colors.brand, marginLeft: 6 }}>Retry</AppText>
+              </Pressable>
             </Card>
           ) : (slots ?? []).length === 0 ? (
             <Card variant="outline">
-              <AppText variant="small" color="muted" align="center" style={{ paddingVertical: spacing.lg }}>
-                No openings on this day — try another date.
-              </AppText>
-            </Card>
-          ) : (
-            <View style={styles.slotGrid}>
-              {(slots ?? []).map((iso) => {
-                const active = iso === selectedSlot;
-                return (
+              <View style={{ paddingVertical: spacing.md, alignItems: "center" }}>
+                <Ionicons name="calendar-outline" size={24} color={colors.inkSubtle} />
+                <AppText variant="bodyStrong" align="center" style={{ marginTop: spacing.sm }}>
+                  No openings on {dayLabel(selectedDate)}
+                </AppText>
+                {scanning ? (
+                  <AppText variant="small" color="muted" align="center" style={{ marginTop: 4 }}>
+                    Searching for the next available day…
+                  </AppText>
+                ) : nextOpening ? (
                   <Pressable
-                    key={iso}
                     onPress={() => {
                       void Haptics.selectionAsync().catch(() => {});
-                      setSelectedSlot(iso);
+                      setSelectedDate(nextOpening);
+                      setNextOpening(null);
                     }}
-                    style={[styles.slotChip, active && styles.slotChipActive]}
+                    style={styles.nextOpeningBtn}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Jump to next opening, ${dayLabel(nextOpening)}`}
                   >
-                    <AppText
-                      variant="bodyStrong"
-                      style={{ color: active ? colors.inkOnBrand : colors.ink }}
-                    >
-                      {formatTime(iso)}
+                    <Ionicons name="arrow-forward-circle" size={16} color={colors.inkOnBrand} />
+                    <AppText variant="smallStrong" style={{ color: colors.inkOnBrand, marginLeft: 6 }}>
+                      Next opening: {dayLabel(nextOpening)}
                     </AppText>
                   </Pressable>
-                );
-              })}
-            </View>
+                ) : (
+                  <>
+                    <AppText variant="small" color="muted" align="center" style={{ marginTop: 4, paddingHorizontal: spacing.lg }}>
+                      Pick another date, or search ahead. If days stay empty, this
+                      service may have no bookable staff or working hours — set
+                      them in Settings → Working Hours.
+                    </AppText>
+                    <Pressable
+                      onPress={() => {
+                        void Haptics.selectionAsync().catch(() => {});
+                        void findNextOpening();
+                      }}
+                      style={styles.nextOpeningBtn}
+                      accessibilityRole="button"
+                      accessibilityLabel="Find next opening"
+                    >
+                      <Ionicons name="search" size={15} color={colors.inkOnBrand} />
+                      <AppText variant="smallStrong" style={{ color: colors.inkOnBrand, marginLeft: 6 }}>
+                        Find next opening
+                      </AppText>
+                    </Pressable>
+                  </>
+                )}
+              </View>
+            </Card>
+          ) : (
+            <>
+              <AppText variant="micro" color="subtle" style={{ marginBottom: spacing.sm }}>
+                {(slots ?? []).length} TIME{(slots ?? []).length === 1 ? "" : "S"} · {timezone}
+              </AppText>
+              <View style={styles.slotGrid}>
+                {(slots ?? []).map((iso) => {
+                  const active = iso === selectedSlot;
+                  return (
+                    <Pressable
+                      key={iso}
+                      onPress={() => {
+                        void Haptics.selectionAsync().catch(() => {});
+                        setSelectedSlot(iso);
+                      }}
+                      style={[styles.slotChip, active && styles.slotChipActive]}
+                    >
+                      <AppText
+                        variant="bodyStrong"
+                        style={{ color: active ? colors.inkOnBrand : colors.ink }}
+                      >
+                        {formatTime(iso)}
+                      </AppText>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </>
           )}
         </SectionFade>
 
@@ -761,29 +824,21 @@ const styles = StyleSheet.create({
     height: 10,
     borderRadius: 5,
   },
-  dateStripContent: {
-    gap: spacing.sm,
-    paddingVertical: spacing.xs,
-  },
-  dateChip: {
-    width: 60,
-    paddingVertical: spacing.sm,
-    borderRadius: radius.lg,
-    backgroundColor: colors.surface,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.borderSubtle,
+  retryBtn: {
+    flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
+    alignSelf: "flex-start",
+    marginTop: spacing.sm,
+    paddingVertical: 6,
   },
-  dateChipActive: {
+  nextOpeningBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: spacing.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.full,
     backgroundColor: colors.brand,
-    borderColor: colors.brand,
-  },
-  todayDot: {
-    width: 4,
-    height: 4,
-    borderRadius: 2,
-    marginTop: 4,
   },
   slotGrid: {
     flexDirection: "row",

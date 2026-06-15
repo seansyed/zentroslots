@@ -541,6 +541,27 @@ export default function RootLayout() {
                   gestureEnabled: true,
                 }}
               />
+              {/* Management — native CRUD for departments / services /
+                  locations / working hours. Each screen renders its own
+                  top bar (matches the other settings sub-screens). */}
+              {[
+                "settings/management/departments",
+                "settings/management/services",
+                "settings/management/services/[id]",
+                "settings/management/locations",
+                "settings/management/locations/[id]",
+                "settings/management/working-hours",
+              ].map((name) => (
+                <Stack.Screen
+                  key={name}
+                  name={name}
+                  options={{
+                    animation: "slide_from_right",
+                    presentation: "card",
+                    gestureEnabled: true,
+                  }}
+                />
+              ))}
             </Stack>
           </AuthBoot>
           </ErrorBoundary>

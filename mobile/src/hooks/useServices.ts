@@ -36,9 +36,15 @@
  */
 
 import * as React from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { servicesApi, type ServiceListResult } from "@/api/services";
+import {
+  servicesApi,
+  type Service,
+  type ServiceCreateInput,
+  type ServiceListResult,
+  type ServiceUpdateInput,
+} from "@/api/services";
 import { useAuthStore } from "@/store/authStore";
 import { track } from "@/lib/telemetry";
 
@@ -92,4 +98,64 @@ export function useServices() {
   }, [q.data, q.isLoading]);
 
   return q;
+}
+
+/**
+ * useService — resolve a single service by id.
+ *
+ * Backed by servicesApi.byId(), which pulls the tenant `?include=all`
+ * list and picks the match (the backend has no GET /api/services/:id —
+ * see api/services.ts). Same per-account query key shape as
+ * useServices so a sign-out drops it; same `staleTime: 0` /
+ * refetchOnMount freshness contract so the detail screen never shows a
+ * stale duration/price.
+ *
+ * Resolves to `null` (not an error) when the id isn't in the tenant,
+ * letting the screen render a clean "not found" state.
+ */
+export function useService(id: string | undefined) {
+  const userId = useAuthStore((s) => s.user?.id);
+  return useQuery<Service | null>({
+    queryKey: ["service", userId ?? "anon", id ?? "skip"] as const,
+    queryFn: () => servicesApi.byId(id!),
+    enabled: Boolean(id) && Boolean(userId),
+    staleTime: 0,
+    refetchOnMount: "always",
+    refetchOnReconnect: true,
+  });
+}
+
+/** Invalidate every services list + single-service query. Both key
+ *  families are prefixed (`["services", ...]`, `["service", ...]`) so
+ *  the bare prefix matches all account/id variants. */
+function invalidateServices(qc: ReturnType<typeof useQueryClient>) {
+  void qc.invalidateQueries({ queryKey: ["services"] });
+  void qc.invalidateQueries({ queryKey: ["service"] });
+}
+
+export function useCreateService() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationKey: ["services:create"],
+    mutationFn: (input: ServiceCreateInput) => servicesApi.create(input),
+    onSuccess: () => invalidateServices(qc),
+  });
+}
+
+export function useUpdateService(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationKey: ["services:update", id],
+    mutationFn: (input: ServiceUpdateInput) => servicesApi.update(id, input),
+    onSuccess: () => invalidateServices(qc),
+  });
+}
+
+export function useDeleteService(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationKey: ["services:delete", id],
+    mutationFn: () => servicesApi.remove(id),
+    onSuccess: () => invalidateServices(qc),
+  });
 }
