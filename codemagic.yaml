@@ -51,7 +51,7 @@
 # ----------------------------
 # Upload an Android release keystore to:
 #   Codemagic → Teams → Code Signing → Android keystores
-# and name the entry exactly:  zentromeet_android_keystore
+# and name the entry exactly:  ZentroMeet
 # Codemagic will automatically inject these env vars into the build:
 #   CM_KEYSTORE_PATH, CM_KEYSTORE_PASSWORD, CM_KEY_ALIAS, CM_KEY_PASSWORD
 #
@@ -70,7 +70,7 @@ workflows:
   # phones. No Play Store review, no EAS queue. Built entirely on Codemagic's
   # linux_x2 machine via `expo prebuild` + Gradle.
   #
-  # Signing: optional. If the zentromeet_android_keystore entry is configured,
+  # Signing: optional. If the ZentroMeet entry is configured,
   # builds a SIGNED release APK. Otherwise falls back to assembleDebug, which
   # is still fully installable (just signed with the debug key).
   #
@@ -87,7 +87,7 @@ workflows:
       java: 17
       # Optional for preview — script falls back to assembleDebug if absent.
       android_signing:
-        - zentromeet_android_keystore
+        - ZentroMeet
       groups:
         # android-preview builds entirely on Codemagic via `expo prebuild`
         # + Gradle — NO EAS Build and NO Expo login are required. We only
@@ -279,7 +279,7 @@ workflows:
       java: 17
       # REQUIRED for production. Build aborts in step 2 if missing.
       android_signing:
-        - zentromeet_android_keystore
+        - ZentroMeet
       groups:
         - expo_credentials
         - zentromeet_api
@@ -326,7 +326,7 @@ workflows:
           if [ -z "$CM_KEYSTORE_PATH" ]; then
             echo "ERROR: No Android release keystore configured."
             echo "Go to Codemagic → Teams → Code Signing → Android keystores"
-            echo "and upload your release.keystore as 'zentromeet_android_keystore'."
+            echo "and upload your release.keystore as 'ZentroMeet'."
             exit 1
           fi
           echo "Keystore found at: $CM_KEYSTORE_PATH"
