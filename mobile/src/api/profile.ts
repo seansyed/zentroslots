@@ -14,6 +14,17 @@
  */
 
 import { apiGet, apiPatch } from "./client";
+import { env } from "@/lib/env";
+import { absolutizeUrl } from "@/lib/url";
+
+/**
+ * Absolutize an image URL from the API against our origin so RN <Image>
+ * can load it (the backend returns relative `/uploads/...` paths). See
+ * src/lib/url.ts for the pure implementation (+ its tests).
+ */
+export function toAbsoluteImageUrl(url: string | null | undefined): string | null {
+  return absolutizeUrl(url, env.apiBaseUrl);
+}
 
 export type Profile = {
   id: string;
@@ -28,6 +39,10 @@ export type Profile = {
     slug: string;
     plan: string;
     active: boolean;
+    /** Tenant-configured brand logo (absolutized). Null = use platform logo. */
+    logoUrl: string | null;
+    /** Tenant brand color (hex). Null = platform default. */
+    primaryColor: string | null;
   } | null;
   /** Surfaced from /api/auth/me so the Settings screen can show a
    *  "Connect Google Calendar" CTA without an extra round-trip. */
@@ -48,6 +63,8 @@ type AuthMeResponse = {
     slug: string;
     plan: string;
     active?: boolean;
+    logoUrl?: string | null;
+    primaryColor?: string | null;
   } | null;
 };
 
@@ -62,7 +79,8 @@ function normalize(raw: AuthMeResponse): Profile {
     email: raw.email,
     name: raw.name,
     role: raw.role,
-    avatarUrl: raw.avatarUrl ?? null,
+    // Absolutize so RN <Image> can load it (backend returns a relative path).
+    avatarUrl: toAbsoluteImageUrl(raw.avatarUrl),
     timezone: raw.timezone ?? "UTC",
     googleConnected: Boolean(raw.googleConnected),
     tenant: raw.tenant
@@ -72,6 +90,8 @@ function normalize(raw: AuthMeResponse): Profile {
           slug: raw.tenant.slug,
           plan: raw.tenant.plan,
           active: raw.tenant.active ?? true,
+          logoUrl: toAbsoluteImageUrl(raw.tenant.logoUrl),
+          primaryColor: raw.tenant.primaryColor ?? null,
         }
       : null,
   };

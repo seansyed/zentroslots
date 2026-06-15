@@ -39,6 +39,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 
 import { OfflineBanner } from "@/components/ui/OfflineBanner";
 import { AppText } from "@/components/ui/Text";
+import { Logo } from "@/components/ui/Logo";
 import { ErrorBoundary } from "@/components/util/ErrorBoundary";
 import { useAppLifecycle } from "@/hooks/useAppLifecycle";
 import { consumeOAuthDeepLink, oauthErrorMessage } from "@/hooks/useAuth";
@@ -379,9 +380,10 @@ function AuthBoot({ children }: { children: React.ReactNode }) {
 function BootLoading() {
   return (
     <View style={bootStyles.root}>
-      <ActivityIndicator size="large" color={colors.brand} />
+      <Logo variant="mark" size={64} />
+      <ActivityIndicator size="large" color={colors.brand} style={{ marginTop: 4 }} />
       <AppText variant="body" color="muted" style={bootStyles.label}>
-        Loading ZentroMeet…
+        Loading…
       </AppText>
     </View>
   );

@@ -10,9 +10,31 @@
  * directly in the list UI so a single fetch can paint the whole CRM.
  */
 
-import { apiGet } from "./client";
+import { apiGet, apiPatch, apiPost } from "./client";
 
 export type CustomerStatus = "active" | "vip" | "archived" | "prospect";
+
+/** Create payload — mirrors the backend POST /api/customers zod schema.
+ *  name + email required; everything else optional. */
+export type CustomerCreateInput = {
+  name: string;
+  email: string;
+  phone?: string | null;
+  notes?: string | null;
+  status?: CustomerStatus;
+  tags?: string[];
+};
+
+/** Update payload — mirrors backend PATCH /api/customers/:id. NOTE: the
+ *  backend PATCH schema does NOT accept `email` (email is set at create),
+ *  so edits cover name/phone/notes/status/tags only. */
+export type CustomerUpdateInput = {
+  name?: string;
+  phone?: string | null;
+  notes?: string | null;
+  status?: CustomerStatus;
+  tags?: string[];
+};
 
 export type Customer = {
   id: string;
@@ -59,6 +81,33 @@ export const customersApi = {
     const search: Record<string, string> = {};
     if (params.q) search.q = params.q;
     return apiGet<CustomerListResponse>("/api/customers", { params: search });
+  },
+
+  /** Create a customer. Backend returns the created row (201). Throws
+   *  ApiError(409) if a customer with this email already exists in the
+   *  tenant — the form surfaces that as a duplicate warning. */
+  async create(input: CustomerCreateInput): Promise<Customer> {
+    return apiPost<Customer, CustomerCreateInput>("/api/customers", input);
+  },
+
+  /** Update mutable fields (name/phone/notes/status/tags). */
+  async update(id: string, input: CustomerUpdateInput): Promise<Customer> {
+    return apiPatch<Customer, CustomerUpdateInput>(`/api/customers/${id}`, input);
+  },
+
+  /** Archive (soft-delete): the product has no hard-delete — archiving
+   *  sets status="archived" and preserves all booking history. */
+  async archive(id: string): Promise<Customer> {
+    return apiPatch<Customer, CustomerUpdateInput>(`/api/customers/${id}`, {
+      status: "archived",
+    });
+  },
+
+  /** Restore an archived customer back to active. */
+  async unarchive(id: string): Promise<Customer> {
+    return apiPatch<Customer, CustomerUpdateInput>(`/api/customers/${id}`, {
+      status: "active",
+    });
   },
 
   async byId(id: string): Promise<CustomerDetail> {

@@ -21,7 +21,9 @@ import * as Haptics from "expo-haptics";
 
 import { ApiError } from "@/api/client";
 import { Card, PressableCard } from "@/components/ui/Card";
+import { CustomerEditModal } from "@/components/ui/CustomerEditModal";
 import { CustomerRow } from "@/components/ui/CustomerRow";
+import { FAB } from "@/components/ui/FAB";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ErrorState } from "@/components/ui/ErrorState";
 import { Input } from "@/components/ui/Input";
@@ -38,6 +40,8 @@ export default function CustomersScreen() {
   const router = useRouter();
   const [search, setSearch] = React.useState("");
   const [debouncedSearch, setDebouncedSearch] = React.useState("");
+  const [createOpen, setCreateOpen] = React.useState(false);
+  const [showArchived, setShowArchived] = React.useState(false);
 
   // 300ms debounce — calm on the network, fast enough that user feels in control.
   React.useEffect(() => {
@@ -60,15 +64,28 @@ export default function CustomersScreen() {
     });
   }, [customers]);
 
-  // Summary counts
+  // Archived are hidden by default (soft-deleted); toggle to reveal them.
+  const archivedCount = React.useMemo(
+    () => customers.filter((c) => c.status === "archived").length,
+    [customers],
+  );
+  const visible = React.useMemo(
+    () => (showArchived ? sorted : sorted.filter((c) => c.status !== "archived")),
+    [sorted, showArchived],
+  );
+
+  // Summary counts (exclude archived from the headline totals).
   const counts = React.useMemo(() => {
+    let total = 0;
     let vip = 0;
     let prospect = 0;
     for (const c of customers) {
+      if (c.status === "archived") continue;
+      total++;
       if (c.status === "vip") vip++;
       else if (c.status === "prospect") prospect++;
     }
-    return { total: customers.length, vip, prospect };
+    return { total, vip, prospect };
   }, [customers]);
 
   const onRefresh = React.useCallback(() => {
@@ -77,6 +94,7 @@ export default function CustomersScreen() {
   }, [q]);
 
   return (
+    <View style={styles.root}>
     <ScreenContainer
       scrollable
       refreshControl={
@@ -145,7 +163,7 @@ export default function CustomersScreen() {
             <Shimmer.Card height={88} />
             <Shimmer.Card height={88} />
           </View>
-        ) : sorted.length === 0 ? (
+        ) : visible.length === 0 ? (
           <Card variant="outline" style={{ borderRadius: radius["2xl"] }}>
             <EmptyState
               icon={<Ionicons name="people-outline" size={26} color={colors.brand} />}
@@ -153,7 +171,7 @@ export default function CustomersScreen() {
               body={
                 debouncedSearch
                   ? "Try a different name or email."
-                  : "Customers show up here automatically after their first booking."
+                  : "Add your first customer with the + button, or they'll appear here automatically after their first booking."
               }
             />
           </Card>
@@ -162,7 +180,7 @@ export default function CustomersScreen() {
           // "10–14px" sweet spot. Tight enough to feel grouped, loose
           // enough to read each row as its own surface.
           <View style={{ gap: 12 }}>
-            {sorted.map((c, i) => (
+            {visible.map((c, i) => (
               <SectionFade key={c.id} delay={140 + Math.min(i, 8) * 30}>
                 <CustomerRow
                   customer={c}
@@ -170,12 +188,41 @@ export default function CustomersScreen() {
                 />
               </SectionFade>
             ))}
+            {archivedCount > 0 ? (
+              <Pill tone="neutral">
+                <AppText
+                  variant="smallStrong"
+                  style={{ color: colors.inkMuted }}
+                  onPress={() => {
+                    void Haptics.selectionAsync().catch(() => {});
+                    setShowArchived((s) => !s);
+                  }}
+                >
+                  {showArchived ? "Hide archived" : `Show archived (${archivedCount})`}
+                </AppText>
+              </Pill>
+            ) : null}
           </View>
         )}
       </SectionFade>
 
       <View style={{ height: spacing["3xl"] }} />
     </ScreenContainer>
+
+      <FAB
+        icon="person-add"
+        accessibilityLabel="Add customer"
+        onPress={() => {
+          void Haptics.selectionAsync().catch(() => {});
+          setCreateOpen(true);
+        }}
+      />
+      <CustomerEditModal
+        visible={createOpen}
+        onClose={() => setCreateOpen(false)}
+        onSaved={(c) => router.push(`/customers/${c.id}`)}
+      />
+    </View>
   );
 }
 
@@ -205,6 +252,7 @@ function SummaryChip({
 void PressableCard;
 
 const styles = StyleSheet.create({
+  root: { flex: 1 },
   summaryStrip: {
     flexDirection: "row",
     gap: spacing.md,

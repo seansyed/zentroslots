@@ -35,7 +35,12 @@ import { SectionFade } from "@/components/ui/SectionFade";
 import { SectionHeader } from "@/components/ui/SectionHeader";
 import { Shimmer } from "@/components/ui/Shimmer";
 import { AppText } from "@/components/ui/Text";
-import { useCustomer } from "@/hooks/useCustomers";
+import { CustomerEditModal } from "@/components/ui/CustomerEditModal";
+import {
+  useArchiveCustomer,
+  useCustomer,
+  useUnarchiveCustomer,
+} from "@/hooks/useCustomers";
 import { colors, layout, radius, spacing, typography } from "@/theme";
 
 import type { Appointment, BookingStatus } from "@/api/appointments";
@@ -191,6 +196,43 @@ export default function CustomerDetailScreen() {
   const router = useRouter();
   const q = useCustomer(id);
   const customer = q.data;
+  const [editOpen, setEditOpen] = React.useState(false);
+  const archiveMut = useArchiveCustomer(id ?? "");
+  const unarchiveMut = useUnarchiveCustomer(id ?? "");
+
+  function onArchiveToggle() {
+    if (!customer) return;
+    const archived = customer.status === "archived";
+    void Haptics.selectionAsync().catch(() => {});
+    Alert.alert(
+      archived ? "Restore customer?" : "Archive customer?",
+      archived
+        ? "This customer will return to your active list."
+        : "They'll be hidden from your active customer list. Their full booking history is preserved and nothing is deleted — you can restore them any time.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: archived ? "Restore" : "Archive",
+          style: archived ? "default" : "destructive",
+          onPress: async () => {
+            try {
+              if (archived) await unarchiveMut.mutateAsync();
+              else await archiveMut.mutateAsync();
+              void Haptics.notificationAsync(
+                Haptics.NotificationFeedbackType.Success,
+              ).catch(() => {});
+              await q.refetch();
+            } catch (e) {
+              Alert.alert(
+                "Couldn't update",
+                e instanceof Error ? e.message : "Please try again.",
+              );
+            }
+          },
+        },
+      ],
+    );
+  }
 
   // Defensive: STATUS_TONE has 4 known statuses; if the API ever returns
   // something outside that set (e.g. legacy "lead", future "frozen") the
@@ -284,8 +326,38 @@ export default function CustomerDetailScreen() {
         <AppText variant="bodyStrong" numberOfLines={1} style={styles.topTitle}>
           {customer ? displayNameOf(customer) : "Customer"}
         </AppText>
-        <View style={{ width: 36 }} />
+        {customer ? (
+          <View style={styles.topActions}>
+            <IconButton
+              icon="create-outline"
+              accessibilityLabel="Edit customer"
+              onPress={() => {
+                void Haptics.selectionAsync().catch(() => {});
+                setEditOpen(true);
+              }}
+            />
+            <IconButton
+              icon={customer.status === "archived" ? "refresh-outline" : "archive-outline"}
+              accessibilityLabel={
+                customer.status === "archived" ? "Restore customer" : "Archive customer"
+              }
+              onPress={onArchiveToggle}
+            />
+          </View>
+        ) : (
+          <View style={{ width: 36 }} />
+        )}
       </View>
+
+      <CustomerEditModal
+        visible={editOpen}
+        customer={customer}
+        onClose={() => setEditOpen(false)}
+        onSaved={() => {
+          setEditOpen(false);
+          void q.refetch();
+        }}
+      />
 
       <View style={styles.scroll}>
         {q.isLoading ? (
@@ -616,6 +688,11 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surfaceSubtle,
     borderBottomColor: colors.borderSubtle,
     borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  topActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs,
   },
   topTitle: {
     flex: 1,

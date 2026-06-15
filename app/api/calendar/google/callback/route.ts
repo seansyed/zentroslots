@@ -5,6 +5,11 @@ import { exchangeCode } from "@/lib/calendar/google";
 import { upsertGoogleConnection } from "@/lib/calendar/sync";
 import { audit, ipFromHeaders } from "@/lib/audit";
 import { consumeCalendarStateCookie } from "@/lib/calendar/oauth-state";
+import {
+  buildCalendarMobileErrorUrl,
+  buildCalendarMobileSuccessUrl,
+  verifyCalendarMobileState,
+} from "@/lib/calendar/oauth-mobile";
 
 const APP_BASE_URL = process.env.APP_BASE_URL ?? "http://localhost:3001";
 
@@ -22,6 +27,46 @@ export async function GET(req: NextRequest) {
     const code = req.nextUrl.searchParams.get("code");
     const state = req.nextUrl.searchParams.get("state");
     const errParam = req.nextUrl.searchParams.get("error");
+
+    // ── MOBILE flow ──────────────────────────────────────────────────
+    // If `state` is a valid signed mobile token, handle it WITHOUT a
+    // session/cookie (the system browser has neither) and deep-link the
+    // result back to the app. The user/tenant come from the verified,
+    // tamper-proof token. Web requests carry a random cookie-nonce state
+    // that is NOT a valid JWT, so they fall through to the web flow below.
+    const mobile = await verifyCalendarMobileState(state, "google");
+    if (mobile) {
+      if (errParam) {
+        return NextResponse.redirect(buildCalendarMobileErrorUrl("google", errParam));
+      }
+      if (!code) {
+        return NextResponse.redirect(buildCalendarMobileErrorUrl("google", "missing_code"));
+      }
+      try {
+        const tokens = await exchangeCode(code);
+        const connectionId = await upsertGoogleConnection({
+          tenantId: mobile.tenantId,
+          userId: mobile.userId,
+          refreshTokenPlain: tokens.refreshToken,
+          accessTokenPlain: tokens.accessToken,
+          accessTokenExpiresAt: tokens.expiresAt,
+          accountEmail: tokens.email,
+          scopes: tokens.scope,
+        });
+        audit({
+          tenantId: mobile.tenantId,
+          action: "calendar.connect",
+          actorUserId: mobile.userId,
+          entityType: "calendar_connection",
+          entityId: connectionId,
+          metadata: { provider: "google", accountEmail: tokens.email, surface: "mobile" },
+          ipAddress: ipFromHeaders(req.headers),
+        });
+        return NextResponse.redirect(buildCalendarMobileSuccessUrl("google"));
+      } catch {
+        return NextResponse.redirect(buildCalendarMobileErrorUrl("google", "exchange_failed"));
+      }
+    }
 
     if (errParam) {
       // User clicked "Cancel" on Google's consent screen — friendly redirect.

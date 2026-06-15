@@ -5,6 +5,11 @@ import { exchangeCode } from "@/lib/calendar/microsoft";
 import { upsertMicrosoftConnection } from "@/lib/calendar/sync";
 import { audit, ipFromHeaders } from "@/lib/audit";
 import { consumeCalendarStateCookie } from "@/lib/calendar/oauth-state";
+import {
+  buildCalendarMobileErrorUrl,
+  buildCalendarMobileSuccessUrl,
+  verifyCalendarMobileState,
+} from "@/lib/calendar/oauth-mobile";
 
 const APP_BASE_URL = process.env.APP_BASE_URL ?? "http://localhost:3001";
 
@@ -25,6 +30,44 @@ export async function GET(req: NextRequest) {
     const state = req.nextUrl.searchParams.get("state");
     const errParam = req.nextUrl.searchParams.get("error");
     const errDesc = req.nextUrl.searchParams.get("error_description");
+
+    // ── MOBILE flow ──────────────────────────────────────────────────
+    // Signed mobile state → handle without session/cookie + deep-link the
+    // result. See google/callback + lib/calendar/oauth-mobile for rationale.
+    // Web requests carry a cookie-nonce state (not a JWT) → fall through.
+    const mobile = await verifyCalendarMobileState(state, "microsoft");
+    if (mobile) {
+      if (errParam) {
+        return NextResponse.redirect(buildCalendarMobileErrorUrl("microsoft", errParam));
+      }
+      if (!code) {
+        return NextResponse.redirect(buildCalendarMobileErrorUrl("microsoft", "missing_code"));
+      }
+      try {
+        const tokens = await exchangeCode(code);
+        const connectionId = await upsertMicrosoftConnection({
+          tenantId: mobile.tenantId,
+          userId: mobile.userId,
+          refreshTokenPlain: tokens.refreshToken,
+          accessTokenPlain: tokens.accessToken,
+          accessTokenExpiresAt: tokens.expiresAt,
+          accountEmail: tokens.email,
+          scopes: tokens.scope,
+        });
+        audit({
+          tenantId: mobile.tenantId,
+          action: "calendar.connect",
+          actorUserId: mobile.userId,
+          entityType: "calendar_connection",
+          entityId: connectionId,
+          metadata: { provider: "microsoft", accountEmail: tokens.email, surface: "mobile" },
+          ipAddress: ipFromHeaders(req.headers),
+        });
+        return NextResponse.redirect(buildCalendarMobileSuccessUrl("microsoft"));
+      } catch {
+        return NextResponse.redirect(buildCalendarMobileErrorUrl("microsoft", "exchange_failed"));
+      }
+    }
 
     if (errParam) {
       // User declined consent, or Microsoft surfaced an admin-consent

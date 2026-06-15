@@ -28,6 +28,7 @@ const OAUTH_AVAILABLE = Platform.OS !== "web";
 
 import { consumePendingOAuthError } from "./_layout";
 import { Button } from "@/components/ui/Button";
+import { Logo } from "@/components/ui/Logo";
 import { Card } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
 import { ScreenContainer } from "@/components/ui/ScreenContainer";
@@ -102,14 +103,9 @@ export default function LoginScreen() {
 
   return (
     <ScreenContainer scrollable padding keyboardAvoiding edges={["top", "bottom"]}>
-      {/* Brand wordmark */}
+      {/* Brand wordmark — official ZentroMeet logo */}
       <View style={styles.brandRow}>
-        <View style={styles.brandMark}>
-          <AppText variant="h2" color="onBrand">Z</AppText>
-        </View>
-        <AppText variant="h1" style={{ marginLeft: spacing.sm }}>
-          ZentroMeet
-        </AppText>
+        <Logo variant="wordmark" size={44} showTagline />
       </View>
 
       {/* Heading */}

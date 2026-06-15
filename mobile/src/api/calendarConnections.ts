@@ -63,6 +63,21 @@ export const calendarConnectionsApi = {
   },
 
   /**
+   * Begin a SECURE mobile calendar-connect. Bearer-authed call returns the
+   * provider consent URL (carrying a short-lived signed state that binds
+   * this user/tenant). The screen opens that URL in the system browser via
+   * WebBrowser.openAuthSessionAsync; the backend callback stores the
+   * encrypted tokens server-side and deep-links
+   * zentromeet://oauth/calendar/{provider}/{success,error}. No tokens or
+   * secrets ever touch the device.
+   */
+  async mobileConnectStart(provider: "google" | "microsoft"): Promise<{ authUrl: string }> {
+    return apiGet<{ authUrl: string }>(
+      `/api/calendar/${provider}/connect/mobile`,
+    );
+  },
+
+  /**
    * Full URL for the system browser to open. We append `mobile=1` so
    * the callback knows to return a deep link.
    */

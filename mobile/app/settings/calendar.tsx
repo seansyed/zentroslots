@@ -21,9 +21,10 @@
  */
 
 import * as React from "react";
-import { Alert, Linking, ScrollView, StyleSheet, View } from "react-native";
+import { Alert, ScrollView, StyleSheet, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
+import * as WebBrowser from "expo-web-browser";
 import { useRouter } from "expo-router";
 
 import { ApiError } from "@/api/client";
@@ -121,31 +122,47 @@ export default function CalendarConnectionsScreen() {
     return () => clearInterval(id);
   }, []);
 
-  // When the user returns from the OAuth browser, refetch so the new
-  // connection appears. We hook AppState via a focus refetch on the
-  // query; an explicit refetch on focus belt-and-braces.
-  React.useEffect(() => {
-    const sub = Linking.addEventListener("url", (event) => {
-      if (event.url.startsWith("zentromeet://")) {
-        // The deep-link handler in _layout.tsx already routes us back
-        // into the app; we just need to refresh.
-        void connectionsQ.refetch();
-        void profileQ.refetch();
-      }
-    });
-    return () => sub.remove();
-  }, [connectionsQ, profileQ]);
+  // Which provider is mid-connect — drives the button "Connecting…" state
+  // and, critically, prevents a second tap from opening a second OAuth
+  // session while the first is still in the browser.
+  const [connecting, setConnecting] = React.useState<CalendarProvider | null>(null);
 
-  function openConnect(provider: "google" | "microsoft") {
+  // Secure mobile calendar connect:
+  //   1. Ask the backend (Bearer) for the provider consent URL (state binds
+  //      this user/tenant).
+  //   2. Open it in the system browser; the auth session resolves with the
+  //      zentromeet://oauth/calendar/{provider}/{success,error} deep link.
+  //   3. On success, refresh the connection list. Tokens are stored
+  //      server-side — nothing sensitive ever returns to the app.
+  async function openConnect(provider: "google" | "microsoft") {
+    if (connecting) return;
+    setConnecting(provider);
     void Haptics.selectionAsync().catch(() => {});
-    const url = calendarConnectionsApi.connectUrl(provider);
-    track("navigation", `Calendar connect: ${provider}`, "info", { url });
-    Linking.openURL(url).catch(() => {
+    try {
+      const { authUrl } = await calendarConnectionsApi.mobileConnectStart(provider);
+      const redirect = `${env.appScheme}://oauth/calendar/${provider}`;
+      track("navigation", `Calendar connect: ${provider}`, "info");
+      const result = await WebBrowser.openAuthSessionAsync(authUrl, redirect);
+      if (result.type !== "success" || !result.url) {
+        // Dismissed / cancelled — not an error, just stop.
+        return;
+      }
+      if (result.url.includes("/error")) {
+        const code = decodeURIComponent(result.url.split("error=")[1] ?? "connect_failed");
+        Alert.alert("Connection failed", code);
+        return;
+      }
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      await connectionsQ.refetch();
+      void profileQ.refetch();
+    } catch (e) {
       Alert.alert(
-        "Couldn't open browser",
-        "Open your device's browser and try again.",
+        "Couldn't connect",
+        e instanceof Error ? e.message : "Please try again in a moment.",
       );
-    });
+    } finally {
+      setConnecting(null);
+    }
   }
 
   function confirmDisconnect(row: CalendarConnection) {
@@ -257,6 +274,7 @@ export default function CalendarConnectionsScreen() {
                 provider="google"
                 connection={byProvider.google}
                 now={now}
+                connecting={connecting === "google"}
                 onConnect={() => openConnect("google")}
                 onDisconnect={confirmDisconnect}
                 disconnecting={
@@ -268,6 +286,7 @@ export default function CalendarConnectionsScreen() {
                 provider="microsoft"
                 connection={byProvider.microsoft}
                 now={now}
+                connecting={connecting === "microsoft"}
                 onConnect={() => openConnect("microsoft")}
                 onDisconnect={confirmDisconnect}
                 disconnecting={
@@ -339,6 +358,7 @@ type CardProps = {
   provider: "google" | "microsoft";
   connection: CalendarConnection | undefined;
   now: number;
+  connecting: boolean;
   onConnect: () => void;
   onDisconnect: (row: CalendarConnection) => void;
   disconnecting: boolean;
@@ -348,6 +368,7 @@ function ProviderCard({
   provider,
   connection,
   now,
+  connecting,
   onConnect,
   onDisconnect,
   disconnecting,
@@ -430,12 +451,15 @@ function ProviderCard({
             <View style={[styles.actionBtn, styles.actionSecondary]}>
               <AppText
                 variant="smallStrong"
-                style={{ color: colors.ink }}
-                onPress={onConnect}
+                style={{ color: connecting ? colors.inkSubtle : colors.ink }}
+                onPress={() => {
+                  if (connecting) return;
+                  onConnect();
+                }}
                 accessibilityRole="button"
                 accessibilityLabel={`Reconnect ${meta.label}`}
               >
-                Reconnect
+                {connecting ? "Connecting…" : "Reconnect"}
               </AppText>
             </View>
             <View style={[styles.actionBtn, styles.actionDanger]}>
@@ -458,7 +482,7 @@ function ProviderCard({
         ) : (
           <View style={[styles.actionBtn, styles.actionPrimary]}>
             <Ionicons
-              name="link-outline"
+              name={connecting ? "hourglass-outline" : "link-outline"}
               size={14}
               color={colors.inkOnBrand}
               style={{ marginRight: 6 }}
@@ -466,11 +490,14 @@ function ProviderCard({
             <AppText
               variant="smallStrong"
               style={{ color: colors.inkOnBrand }}
-              onPress={onConnect}
+              onPress={() => {
+                if (connecting) return;
+                onConnect();
+              }}
               accessibilityRole="button"
               accessibilityLabel={`Connect ${meta.label}`}
             >
-              Connect {meta.label}
+              {connecting ? "Connecting…" : `Connect ${meta.label}`}
             </AppText>
           </View>
         )}

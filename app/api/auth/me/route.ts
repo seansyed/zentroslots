@@ -42,6 +42,11 @@ export async function GET() {
             slug: tenant.slug,
             plan: tenant.plan,
             active: tenant.active,
+            // Additive (mobile branding): tenant-configured logo + brand
+            // color. Relative logoUrl is absolutized client-side. Web
+            // ignores unknown fields, so this is backward-compatible.
+            logoUrl: tenant.logoUrl ?? null,
+            primaryColor: tenant.primaryColor ?? null,
           }
         : null,
     });
@@ -135,6 +140,11 @@ export async function PATCH(req: NextRequest) {
             slug: tenant.slug,
             plan: tenant.plan,
             active: tenant.active,
+            // Additive (mobile branding): tenant-configured logo + brand
+            // color. Relative logoUrl is absolutized client-side. Web
+            // ignores unknown fields, so this is backward-compatible.
+            logoUrl: tenant.logoUrl ?? null,
+            primaryColor: tenant.primaryColor ?? null,
           }
         : null,
     });
