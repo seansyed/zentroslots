@@ -20,6 +20,7 @@ import {
   StyleSheet,
   View,
   type PressableProps,
+  type TextStyle,
   type ViewStyle,
 } from "react-native";
 
@@ -131,14 +132,14 @@ const VARIANT_STYLES: Record<
   },
 };
 
-const SIZE_STYLES: Record<Size, { container: ViewStyle; label: ViewStyle }> = {
+const SIZE_STYLES: Record<Size, { container: ViewStyle; label: TextStyle }> = {
   sm: {
     container: {
       height: 36,
       paddingHorizontal: spacing.md,
       borderRadius: radius.lg,
     },
-    label: typography.smallStrong as ViewStyle,
+    label: typography.smallStrong as TextStyle,
   },
   md: {
     container: {
@@ -146,7 +147,7 @@ const SIZE_STYLES: Record<Size, { container: ViewStyle; label: ViewStyle }> = {
       paddingHorizontal: spacing.lg,
       borderRadius: radius.lg,
     },
-    label: typography.bodyStrong as ViewStyle,
+    label: typography.bodyStrong as TextStyle,
   },
   lg: {
     container: {
@@ -154,7 +155,7 @@ const SIZE_STYLES: Record<Size, { container: ViewStyle; label: ViewStyle }> = {
       paddingHorizontal: spacing.xl,
       borderRadius: radius.xl,
     },
-    label: typography.h4 as ViewStyle,
+    label: typography.h4 as TextStyle,
   },
 };
 

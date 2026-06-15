@@ -37,6 +37,12 @@ import { useAuthStore } from "@/store/authStore";
 // doesn't miss real-time booking changes while staring at the app.
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
+    // `shouldShowAlert` is the legacy key still required by the
+    // NotificationBehavior type in expo-notifications (SDK 52); the
+    // newer `shouldShowBanner`/`shouldShowList` refine iOS 14+ behavior.
+    // Include all three so the type is satisfied and behavior is correct
+    // across OS versions.
+    shouldShowAlert: true,
     shouldShowBanner: true,
     shouldShowList: true,
     shouldPlaySound: false,
@@ -83,7 +89,6 @@ async function requestPermissionAndToken(): Promise<string | null> {
           allowBadge: true,
           allowSound: true,
           allowDisplayInCarPlay: false,
-          allowAnnouncements: false,
         },
       });
       granted =

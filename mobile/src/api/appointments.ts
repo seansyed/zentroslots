@@ -38,6 +38,9 @@ export type Appointment = {
   location?: string | null;
   amountCents?: number | null;
   notes?: string | null;
+  /** Managerial-only internal note, returned by the detail endpoint
+   *  (GET /api/bookings/[id]) — absent on the list shape. */
+  internalNotes?: string | null;
 };
 
 export type AppointmentListParams = {
@@ -147,6 +150,7 @@ export const appointmentsApi = {
       location: w.location ?? null,
       amountCents: w.amountCents ?? null,
       notes: w.notes ?? null,
+      internalNotes: w.internalNotes ?? null,
     };
   },
 

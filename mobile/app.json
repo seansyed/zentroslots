@@ -23,7 +23,6 @@
         "usesNonExemptEncryption": false
       },
       "associatedDomains": [
-        "applinks:app.zentromeet.com",
         "applinks:app.zentromeet.com"
       ],
       "infoPlist": {
@@ -48,43 +47,9 @@
         "POST_NOTIFICATIONS",
         "VIBRATE",
         "WAKE_LOCK",
-        "RECEIVE_BOOT_COMPLETED",
-        "INTERNET",
-        "POST_NOTIFICATIONS",
-        "VIBRATE",
-        "WAKE_LOCK",
         "RECEIVE_BOOT_COMPLETED"
       ],
       "intentFilters": [
-        {
-          "action": "VIEW",
-          "autoVerify": true,
-          "category": [
-            "BROWSABLE",
-            "DEFAULT"
-          ],
-          "data": [
-            {
-              "scheme": "zentromeet",
-              "host": "oauth"
-            }
-          ]
-        },
-        {
-          "action": "VIEW",
-          "autoVerify": true,
-          "category": [
-            "BROWSABLE",
-            "DEFAULT"
-          ],
-          "data": [
-            {
-              "scheme": "https",
-              "host": "app.zentromeet.com",
-              "pathPrefix": "/m"
-            }
-          ]
-        },
         {
           "action": "VIEW",
           "autoVerify": true,
@@ -148,8 +113,8 @@
     },
     "extra": {
       "apiBaseUrl": "https://app.zentromeet.com",
-      "privacyPolicyUrl": "https://app.zentromeet.com/legal/privacy",
-      "termsUrl": "https://app.zentromeet.com/legal/terms",
+      "privacyPolicyUrl": "https://app.zentromeet.com/privacy",
+      "termsUrl": "https://app.zentromeet.com/terms",
       "supportEmail": "support@zentromeet.com",
       "router": {
         "origin": false

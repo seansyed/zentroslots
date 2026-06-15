@@ -77,7 +77,7 @@ export function PressableCard({
   return (
     <Pressable
       {...rest}
-      style={({ pressed }) => [
+      style={({ pressed, hovered }) => [
         styles.base,
         variant === "elevated" && styles.elevated,
         variant === "outline" && styles.outline,
@@ -87,7 +87,7 @@ export function PressableCard({
           transform: [{ scale: pressedScale }],
           opacity: 0.92,
         },
-        typeof style === "function" ? style({ pressed }) : style,
+        typeof style === "function" ? style({ pressed, hovered }) : style,
       ]}
     >
       {children}

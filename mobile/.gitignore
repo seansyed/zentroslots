@@ -16,9 +16,11 @@ ios/
 
 # Dependencies
 node_modules/
-package-lock.json
 yarn.lock
 pnpm-lock.yaml
+# package-lock.json IS committed (reproducible EAS/CI builds + pins the
+# SDK-52-aligned versions so `npm install` can't silently drift
+# react-native back to a version that breaks the native bridge).
 
 # Environment
 .env

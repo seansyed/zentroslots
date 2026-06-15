@@ -294,13 +294,22 @@ function AuthBoot({ children }: { children: React.ReactNode }) {
 
   useAuthGate();
   useOAuthDeepLink();
-  // TEMP: disabling non-essential hooks while we isolate a
-  // "TypeError: undefined is not a function" crash inside AuthBoot.
-  // Re-enable once the boot path is stable.
-  // usePushNotifications();   // <- expo-notifications API drift suspect
-  // useAppLifecycle();        // <- AppState listener
-  // useNavigationBreadcrumbs(); // <- telemetry; non-essential
-  // useGlobalErrorHandlers();   // <- error capture; non-essential
+  // Re-enabled (launch finishing) after fixing the root causes of the
+  // prior "TypeError: undefined is not a function" boot crash:
+  //   • Dependency drift aligned to Expo SDK 52 — react-native 0.76.3→0.76.9
+  //     and react-native-screens 4.1.0→4.4.0 (the navigation/native-bridge
+  //     mismatch was the most likely source of the undefined-function crash).
+  //   • expo-notifications API drift fixed — handler now includes the
+  //     required `shouldShowAlert` key and the dropped `allowAnnouncements`
+  //     option was removed.
+  // All four hooks are independently guarded (try/catch around native
+  // calls; effects never throw synchronously), so a single failing module
+  // can't take down boot. On-device verification via an EAS dev build is
+  // still recommended before store submission.
+  usePushNotifications();
+  useAppLifecycle();
+  useNavigationBreadcrumbs();
+  useGlobalErrorHandlers();
 
   // Wait for hydration before mounting the Stack — the auth gate
   // can't make a routing decision until SecureStore is read.
