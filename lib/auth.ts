@@ -1,7 +1,7 @@
 import { SignJWT, jwtVerify } from "jose";
 import bcrypt from "bcryptjs";
 import crypto from "node:crypto";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 
 import { db } from "@/db/client";
@@ -105,9 +105,30 @@ export async function clearSessionCookie(): Promise<void> {
 
 export async function getSession(): Promise<SessionPayload | null> {
   const jar = await cookies();
-  const token = jar.get(COOKIE_NAME)?.value;
+  let token = jar.get(COOKIE_NAME)?.value;
+  if (!token) {
+    // Mobile clients have no cookie jar — they authenticate by sending the
+    // SAME signed session JWT as `Authorization: Bearer <token>`. Accept it
+    // here so a single getSession()/requireUser() path serves both web
+    // (httpOnly cookie) and mobile (Bearer). The token is verified
+    // identically (signature + expiry via verifyToken), so this adds no new
+    // trust surface, and Bearer is CSRF-safe (not auto-sent by browsers).
+    token = bearerToken(await headers());
+  }
   if (!token) return null;
   return verifyToken(token);
+}
+
+/** Extract a Bearer token from an Authorization header, if present.
+ *  Accepts any header bag with a `get()` (Headers, ReadonlyHeaders, or a
+ *  NextRequest's headers). */
+function bearerToken(h: { get(name: string): string | null }): string | undefined {
+  const authz = h.get("authorization");
+  if (authz && authz.toLowerCase().startsWith("bearer ")) {
+    const t = authz.slice(7).trim();
+    return t.length > 0 ? t : undefined;
+  }
+  return undefined;
 }
 
 export async function requireUser(): Promise<User> {
@@ -147,7 +168,8 @@ export async function getTenantId(): Promise<string | null> {
 
 // Edge-friendly session read for route handlers that already hold a NextRequest.
 export async function getSessionFromRequest(req: NextRequest): Promise<SessionPayload | null> {
-  const token = req.cookies.get(COOKIE_NAME)?.value;
+  // Cookie (web) first, then Authorization: Bearer (mobile) — same JWT shape.
+  const token = req.cookies.get(COOKIE_NAME)?.value ?? bearerToken(req.headers);
   if (!token) return null;
   return verifyToken(token);
 }
