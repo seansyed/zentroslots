@@ -15,6 +15,7 @@
 import * as React from "react";
 import { Pressable, ScrollView, StyleSheet, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import * as SplashScreen from "expo-splash-screen";
 
 import { AppText } from "@/components/ui/Text";
 import { track } from "@/lib/telemetry";
@@ -38,6 +39,11 @@ export class ErrorBoundary extends React.Component<Props, State> {
   }
 
   componentDidCatch(error: Error, errorInfo: { componentStack?: string }): void {
+    // A boot-path error can unmount the tree BEFORE the splash was hidden
+    // (SplashScreen.hideAsync runs from AuthBoot effects that never complete).
+    // Hide it here so THIS recovery screen is actually visible instead of
+    // staying frozen behind the native launch splash (the "Z" ANR).
+    SplashScreen.hideAsync().catch(() => {});
     track("crash", `Render error: ${error.name}: ${error.message}`, "error", {
       stack: error.stack?.split("\n").slice(0, 8).join("\n") ?? null,
       componentStack: errorInfo.componentStack?.split("\n").slice(0, 8).join("\n") ?? null,

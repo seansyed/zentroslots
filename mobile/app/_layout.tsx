@@ -14,6 +14,12 @@
  *     there's no flash of unstyled / unauthenticated UI.
  */
 
+// MUST be first: installs ES2023 array polyfills (findLast/findLastIndex)
+// that Hermes lacks but @react-navigation/expo-router call at runtime. Without
+// this the first navigation action throws "undefined is not a function" and
+// freezes boot on the splash. See src/lib/polyfills.ts.
+import "@/lib/polyfills";
+
 import * as React from "react";
 import { ActivityIndicator, StyleSheet, View } from "react-native";
 import { StatusBar } from "expo-status-bar";
@@ -41,6 +47,7 @@ import { queryClient } from "@/lib/query";
 import { hydrateQueryCache, wireUpPersistence } from "@/lib/queryPersistence";
 import { hydrateTelemetry, track } from "@/lib/telemetry";
 import { startTelemetrySink } from "@/lib/telemetrySink";
+import { guard } from "@/lib/safeInit";
 import { useAuthStore } from "@/store/authStore";
 import { usePresenceStore } from "@/store/presenceStore";
 import { useFirstRun } from "@/hooks/useFirstRun";
@@ -48,6 +55,18 @@ import { colors } from "@/theme";
 
 // Show the splash for as long as we need (hydration + fonts).
 SplashScreen.preventAutoHideAsync().catch(() => {});
+
+// Module-level splash failsafe — dismiss the splash a few seconds after the
+// JS bundle loads, INDEPENDENT of React. The in-component 5s fallback (inside
+// AuthBoot) is cancelled by AuthBoot's unmount cleanup whenever a boot effect
+// throws (the ErrorBoundary unmounts AuthBoot → clearTimeout), which is what
+// left the native splash frozen on screen forever (the "Z" ANR). A
+// module-scoped timer has no cleanup tied to any component, so nothing can
+// cancel it: the OS splash is guaranteed to come down and reveal the app (or
+// the ErrorBoundary recovery screen) even if every React effect fails.
+setTimeout(() => {
+  SplashScreen.hideAsync().catch(() => {});
+}, 4000);
 
 /**
  * Module-level state for surfacing OAuth deep-link errors that arrived
@@ -213,19 +232,27 @@ function useOAuthDeepLink() {
       }
     }
 
-    // Cold start
-    Linking.getInitialURL()
-      .then(processUrl)
-      .catch((err) => console.warn("[deeplink] getInitialURL failed:", err));
+    // Fail-open: attaching native Linking handlers must never throw out of
+    // this passive effect (a throw here unmounts the tree and freezes boot).
+    const sub = guard("oauthDeepLink", () => {
+      // Cold start
+      Linking.getInitialURL()
+        .then(processUrl)
+        .catch((err) => console.warn("[deeplink] getInitialURL failed:", err));
 
-    // Foreground
-    const sub = Linking.addEventListener("url", (event) => {
-      void processUrl(event.url);
+      // Foreground
+      return Linking.addEventListener("url", (event) => {
+        void processUrl(event.url);
+      });
     });
 
     return () => {
       cancelled = true;
-      sub.remove();
+      try {
+        sub?.remove();
+      } catch {
+        /* noop */
+      }
     };
   }, []);
 }

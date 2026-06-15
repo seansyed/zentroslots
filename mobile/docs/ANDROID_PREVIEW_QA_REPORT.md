@@ -1,3 +1,64 @@
+# UPDATE 2 — ACTUAL device-log root cause of the boot freeze (2026-06-15)
+
+The versionCode-4 APK (which contained "UPDATE 1"'s notification fix) **still froze
+on the "Z" splash and ANR'd** on a physical Galaxy S26 Ultra. I captured a live
+`adb logcat` from that exact build and found the real, evidence-based cause —
+which is **different** from the import-time-notification theory in UPDATE 1.
+
+**Device error (logcat, release Hermes, versionCode 4):**
+```
+I ReactNativeJS: Running "main"
+E ReactNativeJS: TypeError: undefined is not a function
+E ReactNativeJS:   in AuthBoot ... in ErrorBoundary ... in ExpoRoot
+   stack: anonymous@1:1868131  commitHookEffectListMount  commitHookPassiveMountEffects  flushPassiveEffects
+```
+
+**Root cause:** the throw is in a **passive `useEffect`** (`commitHookEffectListMount`),
+not render. Hermes (`hermes-2024-11-12-RNv0.76.2`) **does not implement
+`Array.prototype.findLast` / `findLastIndex`**, but **`@react-navigation/routers`**
+(`StackRouter`/`TabRouter`, used by expo-router 4) calls them inside
+`getStateForAction` / `getInitialState`. The **first navigation action**
+(`router.replace` from `useAuthGate`, which lives in `AuthBoot`) reaches that code →
+`undefined is not a function`. Because it throws in a passive effect, the
+`ErrorBoundary` catches it by **unmounting `AuthBoot`**, whose unmount cleanup runs
+`clearTimeout` on the 5s splash-dismiss timer → the native splash never hides →
+frozen "Z" → ANR. TypeScript's lib declares these methods, so it passed
+`tsc`/`expo-doctor`/`expo export` and only failed at runtime under Hermes.
+
+**Fix (commit on main):**
+- **`mobile/src/lib/polyfills.ts` (NEW, imported FIRST in `app/_layout.tsx`)** — a
+  feature-detected polyfill for `Array.prototype.findLast` / `findLastIndex` / `at`.
+  No-op if the engine already has them, so it's safe on every engine/platform.
+  Tested in `mobile/tests/polyfills.test.ts` (6 tests, native-parity).
+- **Splash can no longer freeze:** a **module-level** `setTimeout`→`hideAsync` in
+  `_layout.tsx` (immune to component unmount) + `SplashScreen.hideAsync()` in
+  `ErrorBoundary.componentDidCatch` (so the recovery screen is never hidden behind
+  the splash).
+- **Optional boot hooks made fail-open** with named logging (`[boot:<hook>]`):
+  `useOAuthDeepLink` (Linking), `usePushNotifications` (response listener),
+  `useAppLifecycle` (AppState). A new `guard()` in `safeInit.ts`. So any *other*
+  undefined boot call degrades gracefully and is named in logcat, instead of
+  freezing.
+- `android.versionCode` 4 → **5**.
+
+**Validation (this commit):** polyfill + safeInit tests 10/10 · `tsc` 0 errors ·
+`expo-doctor` 18/18 · `expo export` android OK (polyfill confirmed in the Hermes
+bundle; module count 1545→1546).
+
+**Diagnosis method (how the device was read, for reproducibility):** fresh Google
+`platform-tools` adb → confirmed installed `versionCode=5`-predecessor `=4` →
+`adb logcat` of a clean relaunch → isolated the `ReactNativeJS` stack. Symbolication
+of the Hermes offsets was attempted (local `expo export:embed` + `metro-symbolicate`,
+incl. a full `npm ci` of Codemagic's exact tree) but the local bundle isn't
+byte-identical to the gradle-embedded one, so offsets didn't map — root cause was
+instead established from the component stack + a multi-agent audit of the boot path
+that pinpointed the `findLast`/`findLastIndex` calls in `@react-navigation/routers`.
+
+**Status:** fix applied + locally validated; **not** marked resolved until a
+versionCode-5 APK is built on Codemagic and verified opening on the device.
+
+---
+
 # ZentroMeet Mobile — Android Preview Build & Physical-Device QA
 
 **Date:** 2026-06-15

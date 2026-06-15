@@ -89,8 +89,26 @@ export function useAppLifecycle(): void {
       }
     }
 
-    const sub = AppState.addEventListener("change", handleChange);
-    return () => sub.remove();
+    // Fail-open: the AppState attach is a native call and must never throw out
+    // of this passive effect (a throw here unmounts the tree and freezes boot).
+    let sub: { remove: () => void } | null = null;
+    try {
+      sub = AppState.addEventListener("change", handleChange);
+    } catch (e) {
+      try {
+        console.error("[boot:appStateListener] failed:", (e as Error)?.message ?? e);
+      } catch {
+        /* logging must never throw */
+      }
+      sub = null;
+    }
+    return () => {
+      try {
+        sub?.remove();
+      } catch {
+        /* noop */
+      }
+    };
   }, [queryClient]);
 
   // ── Push arrival: invalidate the affected booking's cached state ──

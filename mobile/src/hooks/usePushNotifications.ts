@@ -213,13 +213,32 @@ export function usePushNotifications() {
   // ── Foreground tap handler ────────────────────────────────────────
   React.useEffect(() => {
     if (!isAuthed) return;
-    const sub = Notifications.addNotificationResponseReceivedListener((response) => {
-      const payload = parsePayload(response.notification);
-      if (payload?.bookingId) {
-        router.push(`/appointments/${payload.bookingId}`);
+    // Fail-open: the listener attach is a native call. If it throws it must
+    // NOT bubble out of this passive effect (that would unmount the tree and
+    // freeze boot) — return a no-op cleanup instead.
+    let sub: { remove: () => void } | null = null;
+    try {
+      sub = Notifications.addNotificationResponseReceivedListener((response) => {
+        const payload = parsePayload(response.notification);
+        if (payload?.bookingId) {
+          router.push(`/appointments/${payload.bookingId}`);
+        }
+      });
+    } catch (e) {
+      try {
+        console.error("[boot:pushResponseListener] failed:", (e as Error)?.message ?? e);
+      } catch {
+        /* logging must never throw */
       }
-    });
-    return () => sub.remove();
+      sub = null;
+    }
+    return () => {
+      try {
+        sub?.remove();
+      } catch {
+        /* noop */
+      }
+    };
   }, [isAuthed, router]);
 
   // ── Foreground arrival (no tap) — placeholder for future toast UI.

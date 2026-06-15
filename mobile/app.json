@@ -41,7 +41,7 @@
         "backgroundColor": "#359df3"
       },
       "package": "com.zentromeet.app",
-      "versionCode": 4,
+      "versionCode": 5,
       "permissions": [
         "INTERNET",
         "POST_NOTIFICATIONS",
