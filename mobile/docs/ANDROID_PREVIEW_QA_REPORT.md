@@ -45,12 +45,21 @@ SLOT ROOT CAUSE:          MOBILE display — UTC instants formatted in device tz
 SLOT FIX:                 server returns authoritative timezone + display[] labels; mobile renders labels, books raw instants
 ANDROID VERSION CODE:     10
 IOS BUILD NUMBER:         6
-BACKEND DEPLOY:           REQUIRED (slots route changed) — see deploy note in this update
-CODEMAGIC BUILD:          PENDING — operator triggers android-preview on main (versionCode 10)
+BACKEND DEPLOY:           DONE + verified — commit 9038632 on prod (35.83.95.42); pre-deploy PG
+                          backup OK (1.83 MB, 619 restore-list lines, 69 table-data); build once +
+                          PM2 restart once + pm2 save; no drizzle-kit/schema change.
+HEALTH:                   /api/health = 200 (edge https://app.zentromeet.com + local :3001)
+SLOTS VERIFY:             /api/slots live on new build (route wired to buildSlotDisplay); deployed
+                          runtime formats synthetic 9AM–6PM EST → first 9:00 AM, last 5:45 PM,
+                          36 slots, ZERO pre-9AM/2AM-class labels (privacy-safe, no customer data)
+CODEMAGIC BUILD:          OPERATOR ACTION — start `android-preview` on `main` in the Codemagic UI
+                          (versionCode 10; app code == commit 9038632). Auto-trigger is `develop`
+                          only and that branch does not exist; no API token available to trigger.
 APK:                      PENDING (versionCode 10)
 DEVICE QA:                PENDING — physical Android device required
-READY FOR NEXT PREVIEW BUILD: YES (after backend deploy)
-RESOLUTION:               NOT marked resolved until installed APK shows the logo AND only in-hours slots AND completes a real booking
+READY FOR NEXT PREVIEW BUILD: YES — backend deployed; operator can build now
+RESOLUTION:               NOT marked resolved until the installed APK shows the logo AND only
+                          in-hours slots AND completes a real booking on the device
 ```
 
 ---
