@@ -176,9 +176,14 @@ function useGlobalErrorHandlers() {
       });
     }
 
-    // Web: window-level handlers. `window` is undefined on native, hence
-    // the typeof check.
-    if (typeof window !== "undefined") {
+    // Web ONLY: window-level handlers. NOTE: React Native DOES define a global
+    // `window` (so `typeof window !== "undefined"` is true on native), but it
+    // has NO `addEventListener` — that's a web-only DOM API. The previous
+    // `typeof window !== "undefined"` check therefore ran on native and
+    // `window.addEventListener(...)` threw "undefined is not a function" inside
+    // this boot effect — the actual cause of the Android release boot crash.
+    // Gate on the method's existence so this block runs on web only.
+    if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
       const onError = (ev: ErrorEvent) => {
         track(
           "runtime",
