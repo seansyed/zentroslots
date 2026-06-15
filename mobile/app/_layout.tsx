@@ -47,7 +47,7 @@ import { queryClient } from "@/lib/query";
 import { hydrateQueryCache, wireUpPersistence } from "@/lib/queryPersistence";
 import { hydrateTelemetry, track } from "@/lib/telemetry";
 import { startTelemetrySink } from "@/lib/telemetrySink";
-import { guard } from "@/lib/safeInit";
+import { guard, bootBreadcrumb } from "@/lib/safeInit";
 import { useAuthStore } from "@/store/authStore";
 import { usePresenceStore } from "@/store/presenceStore";
 import { useFirstRun } from "@/hooks/useFirstRun";
@@ -96,6 +96,7 @@ function useAuthGate() {
   const firstRun = useFirstRun();
 
   React.useEffect(() => {
+    bootBreadcrumb("authGate h=" + hydrated + " frh=" + firstRun.hydrated);
     if (!hydrated || !firstRun.hydrated) return;
     const inAuthRoute = segments[0] === "login";
     const inOnboarding = segments[0] === "onboarding";
@@ -130,6 +131,7 @@ function useAuthGate() {
 function useNavigationBreadcrumbs() {
   const segments = useSegments();
   React.useEffect(() => {
+    bootBreadcrumb("navBreadcrumbs");
     // Fail-open: a breadcrumb is diagnostics-only and must never throw on
     // the render/commit path.
     try {
@@ -153,6 +155,7 @@ function useNavigationBreadcrumbs() {
  */
 function useGlobalErrorHandlers() {
   React.useEffect(() => {
+    bootBreadcrumb("globalErrorHandlers");
     // Native: ErrorUtils is a global on RN. Type it loosely to avoid
     // pulling in @types/react-native internals.
     type ErrorUtilsLike = {
@@ -221,6 +224,7 @@ function useGlobalErrorHandlers() {
  */
 function useOAuthDeepLink() {
   React.useEffect(() => {
+    bootBreadcrumb("oauthDeepLink");
     let cancelled = false;
 
     async function processUrl(url: string | null) {
@@ -258,6 +262,7 @@ function useOAuthDeepLink() {
 }
 
 function AuthBoot({ children }: { children: React.ReactNode }) {
+  bootBreadcrumb("render:AuthBoot start");
   const hydrate = useAuthStore((s) => s.hydrate);
   const hydrated = useAuthStore((s) => s.hydrated);
 
@@ -267,10 +272,13 @@ function AuthBoot({ children }: { children: React.ReactNode }) {
     PublicSans_600SemiBold,
     PublicSans_700Bold,
   });
+  bootBreadcrumb("render:after useFonts");
 
   const hydratePresence = usePresenceStore((s) => s.hydrate);
+  bootBreadcrumb("render:after stores");
 
   React.useEffect(() => {
+    bootBreadcrumb("effect:init");
     // EVERY init call gets its own try/catch so a single broken module
     // (e.g. expo-secure-store, AsyncStorage, expo-notifications) can't
     // take down the entire boot. Each failure is silently downgraded —
@@ -311,6 +319,7 @@ function AuthBoot({ children }: { children: React.ReactNode }) {
   // the background. Gating on both was causing infinite splash hangs
   // when font load races with auth init.
   React.useEffect(() => {
+    bootBreadcrumb("effect:splashHide hydrated=" + hydrated);
     if (hydrated) {
       SplashScreen.hideAsync().catch(() => {});
     }
@@ -321,6 +330,7 @@ function AuthBoot({ children }: { children: React.ReactNode }) {
   // never completes, the user at least sees the actual UI (or the
   // ErrorBoundary fallback) instead of an infinite Z splash.
   React.useEffect(() => {
+    bootBreadcrumb("effect:splash5s");
     const splashTimeout = setTimeout(() => {
       SplashScreen.hideAsync().catch(() => {});
     }, 5000);
@@ -351,6 +361,7 @@ function AuthBoot({ children }: { children: React.ReactNode }) {
   // loading screen (never `null`) so that if the native splash dismisses
   // before hydration completes, the user sees a styled loading state
   // instead of a blank white screen.
+  bootBreadcrumb("render:before-return hydrated=" + hydrated);
   if (!hydrated) return <BootLoading />;
   return <>{children}</>;
 }

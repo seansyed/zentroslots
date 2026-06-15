@@ -31,6 +31,7 @@ import * as Notifications from "expo-notifications";
 import { useQueryClient } from "@tanstack/react-query";
 
 import { queryKeys } from "@/lib/query";
+import { bootBreadcrumb } from "@/lib/safeInit";
 
 // Hide-then-show this quickly = treat as "still in flow", don't refetch.
 // 60s is roughly the boundary where users expect data to feel fresh.
@@ -58,6 +59,7 @@ export function useAppLifecycle(): void {
 
   // ── AppState: invalidate stale appointment data on foreground ──
   React.useEffect(() => {
+    bootBreadcrumb("lifecycle:appState");
     function handleChange(next: AppStateStatus) {
       const prev = lastStateRef.current;
       lastStateRef.current = next;
@@ -117,6 +119,7 @@ export function useAppLifecycle(): void {
   // doesn't tap — so the in-app appointment list / detail stays
   // truthful without waiting for a focus event.
   React.useEffect(() => {
+    bootBreadcrumb("lifecycle:notification");
     // Fail-open: attaching the listener is a native call (expo-notifications).
     // If the native module is unavailable it must not bubble out of the
     // effect — return a no-op cleanup instead.

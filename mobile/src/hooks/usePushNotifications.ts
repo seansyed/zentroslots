@@ -32,7 +32,7 @@ import { pushTokensApi } from "@/api/pushTokens";
 import { STORAGE_KEYS, storage } from "@/lib/storage";
 import { useAuthStore } from "@/store/authStore";
 import { track } from "@/lib/telemetry";
-import { createRunOnceSafe } from "@/lib/safeInit";
+import { createRunOnceSafe, bootBreadcrumb } from "@/lib/safeInit";
 
 // IMPORTANT: never touch an expo-notifications API at module-import time.
 // `Notifications.setNotificationHandler(...)` previously ran here as a
@@ -147,11 +147,13 @@ export function usePushNotifications() {
   // This replaces the old module-import-time call so a notification API
   // failure can never white-screen boot.
   React.useEffect(() => {
+    bootBreadcrumb("push:installHandler");
     installNotificationHandler();
   }, []);
 
   // ── Registration: runs once when auth lands ───────────────────────
   React.useEffect(() => {
+    bootBreadcrumb("push:registration authed=" + isAuthed);
     if (!isAuthed) return;
     let cancelled = false;
 
@@ -192,6 +194,7 @@ export function usePushNotifications() {
   // dispatch the same routing logic as the foreground listener so
   // there's exactly one tap-handling path.
   React.useEffect(() => {
+    bootBreadcrumb("push:coldStartTap authed=" + isAuthed);
     if (!isAuthed) return;
     let cancelled = false;
 
@@ -212,6 +215,7 @@ export function usePushNotifications() {
 
   // ── Foreground tap handler ────────────────────────────────────────
   React.useEffect(() => {
+    bootBreadcrumb("push:foregroundTap authed=" + isAuthed);
     if (!isAuthed) return;
     // Fail-open: the listener attach is a native call. If it throws it must
     // NOT bubble out of this passive effect (that would unmount the tree and

@@ -27,6 +27,8 @@
 import * as React from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
+import { bootBreadcrumb } from "@/lib/safeInit";
+
 const STORAGE_KEY = "zentromeet:firstRun:v1";
 
 type State =
@@ -37,6 +39,7 @@ export function useFirstRun() {
   const [state, setState] = React.useState<State>({ hydrated: false, seen: false });
 
   React.useEffect(() => {
+    bootBreadcrumb("firstRun");
     let cancelled = false;
     (async () => {
       try {

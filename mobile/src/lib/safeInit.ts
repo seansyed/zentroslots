@@ -64,6 +64,22 @@ export function createRunOnceSafe(
  *
  * Returns whatever `fn` returns, or `fallback` (default `undefined`) on throw.
  */
+/**
+ * TEMPORARY boot diagnostic. Emits a greppable `[bootcrumb] <name>` line that
+ * survives release minification (console is not stripped in this app's babel
+ * config). Effects run sequentially during React's passive-effect flush, so
+ * the LAST bootcrumb before a "TypeError: undefined is not a function" names
+ * the failing effect. Remove once the residual boot error is fixed.
+ */
+export function bootBreadcrumb(name: string): void {
+  try {
+    // eslint-disable-next-line no-console
+    console.error(`[bootcrumb] ${name}`);
+  } catch {
+    /* never throw on the boot path */
+  }
+}
+
 export function guard<T>(label: string, fn: () => T, fallback?: T): T | undefined {
   try {
     return fn();

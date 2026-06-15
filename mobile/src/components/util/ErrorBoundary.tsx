@@ -44,6 +44,14 @@ export class ErrorBoundary extends React.Component<Props, State> {
     // Hide it here so THIS recovery screen is actually visible instead of
     // staying frozen behind the native launch splash (the "Z" ANR).
     SplashScreen.hideAsync().catch(() => {});
+    // TEMP diagnostic marker (greppable in logcat): correlates the boundary
+    // catch with the last [bootcrumb] so we can name the failing effect.
+    try {
+      // eslint-disable-next-line no-console
+      console.error(`[bootcrumb] ErrorBoundary caught: ${error?.name}: ${error?.message}`);
+    } catch {
+      /* never throw on the boot path */
+    }
     track("crash", `Render error: ${error.name}: ${error.message}`, "error", {
       stack: error.stack?.split("\n").slice(0, 8).join("\n") ?? null,
       componentStack: errorInfo.componentStack?.split("\n").slice(0, 8).join("\n") ?? null,
