@@ -292,3 +292,82 @@ FINAL RECOMMENDATION:       CONDITIONAL GO
 ```
 
 > Honesty note: production health shown above is for the **currently-deployed** build (read-only probe). My validated `bc20589` is **not yet on the host** — I did not deploy it because it could not be done safely from this environment without guessing forbidden production parameters. To flip to GO: deploy `bc20589` via the runbook, add the mailing address, register the cron manifest, and pass the live smoke test. I can drive all of that if given the confirmed host/key/user/app-path/pm2-service and authorization to operate on the live box.
+
+---
+
+# UPDATE — Stabilization Phase 3 (PRODUCTION DEPLOYMENT EXECUTED), 2026-06-15
+
+Connection parameters were provided by the owner (host `35.83.95.42`, user `ubuntu`, key `aats-deploy.pem`) — no guessing. Deployment was executed in safe, staged, verified steps. All evidence below is real command output from the production host.
+
+## Access + identity (read-only confirm)
+- `ubuntu@ip-172-26-2-53`, Linux 6.8.0-1053-aws, **Node v22.22.2**. Confirmed as the ZentroMeet origin: git remote = `seansyed/zentroslots`, app dir `/var/www/scheduling-saas`, PM2 `scheduling-saas`, `localhost:3001/api/health` ok.
+- Box resources: **7.6 GB RAM** (6.7 GB available), 2 GB swap (unused), disk 25% used (117 GB free) → building on-box is safe (the "~2 GB Lightsail" assumption in the old template was wrong).
+- DB: **PostgreSQL 14.23** (Ubuntu-hosted, reachable; not the RDS 16 the docs claim — doc-drift note). `bookings_no_overlap` constraint present (health green).
+
+## Backup (Phase 4) — done & validated
+- `pg_dump -Fc` → `~/zentromeet-backups/db-2026-06-15-023924.dump` (**1.8 MB, exit 0, 619 TOC entries**, validated via `pg_restore --list`).
+- Current build preserved: `.next.rollback` (1.2 GB). Dirty `package-lock.json` backed up. Rollback commit recorded: **`fc5df06`**.
+
+## Deploy (Phase 5) — executed
+- Pre-deploy HEAD was **`fc5df06`** (prod was behind by the web fixes AND the mobile commits). Cleaned the one dirty file (`package-lock.json`, backed up first), then `git pull --ff-only origin main` → **`fc5df06..7cd1118`**.
+- No DB migration (verified: zero `db/migrations`/`schema.ts` diff `fc5df06→7cd1118`). Root deps unchanged (`package-lock.json` not in the diff) → existing `node_modules` reused; **no `drizzle-kit` ever run**.
+- `NODE_OPTIONS=--max-old-space-size=4096 npm run build` (output to file, **not piped**) → **BUILD EXIT 0**; manifest now includes `/privacy`, `/terms`.
+- `pm2 restart scheduling-saas --update-env` (single) + `pm2 save`. New pid online; **restart_time 26, unstable_restarts 0** (no crash loop). nginx active.
+
+## Post-deploy verification (real evidence)
+- **Deployed commit on host = `7cd1118`** (`git rev-parse`).
+- Public path through Cloudflare: `/api/health`→200 `ok:true`; `/`→307; `/dashboard/login`→200; `/pricing`→200; `/book`→**200** (the dynamic-rendering fix); `/sitemap.xml`→200; `/robots.txt`→200.
+- **`/privacy`→200 and `/terms`→200** (were **404** pre-deploy) — `/privacy` renders "ParaFort LLC", "June 14, 2026", "California, United States", and "Limited Use" → the legal pages + Google API Limited-Use disclosure are **live**.
+- Auth protection (unauthenticated): `/api/auth/me`,`/api/customers`,`/api/bookings`,`/api/staff`,`/api/billing/state`→**401**; `/api/admin/tenants`→**404** (hidden); `/api/tenant`→405; `/api/services`→200 returning **`[]`** (tenant-scoped via `getTenantId()`, no leak). No 500s; garbage booking-token pages render an invalid-link UI (200), no crash.
+
+## Cron (Phase 6) — gap closed
+- Prod already had a comprehensive crontab (reminders, automations, waitlists, recurring, analytics, scheduled-reports, governance, feeds, holds, admin:snapshots×4, push) + a custom backup/healthcheck/verify/monitor suite + certbot. So reminders/automations were already running (no mass-send introduced).
+- The launch-critical gap was **`calendar:webhook-renew`** (absent) — registered hourly, plus `calendar:drift`, `freebusy:cleanup`, `payments:reconcile`. **Test-run of `calendar:webhook-renew` succeeded: `done in 649ms — renewed 1/1`** (it renewed a real near-expiry calendar channel). New crons are `timeout`-guarded (the google scripts don't self-exit; the guard prevents hourly process pileup — a minor issue worth a follow-up `process.exit(0)` in those scripts).
+
+## Live smoke (Phase 7) — partial (safe subset done; transactional deferred)
+- DONE on prod (safe, no data created): public surfaces, deep `/api/health`, unauthenticated API protection, `/api/services` no-leak, calendar webhook renewal.
+- NOT run by me (would create real prod tenants/bookings, send real emails, or need external Google/Microsoft/Stripe test accounts + a controlled inbox): full signup→onboarding→booking→confirmation-email, Google/Microsoft live connect→event→reschedule→cancel, Stripe live checkout. The code for these is validated (722 unit tests + the specific fixes) and the deploy is healthy, but a live transactional pass requires a designated internal test tenant + test calendar/inbox. **This is the remaining gate to GO.**
+
+## Final summary (Phase 9 — authoritative)
+```
+AUTHORITATIVE ORIGIN/MAIN COMMIT:  7cd1118  (= bc20589 web-fixes merge + docs-only commit)
+DEPLOYED COMMIT:                   7cd1118  (verified on host via git rev-parse; was fc5df06)
+SSH HOST:                          35.83.95.42  (ip-172-26-2-53)
+SSH USER:                          ubuntu
+KEY FILE:                          ~/.ssh/aats-deploy.pem
+APPLICATION DIRECTORY:             /var/www/scheduling-saas
+PM2 SERVICE:                       scheduling-saas (id 0, fork mode)
+DEPLOYMENT METHOD:                 git pull --ff-only -> npm run build -> pm2 restart (no schema/deps change)
+BACKUP:                            db-2026-06-15-023924.dump (1.8MB, 619 TOC, validated) + .next.rollback (1.2G)
+PRODUCTION HEALTH:                 GREEN — /api/health 200 ok:true (db ok, bookings_no_overlap ok); pm2 online,
+                                   0 unstable restarts, no crash loop; nginx active; 6.7G RAM free
+CRON:                              Existing full suite present; ADDED + verified calendar:webhook-renew
+                                   (renewed 1/1 live) + calendar:drift + freebusy:cleanup + payments:reconcile
+                                   (timeout-guarded)
+SIGNUP:                            CODE deployed + unit-validated; live transactional run = operator/test-tenant
+ONBOARDING:                        FIXED + deployed (unbookable-service + dead-end closed); live run = operator
+BOOKING:                           CODE deployed (/book 200 live); live transactional run = operator
+GOOGLE:                            DEPLOYED (CSRF nonce live); webhook-renew verified working in prod;
+                                   live connect/event + consent/redirect verify = operator (needs test account)
+MICROSOFT:                         DEPLOYED (CSRF nonce); live connect + Azure publisher verification = operator
+STRIPE:                            DEPLOYED (checkout 502 + env tolerance + revenue fixes); live checkout = operator
+EMAIL:                             DEPLOYED; SES out-of-sandbox + SPF/DKIM/DMARC + live send = operator
+SUPER ADMIN:                       DEPLOYED (revenue $0 fix live, gated); live KPI count check = operator
+TENANT ISOLATION:                  VERIFIED — unauth APIs 401/404, /api/services returns [] unauth, admin hidden;
+                                   no cross-tenant leak observed (full source trace + live probe)
+LEGAL:                             /privacy + /terms LIVE on app subdomain (ParaFort LLC · California, US ·
+                                   2026-06-14 · Google Limited Use); apex already served them. Mailing address
+                                   PENDING (omitted, no public placeholder) — requires owner/counsel.
+ROLLBACK:                          READY — git checkout fc5df06 + restore .next.rollback + pm2 restart
+                                   (no schema rollback needed); DB dump on host for worst case
+BLOCKERS:                          (1) ParaFort LLC mailing address (legal completeness).
+                                   (2) Live transactional smoke (signup->booking->email, Google/Microsoft
+                                       live connect, Stripe checkout) not run on prod — needs a designated
+                                       internal test tenant + test calendar/inbox.
+WEB LAUNCH DECISION:               CONDITIONAL GO
+SAFE TO ANNOUNCE:                  After the live transactional smoke passes + the mailing address is added.
+                                   The platform is DEPLOYED, LIVE, and HEALTHY on 7cd1118; the remaining items
+                                   are end-to-end verification and one legal detail, not code defects.
+```
+
+> Evidence standard upheld: every "deployed/verified/green" above is backed by real production command output captured this session. Items I could not run safely (live transactional flows needing external accounts / real customer emails) are marked operator-required, not asserted as passed. Mobile remains out of scope (a separate `mobile/` app now lives on `main`; not touched).
