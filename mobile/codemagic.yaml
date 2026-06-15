@@ -91,8 +91,11 @@ workflows:
       android_signing:
         - zentromeet_android_keystore
       groups:
-        - expo_credentials   # Provides EXPO_TOKEN
-        - zentromeet_api     # Provides API_BASE_URL, EAS_PROJECT_ID
+        # android-preview builds entirely on Codemagic via `expo prebuild`
+        # + Gradle — NO EAS Build and NO Expo login are required. We only
+        # need the public API base-URL group; EXPO_TOKEN / expo_credentials
+        # is intentionally NOT referenced here.
+        - zentromeet_api     # Provides EXPO_PUBLIC_API_BASE_URL
       vars:
         # NOTE: Codemagic does NOT perform $VAR substitution inside this
         # `vars:` block. EXPO_PUBLIC_API_BASE_URL must be set DIRECTLY
@@ -134,43 +137,43 @@ workflows:
           echo "Build:   $CM_BUILD_ID"
           echo "Workdir: $(pwd)"
 
-      # ----- 2. Install dependencies ---------------------------------------
-      # package-lock.json is .gitignored in this project (see .gitignore line
-      # 19-21), so npm ci often will not have a lockfile to work with. We
-      # prefer `npm ci` when the lockfile happens to be present (faster, more
-      # reproducible) and fall back to `npm install` otherwise. Output is
-      # teed to /tmp/install.log for the artifact bundle.
+      # ----- 2. Install dependencies (reproducible) ------------------------
+      # package-lock.json IS committed (un-ignored 2026-06-15), so we use
+      # `npm ci` for a clean, reproducible install pinned to the SDK-52
+      # aligned versions (react-native 0.76.9, react-native-screens 4.4.0).
+      # Output is teed to /tmp/install.log for the artifact bundle.
       - name: Install dependencies
         script: |
           # pipefail so a failing npm step propagates through `tee`.
           # Without it, `set -e` only checks tee's exit status (always 0).
           set -euo pipefail
           mkdir -p /tmp
-          if [ -f package-lock.json ]; then
-            echo "package-lock.json found — using npm ci"
-            npm ci --no-audit --no-fund 2>&1 | tee /tmp/install.log
-          else
-            echo "No package-lock.json — using npm install"
-            npm install --no-audit --no-fund 2>&1 | tee /tmp/install.log
+          if [ ! -f package-lock.json ]; then
+            echo "ERROR: package-lock.json is missing — it must be committed for reproducible CI." >&2
+            exit 1
           fi
+          npm ci --no-audit --no-fund 2>&1 | tee /tmp/install.log
 
-      # ----- 3. Expo install verification (non-fatal) -----------------------
-      - name: Expo install verification
+      # ----- 3. Validation gate (fail fast BEFORE the Gradle build) --------
+      # Catches the error classes that previously slipped to runtime: type
+      # drift, Expo SDK dependency drift (the root cause of the prior boot
+      # crash), and broken imports. All three are FATAL — we never want a
+      # drifted/broken bundle to reach a device.
+      - name: TypeScript check (tsc --noEmit)
         script: |
-          # `expo install --check` warns about SDK-incompatible package
-          # versions. Non-fatal for preview — we just want visibility.
-          npx expo install --check 2>&1 || echo "expo install --check produced warnings (non-fatal)"
+          set -e
+          npx tsc --noEmit
 
-      # ----- 4. Verify EAS authentication ----------------------------------
-      - name: Verify EAS authentication
+      - name: Expo doctor (dependency + config health)
         script: |
-          if [ -z "$EXPO_TOKEN" ]; then
-            echo "WARNING: EXPO_TOKEN is not set. Prebuild will run unauthenticated."
-            echo "Set EXPO_TOKEN inside the 'expo_credentials' group in Codemagic UI."
-          else
-            echo "EXPO_TOKEN is set — checking eas-cli session..."
-            npx --yes eas-cli whoami 2>&1 || echo "eas-cli whoami failed (non-fatal for prebuild)"
-          fi
+          set -e
+          npx --yes expo-doctor
+
+      - name: Expo export (validate JS bundle compiles)
+        script: |
+          set -e
+          npx expo export --platform android
+          rm -rf dist   # validation artifact only; the installable build is via Gradle below
 
       # ----- 5. Expo prebuild — generate Android native project -------------
       # android/ is .gitignored, so we always regenerate it. --clean wipes
