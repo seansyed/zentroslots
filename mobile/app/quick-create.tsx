@@ -55,18 +55,11 @@ import type { Service } from "@/api/services";
 
 // ─── Helpers ──────────────────────────────────────────────────────
 // Date helpers live in @/lib/dates (Hermes-safe — no Intl timezone
-// formatting; the previous Intl.DateTimeFormat path silently sent the wrong
-// day on Hermes for operators east of UTC). The picked calendar day is sent
-// literally as YYYY-MM-DD; the backend interprets it in the tenant timezone.
-
-function formatTime(iso: string): string {
-  const d = new Date(iso);
-  let h = d.getHours();
-  const m = d.getMinutes().toString().padStart(2, "0");
-  const ampm = h >= 12 ? "PM" : "AM";
-  h = h % 12 || 12;
-  return `${h}:${m} ${ampm}`;
-}
+// formatting). The picked calendar day is sent literally as YYYY-MM-DD; the
+// backend interprets it in the tenant timezone. Slot TIME labels are NOT
+// formatted here either — they come pre-formatted from the server in the
+// authoritative timezone (formatting UTC instants in the DEVICE timezone was
+// the cause of out-of-hours "2 AM" slots). See appointmentsApi.slots.
 
 // ─── Screen ───────────────────────────────────────────────────────
 
@@ -155,7 +148,9 @@ export default function QuickCreateScreen() {
   const slotsQ = useQuery({
     queryKey: ["slots", service?.id ?? null, slotDateIso, timezone] as const,
     queryFn: async () => {
-      if (!service) return [] as string[];
+      if (!service) {
+        return { slots: [], timezone, display: [] };
+      }
       return appointmentsApi.slots({
         serviceId: service.id,
         staffUserId: "any",
@@ -174,23 +169,21 @@ export default function QuickCreateScreen() {
   // severity so it shows up in /settings/diagnostics > Warnings.
   React.useEffect(() => {
     if (!service || slotsQ.isLoading || !slotsQ.data) return;
-    if (slotsQ.data.length === 0) {
+    if (slotsQ.data.slots.length === 0) {
       track("info", "Quick Create: no availability", "warn", {
         serviceId: service.id,
         serviceName: service.name,
         date: slotDateIso,
-        timezone,
-        weekday: new Date(slotDateIso + "T12:00:00").toLocaleDateString(undefined, {
-          weekday: "long",
-          timeZone: timezone,
-        }),
+        timezone: slotsQ.data.timezone,
       });
     }
   }, [service, slotsQ.data, slotsQ.isLoading, slotDateIso, timezone]);
 
-  // Compatibility aliases — the JSX below was written against the old
-  // local-state names. Mapping here avoids touching the render block.
-  const slots = slotsQ.data ?? null;
+  // Render data: server-formatted display rows + the authoritative tz. We
+  // NEVER format slot instants on-device (that device-tz bug produced the
+  // out-of-hours "2 AM" slots) — the label comes from the server.
+  const slotRows = slotsQ.data?.display ?? [];
+  const slotTimezone = slotsQ.data?.timezone ?? timezone;
   const slotsLoading = slotsQ.isLoading;
   const slotsError = slotsQ.error
     ? slotsQ.error instanceof Error
@@ -236,7 +229,7 @@ export default function QuickCreateScreen() {
           timezone,
         });
         if (seq !== scanSeq.current) return;
-        if (found.length > 0) {
+        if (found.slots.length > 0) {
           setNextOpening(probe);
           return;
         }
@@ -600,7 +593,7 @@ export default function QuickCreateScreen() {
                 <AppText variant="smallStrong" style={{ color: colors.brand, marginLeft: 6 }}>Retry</AppText>
               </Pressable>
             </Card>
-          ) : (slots ?? []).length === 0 ? (
+          ) : slotRows.length === 0 ? (
             <Card variant="outline">
               <View style={{ paddingVertical: spacing.md, alignItems: "center" }}>
                 <Ionicons name="calendar-outline" size={24} color={colors.inkSubtle} />
@@ -655,17 +648,17 @@ export default function QuickCreateScreen() {
           ) : (
             <>
               <AppText variant="micro" color="subtle" style={{ marginBottom: spacing.sm }}>
-                {(slots ?? []).length} TIME{(slots ?? []).length === 1 ? "" : "S"} · {timezone}
+                {slotRows.length} TIME{slotRows.length === 1 ? "" : "S"} · {slotTimezone}
               </AppText>
               <View style={styles.slotGrid}>
-                {(slots ?? []).map((iso) => {
-                  const active = iso === selectedSlot;
+                {slotRows.map((row) => {
+                  const active = row.start === selectedSlot;
                   return (
                     <Pressable
-                      key={iso}
+                      key={row.start}
                       onPress={() => {
                         void Haptics.selectionAsync().catch(() => {});
-                        setSelectedSlot(iso);
+                        setSelectedSlot(row.start);
                       }}
                       style={[styles.slotChip, active && styles.slotChipActive]}
                     >
@@ -673,7 +666,7 @@ export default function QuickCreateScreen() {
                         variant="bodyStrong"
                         style={{ color: active ? colors.inkOnBrand : colors.ink }}
                       >
-                        {formatTime(iso)}
+                        {row.label}
                       </AppText>
                     </Pressable>
                   );

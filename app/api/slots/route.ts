@@ -8,6 +8,34 @@ import { errorResponse, getSession, HttpError } from "@/lib/auth";
 import { assertResourcesShareTenant } from "@/lib/tenant";
 import { slotsQuerySchema } from "@/lib/validation";
 import { recommendSlots } from "@/lib/scheduling/intelligence/recommendationEngine";
+import { buildSlotDisplay } from "@/lib/slots-display";
+
+/**
+ * Build the slots response. ADDITIVE, web-compatible:
+ *   • `slots`     — unchanged: ISO-8601 UTC instants (web consumers).
+ *   • `timezone`  — the authoritative display timezone (the request tz).
+ *   • `display`   — per-slot { start (the ISO instant, booked verbatim),
+ *                   label ("9:00 AM" formatted ONCE, server-side, in the
+ *                   authoritative tz) }.
+ *
+ * Mobile renders `display[].label` and books `display[].start`, so it never
+ * does timezone math on-device (Hermes can't format IANA zones reliably) and
+ * can never shift a slot into the wrong zone (the cause of "2 AM" slots being
+ * shown for 9–6 working hours: mobile was formatting UTC instants in the
+ * DEVICE timezone). Web ignores the new fields.
+ */
+function slotsResponse(
+  slots: string[],
+  timezone: string,
+  extra?: Record<string, unknown>,
+) {
+  return NextResponse.json({
+    slots,
+    timezone,
+    display: buildSlotDisplay(slots, timezone),
+    ...(extra ?? {}),
+  });
+}
 
 export async function GET(req: NextRequest) {
   try {
@@ -66,7 +94,7 @@ export async function GET(req: NextRequest) {
         console.log(
           `[slots-GET] mode=any tenant=${service.tenantId.slice(0, 8)} service=${service.id.slice(0, 8)} eligible_staff=0 → empty`,
         );
-        return NextResponse.json({ slots: [] });
+        return slotsResponse([], params.timezone);
       }
     } else {
       // ── Mode B: concrete staffUserId — original contract preserved ──
@@ -160,7 +188,7 @@ export async function GET(req: NextRequest) {
       // unioned slots without the scored layer — callers see no
       // intelligence field rather than an error.
       if (unionMode || !staff) {
-        return NextResponse.json({ slots: filtered });
+        return slotsResponse(filtered, params.timezone);
       }
       const scored = await recommendSlots({
         slots: filtered,
@@ -172,13 +200,10 @@ export async function GET(req: NextRequest) {
         customerEmail,
         customerTimezone,
       });
-      return NextResponse.json({
-        slots: filtered,
-        intelligence: { scored },
-      });
+      return slotsResponse(filtered, params.timezone, { intelligence: { scored } });
     }
 
-    return NextResponse.json({ slots: filtered });
+    return slotsResponse(filtered, params.timezone);
   } catch (err) {
     console.error("[slots-GET] error:", err instanceof Error ? err.message : err);
     return errorResponse(err);

@@ -53,6 +53,7 @@ import {
   type SettingsRowTone,
 } from "@/components/ui/SettingsRow";
 import { AppText } from "@/components/ui/Text";
+import { Logo } from "@/components/ui/Logo";
 import { WebHandoffSheet, type HandoffSpec } from "@/components/ui/WebHandoffSheet";
 import { useAuth } from "@/hooks/useAuth";
 import { useProfile } from "@/hooks/useProfile";
@@ -377,9 +378,12 @@ export default function SettingsScreen() {
         />
       </View>
 
-      <AppText variant="caption" color="subtle" align="center" style={styles.versionLabel}>
-        ZentroMeet · v{env.appVersion}
-      </AppText>
+      <View style={styles.brandFooter}>
+        <Logo variant="wordmark" size={28} />
+        <AppText variant="caption" color="subtle" align="center" style={styles.versionLabel}>
+          v{env.appVersion}
+        </AppText>
+      </View>
 
       {/* Mounted last so the Modal's portal sits above every settings row.
           Driven by the Workspace-section row taps — see workspaceRows above. */}
@@ -657,7 +661,12 @@ const styles = StyleSheet.create({
   groupGap: {
     height: spacing["2xl"] + 4,
   },
-  versionLabel: {
+  brandFooter: {
     marginTop: spacing["3xl"],
+    alignItems: "center",
+    gap: spacing.xs,
+  },
+  versionLabel: {
+    marginTop: 0,
   },
 });

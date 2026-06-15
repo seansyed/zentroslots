@@ -1,30 +1,30 @@
 /**
  * Logo — the official ZentroMeet brand mark + wordmark.
  *
- * Vector transcription of the canonical brand assets
- * (public/zentromeet-mark.svg, public/zentromeet-wordmark.svg) so the
- * logo renders crisp at any size with no bundled raster asset. Brand
- * blue #359df3 + ink #0f172a, matching the web app exactly.
- *
- * Variants:
- *   • "mark"     — the circular badge alone (square). Use in compact
- *                  spots (boot screen, headers).
- *   • "wordmark" — badge + "ZentroMeet" lockup (+ optional tagline).
- *                  Use on the login / auth screen.
+ * Uses a BUNDLED RASTER mark (assets/logo-mark.png, rasterized from the
+ * official public/zentromeet-mark.svg) instead of inline react-native-svg.
+ * Rationale: the previous SVG-based logo did not render on the physical
+ * release (Hermes) build. A bundled PNG via require() is bulletproof in
+ * release — it has no runtime SVG engine dependency and no remote URL — so
+ * the platform logo always shows. The wordmark text is plain <Text> (always
+ * renders). Explicit non-zero dimensions; aspect ratio preserved.
  *
  * Tenant branding: pass `tenantLogoUrl` to render a tenant's OWN uploaded
- * logo instead of the platform mark (for tenant-branded surfaces). It
- * falls back to the ZentroMeet mark if the image fails to load, so the UI
- * is never empty. Platform surfaces (login, boot) intentionally always
- * show the ZentroMeet identity and do NOT pass tenantLogoUrl.
+ * logo (tenant-branded surfaces only). On load failure it falls back to the
+ * bundled ZentroMeet mark, so the UI is never empty. Platform surfaces
+ * (login, boot) intentionally show the ZentroMeet identity and do NOT pass
+ * tenantLogoUrl — and never depend on a remote URL.
  */
 
 import * as React from "react";
 import { Image, StyleSheet, Text, View, type ViewStyle } from "react-native";
-import Svg, { Circle, Line, Path, Rect } from "react-native-svg";
 
 const BRAND = "#359df3";
 const INK = "#0f172a";
+
+// Bundled official mark — rasterized from public/zentromeet-mark.svg (512px,
+// transparent). require() is resolved + bundled at build time by Metro.
+const MARK = require("../../../assets/logo-mark.png");
 
 type LogoVariant = "mark" | "wordmark";
 
@@ -40,17 +40,16 @@ type Props = {
   accessibilityLabel?: string;
 };
 
-/** The circular "Z" badge — viewBox 0 0 160 160. */
+/** The bundled circular "Z" badge image at the given square size. */
 function Mark({ size }: { size: number }) {
   return (
-    <Svg width={size} height={size} viewBox="0 0 160 160">
-      <Circle cx={80} cy={80} r={80} fill={BRAND} />
-      <Rect x={40} y={40} width={80} height={15} fill={INK} />
-      <Rect x={40} y={105} width={80} height={15} fill={INK} />
-      <Line x1={118} y1={48} x2={42} y2={112} stroke={INK} strokeWidth={22} />
-      <Path d="M 128 64 L 130 70 L 136 72 L 130 74 L 128 80 L 126 74 L 120 72 L 126 70 Z" fill={INK} />
-      <Path d="M 139 79 L 140 83 L 144 84 L 140 85 L 139 89 L 138 85 L 134 84 L 138 83 Z" fill={INK} />
-    </Svg>
+    <Image
+      source={MARK}
+      resizeMode="contain"
+      // Explicit non-zero dimensions so the layout can never collapse it.
+      style={{ width: size, height: size }}
+      fadeDuration={0}
+    />
   );
 }
 
@@ -66,7 +65,7 @@ export function Logo({
   const useTenant = Boolean(tenantLogoUrl) && !tenantFailed;
 
   // Tenant-branded surface: render the tenant's own logo (square, contained),
-  // falling back to the platform mark if it can't load.
+  // falling back to the bundled platform mark if it can't load.
   if (useTenant) {
     return (
       <View
@@ -97,8 +96,8 @@ export function Logo({
   }
 
   // Wordmark: badge + "ZentroMeet" lockup. Font size scales with `size`.
-  const fontSize = Math.round(size * 0.46);
-  const taglineSize = Math.max(10, Math.round(size * 0.14));
+  const fontSize = Math.round(size * 0.5);
+  const taglineSize = Math.max(10, Math.round(size * 0.16));
   return (
     <View
       accessibilityRole="image"

@@ -1,3 +1,60 @@
+# UPDATE 4 — versionCode 10 preview: P0 logo + out-of-hours slots, 2026-06-15
+
+**Android versionCode:** 10 · **iOS buildNumber:** 6.
+**Fixes two P0 booking-integrity defects:**
+
+1. **Missing logo in the installed APK.** Root cause: `Logo.tsx` rendered the
+   brand mark via `react-native-svg`, which does not paint reliably in a release
+   Hermes build (the very path the preview APK uses). **Fix:** the official
+   ZentroMeet mark is now a **bundled raster** — `mobile/assets/logo-mark.png`
+   (512×512, rasterized from the existing `public/zentromeet-mark.svg` brand
+   asset via `sharp`, no new design) — loaded with `require()` + `<Image>`. A
+   bundled `require()` asset is bulletproof in release. Wordmark text and the
+   tenant-logo override (remote `<Image>` with `onError` → bundled fallback) are
+   preserved. The mark now renders on login, the boot screen, and the Settings
+   footer.
+
+2. **Out-of-hours slots (e.g. ~2:00 AM for 9 AM–6 PM working hours).**
+   **Root cause = MOBILE timezone display, NOT backend generation.** The backend
+   (`lib/availability.ts`) correctly clamps slots to each staff's working window
+   in the staff timezone and returns UTC instants; verified by reading the engine
+   and by 733/733 backend tests. The mobile app was formatting those UTC instants
+   with the **device** clock (`formatTime`), so a 9 AM slot rendered as ~1–2 AM —
+   worst for Google-OAuth users whose timezone defaults to `UTC`.
+   **Fix (server-authoritative, web-compatible):** `/api/slots` now returns, in
+   addition to the unchanged `slots: string[]`, an authoritative `timezone` and a
+   `display[]` of `{ start, label }` where `label` ("9:00 AM") is formatted ONCE
+   server-side in the request/tenant timezone (new pure helper
+   `lib/slots-display.ts`). Mobile (New Booking + Reschedule) renders
+   `display[].label` and books `display[].start` (the raw instant) — it does **no**
+   on-device timezone math (Hermes can't format IANA zones reliably). Valid
+   in-hours slots (e.g. 3:15 PM) still show; conflict/buffer/min-notice/horizon
+   behavior is untouched; **web and public booking are unchanged** (they ignore the
+   additive fields). The defect was NOT papered over by UI-side filtering.
+
+**Local gates (all green):** backend `tsc`; **733/733** backend tests (incl. new
+`tests/slots-display.test.ts`: 9 AM labels as 9:00 AM not 2 AM, the device-tz-vs-
+authoritative-tz bug, east/west-of-UTC, DST); web production build OK; mobile
+`tsc`; **23/23** mobile tests; expo-doctor 18/18; expo export android+iOS; expo
+prebuild android `--clean`.
+
+```
+LOGO ROOT CAUSE:          react-native-svg mark did not paint in release Hermes
+LOGO FIX:                 bundled raster logo-mark.png (official mark) via require()+<Image>
+SLOT ROOT CAUSE:          MOBILE display — UTC instants formatted in device tz (backend correct)
+SLOT FIX:                 server returns authoritative timezone + display[] labels; mobile renders labels, books raw instants
+ANDROID VERSION CODE:     10
+IOS BUILD NUMBER:         6
+BACKEND DEPLOY:           REQUIRED (slots route changed) — see deploy note in this update
+CODEMAGIC BUILD:          PENDING — operator triggers android-preview on main (versionCode 10)
+APK:                      PENDING (versionCode 10)
+DEVICE QA:                PENDING — physical Android device required
+READY FOR NEXT PREVIEW BUILD: YES (after backend deploy)
+RESOLUTION:               NOT marked resolved until installed APK shows the logo AND only in-hours slots AND completes a real booking
+```
+
+---
+
 # UPDATE 3 — versionCode 8 preview (features + calendar OAuth), 2026-06-15
 
 **Commit:** `2fca3a0` · **Android versionCode:** 8 · **iOS buildNumber:** 4.

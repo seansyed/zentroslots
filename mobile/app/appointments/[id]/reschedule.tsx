@@ -54,10 +54,10 @@ import { useAppointment } from "@/hooks/useAppointments";
 import { useProfile } from "@/hooks/useProfile";
 import {
   formatDateLong,
-  formatTime,
   formatTimeRange,
   isSameDay,
 } from "@/lib/format";
+import { dayLabel, isoDateLocal } from "@/lib/dates";
 import { queryKeys } from "@/lib/query";
 import { colors, layout, radius, shadows, spacing, typography } from "@/theme";
 
@@ -66,22 +66,9 @@ import { colors, layout, radius, shadows, spacing, typography } from "@/theme";
 // buttons but the initial render avoids any layout shift.
 const DATE_STRIP_DAYS = 14;
 
-/** Returns YYYY-MM-DD in the staff timezone — same format /api/slots
- *  expects. We use Intl so the date math is correct across DST. */
-function isoDateInZone(date: Date, timezone: string): string {
-  try {
-    return new Intl.DateTimeFormat("en-CA", {
-      timeZone: timezone,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-    }).format(date);
-  } catch {
-    // Fallback to UTC if the device's Intl can't resolve the zone — a
-    // mis-zoned date is still better than a crash.
-    return date.toISOString().slice(0, 10);
-  }
-}
+// Date → YYYY-MM-DD uses isoDateLocal (@/lib/dates) — Hermes-safe, sends the
+// picked calendar day literally (the old Intl.DateTimeFormat path silently
+// sent the wrong day on Hermes for operators east of UTC).
 
 function addDays(d: Date, n: number): Date {
   const copy = new Date(d);
@@ -128,13 +115,13 @@ export default function RescheduleScreen() {
 
   const slotsQuery = useQuery({
     queryKey: appt?.serviceId && appt?.staffId
-      ? ["slots", appt.serviceId, appt.staffId, isoDateInZone(selectedDate, timezone), timezone]
+      ? ["slots", appt.serviceId, appt.staffId, isoDateLocal(selectedDate), timezone]
       : ["slots", "skip"],
     queryFn: () =>
       appointmentsApi.slots({
         serviceId: appt!.serviceId!,
         staffUserId: appt!.staffId!,
-        date: isoDateInZone(selectedDate, timezone),
+        date: isoDateLocal(selectedDate),
         timezone,
       }),
     enabled: Boolean(appt?.serviceId && appt?.staffId),
@@ -146,6 +133,11 @@ export default function RescheduleScreen() {
   React.useEffect(() => {
     setSelectedSlot(null);
   }, [selectedDate]);
+
+  // Authoritative label for the selected slot (server-formatted in the
+  // tenant tz) — never formatted on-device.
+  const selectedLabel =
+    slotsQuery.data?.display.find((r) => r.start === selectedSlot)?.label ?? "";
 
   const rescheduleMutation = useMutation({
     mutationFn: (startAtIso: string) =>
@@ -374,7 +366,7 @@ export default function RescheduleScreen() {
                     }
                     onRetry={() => void slotsQuery.refetch()}
                   />
-                ) : (slotsQuery.data ?? []).length === 0 ? (
+                ) : (slotsQuery.data?.display ?? []).length === 0 ? (
                   <View style={styles.emptyState}>
                     <Ionicons name="calendar-outline" size={24} color={colors.inkSubtle} />
                     <AppText variant="bodyStrong" style={{ marginTop: spacing.sm }}>
@@ -386,12 +378,12 @@ export default function RescheduleScreen() {
                   </View>
                 ) : (
                   <View style={styles.slotGrid}>
-                    {(slotsQuery.data ?? []).map((iso) => {
-                      const active = iso === selectedSlot;
+                    {(slotsQuery.data?.display ?? []).map((row) => {
+                      const active = row.start === selectedSlot;
                       return (
                         <Pressable
-                          key={iso}
-                          onPress={() => onSlotPress(iso)}
+                          key={row.start}
+                          onPress={() => onSlotPress(row.start)}
                           accessibilityRole="button"
                           accessibilityState={{ selected: active }}
                           style={[styles.slotChip, active && styles.slotChipActive]}
@@ -400,7 +392,7 @@ export default function RescheduleScreen() {
                             variant="bodyStrong"
                             style={{ color: active ? colors.inkOnBrand : colors.ink }}
                           >
-                            {formatTime(iso)}
+                            {row.label}
                           </AppText>
                         </Pressable>
                       );
@@ -436,7 +428,7 @@ export default function RescheduleScreen() {
                 New time
               </AppText>
               <AppText variant="bodyStrong" numberOfLines={1}>
-                {formatDateLong(selectedSlot)} · {formatTime(selectedSlot)}
+                {dayLabel(selectedDate)} · {selectedLabel}
               </AppText>
             </View>
           ) : null}

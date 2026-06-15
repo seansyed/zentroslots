@@ -1,7 +1,7 @@
 # ZentroMeet Mobile — Booking Availability + Management Modules Report
 
-**Date:** 2026-06-15 · **Mobile:** Expo SDK 52 / RN 0.76.9 · **Backend:** unchanged (reused existing prod APIs)
-**Scope:** New Booking availability + month navigation; Departments / Services / Locations / Working Hours modules.
+**Date:** 2026-06-15 · **Mobile:** Expo SDK 52 / RN 0.76.9 · **Backend:** one **additive, web-compatible** change to `/api/slots` (see "Slot display contract" below — requires deploy)
+**Scope:** New Booking availability + month navigation; Departments / Services / Locations / Working Hours modules; **P0 fix — out-of-hours slot display + missing logo (versionCode 10).**
 **Key rule honored:** the server is authoritative for availability + all business rules — mobile reuses `/api/slots`, `/api/bookings`, and the existing CRUD routes; **no business logic was reimplemented on the device, no schema changes, no destructive operations.**
 
 ---
@@ -28,6 +28,16 @@ Compounded by two real mobile defects:
 
 ---
 
+## P0 — Out-of-hours slots + missing logo (versionCode 10)
+
+**Out-of-hours slots (e.g. ~2:00 AM for 9 AM–6 PM hours) — root cause = MOBILE display, not backend generation.** `lib/availability.ts` correctly clamps each slot to the staff working window in the staff timezone and emits UTC instants (verified by reading the engine + 733/733 backend tests). Mobile was formatting those UTC instants with the **device** clock, so a 9 AM slot read as ~1–2 AM — worst for Google-OAuth users defaulting to `UTC`.
+
+**Slot display contract (additive backend change — `app/api/slots/route.ts` + new `lib/slots-display.ts`).** `/api/slots` now also returns an authoritative `timezone` and `display[]` of `{ start, label }`, where `label` ("9:00 AM") is formatted **once, server-side**, in the request/tenant timezone (`formatInTimeZone`). The original `slots: string[]` is unchanged, so **web and public booking are untouched** (they ignore the new fields). Mobile (New Booking + Reschedule) renders `display[].label` and books `display[].start` (the raw instant) — **zero on-device timezone math** (Hermes can't format IANA zones reliably). Valid in-hours slots (3:15 PM) still show; conflict/buffer/min-notice/horizon untouched; the defect is fixed at the source, not hidden by UI filtering. Covered by `tests/slots-display.test.ts` (9 AM→"9:00 AM" not 2 AM, device-tz-vs-authoritative-tz, east/west-of-UTC, DST). **Requires a backend deploy.**
+
+**Missing logo in the installed APK.** `Logo.tsx` painted the mark via `react-native-svg`, which is unreliable in release Hermes. Now a **bundled raster** `mobile/assets/logo-mark.png` (512×512, rasterized from the existing `public/zentromeet-mark.svg` brand asset — no new design) loaded with `require()` + `<Image>` (bulletproof in release); wordmark text + tenant-logo override (remote `<Image>` `onError` → bundled fallback) preserved.
+
+---
+
 ## Management modules (Settings → Management, role-gated)
 
 A new **Management** group in Settings (admin/manager see Departments/Services/Locations/Working Hours; staff see Working Hours for their own schedule). Writes require admin/manager **on the backend**; the UI gating is UX-only. All endpoints are tenant-scoped server-side (no `tenantId` ever sent).
@@ -47,7 +57,7 @@ Reuses `GET/PUT /api/availability`. Weekly editor (per-day enable + start/end HH
 ---
 
 ## Backend changes
-**None.** Every module reuses an existing production route; no schema change, no migration, no destructive op. **One backend gap flagged for a fast-follow:** add `app/api/departments/[id]/route.ts` (PATCH/DELETE, `requireRole(["admin","manager"])`, null-out `services.departmentId`/`users.departmentId` on delete) to unlock mobile Departments edit/delete. Until then, Departments is list + create only.
+**One additive, web-compatible change:** `/api/slots` returns extra `timezone` + `display[]` fields (new `lib/slots-display.ts`); the existing `slots: string[]` is preserved so web/public consumers are unaffected. **No schema change, no migration, no destructive op. Requires a production deploy.** Every management module still reuses an existing production route unchanged. **One backend gap flagged for a fast-follow:** add `app/api/departments/[id]/route.ts` (PATCH/DELETE, `requireRole(["admin","manager"])`, null-out `services.departmentId`/`users.departmentId` on delete) to unlock mobile Departments edit/delete. Until then, Departments is list + create only.
 
 ## Security / tenant isolation
 - All reads `requireUser()`; all writes `requireRole(["admin","manager"])` (services/locations/departments/workspace-hours). Working-hours PUT allows self for any role; managers target others via `?userId=`.
@@ -57,7 +67,7 @@ Reuses `GET/PUT /api/availability`. Weekly editor (per-day enable + start/end HH
 ## Tests
 - `mobile/tests/dates.test.ts` (7): `isoDateLocal` (no UTC/Intl shift), month/day/year-boundary navigation, `monthMatrix` 6×7 + focal-month flags, `weekStartsOn`, Hermes-safe labels.
 - Existing mobile tests still green (`url`, `safeInit`, `polyfills`). Backend `calendar-oauth-mobile` + full backend suite unaffected (no backend change).
-- Availability-engine rule tests (closed/no-staff/buffer/min-notice/DST/fully-booked) live server-side and are covered by the backend suite (728/728); mobile does not reimplement them.
+- Availability-engine rule tests (closed/no-staff/buffer/min-notice/DST/fully-booked) live server-side and are covered by the backend suite (**733/733**, incl. new `tests/slots-display.test.ts`); mobile does not reimplement them.
 
 ## Builds / validation
 - `tsc --noEmit` mobile: clean (incl. all new module files). expo-doctor / android+iOS export / android prebuild: see final response.
@@ -66,4 +76,4 @@ Reuses `GET/PUT /api/availability`. Weekly editor (per-day enable + start/end HH
 - **Departments edit/delete** — needs the backend `[id]` route (flagged above).
 - **Service `minNoticeMinutes`/`maxAdvanceDays` write path** — backend schemas omit them (read-only on mobile).
 - **Service staff-assignment editor, location logo upload, availability breaks/overrides/holidays, per-service & per-location hours, tenant default workspace-hours editor** — scoped out this pass (single weekly window per day on mobile; advanced config stays on web).
-- **Device QA** — operator step; New Booking time-slot success is NOT marked fixed until the installed app shows and books a real slot.
+- **Device QA** — operator step; New Booking time-slot success is NOT marked fixed until the installed app shows and books a real slot. The **versionCode-10** P0s (logo visible + only in-hours slots + a real booking) are NOT marked resolved until verified on the installed APK against the deployed backend.

@@ -94,6 +94,18 @@ function normalize(wire: WireBooking): Appointment {
   };
 }
 
+/** One bookable slot, ready to display + book. `start` is the ISO-8601 UTC
+ *  instant (sent verbatim on booking); `label` is the server-formatted local
+ *  time ("9:00 AM") in the authoritative timezone. */
+export type SlotDisplay = { start: string; label: string };
+
+/** /api/slots result: raw instants + authoritative tz + display rows. */
+export type SlotsResult = {
+  slots: string[];
+  timezone: string;
+  display: SlotDisplay[];
+};
+
 export const appointmentsApi = {
   async list(params: AppointmentListParams = {}): Promise<AppointmentListResponse> {
     const search: Record<string, string> = {};
@@ -196,17 +208,28 @@ export const appointmentsApi = {
   },
 
   /**
-   * Available slots for a given service+staff+date. Mirrors GET /api/slots.
-   * `date` is YYYY-MM-DD in the *staff* timezone; the engine returns ISO
-   * timestamps which the UI formats in the device's local time.
+   * Available slots for a service+staff+date. Mirrors GET /api/slots.
+   *
+   * `date` is YYYY-MM-DD; `timezone` is the authoritative (tenant/operator)
+   * IANA zone. The backend returns ISO-8601 UTC instants in `slots` AND a
+   * parallel `display[]` of { start (ISO, booked verbatim), label ("9:00 AM"
+   * formatted ONCE server-side in the authoritative tz) } plus the canonical
+   * `timezone`. The UI renders `display[].label` and books `display[].start`
+   * — it never formats the instant itself (Hermes can't format IANA zones,
+   * and device-tz formatting was producing wrong times like "2 AM" for 9–6
+   * working hours). Falls back gracefully if an older backend omits `display`.
    */
   async slots(params: {
     serviceId: string;
     staffUserId: string;
     date: string;
     timezone: string;
-  }): Promise<string[]> {
-    const res = await apiGet<{ slots: string[] }>("/api/slots", {
+  }): Promise<SlotsResult> {
+    const res = await apiGet<{
+      slots?: string[];
+      timezone?: string;
+      display?: SlotDisplay[];
+    }>("/api/slots", {
       params: {
         serviceId: params.serviceId,
         staffUserId: params.staffUserId,
@@ -214,7 +237,16 @@ export const appointmentsApi = {
         timezone: params.timezone,
       },
     });
-    return Array.isArray(res?.slots) ? res.slots : [];
+    const slots = Array.isArray(res?.slots) ? res.slots : [];
+    const timezone = res?.timezone || params.timezone;
+    const display =
+      Array.isArray(res?.display) && res.display.length === slots.length
+        ? res.display
+        : // Fallback for a pre-deploy backend: show the UTC wall-clock so the
+          // value is never a raw ISO string (still authoritative-safe — no
+          // device-tz guess). The deployed backend always sends labels.
+          slots.map((s) => ({ start: s, label: s.slice(11, 16) }));
+    return { slots, timezone, display };
   },
 
   remove(id: string): Promise<{ ok: true }> {
