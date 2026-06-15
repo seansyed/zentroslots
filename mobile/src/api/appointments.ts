@@ -11,6 +11,7 @@
  */
 
 import { apiDelete, apiGet, apiPost } from "./client";
+import type { IntakeAnswer } from "./intake";
 
 export type BookingStatus =
   | "pending"
@@ -203,8 +204,28 @@ export const appointmentsApi = {
     clientName: string;
     clientEmail: string;
     notes?: string;
+    /** Service-template intake answers, keyed by field.key. Only sent when the
+     *  selected service has an active intake form (e.g. a tax service's
+     *  "filing_status"). The backend re-validates against the form definition
+     *  and dual-writes them to the booking. Omit for services without a form. */
+    intakeResponses?: Record<string, unknown>;
   }): Promise<Appointment> {
     return apiPost<WireBooking>("/api/bookings", payload).then(normalize);
+  },
+
+  /**
+   * Submitted intake answers for a booking, labeled + role-gated by the
+   * backend (GET /api/bookings/:id/intake-responses). Used by the appointment
+   * detail screen's "Service details" card. Reads the normalized
+   * intake_field_responses table (snapshots labels, so historical answers
+   * survive later template edits) and falls back to the legacy jsonb. Returns
+   * [] when the booking has no answers or the caller lacks access.
+   */
+  async intakeResponses(id: string): Promise<IntakeAnswer[]> {
+    const res = await apiGet<{ responses?: IntakeAnswer[] }>(
+      `/api/bookings/${id}/intake-responses`,
+    );
+    return Array.isArray(res?.responses) ? res.responses : [];
   },
 
   /**

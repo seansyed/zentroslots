@@ -31,11 +31,18 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { ApiError } from "@/api/client";
 import { appointmentsApi } from "@/api/appointments";
+import {
+  intakeApi,
+  validateIntakeResponses,
+  buildIntakePayload,
+  seedIntakeDefaults,
+} from "@/api/intake";
 import { Avatar } from "@/components/ui/Avatar";
 import { Button } from "@/components/ui/Button";
 import { Card, PressableCard } from "@/components/ui/Card";
 import { IconButton } from "@/components/ui/IconButton";
 import { Input } from "@/components/ui/Input";
+import { IntakeFields } from "@/components/ui/IntakeFields";
 import { Pill } from "@/components/ui/Pill";
 import { ScreenContainer } from "@/components/ui/ScreenContainer";
 import { SectionFade } from "@/components/ui/SectionFade";
@@ -82,6 +89,12 @@ export default function QuickCreateScreen() {
   const [search, setSearch] = React.useState("");
   const [debouncedSearch, setDebouncedSearch] = React.useState("");
   const [error, setError] = React.useState<string | null>(null);
+  // Service-template intake answers + per-field validation errors. Keyed by
+  // field.key (the server contract). Cleared when the SERVICE changes (rule:
+  // changing the service clears fields that no longer apply); preserved across
+  // date/time navigation for the same service.
+  const [intakeValues, setIntakeValues] = React.useState<Record<string, unknown>>({});
+  const [intakeErrors, setIntakeErrors] = React.useState<Record<string, string>>({});
 
   React.useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(search.trim()), 250);
@@ -162,6 +175,58 @@ export default function QuickCreateScreen() {
     staleTime: 30_000,        // slots can flip the moment someone else books
     gcTime: 5 * 60_000,
   });
+
+  // ── Service-template intake form ──────────────────────────────────
+  //
+  // SERVER IS AUTHORITATIVE. A service may link an active intake form
+  // (services.intakeFormId). When it does, the booking POST validates the
+  // configured fields (e.g. a required "Filing Status" for a tax service) and
+  // rejects with 400 if they're missing. We fetch the SAME render-ready form
+  // the public web booking uses and collect answers below; mobile never
+  // defines its own field model. When the service has no form (or the feature
+  // is off), this returns null and booking behaves exactly as before.
+  const intakeFormQ = useQuery({
+    queryKey: ["intake-form", service?.id ?? null] as const,
+    queryFn: () => (service ? intakeApi.getForm(service.id) : Promise.resolve(null)),
+    enabled: Boolean(service),
+    staleTime: 5 * 60_000,
+    gcTime: 10 * 60_000,
+  });
+  const intakeForm = intakeFormQ.data ?? null;
+  const hasIntake = Boolean(intakeForm && intakeForm.fields.length > 0);
+
+  // Clear answers + errors whenever the SERVICE changes — stale answers from a
+  // different service must never carry over (and would 400 server-side).
+  React.useEffect(() => {
+    setIntakeValues({});
+    setIntakeErrors({});
+  }, [service?.id]);
+
+  // Seed defaults once the form for the current service arrives. User-entered
+  // values win (spread prev last) so this never clobbers in-progress input.
+  React.useEffect(() => {
+    if (!intakeForm) return;
+    const defaults = seedIntakeDefaults(intakeForm.fields);
+    if (Object.keys(defaults).length === 0) return;
+    setIntakeValues((prev) => ({ ...defaults, ...prev }));
+  }, [intakeForm]);
+
+  // Live client-side validation (mirror of the server validator). Drives the
+  // submit gate so the operator can't confirm with a missing required field.
+  const intakeOk = React.useMemo(
+    () => !hasIntake || Object.keys(validateIntakeResponses(intakeForm!.fields, intakeValues)).length === 0,
+    [hasIntake, intakeForm, intakeValues],
+  );
+
+  const setIntakeValue = React.useCallback((key: string, value: unknown) => {
+    setIntakeValues((prev) => ({ ...prev, [key]: value }));
+    setIntakeErrors((prev) => {
+      if (!(key in prev)) return prev;
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+  }, []);
 
   // Telemetry breadcrumb when a date returns zero availability — gives
   // us a triage hook ("operator picked Sunday and saw nothing — was
@@ -262,12 +327,28 @@ export default function QuickCreateScreen() {
       const name = customer?.name ?? manualName.trim();
       const email = customer?.email ?? manualEmail.trim();
       if (!name || !email) throw new Error("Enter customer name and email");
+
+      // Validate + assemble service-template answers (client mirror of the
+      // server validator). On any error, surface it under the field and stop —
+      // the server would reject it anyway.
+      let intakeResponses: Record<string, unknown> | undefined;
+      if (intakeForm && intakeForm.fields.length > 0) {
+        const errs = validateIntakeResponses(intakeForm.fields, intakeValues);
+        if (Object.keys(errs).length > 0) {
+          setIntakeErrors(errs);
+          throw new Error("Please complete the required service details.");
+        }
+        const payload = buildIntakePayload(intakeForm.fields, intakeValues);
+        intakeResponses = Object.keys(payload).length > 0 ? payload : undefined;
+      }
+
       return appointmentsApi.create({
         serviceId: service.id,
         staffUserId: "auto",
         startAt: selectedSlot,
         clientName: name,
         clientEmail: email,
+        intakeResponses,
       });
     },
     onSuccess: () => {
@@ -295,7 +376,24 @@ export default function QuickCreateScreen() {
     },
   });
 
-  const canSubmit = Boolean(service && selectedSlot && ((customer) || (manualName.trim() && manualEmail.trim())));
+  // NOTE: intake validity is intentionally NOT part of canSubmit. Mirroring the
+  // web booking flow, the Confirm button stays active so pressing it runs
+  // validation and surfaces per-field errors ("Filing status is required")
+  // directly under each field — a disabled button would hide WHICH field is
+  // missing. The mutation still blocks submit on any intake error (and the
+  // server re-validates), so an incomplete booking is never created.
+  const canSubmit = Boolean(
+    service &&
+    selectedSlot &&
+    (customer || (manualName.trim() && manualEmail.trim())),
+  );
+
+  // Dynamic step numbering: the "Service details" step only exists when the
+  // selected service has an intake form (or we're loading/erroring one), so
+  // Date/Time renumber to keep the sequence contiguous.
+  const showDetails = Boolean(service) && (intakeFormQ.isLoading || hasIntake || intakeFormQ.isError);
+  const stepDate = showDetails ? 4 : 3;
+  const stepTime = showDetails ? 5 : 4;
 
   return (
     <ScreenContainer padding={false} edges={["top"]}>
@@ -540,9 +638,62 @@ export default function QuickCreateScreen() {
           )}
         </SectionFade>
 
-        {/* ── Step 3: Date — full month picker, horizon-aware ──────── */}
+        {/* ── Step 3 (conditional): Service details — dynamic intake ─── */}
+        {showDetails ? (
+          <SectionFade delay={100} style={{ marginTop: spacing.xl }}>
+            <StepLabel n={3} label="Details" complete={hasIntake && intakeOk} />
+            {intakeFormQ.isLoading ? (
+              <View style={{ gap: spacing.sm }}>
+                <Shimmer.Card height={56} />
+                <Shimmer.Card height={56} />
+              </View>
+            ) : intakeFormQ.isError ? (
+              <Card style={styles.errorBanner}>
+                <View style={{ flexDirection: "row", alignItems: "center" }}>
+                  <Ionicons name="cloud-offline-outline" size={18} color={colors.dangerInk} />
+                  <AppText
+                    variant="small"
+                    style={{ color: colors.dangerInk, marginLeft: spacing.sm, flex: 1 }}
+                  >
+                    Couldn't load the service form. Required details may be missing.
+                  </AppText>
+                </View>
+                <Pressable
+                  onPress={() => {
+                    void Haptics.selectionAsync().catch(() => {});
+                    void intakeFormQ.refetch();
+                  }}
+                  style={styles.retryBtn}
+                  accessibilityRole="button"
+                  accessibilityLabel="Retry loading service details"
+                >
+                  <Ionicons name="refresh" size={14} color={colors.brand} />
+                  <AppText variant="smallStrong" style={{ color: colors.brand, marginLeft: 6 }}>
+                    Retry
+                  </AppText>
+                </Pressable>
+              </Card>
+            ) : intakeForm ? (
+              <Card variant="outline">
+                {intakeForm.description ? (
+                  <AppText variant="small" color="muted" style={{ marginBottom: spacing.md }}>
+                    {intakeForm.description}
+                  </AppText>
+                ) : null}
+                <IntakeFields
+                  fields={intakeForm.fields}
+                  values={intakeValues}
+                  errors={intakeErrors}
+                  onChange={setIntakeValue}
+                />
+              </Card>
+            ) : null}
+          </SectionFade>
+        ) : null}
+
+        {/* ── Step: Date — full month picker, horizon-aware ─────────── */}
         <SectionFade delay={120} style={{ marginTop: spacing.xl }}>
-          <StepLabel n={3} label="Date" complete={Boolean(selectedDate)} />
+          <StepLabel n={stepDate} label="Date" complete={Boolean(selectedDate)} />
           <MonthCalendar
             selectedDate={selectedDate}
             onSelectDate={setSelectedDate}
@@ -557,9 +708,9 @@ export default function QuickCreateScreen() {
           ) : null}
         </SectionFade>
 
-        {/* ── Step 4: Slot ─────────────────────────────────────────── */}
+        {/* ── Step: Slot ───────────────────────────────────────────── */}
         <SectionFade delay={180} style={{ marginTop: spacing.xl }}>
-          <StepLabel n={4} label="Time" complete={Boolean(selectedSlot)} />
+          <StepLabel n={stepTime} label="Time" complete={Boolean(selectedSlot)} />
           {!service ? (
             <Card variant="outline">
               <AppText variant="small" color="muted" align="center" style={{ paddingVertical: spacing.lg }}>

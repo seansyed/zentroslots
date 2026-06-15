@@ -1,7 +1,7 @@
 # ZentroMeet Mobile — Booking Availability + Management Modules Report
 
 **Date:** 2026-06-15 · **Mobile:** Expo SDK 52 / RN 0.76.9 · **Backend:** one **additive, web-compatible** change to `/api/slots` (see "Slot display contract" below — requires deploy)
-**Scope:** New Booking availability + month navigation; Departments / Services / Locations / Working Hours modules; **P0 fix — out-of-hours slot display + missing logo (versionCode 10).**
+**Scope:** New Booking availability + month navigation; Departments / Services / Locations / Working Hours modules; **P0 — out-of-hours slot display + missing logo (versionCode 10); P0 — service-template intake fields in New Booking (versionCode 11, mobile-only, no backend change).**
 **Key rule honored:** the server is authoritative for availability + all business rules — mobile reuses `/api/slots`, `/api/bookings`, and the existing CRUD routes; **no business logic was reimplemented on the device, no schema changes, no destructive operations.**
 
 ---
@@ -35,6 +35,25 @@ Compounded by two real mobile defects:
 **Slot display contract (additive backend change — `app/api/slots/route.ts` + new `lib/slots-display.ts`).** `/api/slots` now also returns an authoritative `timezone` and `display[]` of `{ start, label }`, where `label` ("9:00 AM") is formatted **once, server-side**, in the request/tenant timezone (`formatInTimeZone`). The original `slots: string[]` is unchanged, so **web and public booking are untouched** (they ignore the new fields). Mobile (New Booking + Reschedule) renders `display[].label` and books `display[].start` (the raw instant) — **zero on-device timezone math** (Hermes can't format IANA zones reliably). Valid in-hours slots (3:15 PM) still show; conflict/buffer/min-notice/horizon untouched; the defect is fixed at the source, not hidden by UI filtering. Covered by `tests/slots-display.test.ts` (9 AM→"9:00 AM" not 2 AM, device-tz-vs-authoritative-tz, east/west-of-UTC, DST). **Requires a backend deploy.**
 
 **Missing logo in the installed APK.** `Logo.tsx` painted the mark via `react-native-svg`, which is unreliable in release Hermes. Now a **bundled raster** `mobile/assets/logo-mark.png` (512×512, rasterized from the existing `public/zentromeet-mark.svg` brand asset — no new design) loaded with `require()` + `<Image>` (bulletproof in release); wordmark text + tenant-logo override (remote `<Image>` `onError` → bundled fallback) preserved.
+
+---
+
+## P0 — Service-template intake fields in New Booking (versionCode 11)
+
+**Symptom:** booking a tax/accounting service from mobile failed at confirm with a backend error requiring a field (e.g. "Filing Status") that the mobile screen never displayed. **Root cause = MOBILE, not backend.** A service can link an active intake form (`services.intakeFormId` → `intakeForms.fields` JSONB of `IntakeField`); `app/api/bookings` validates the configured fields via `lib/intake.ts validateResponses` and 400s on a missing required one. The web flow (`components/BookingFlow.tsx` + `booking/IntakeStep.tsx`) fetches the form and submits `intakeResponses`; **mobile had no intake layer at all** (`quick-create.tsx` + `appointments.ts` sent only name/email/service/time).
+
+**Canonical model reused (no new field model, no backend change).** Definitions: `intakeForms.fields` (the 12 canonical types) linked by `services.intakeFormId`. Answers: server-owned dual-write to `bookings.intakeResponses` + `intake_field_responses`. Mobile reads definitions from the **existing** public endpoint `GET /api/public/services/{id}/intake-form` (`{form|null}`, canonicalized + order-sorted) and submits `intakeResponses` (object keyed by `field.key`) on the **same** `POST /api/bookings`. The fetch gate is symmetric with the POST's validation gate, so a service without a form books exactly as before.
+
+**Mobile changes (mobile-only):**
+- `src/lib/intake.ts` (pure, unit-testable): types + client validator mirroring the server + `buildIntakePayload` (sends only non-empty/in-form answers) + `normalizeFormFields` (legacy-type canonicalize + order) + option-aware `seedIntakeDefaults` + `formatIntakeValue`.
+- `src/api/intake.ts`: `intakeApi.getForm` + re-export of the lib.
+- `src/components/ui/IntakeFields.tsx`: dynamic RN renderer for all 12 types (text/textarea/email/phone/number/url via shared `Input`; select/radio/multi_select as option chips; boolean/consent as checkboxes with consent link). Required markers, help text, per-field errors.
+- `app/quick-create.tsx`: a conditional **"Service details"** step (only when the service has a form), Date/Time renumber contiguously; answers clear on **service** change and persist across date/time nav; submit validates + maps errors under each field and blocks the POST until valid (the Confirm button stays tappable to surface *which* field is missing, mirroring web).
+- `app/appointments/[id]/index.tsx`: read-only **"Service details"** card via `GET /api/bookings/{id}/intake-responses` (labeled, role-gated, snapshots labels so historical answers survive template edits). No backend write path for answers → read-only by design.
+
+**Not in the backend model (so not built, per "don't invent"):** there is no conditional-logic or per-field customer/staff/internal **scope/visibility** field in `intakeFieldSchema` — the public endpoint already strips admin-only fields and sorts by `order`, so mobile renders exactly what it returns.
+
+**Adversarial review fixes:** the `url` client check used `new URL()` (a no-op under Hermes) → Hermes-safe `scheme://host` regex; an off-options `defaultValue` would pass the client but 400 server-side → option-aware seeding + option-membership parity in the validator. Covered by `tests/intake.test.ts` (13 cases).
 
 ---
 

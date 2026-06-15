@@ -32,10 +32,11 @@ import {
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { ApiError } from "@/api/client";
 import { appointmentsApi, type Appointment, type BookingStatus } from "@/api/appointments";
+import { formatIntakeValue, type IntakeAnswer } from "@/api/intake";
 import { AppText } from "@/components/ui/Text";
 import { Avatar } from "@/components/ui/Avatar";
 import { Button } from "@/components/ui/Button";
@@ -97,6 +98,19 @@ export default function BookingDetailScreen() {
 
   const q = useAppointment(id);
   const appt = q.data;
+
+  // Service-template intake answers for this booking. Read-only on mobile —
+  // the backend exposes no write path (the intake-responses route is GET-only),
+  // so we display them and document the limitation. Role-gated server-side;
+  // resolves to [] when there are none or the caller lacks access (never blocks
+  // the screen).
+  const intakeQ = useQuery({
+    queryKey: ["intake-responses", id],
+    queryFn: () => appointmentsApi.intakeResponses(id),
+    enabled: Boolean(id) && Boolean(appt),
+    staleTime: 60_000,
+  });
+  const intakeAnswers = intakeQ.data ?? [];
 
   // Optimistic cancel — flip the cached row to "cancelled" the moment
   // the user taps the button, then roll back if the server rejects.
@@ -287,6 +301,7 @@ export default function BookingDetailScreen() {
         ) : (
           <DetailBody
             appt={appt}
+            intakeAnswers={intakeAnswers}
             onEmail={onEmailCustomer}
             onCall={onCallCustomer}
             onMessage={onMessageCustomer}
@@ -355,12 +370,14 @@ export default function BookingDetailScreen() {
 
 function DetailBody({
   appt,
+  intakeAnswers,
   onEmail,
   onCall,
   onMessage,
   onJoin,
 }: {
   appt: Appointment;
+  intakeAnswers: IntakeAnswer[];
   onEmail: () => void;
   onCall: () => void;
   onMessage: () => void;
@@ -496,6 +513,28 @@ function DetailBody({
           <DetailRow icon="location-outline" label="Location" value={appt.location} />
         ) : null}
       </Card>
+
+      {/* ── Service details (intake answers, read-only) ─────────── */}
+      {intakeAnswers.length > 0 ? (
+        <Card>
+          <SectionHeader title="Service details" eyebrow="Intake" />
+          {intakeAnswers.map((a) => {
+            const display = formatIntakeValue(a.value);
+            return (
+              <DetailRow
+                key={a.fieldKey}
+                icon="document-text-outline"
+                label={a.fieldLabel}
+                value={
+                  <AppText variant="bodyStrong" style={{ marginTop: 2 }}>
+                    {display || "—"}
+                  </AppText>
+                }
+              />
+            );
+          })}
+        </Card>
+      ) : null}
 
       {/* ── Notes ──────────────────────────────────────────────── */}
       {appt.notes || appt.internalNotes ? (

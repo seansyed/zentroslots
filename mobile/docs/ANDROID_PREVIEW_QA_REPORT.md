@@ -1,3 +1,77 @@
+# UPDATE 5 — versionCode 11 preview: P0 service-template intake fields in New Booking, 2026-06-15
+
+**Android versionCode:** 11 · **iOS buildNumber:** 7.
+**Fixes the P0** where a tax/accounting service booked from mobile failed at
+confirm with a backend error requiring a field (e.g. "Filing Status") that the
+mobile screen never showed.
+
+**Root cause = MOBILE, not backend.** A service can link an active intake form
+(`services.intakeFormId` → `intakeForms.fields`); the booking POST validates the
+configured fields and 400s if a required one is missing. The web booking flow
+fetches the form and submits `intakeResponses`; **mobile never fetched, rendered,
+or sent them**, so the server rejected the booking and the operator had no field
+to fill. Confirmed by reading `app/api/bookings/route.ts` (intake gate),
+`lib/intake.ts validateResponses` ("Missing required field: …"), and the mobile
+`quick-create.tsx` / `appointments.ts` (no intake layer at all).
+
+**Fix (mobile-only; reuses the existing system end to end — no new field model,
+no backend change):**
+- Fetch the service's render-ready form from the existing public endpoint
+  `GET /api/public/services/{id}/intake-form` (returns `{form|null}`, fields
+  canonicalized + ordered). New `mobile/src/lib/intake.ts` (pure types + client
+  validator) + `mobile/src/api/intake.ts` (`intakeApi.getForm`).
+- New dynamic **"Service details"** step in New Booking
+  (`mobile/src/components/ui/IntakeFields.tsx`) renders all 12 canonical field
+  types (short_text, long_text, email, phone, number, url, select, multi_select,
+  radio, date, boolean, consent) in configured order, with required markers,
+  help text, options, defaults, and per-field validation. The step only appears
+  when the service has a form; Date/Time renumber contiguously; answers clear on
+  service change and persist across date/time navigation.
+- Submit adds `intakeResponses` (object keyed by `field.key`) to the **same**
+  `POST /api/bookings`; only non-empty/valid answers are sent; the server
+  re-validates (authoritative). Client validation mirrors the server and maps
+  errors under each field ("Filing status is required"); the booking POST is
+  blocked until valid.
+- **Appointment detail** gains a read-only "Service details" card via
+  `GET /api/bookings/{id}/intake-responses` (labeled, role-gated, historical-safe).
+  Editing answers has no backend write path → read-only by design (documented).
+- **Web + public booking, availability, OAuth, customer CRUD: untouched** — the
+  diff is mobile-only (zero backend/web files changed).
+
+**Adversarial review applied (FIX-FIRST → fixed):** (1) the `url` client check
+relied on `new URL()` throwing, which is a no-op under Hermes → replaced with a
+Hermes-safe `scheme://host` regex; (2) a `defaultValue` not in a select/radio/
+multi_select's `options` would pass the client but 400 server-side → seeding now
+drops off-options defaults, and the client validator gained option-membership
+parity. (3) date stays strict `YYYY-MM-DD` (intentional data hygiene; documented).
+
+**Local gates (all green):** backend `tsc`; **733/733** backend tests (no
+backend change — proves no regression); web production build OK; mobile `tsc`;
+**36/36** mobile tests (incl. new `tests/intake.test.ts`, 13 cases: required
+Filing Status regression, number min/max, email/url/date, select/radio/
+multi_select membership, consent, stale-answer drop, legacy-type canonicalize +
+order, option-aware default seeding, appointment-detail formatting); expo-doctor
+18/18; expo export android+iOS; expo prebuild android `--clean`.
+
+```
+ROOT CAUSE:               MOBILE never fetched/rendered/sent service intake fields (backend authoritative + correct)
+CANONICAL FIELD MODEL:    intakeForms.fields JSONB (IntakeField) ← services.intakeFormId; answers in bookings.intakeResponses + intake_field_responses (server-owned)
+SERVICE API:              GET /api/public/services/{id}/intake-form (existing, unauth) — no backend change
+FIELD TYPES:              12 canonical (short_text,long_text,email,phone,number,url,select,multi_select,radio,date,boolean,consent)
+DYNAMIC FORM:             new "Service details" step (IntakeFields.tsx); order/required/options/defaults/help/validation; clears on service change
+SUBMISSION PAYLOAD:       intakeResponses object keyed by field.key on POST /api/bookings (non-empty only)
+APPOINTMENT DETAIL:       read-only "Service details" card via GET /api/bookings/{id}/intake-responses
+ANDROID VERSION CODE:     11
+IOS BUILD NUMBER:         7
+BACKEND DEPLOYED:         NOT REQUIRED — zero backend/API changes (endpoints already in production)
+CODEMAGIC BUILD:          OPERATOR ACTION — start android-preview on main (versionCode 11)
+DEVICE QA:                PENDING — physical Android device required
+P0 ISSUES:                NOT marked resolved until the installed APK renders Filing Status and books a real service-specific appointment
+READY FOR NEXT PREVIEW BUILD: YES (no deploy needed)
+```
+
+---
+
 # UPDATE 4 — versionCode 10 preview: P0 logo + out-of-hours slots, 2026-06-15
 
 **Android versionCode:** 10 · **iOS buildNumber:** 6.
