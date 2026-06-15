@@ -202,3 +202,93 @@ RECOMMENDED ACTION:         Open the PR (link in §1), merge to main, deploy on 
 ```
 
 > No item above is marked "ready/pass" without code-level evidence, and every production-only step is labeled OPERATOR-REQUIRED rather than asserted. Mobile readiness is not claimed.
+
+---
+
+# UPDATE — Stabilization Phase 2 (merge-to-main + deploy attempt), 2026-06-15
+
+## New facts established this phase (with evidence)
+
+1. **Web fixes merged to `main` and validated on the merged tree.** `origin/main` is now `bc20589` (fast-forward, no force). Validated on the merged tree: `tsc --noEmit` **0 errors**, `npm test` **722/722**, `next build` **passes**.
+
+2. **`origin/main` had diverged** — 10 new commits added a **real React Native/Expo mobile app under `mobile/`** (122 files, +22k LOC; `6c33498`…`b866307`), created *after* the audit (which is why the audit correctly found only the empty `zentromeet-mobile/` stub at `0e5921d`). Per instruction, **mobile was not worked on**. The web↔mobile paths are disjoint (clean merge, no conflicts).
+   - One required web-config fix: the root `tsconfig.json` did not exclude `mobile/`, so `tsc` tried to compile the RN project (**752 errors, all in `mobile/`, 0 in web**). Added `"mobile"` to the web tsconfig `exclude` — a web-scope fix touching no mobile code and no runtime behavior (`next build` already ignores `mobile/`). Merged-tree `tsc` is now clean.
+
+3. **Production is LIVE and HEALTHY** (read-only HTTPS probe, no mutation):
+   - `https://app.zentromeet.com/api/health` → **200** `{"ok":true,"env":"production","db":{ok:true,1ms},"bookings_no_overlap":{ok:true},"billing_ledger":{ok:true},...}`. DB connected; the double-booking EXCLUDE constraint is present in prod.
+   - `app.zentromeet.com`: `/`→307 (→dashboard), `/pricing`→200, `/sitemap.xml`→200, `/robots.txt`→200, `/dashboard/login`→200; `/privacy`→404, `/terms`→404 (old code; my new app-subdomain pages not yet deployed).
+   - `zentromeet.com` (marketing apex): `/`→200, `/pricing`→200, **`/privacy`→200, `/terms`→200**, `/sitemap.xml`→200, `/robots.txt`→200 (apex served separately from the app).
+   - **Legal-blocker re-assessment:** the login's legal links point to `zentromeet.com/{terms,privacy}`, which **resolve (200) in production** — so the live "broken legal links" risk is lower than the static audit could confirm. The authoritative public legal pages live at the apex (a separate deployment not in this repo); the content there should still be confirmed against the ParaFort LLC details.
+
+4. **Legal details filled** (you supplied them): operator = **ParaFort LLC**, governing law = **California, United States**, effective date = **June 14, 2026**, support = `support@zentromeet.com` (established in code). **Business mailing address withheld (not invented)** and rendered conditionally — **omitted** with no public placeholder until supplied. This remains the one legal blocker → keeps CONDITIONAL GO.
+
+## Why the in-place production deploy was NOT executed (and is correct to defer)
+
+All are simultaneously true and verified:
+- **The system is live and healthy** — an unreviewed deploy risks an outage of a working product.
+- **No established in-place update process exists in the repo** — `PRODUCTION_DEPLOY.md` is an unfilled, first-time-provisioning template (`YOUR_DOMAIN`/`YOUR_RDS_HOST` placeholders, a different local path, example commit `92b8036`, "expected: no Node/PM2/Nginx"). There is no documented "deploy an update to existing prod" runbook, and no deploy command in shell history.
+- **The host/key/user/path/pm2-service cannot be identified without guessing** — `known_hosts` shows two candidate IPs (`3.236.115.193`, `52.36.121.73`) and there are two keys (`aats-deploy.pem`, `zp-deploy.pem`), but no record maps them to ZentroMeet prod, and the task explicitly forbids guessing these.
+- **Build-on-box OOM risk** — the documented box is ~2 GB; building Next in place could memory-starve the running app.
+- **Live smoke tests can't be completed here** — Phases 9C/9D/9E/9F (Google/Microsoft/Stripe/SES) need real test accounts/credentials not present in this environment; a deploy alone could not reach GO via automated checks.
+
+**The deployable artifact is ready:** `origin/main @ bc20589`, validated. The operator (or a session with confirmed prod access) runs the deploy below.
+
+## Ready-to-run deploy (operator, on the confirmed prod host)
+```
+# 0) confirm host/key/user first (NOT guessable from this machine):
+#    ssh -i ~/.ssh/<correct-key>.pem <user>@<confirmed-host>
+cd <app-path>                                   # e.g. /var/www/scheduling-saas
+PREV=$(git rev-parse --short HEAD)              # record rollback target
+pg_dump "$DATABASE_URL" -Fc -f /var/backups/zentromeet/db-$(date +%F-%H%M).dump   # BACKUP FIRST
+git fetch origin && git checkout main && git pull --ff-only origin main           # -> bc20589
+NODE_OPTIONS=--max-old-space-size=1024 npm ci && NODE_OPTIONS=--max-old-space-size=1024 npm run build
+# NO drizzle-kit. This branch has NO schema changes; only run NEW raw SQL via the psql loop if any are pending.
+pm2 restart <pm2-service> --update-env && pm2 save
+curl -fsS https://app.zentromeet.com/api/health | jq .ok       # expect true
+# then register docs/operations/cron-manifest.md and run the §9 live smoke test.
+# Rollback: git checkout $PREV && npm ci && npm run build && pm2 restart <svc>
+```
+
+## Revised final summary (authoritative — supersedes the v1 block above)
+
+```
+WEB LAUNCH DECISION:        CONDITIONAL GO
+DEPLOYED COMMIT:            origin/main = bc20589 (web fixes merged + validated). NOT yet on the prod host.
+DEPLOYMENT TIME:            main pushed 2026-06-15 UTC; host deploy NOT performed (see reasons above)
+PRODUCTION HEALTH:          LIVE + GREEN (current prod) — app.zentromeet.com/api/health 200, ok=true, db ok,
+                            bookings_no_overlap ok. (Evidence is the CURRENTLY-deployed build; bc20589 not on host yet.)
+DATABASE MIGRATIONS:        no schema changes on this branch; apply NEW raw SQL via psql loop only (never drizzle-kit)
+DATABASE CONSTRAINTS:       bookings_no_overlap present in prod (health check green)
+BACKUP COMPLETED:           NO — requires host access (operator; command provided)
+BACKUP VERIFIED:            N/A
+LEGAL PAGES:                Entity/jurisdiction/date filled (ParaFort LLC · California, US · 2026-06-14);
+                            mailing address PENDING (blocker). Apex /privacy + /terms already 200 in prod.
+GOOGLE OAUTH:               CODE READY (CSRF nonce added, 9 tests); consent/redirect verify = operator
+GOOGLE CALENDAR:            CODE READY; live connect→event→reschedule→cancel = operator (needs test account)
+MICROSOFT OAUTH:            CODE READY (CSRF nonce added); Azure publisher verification = operator
+MICROSOFT CALENDAR:         CODE READY; live test = operator
+STRIPE:                     CODE READY (checkout 502 fixed, env tolerant, revenue fixed); live test = operator
+SES EMAIL:                  CODE READY; SES out-of-sandbox + SPF/DKIM/DMARC + APP_BASE_URL = operator
+REMINDERS:                  CODE READY; cron registration + test-only run = operator
+CRON JOBS:                  manifest + npm scripts added; host registration = operator
+SIGNUP:                     CODE READY; live run = operator (needs deploy + test tenant)
+ONBOARDING:                 FIXED + validated (unbookable-service P0 + dead-end closed); live run = operator
+PUBLIC BOOKING:             CODE READY (engine verified, checkout fixed); live run = operator
+RESCHEDULING:               CODE READY; live run = operator
+CANCELLATION:               FIXED (status-route bypass closed); live run = operator
+SUPER ADMIN:                CODE READY (gated, honest KPIs, revenue $0 fixed); live count check = operator
+TENANT ISOLATION:           READY (full source trace, no P0/P1)
+MONITORING:                 OPERATOR-REQUIRED (uptime/alerts/logrotate)
+ROLLBACK:                   READY — no schema changes; revert merge bc20589 or git checkout PREV (commands above)
+MOBILE:                     NOT part of this task. A mobile app now exists on main under mobile/ (added separately,
+                            after the audit). Not worked on; web typecheck excludes it. No web claim of a mobile app.
+BLOCKERS REMAINING:         (1) ParaFort LLC mailing address for legal pages.
+                            (2) Production deploy of bc20589 + live smoke — not safely executable from this machine
+                                (undocumented in-place process; host/key/user/path/service not identifiable without
+                                guessing, which is forbidden; live healthy system must not be risked; live
+                                Google/Microsoft/Stripe/SES smoke needs test accounts/credentials not available here).
+SAFE TO ANNOUNCE:           NOT YET — after host deploy of bc20589 + §9 live smoke pass + the mailing address is added.
+FINAL RECOMMENDATION:       CONDITIONAL GO
+```
+
+> Honesty note: production health shown above is for the **currently-deployed** build (read-only probe). My validated `bc20589` is **not yet on the host** — I did not deploy it because it could not be done safely from this environment without guessing forbidden production parameters. To flip to GO: deploy `bc20589` via the runbook, add the mailing address, register the cron manifest, and pass the live smoke test. I can drive all of that if given the confirmed host/key/user/app-path/pm2-service and authorization to operate on the live box.

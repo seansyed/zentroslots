@@ -263,7 +263,7 @@ Diffstat: **25 modified files, +220/−87**, plus 3 new files. No changes to aut
 
 ## 25. Deployment status
 
-**Pushed (branch), NOT yet deployed.** Update (stabilization phase, commit `a18a534`): the branch `launch-audit-fixes` has been validated (`tsc` clean, `npm test` 722/722, **`next build` passes**) and **pushed to `origin`** (`github.com/seansyed/zentroslots`). It is **not** merged to `main` and **not** deployed to the EC2 host — production deploy + live verification require host/console access (see `ZENTROMEET_FINAL_LAUNCH_VALIDATION.md` for the runbook and OPERATOR-REQUIRED checklist). Open the PR: `https://github.com/seansyed/zentroslots/pull/new/launch-audit-fixes`.
+**Merged to `main`, NOT deployed to the host.** Update (stabilization phase 2): the web fixes were merged into `main` (`origin/main` = `bc20589`, fast-forward, no force) and validated **on the merged tree** (`tsc` 0 errors, `npm test` 722/722, **`next build` passes**). Note `main` also gained a separate React Native/Expo mobile app under `mobile/` (added after the audit); it was not worked on, and the web typecheck now excludes it. The validated artifact is ready on `origin/main`; the **in-place production deploy was not executed** because it could not be done safely from the audit machine (no documented in-place update process; prod host/key/user/path/pm2-service not identifiable without guessing; live system is healthy; live Google/Microsoft/Stripe/SES smoke needs test accounts). Production was confirmed **live + healthy** via read-only probe (`app.zentromeet.com/api/health` → 200, `ok:true`). Deploy runbook + reasons + revised GO/NO-GO are in `ZENTROMEET_FINAL_LAUNCH_VALIDATION.md` (Stabilization Phase 2 section).
 
 ## 26. Rollback plan
 
