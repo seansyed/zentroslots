@@ -6,6 +6,7 @@ import { tenants } from "@/db/schema";
 import { errorResponse, HttpError, requireRole } from "@/lib/auth";
 import { authUrl } from "@/lib/calendar/google";
 import { isProviderEnabled, readEnabledIntegrations } from "@/lib/integrations";
+import { generateCalendarOAuthState, setCalendarStateCookie } from "@/lib/calendar/oauth-state";
 
 // GET /api/calendar/google/connect
 //
@@ -36,7 +37,14 @@ export async function GET() {
       throw new HttpError(403, "Google Calendar is disabled by your workspace admin");
     }
 
-    return NextResponse.redirect(authUrl(user.id));
+    // CSRF: mint an unguessable single-use state nonce, bind it to an
+    // httpOnly cookie, and pass it as the OAuth state. The callback
+    // verifies it (constant-time) before accepting the authorization
+    // code. User/tenant association still comes from the verified
+    // session in the callback, never from `state`.
+    const state = generateCalendarOAuthState();
+    await setCalendarStateCookie("google", state);
+    return NextResponse.redirect(authUrl(state));
   } catch (err) {
     return errorResponse(err);
   }
