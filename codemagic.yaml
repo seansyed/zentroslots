@@ -23,10 +23,12 @@
 # ---------------
 # The mobile app lives at  mobile/  inside the larger
 # zentroslots repository (which also holds the scheduling-saas backend at
-# the repo root). Codemagic must be configured to use
-# mobile/codemagic.yaml as the configuration file path. Each
-# workflow below sets `working_directory: mobile` so all scripts
-# execute from the mobile app root regardless of where the repo is cloned.
+# the repo root). This file lives at the REPOSITORY ROOT (codemagic.yaml) —
+# Codemagic's default, auto-detected location. Each workflow below sets
+# `working_directory: mobile` (resolved relative to the clone/repo root, NOT
+# to this file) so all scripts execute from the mobile app root. Artifact
+# paths are written relative to the repo root and therefore carry the
+# `mobile/` prefix (e.g. mobile/android/app/build/outputs/...).
 #
 # REQUIRED ENVIRONMENT-VARIABLE GROUPS (configure in Codemagic UI under
 # Teams → Global / App environment variables):
@@ -223,12 +225,14 @@ workflows:
           echo "Download from Codemagic dashboard → Builds → this build → Artifacts."
 
     artifacts:
-      - android/app/build/outputs/apk/release/*.apk
-      - android/app/build/outputs/apk/debug/*.apk
+      # Repo-root-relative (config file is at root; working_directory only
+      # affects where SCRIPTS run, not the artifact glob base).
+      - mobile/android/app/build/outputs/apk/release/*.apk
+      - mobile/android/app/build/outputs/apk/debug/*.apk
       # NOTE: no mapping.txt — R8/ProGuard is OFF by default in the
       # RN 0.76 / Expo SDK 52 prebuild template, so no mapping file is
       # produced. If you later enable minification for crash-trace
-      # deobfuscation, re-add `android/app/build/outputs/mapping/release/mapping.txt`.
+      # deobfuscation, re-add `mobile/android/app/build/outputs/mapping/release/mapping.txt`.
       - /tmp/install.log
       - /tmp/build.log
 
@@ -403,12 +407,12 @@ workflows:
           echo "Size: $(du -h "$AAB" | cut -f1)"
 
     artifacts:
-      - android/app/build/outputs/bundle/release/*.aab
+      - mobile/android/app/build/outputs/bundle/release/*.aab
       # NOTE: no mapping.txt — see android-preview comment above. R8 is
       # off in the RN 0.76 / Expo SDK 52 prebuild template by default.
       # To enable mapping output, add `android.enableProguardInReleaseBuilds=true`
       # to android/gradle.properties post-prebuild and re-add the path
-      # `android/app/build/outputs/mapping/release/mapping.txt` here.
+      # `mobile/android/app/build/outputs/mapping/release/mapping.txt` here.
       - /tmp/install.log
       - /tmp/build.log
 
@@ -616,7 +620,7 @@ workflows:
           echo "Download from Codemagic dashboard → Builds → this build → Artifacts."
 
     artifacts:
-      - ios-artifacts/*.ipa
+      - mobile/ios-artifacts/*.ipa
       - /tmp/install.log
       - /tmp/eas-build.log
 

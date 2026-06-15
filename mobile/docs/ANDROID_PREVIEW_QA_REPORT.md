@@ -124,9 +124,9 @@ READY FOR PRODUCTION AAB:  NO — gated on a passing preview APK + physical-devi
 
 # UPDATE — Codemagic Android Preview (replacing EAS for this build), 2026-06-15
 
-Build service switched from EAS to **Codemagic** for the Android preview. Audited + corrected `mobile/codemagic.yaml`.
+Build service switched from EAS to **Codemagic** for the Android preview. Audited + corrected `codemagic.yaml`.
 
-## Config audit (Phase 1) — `mobile/codemagic.yaml` (3 workflows)
+## Config audit (Phase 1) — `codemagic.yaml` (3 workflows)
 | Workflow | Method | Notes |
 |---|---|---|
 | `android-preview` | **`expo prebuild` + Gradle** (no EAS) | working_directory `mobile`, linux_x64, Node 20.17.0, Java 17 → installable **APK** |
@@ -144,7 +144,7 @@ Build service switched from EAS to **Codemagic** for the Android preview. Audite
 - **Signing:** workflow uses Codemagic Android keystore **`zentromeet_android_keystore`** if present (→ signed release APK), else `assembleDebug` (debug-signed, still installable). **Upload the keystore in the Codemagic UI** (Teams → Code Signing → Android keystores) — do NOT commit it. **Recommendation:** sign the preview with the **same permanent upload key intended for Google Play**, so tester installs can later be upgraded by the Play build (an APK signed with a different/debug key cannot be upgraded over a Play release outside Play).
 
 ## Codemagic project setup (Phase 5) — owner action (not verifiable from CLI)
-Connect in the Codemagic UI: Add application → GitHub → `seansyed/zentroslots` → use `codemagic.yaml`, **configuration path `mobile/codemagic.yaml`**. Then add the `zentromeet_api` env group + the `zentromeet_android_keystore`.
+Connect in the Codemagic UI: Add application → GitHub → `seansyed/zentroslots` → use `codemagic.yaml`, **configuration path `codemagic.yaml`**. Then add the `zentromeet_api` env group + the `zentromeet_android_keystore`.
 
 ## Build (Phase 8) — NOT TRIGGERED
 No Codemagic API token is available on this machine (`CODEMAGIC_API_TOKEN` unset) and I cannot operate the Codemagic UI, so I did not (and cannot) trigger or monitor the cloud build. **Owner triggers** `android-preview` from the Codemagic dashboard (manual run on `main`) — or pushing to `develop` auto-triggers it.
@@ -152,7 +152,7 @@ No Codemagic API token is available on this machine (`CODEMAGIC_API_TOKEN` unset
 ## Codemagic summary (Phase 9)
 ```
 CODEMAGIC PROJECT:        seansyed/zentroslots  (connect/confirm in Codemagic UI — not CLI-verifiable)
-CONFIG PATH:              mobile/codemagic.yaml
+CONFIG PATH:              codemagic.yaml
 WORKFLOW:                 android-preview
 BUILD NUMBER:             n/a — NOT TRIGGERED (no Codemagic API token / UI access here)
 BUILD COMMIT:             (this push to main)
@@ -173,7 +173,7 @@ LOCAL VALIDATION:         PASS — npm ci (committed lockfile), tsc 0 errors, ex
 DEVICE INSTALL:           PENDING — needs the APK + a physical Android device
 PHYSICAL DEVICE QA:       PENDING — no device available to me (Phases 5–13 checklist above)
 READY FOR PRODUCTION AAB: NO — gated on a passing preview APK + physical-device QA
-NEXT ACTION:              Owner: confirm Codemagic app↔repo + config path mobile/codemagic.yaml;
+NEXT ACTION:              Owner: confirm Codemagic app↔repo + config path codemagic.yaml;
                           add zentromeet_api env group + zentromeet_android_keystore; trigger
                           android-preview; install APK on a phone; run device QA.
 ```

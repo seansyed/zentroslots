@@ -52,7 +52,7 @@ phone during development and internal testing.
 5. **Critical — set the configuration file path:**
    In Codemagic project **Settings → Build → Configuration file path**, enter:
    ```
-   mobile/codemagic.yaml
+   codemagic.yaml
    ```
    This tells Codemagic where the YAML lives inside the monorepo.
 6. The `working_directory: mobile` already set in each workflow

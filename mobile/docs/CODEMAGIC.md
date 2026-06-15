@@ -85,7 +85,7 @@ main-branch build runs to completion.
 2. **CRITICAL:** Project Settings → **Build** → **Configuration file path**:
 
    ```
-   mobile/codemagic.yaml
+   codemagic.yaml
    ```
 
    The repo is a monorepo. Without this setting Codemagic looks for
@@ -421,9 +421,9 @@ workflow — nothing in `app.json` or `eas.json` needs to change.
 
 ## 11. First-build checklist
 
-1. Push `mobile/codemagic.yaml` and this doc to GitHub.
+1. Push `codemagic.yaml` and this doc to GitHub.
 2. Connect the monorepo in the Codemagic dashboard.
-3. Set **Configuration file path** to `mobile/codemagic.yaml`.
+3. Set **Configuration file path** to `codemagic.yaml`.
 4. Add the `expo_credentials` and `zentromeet_api` global env-var
    groups (§ 3b, § 3c).
 5. (Optional for preview / required for production) upload the Android
@@ -446,7 +446,7 @@ workflow — nothing in `app.json` or `eas.json` needs to change.
 
 | Symptom | Cause / fix |
 |---|---|
-| **"Configuration file not found"** when starting a build | Project Settings → Build → **Configuration file path** is not set. Set it to `mobile/codemagic.yaml`. |
+| **"Configuration file not found"** when starting a build | Project Settings → Build → **Configuration file path** is not set. Set it to `codemagic.yaml`. |
 | **"No keystore configured"** on `android-production` | Upload a keystore via **Code signing identities** named exactly `zentromeet_android_keystore`. The workflow fails fast on purpose so you don't ship an unsigned AAB. |
 | **`npm ci` fails: "package-lock.json not found"** | Expected — the lockfile is git-ignored in this project. The workflow's fallback to `npm install --no-audit --no-fund` kicks in automatically; the build continues. |
 | **EAS iOS build fails with "Authentication required"** | `EXPO_TOKEN` is missing or revoked. Regenerate at `expo.dev` → Account → Access Tokens. Expo tokens are NOT action-scoped — they inherit the minting account's full permissions, so there is no scope checkbox to toggle. If the account itself lacks build permission on the project, add it via `expo.dev` → Organization → Members. If Apple credentials are stale, run `npx eas-cli credentials -p ios` locally once to refresh the cached cert. |
