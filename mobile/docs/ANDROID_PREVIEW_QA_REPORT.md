@@ -1,3 +1,25 @@
+# UPDATE 3 — versionCode 8 preview (features + calendar OAuth), 2026-06-15
+
+**Commit:** `2fca3a0` · **Android versionCode:** 8 · **iOS buildNumber:** 4.
+**Adds:** ZentroMeet logo, profile-image URL normalization, full customer create/edit/archive, Google + Microsoft **mobile** calendar OAuth (secure signed-state handoff), OAuth deep-link routes, tenant-logo support.
+
+**Backend:** deployed `2fca3a0` to production (35.83.95.42) + verified — PM2 online (no loop), nginx active, `/api/health` 200, `/api/auth/me` 401, new `…/connect/mobile` endpoints 401 (live), callbacks 400 (reachable); **web Google/Microsoft OAuth unaffected**; pre-deploy PG backup taken (1.8 MB, restore-list OK); **no schema/migration changes**.
+
+**Local gates (all green on `2fca3a0`):** backend+mobile `tsc`; tests 22 new + **728/728** backend suite; expo-doctor 18/18; expo export android+iOS; expo prebuild android `--clean`; web production build (109/109).
+
+```
+ANDROID VERSION CODE:     8
+IOS BUILD NUMBER:         4
+BACKEND DEPLOY:           DONE + verified (commit 2fca3a0; web OAuth no-regression)
+CODEMAGIC BUILD:          PENDING — operator triggers android-preview on main (versionCode 8)
+APK:                      PENDING (versionCode 8)
+DEVICE QA:                PENDING — physical Android device required
+GOOGLE/MICROSOFT MOBILE OAUTH: NOT marked passed until real provider consent returns to the installed app
+READY FOR PRODUCTION AAB: NO — gated on versionCode-8 physical-device QA
+```
+
+---
+
 # UPDATE 2 — ACTUAL device-log root cause of the boot freeze (2026-06-15)
 
 The versionCode-4 APK (which contained "UPDATE 1"'s notification fix) **still froze

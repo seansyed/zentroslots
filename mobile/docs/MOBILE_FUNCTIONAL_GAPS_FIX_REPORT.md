@@ -1,3 +1,15 @@
+# PRODUCTION DEPLOY — 2026-06-15 (backend live, mobile build pending)
+
+**Deployed commit:** `2fca3a0` · **Previous (rollback):** `a294662` · **Host:** 35.83.95.42 (`/var/www/scheduling-saas`, PM2 `scheduling-saas`).
+**Pre-deploy:** no schema/migration/.sql changes in range (verified); working tree clean; gates green (backend+mobile tsc, 728/728 tests, web build, expo-doctor 18/18, android+iOS export, android prebuild).
+**Backup:** `~/backups/zentromeet/db-20260615-111912-predeploy-2fca3a0.dump` (1.8 MB, `pg_restore --list` OK, 619 entries) — taken before any change. **No `drizzle-kit push`, no schema sync** (rules 1–3).
+**Build/restart:** `git pull --ff-only` → one `npm run build` (RC=0) → one `pm2 restart --update-env` + `pm2 save`. PM2 online, restarts 28 (no loop), uptime stable, nginx active.
+**Verification (public, through nginx):** `/api/health` 200 · `/` 307 · `/dashboard/login` 200 · `/api/auth/me` 401 (healthy) · web `…/calendar/google|microsoft/connect` 401 (unchanged, no 500) · **new** `…/calendar/google|microsoft/connect/mobile` 401 (live, auth-gated, no 500) · `…/calendar/google|microsoft/callback` 400 "missing code/state" (reachable, no 500).
+**Web OAuth regression:** NONE — web calendar OAuth + web login untouched (mobile paths are additive, gated on the signed state / Bearer auth).
+**Pending:** Codemagic `android-preview` (versionCode 8) — operator-triggered; physical-device QA — operator. OAuth NOT marked passed until real provider consent returns to the installed app.
+
+---
+
 # ZentroMeet Mobile — Functional Gaps Fix Report
 
 **Date:** 2026-06-15
