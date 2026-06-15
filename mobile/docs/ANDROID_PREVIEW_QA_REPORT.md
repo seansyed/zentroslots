@@ -182,3 +182,40 @@ NEXT ACTION:              Owner: confirm Codemagic app↔repo + config path code
 - The re-enabled hooks (push/lifecycle/error/telemetry) compile and bundle cleanly and the SDK-52 dep drift (the prior crash cause) is fixed, but **on-device boot has not been observed** — device QA is the real confirmation.
 - Push end-to-end depends on EAS-managed FCM credentials (configured during the first EAS build) — verify token registration on-device.
 - iPad: `supportsTablet:true` ships a native iPad app, but a centered max-width layout polish (so content doesn't stretch) is recommended and best verified in the iPad simulator (separate from this Android task).
+
+---
+
+# UPDATE — APK artifact collection fix (build #7 shipped logs-only zip), 2026-06-15
+
+**Symptom:** Codemagic build #7 (`6a2f80d0d2485dfd093b4caa`, commit `ce26022`) finished successfully — TypeScript, expo-doctor, export, prebuild, Gradle APK, and code-signing all passed — but the only artifact was `zentroslots_7_artifacts.zip` (16.52 KB), with **no APK**.
+
+**Root cause:** Codemagic resolves `artifacts:` globs relative to the workflow **`working_directory` (`mobile`)**, not the repo root. When `codemagic.yaml` moved to the repo root, the artifact globs were given a `mobile/` prefix — which double-nests to `mobile/mobile/android/...` and matches nothing. The two **absolute** `/tmp/*.log` paths still matched, which is exactly why a logs-only 16 KB zip was produced. (Deduced from the build evidence; I do not have Codemagic log/API access to read the raw logs.)
+
+**Fix (`codemagic.yaml`):**
+- `android-preview` artifacts: `mobile/android/app/build/outputs/apk/release/*.apk` (+debug) → **`android/app/build/outputs/apk/**/*.apk`** (working-dir-relative, robust `**`).
+- `android-production`: → **`android/app/build/outputs/bundle/**/*.aab`**.
+- `ios-production`: `mobile/ios-artifacts/*.ipa` → **`ios-artifacts/*.ipa`** (same latent bug; iOS build *logic* unchanged).
+- New **"Verify APK + print metadata"** step (after Gradle): prints `pwd`, all `*.apk`/`*.aab`, and the APK path/size/`sha256sum`, and **fails the build if no APK is found** after a "successful" Gradle build.
+- New **"Verify APK signature + package"** step: runs `apksigner verify --print-certs` + `aapt2 dump badging` to confirm the APK is signed by the `ZentroMeet` identity and the package is `com.zentromeet.app` — prints only the public certificate (SHA-256) + package, never any password/key. Non-fatal.
+
+**Validation:** YAML valid; android-preview remains EAS-free with no Play publishing; android-production AAB glob corrected; expected APK ≈ `android/app/build/outputs/apk/release/app-release.apk` (signed, multi-MB).
+
+**Not done here (no access):** I cannot trigger/monitor the Codemagic build or read its logs (no `CODEMAGIC_API_TOKEN`/UI), and cannot run `apksigner` on the artifact locally (no APK + no Android build-tools). The new in-CI steps will print the signature/cert/SHA-256 on the next run. **Owner re-runs `android-preview`** from `main`; the next build's verify step prints the cert + the APK becomes a real multi-MB artifact.
+
+```
+ROOT CAUSE:               artifact globs resolved from working_directory(mobile); mobile/ prefix double-nested -> no APK match (logs-only zip)
+OLD ARTIFACT GLOB:        mobile/android/app/build/outputs/apk/{release,debug}/*.apk
+REAL APK PATH:            android/app/build/outputs/apk/release/app-release.apk  (working-dir-relative; signed release)
+NEW ARTIFACT GLOB:        android/app/build/outputs/apk/**/*.apk
+APK SIGNED:               expected YES (build #7 "code signing setup completed"); confirmed by the new apksigner step on next run
+SIGNING IDENTITY:         ZentroMeet  (Codemagic Android keystore)
+CERTIFICATE SHA-256:      ED:7D:35:C5:57:98:FC:CE:10:27:C5:9D:E6:E6:58:A1:56:61:57:0B:A6:65:8A:2C:4C:9B:4D:01:46:DF:DD:6F (the uploaded ZentroMeet upload key) — to be confirmed by the new apksigner step
+CONFIG COMMIT:            (this push to main)
+NEW BUILD NUMBER:         PENDING — owner re-runs android-preview (no Codemagic API/UI access here)
+NEW BUILD STATUS:         PENDING
+APK FILE:                 PENDING (expected app-release.apk, multi-MB)
+APK SIZE:                 PENDING
+APK URL:                  PENDING (Codemagic -> Builds -> Artifacts)
+DEVICE QA:                PENDING — physical Android device required
+READY FOR PRODUCTION AAB: NO — gated on a real APK installed + tested on a physical device
+```

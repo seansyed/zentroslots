@@ -27,8 +27,9 @@
 # Codemagic's default, auto-detected location. Each workflow below sets
 # `working_directory: mobile` (resolved relative to the clone/repo root, NOT
 # to this file) so all scripts execute from the mobile app root. Artifact
-# paths are written relative to the repo root and therefore carry the
-# `mobile/` prefix (e.g. mobile/android/app/build/outputs/...).
+# globs are ALSO resolved relative to working_directory (mobile), so they are
+# written WITHOUT a `mobile/` prefix (e.g. android/app/build/outputs/...).
+# A `mobile/` prefix double-nests to mobile/mobile/... and matches nothing.
 #
 # REQUIRED ENVIRONMENT-VARIABLE GROUPS (configure in Codemagic UI under
 # Teams → Global / App environment variables):
@@ -213,23 +214,59 @@ workflows:
               --stacktrace 2>&1 | tee /tmp/build.log
           fi
 
-      # ----- 7. Display artifact location ----------------------------------
-      - name: Display artifact location
+      # ----- 7. Verify APK exists + print metadata ------------------------
+      # Runs AFTER the Gradle build. FAILS the build if Gradle reported
+      # success but produced no APK (that mismatch is what shipped a
+      # logs-only 16 KB artifact zip in build #7). No `set -e` here because
+      # `find | head` + pipefail can SIGPIPE-fail spuriously; the explicit
+      # check below is the gate.
+      - name: Verify APK + print metadata
         script: |
-          echo "APK files produced:"
-          find android/app/build/outputs/apk -name "*.apk" -print -exec du -h {} \; 2>/dev/null || true
-          echo ""
-          echo "Download from Codemagic dashboard → Builds → this build → Artifacts."
+          echo "PWD: $(pwd)"
+          echo "--- APKs ---"; find . -type f -name "*.apk" -print 2>/dev/null || true
+          echo "--- AABs ---"; find . -type f -name "*.aab" -print 2>/dev/null || true
+          APK_PATH=$(find . -type f -path "*/build/outputs/apk/*/*.apk" 2>/dev/null | head -1)
+          if [ -z "$APK_PATH" ]; then
+            echo "ERROR: Gradle reported success but no APK was found."
+            exit 1
+          fi
+          echo "APK found: $APK_PATH"
+          ls -lh "$APK_PATH"
+          sha256sum "$APK_PATH"
+
+      # ----- 8. Verify APK signature + package (safe — public cert only) ---
+      # Confirms the release APK is signed (by the Codemagic 'ZentroMeet'
+      # identity) and prints the certificate SHA-256 + package. NEVER prints
+      # the keystore/key password or any private key. Non-fatal so a tooling
+      # quirk can't fail an otherwise-good build.
+      - name: Verify APK signature + package
+        script: |
+          APK_PATH=$(find . -type f -path "*/build/outputs/apk/*/*.apk" 2>/dev/null | head -1)
+          SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+          APKSIGNER=$(find "$SDK/build-tools" -name apksigner 2>/dev/null | sort -V | tail -1)
+          AAPT2=$(find "$SDK/build-tools" -name aapt2 2>/dev/null | sort -V | tail -1)
+          if [ -n "$APKSIGNER" ] && [ -n "$APK_PATH" ]; then
+            echo "=== apksigner verify ==="
+            "$APKSIGNER" verify --verbose --print-certs "$APK_PATH" \
+              | grep -iE "verified|certificate (DN|SHA-256)|Number of signers" || true
+          else
+            echo "apksigner or APK not found — skipping signature print"
+          fi
+          if [ -n "$AAPT2" ] && [ -n "$APK_PATH" ]; then
+            echo "=== package ==="; "$AAPT2" dump badging "$APK_PATH" 2>/dev/null | grep -E "^package:" || true
+          fi
 
     artifacts:
-      # Repo-root-relative (config file is at root; working_directory only
-      # affects where SCRIPTS run, not the artifact glob base).
-      - mobile/android/app/build/outputs/apk/release/*.apk
-      - mobile/android/app/build/outputs/apk/debug/*.apk
+      # Relative to working_directory (mobile). Codemagic resolves artifact
+      # globs from the WORKING DIRECTORY, not the repo root — a `mobile/`
+      # prefix double-nests to mobile/mobile/... and matches nothing (that is
+      # what produced build #7's logs-only 16 KB zip). Robust ** covers the
+      # release (and debug) variant.
+      - android/app/build/outputs/apk/**/*.apk
       # NOTE: no mapping.txt — R8/ProGuard is OFF by default in the
       # RN 0.76 / Expo SDK 52 prebuild template, so no mapping file is
-      # produced. If you later enable minification for crash-trace
-      # deobfuscation, re-add `mobile/android/app/build/outputs/mapping/release/mapping.txt`.
+      # produced. If you later enable minification, re-add
+      # android/app/build/outputs/mapping/release/mapping.txt
       - /tmp/install.log
       - /tmp/build.log
 
@@ -404,12 +441,14 @@ workflows:
           echo "Size: $(du -h "$AAB" | cut -f1)"
 
     artifacts:
-      - mobile/android/app/build/outputs/bundle/release/*.aab
+      # Relative to working_directory (mobile) — no `mobile/` prefix (see
+      # android-preview note). Robust ** covers the release bundle.
+      - android/app/build/outputs/bundle/**/*.aab
       # NOTE: no mapping.txt — see android-preview comment above. R8 is
       # off in the RN 0.76 / Expo SDK 52 prebuild template by default.
       # To enable mapping output, add `android.enableProguardInReleaseBuilds=true`
       # to android/gradle.properties post-prebuild and re-add the path
-      # `mobile/android/app/build/outputs/mapping/release/mapping.txt` here.
+      # `android/app/build/outputs/mapping/release/mapping.txt` here.
       - /tmp/install.log
       - /tmp/build.log
 
@@ -617,7 +656,9 @@ workflows:
           echo "Download from Codemagic dashboard → Builds → this build → Artifacts."
 
     artifacts:
-      - mobile/ios-artifacts/*.ipa
+      # Relative to working_directory (mobile) — no `mobile/` prefix (same
+      # resolution rule as the Android workflows; prefix would match nothing).
+      - ios-artifacts/*.ipa
       - /tmp/install.log
       - /tmp/eas-build.log
 
