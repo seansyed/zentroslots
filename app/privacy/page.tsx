@@ -16,11 +16,14 @@ export const metadata: Metadata = {
   openGraph: { title: "Privacy Policy — ZentroMeet" },
 };
 
-const UPDATED = "[EFFECTIVE DATE]";
-const ENTITY = "[LEGAL ENTITY NAME]";
-const ADDRESS = "[REGISTERED ADDRESS]";
+const UPDATED = "June 14, 2026";
+const ENTITY = "ParaFort LLC";
+// ParaFort LLC business mailing address — owner to supply. Rendered only
+// when set, so no placeholder is ever shown publicly. (Tracked blocker.)
+const ADDRESS = "";
 const PRIVACY_EMAIL = "privacy@zentromeet.com";
 const SUPPORT_EMAIL = "support@zentromeet.com";
+const ENTITY_AND_ADDR = ADDRESS ? `${ENTITY}, ${ADDRESS}` : ENTITY;
 
 export default function PrivacyPage() {
   return (
@@ -38,7 +41,7 @@ export default function PrivacyPage() {
         </p>
 
         <Section title="1. Who we are">
-          ZentroMeet is operated by {ENTITY}, {ADDRESS}. For privacy questions
+          ZentroMeet is operated by {ENTITY_AND_ADDR}. For privacy questions
           contact us at <a className="text-brand-accent underline" href={`mailto:${PRIVACY_EMAIL}`}>{PRIVACY_EMAIL}</a>.
         </Section>
 
@@ -153,7 +156,7 @@ export default function PrivacyPage() {
         </Section>
 
         <Section title="14. Contact">
-          Questions? Email <a className="text-brand-accent underline" href={`mailto:${PRIVACY_EMAIL}`}>{PRIVACY_EMAIL}</a> or write to {ENTITY}, {ADDRESS}.
+          Questions? Email <a className="text-brand-accent underline" href={`mailto:${PRIVACY_EMAIL}`}>{PRIVACY_EMAIL}</a> or write to {ENTITY_AND_ADDR}.
         </Section>
       </article>
       <Footer />

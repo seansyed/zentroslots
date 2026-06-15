@@ -16,11 +16,14 @@ export const metadata: Metadata = {
   openGraph: { title: "Terms of Service — ZentroMeet" },
 };
 
-const UPDATED = "[EFFECTIVE DATE]";
-const ENTITY = "[LEGAL ENTITY NAME]";
-const ADDRESS = "[REGISTERED ADDRESS]";
-const JURISDICTION = "[GOVERNING JURISDICTION]";
+const UPDATED = "June 14, 2026";
+const ENTITY = "ParaFort LLC";
+// ParaFort LLC business mailing address — owner to supply. Rendered only
+// when set, so no placeholder is ever shown publicly. (Tracked blocker.)
+const ADDRESS = "";
+const JURISDICTION = "California, United States";
 const SUPPORT_EMAIL = "support@zentromeet.com";
+const ENTITY_AND_ADDR = ADDRESS ? `${ENTITY}, ${ADDRESS}` : ENTITY;
 
 export default function TermsPage() {
   return (
@@ -33,7 +36,7 @@ export default function TermsPage() {
         <p className="mt-6">
           These Terms of Service (&ldquo;Terms&rdquo;) govern your access to
           and use of the ZentroMeet platform and websites (the
-          &ldquo;Service&rdquo;), operated by {ENTITY}, {ADDRESS}. By creating
+          &ldquo;Service&rdquo;), operated by {ENTITY_AND_ADDR}. By creating
           an account or using the Service you agree to these Terms.
         </p>
 
