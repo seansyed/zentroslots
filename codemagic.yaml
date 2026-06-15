@@ -68,7 +68,7 @@ workflows:
   # ---------------------------------------------------------------------------
   # Produces an installable APK that testers can sideload directly onto their
   # phones. No Play Store review, no EAS queue. Built entirely on Codemagic's
-  # linux_x64 machine via `expo prebuild` + Gradle.
+  # linux_x2 machine via `expo prebuild` + Gradle.
   #
   # Signing: optional. If the zentromeet_android_keystore entry is configured,
   # builds a SIGNED release APK. Otherwise falls back to assembleDebug, which
@@ -78,13 +78,9 @@ workflows:
   # ===========================================================================
   android-preview:
     name: "Android Preview — Installable APK"
-    instance_type: linux_x64
+    instance_type: linux_x2
     max_build_duration: 60
     working_directory: mobile
-    # Workflow-root field. Previously nested under `triggering:` which is
-    # silently ignored by Codemagic's schema. Preview builds are
-    # fast-paced — cancel superseded develop pushes.
-    cancel_previous_builds: true
 
     environment:
       node: 20.17.0
@@ -108,8 +104,9 @@ workflows:
         # time. We intentionally do not redeclare it here.
         #
         # Gradle heap — 2.5 GB leaves ~1.5 GB for Node, Gradle daemon, OS.
-        # Codemagic's linux_x64 standard instance has 4 GB total; a higher
-        # heap will OOM during RN 0.76 New Architecture C++ codegen.
+        # Codemagic's linux_x2 standard instance has ~8 GB total; this
+        # conservative heap still leaves ample room for Node, the Gradle
+        # daemon, and the OS, avoiding OOM during RN 0.76 C++ codegen.
         GRADLE_OPTS: "-Xmx2560m -XX:MaxMetaspaceSize=512m -Dfile.encoding=UTF-8"
         EXPO_NO_TELEMETRY: "1"
 
@@ -273,7 +270,7 @@ workflows:
   # ===========================================================================
   android-production:
     name: "Android Production — Play Store AAB"
-    instance_type: linux_x64
+    instance_type: linux_x2
     max_build_duration: 90
     working_directory: mobile
 
@@ -291,7 +288,7 @@ workflows:
         # is defined in the zentromeet_api group directly (Codemagic does
         # NOT substitute $VARS in this block). Gradle heap held to 2.5 GB
         # to leave room for Node + Gradle daemon + OS on the 4 GB
-        # linux_x64 instance.
+        # linux_x2 instance.
         GRADLE_OPTS: "-Xmx2560m -XX:MaxMetaspaceSize=512m -Dfile.encoding=UTF-8"
         EXPO_NO_TELEMETRY: "1"
 
@@ -435,7 +432,7 @@ workflows:
   #   3) Downloads the resulting .ipa so it's a Codemagic artifact
   #   4) Optionally submits to TestFlight (toggle via SUBMIT_TO_TESTFLIGHT)
   #
-  # Because we are not compiling natively on Codemagic, we use linux_x64
+  # Because we are not compiling natively on Codemagic, we use linux_x2
   # (cheaper than mac_mini_m2). All heavy lifting runs on EAS.
   #
   # Triggers: manual + push to `main`.
@@ -445,7 +442,7 @@ workflows:
   # ===========================================================================
   ios-production:
     name: "iOS Production — App Store / TestFlight (via EAS)"
-    instance_type: linux_x64
+    instance_type: linux_x2
     max_build_duration: 120
     working_directory: mobile
 
