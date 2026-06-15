@@ -57,7 +57,7 @@ Launch-blocking P1s (B4–B7) are in §3. Remaining confirmed P1s:
 | `billing-status-paid-vs-succeeded` | Webhook writes `billing_transactions.status='paid'` but 23 admin-analytics queries filter `='succeeded'` → super-admin revenue/finance dashboards read **$0 on real data** and the billing validator false-flags every paying tenant | **Fixed** (23 admin-analytics filters + 2 seeder literals → `paid`) |
 | `login-unscoped-email-multitenant` | `app/api/auth/login/route.ts:39-41` resolves users by globally-unscoped email; email is unique only per `(tenant_id, email)` → same email in 2 workspaces logs into an arbitrary tenant / can't reach the 2nd account / reset targets wrong account. `loginSchema` has no `tenantSlug` field | **Open — documented** (needs `tenantSlug` added to schema + scoped lookup; low incidence at launch) |
 | `status-route-cancelled-bypasses-cancel-pipeline` | `POST /api/bookings/[id]/status` accepted `cancelled`, skipping the cancel feature-gate, customer email, calendar-event deletion, and waitlist release | **Fixed** (route rejects `cancelled`) |
-| `calendar-oauth-csrf-no-nonce` | Calendar connect uses predictable `state=user.id` with no cookie-bound nonce (calendar-injection); pattern shared by Google **and** Microsoft/Zoom calendar callbacks | **Open — documented** (patch provided; not applied blind to avoid breaking the integration — see §9) |
+| `calendar-oauth-csrf-no-nonce` | Calendar connect used predictable `state=user.id` with no cookie-bound nonce (calendar-injection) | **Fixed** (single-use httpOnly constant-time nonce on Google new+legacy and Microsoft connect/callback; `lib/calendar/oauth-state.ts` + 9 tests) |
 | `no-azure-setup-docs-or-verification-evidence` | No Azure app-registration / redirect-URI / scope / publisher-verification documentation or evidence | **Open — manual** (§10) |
 | `no-customer-billing-emails` | No customer-facing upgrade/downgrade/cancellation/payment-failure/trial-ending emails (admin-side alerts exist) | **Open — backlog** (product decision) |
 | `health-cannot-detect-missing-reminder-cron` | Health `reminder_delivery` reports healthy when the cron was never installed (0 sent + 0 failed) | **Partially mitigated** by cron-manifest; deeper fix backlog |
@@ -111,7 +111,7 @@ Legend: ✅ verified by code-trace (evidence) · 🔧 fixed this pass · ⚠️ 
 - Sign-in OAuth (separate from calendar) uses correct cookie-bound CSRF state. ✅
 
 **Gaps:**
-- **`calendar-oauth-csrf-no-nonce` (P1, open):** the *calendar-connect* flow (not sign-in) uses `state=user.id` with no cookie nonce, on Google **and** Microsoft/Zoom. **Recommended patch (not applied blind to protect the integration):** in `app/api/calendar/google/connect/route.ts` generate a random nonce via `generateOAuthState()`, store httpOnly cookie, pass as state, and verify with `consumeOAuthStateCookie()` (constant-time) in both `app/api/calendar/google/callback` and the legacy `app/api/google/callback` — reusing the proven helpers in `lib/auth/oauth.ts:56-93`. Apply uniformly to microsoft/zoom. **Test the connect round-trip before deploy.**
+- **`calendar-oauth-csrf-no-nonce` (P1) — FIXED (stabilization phase):** the *calendar-connect* flow now mints a single-use, httpOnly, constant-time, per-provider-namespaced state nonce (`lib/calendar/oauth-state.ts`, cookie `zm_cal_state_*`) on Google (new + legacy) and Microsoft connect/callback. User/tenant association is unchanged (still from the verified session). 9 unit tests added. **Still recommended:** run the live connect round-trip per provider before/at deploy (cannot be exercised against live Google/Microsoft from the audit environment).
 - `disconnect-leaks-google-watch-channel` (P3), `no-calendar-list-or-additional-calendar-selection` (P3 — always `primary`; `calendar.readonly` scope unused).
 - **Cannot verify (manual):** consent-screen "In production"/verified status; exact `GOOGLE_REDIRECT_URI` match in Google Console; `APP_BASE_URL` is HTTPS (watch addresses); `COMMS_ENCRYPTION_KEY` is 64-hex in prod.
 
@@ -263,7 +263,7 @@ Diffstat: **25 modified files, +220/−87**, plus 3 new files. No changes to aut
 
 ## 25. Deployment status
 
-**NOT deployed. NOT pushed.** All changes are committed **locally on a new branch** (`launch-audit-fixes`) per the audit constraint ("do not push or deploy until the report is ready/authorized"). Awaiting your review and explicit authorization to push/deploy.
+**Pushed (branch), NOT yet deployed.** Update (stabilization phase, commit `a18a534`): the branch `launch-audit-fixes` has been validated (`tsc` clean, `npm test` 722/722, **`next build` passes**) and **pushed to `origin`** (`github.com/seansyed/zentroslots`). It is **not** merged to `main` and **not** deployed to the EC2 host — production deploy + live verification require host/console access (see `ZENTROMEET_FINAL_LAUNCH_VALIDATION.md` for the runbook and OPERATOR-REQUIRED checklist). Open the PR: `https://github.com/seansyed/zentroslots/pull/new/launch-audit-fixes`.
 
 ## 26. Rollback plan
 
