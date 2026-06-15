@@ -101,20 +101,20 @@ export async function computeFinanceExecutiveKpis(): Promise<FinanceExecutiveKpi
               ), 0) AS churn_impact_cents,
               COALESCE((
                 SELECT SUM(amount_cents)::bigint FROM billing_transactions
-                 WHERE status = 'succeeded'
+                 WHERE status = 'paid'
                    AND transaction_type != 'refund'
                    AND created_at >= date_trunc('month', NOW())
               ), 0) AS collections_this_month_cents,
               COALESCE((
                 SELECT SUM(amount_cents)::bigint FROM billing_transactions
-                 WHERE status = 'succeeded'
+                 WHERE status = 'paid'
                    AND transaction_type != 'refund'
                    AND created_at >= date_trunc('month', NOW() - INTERVAL '1 month')
                    AND created_at <  date_trunc('month', NOW())
               ), 0) AS collections_prior_month_cents,
               COALESCE((
                 SELECT COUNT(*)::int FROM billing_transactions
-                 WHERE status = 'succeeded'
+                 WHERE status = 'paid'
                    AND created_at >= NOW() - INTERVAL '30 days'
               ), 0) AS payments_succeeded_30d,
               COALESCE((

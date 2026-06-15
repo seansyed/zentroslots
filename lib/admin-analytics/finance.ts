@@ -7,7 +7,7 @@
  * Tiles:
  *   • MRR snapshot          plans × active subs
  *   • ARR snapshot          MRR × 12
- *   • Cash collected (30d)  billing_transactions sum where status='succeeded'
+ *   • Cash collected (30d)  billing_transactions sum where status='paid'
  *   • Failed invoices       count where status='failed' last 30d
  *   • Pending invoices      tenants past_due
  *   • Refunds (30d)         transaction_type='refund' last 30d
@@ -99,7 +99,7 @@ export async function computeFinanceBundle(): Promise<FinanceBundle> {
       const snapshot = (await safeRows(
         sql`SELECT
               COALESCE((SELECT SUM(p.price_monthly_cents)::bigint FROM tenants t JOIN plans p ON p.slug=t.current_plan WHERE t.active=true AND t.subscription_status='active'), 0) AS mrr_cents,
-              (SELECT COALESCE(SUM(amount_cents), 0)::bigint FROM billing_transactions WHERE status='succeeded' AND COALESCE(paid_at, created_at) > NOW() - INTERVAL '30 days') AS cash_30d,
+              (SELECT COALESCE(SUM(amount_cents), 0)::bigint FROM billing_transactions WHERE status='paid' AND COALESCE(paid_at, created_at) > NOW() - INTERVAL '30 days') AS cash_30d,
               (SELECT COUNT(*)::int FROM billing_transactions WHERE status='failed' AND created_at > NOW() - INTERVAL '30 days') AS failed_invoices,
               (SELECT COUNT(*)::int FROM tenants WHERE subscription_status = 'past_due') AS pending_invoices,
               (SELECT COALESCE(SUM(amount_cents), 0)::bigint FROM billing_transactions WHERE transaction_type='refund' AND created_at > NOW() - INTERVAL '30 days') AS refunds_30d,
@@ -169,7 +169,7 @@ export async function computeFinanceBundle(): Promise<FinanceBundle> {
           unit: "currency_cents",
           trend: null,
           detail: `${cash30 === 0 ? "0" : "$" + (cash30 / 100).toFixed(0)} via Stripe`,
-          tooltip: "Sum of billing_transactions.amount_cents where status='succeeded' in last 30 days.",
+          tooltip: "Sum of billing_transactions.amount_cents where status='paid' in last 30 days.",
         },
         {
           key: "failed_invoices",
@@ -241,7 +241,7 @@ export async function computeFinanceBundle(): Promise<FinanceBundle> {
         sql`SELECT to_char(date_trunc('month', COALESCE(paid_at, created_at)), 'YYYY-MM') AS m,
                    SUM(amount_cents)::bigint AS n
               FROM billing_transactions
-             WHERE status = 'succeeded' AND transaction_type != 'refund'
+             WHERE status = 'paid' AND transaction_type != 'refund'
                AND COALESCE(paid_at, created_at) >= NOW() - INTERVAL '12 months'
              GROUP BY 1
              ORDER BY 1`,

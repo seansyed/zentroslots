@@ -253,15 +253,22 @@ export async function POST(req: NextRequest) {
       })
       .returning();
 
-    if (body.staffUserIds.length > 0) {
-      await db.insert(serviceStaff).values(
-        body.staffUserIds.map((userId) => ({
-          serviceId: row.id,
-          userId,
-          tenantId: admin.tenantId,
-        }))
-      );
-    }
+    // A service with zero staff is unbookable: every public booking
+    // surface (/u/[slug], the booking funnel, /api/slots) inner-joins
+    // serviceStaff, so a staff-less service is silently hidden or 404s.
+    // When the caller supplies no staff — notably the onboarding wizard,
+    // which posts only name + duration — default to linking the creating
+    // user so the freshly-created service is immediately bookable.
+    // Callers that pass an explicit staff list keep full control.
+    const staffToLink =
+      body.staffUserIds.length > 0 ? body.staffUserIds : [admin.id];
+    await db.insert(serviceStaff).values(
+      staffToLink.map((userId) => ({
+        serviceId: row.id,
+        userId,
+        tenantId: admin.tenantId,
+      }))
+    );
 
     return NextResponse.json(row);
   } catch (err) {

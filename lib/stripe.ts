@@ -17,6 +17,28 @@ export function isStripeConfigured(): boolean {
   return Boolean(process.env.STRIPE_SECRET_KEY);
 }
 
+/**
+ * Resolve a Stripe Price ID from an env var name, tolerating the
+ * historical naming divergence.
+ *
+ * The plan catalog (lib/plans.ts) declares the canonical keys with the
+ * `_MONTH` / `_YEAR` suffix, but `.env.example` / older deploy docs
+ * documented `_MONTHLY` / `_YEARLY`. An operator who populated the
+ * documented variant would otherwise get a null Price ID and every
+ * paid-plan checkout CTA would silently render disabled. We read the
+ * canonical key first and, if unset, fall back to the `*LY` variant so
+ * checkout resolves regardless of which spelling was used.
+ */
+function readEnvPrice(name: string | undefined): string | undefined {
+  if (!name) return undefined;
+  const direct = process.env[name];
+  if (direct) return direct;
+  let alt: string | undefined;
+  if (name.endsWith("_MONTH")) alt = `${name}LY`; // _MONTH -> _MONTHLY
+  else if (name.endsWith("_YEAR")) alt = `${name}LY`; // _YEAR -> _YEARLY
+  return alt ? process.env[alt] ?? undefined : undefined;
+}
+
 export async function getStripe(): Promise<Stripe> {
   if (_stripe) return _stripe;
   if (!process.env.STRIPE_SECRET_KEY) {
@@ -80,13 +102,13 @@ export function planFromStripePriceId(
   for (const planId of planIds) {
     const plan = getPlan(planId);
     if (plan.stripePriceEnvMonthly) {
-      const envVal = process.env[plan.stripePriceEnvMonthly];
+      const envVal = readEnvPrice(plan.stripePriceEnvMonthly);
       if (envVal && envVal === priceId) {
         return { plan: planId, interval: "month" };
       }
     }
     if (plan.stripePriceEnvYearly) {
-      const envVal = process.env[plan.stripePriceEnvYearly];
+      const envVal = readEnvPrice(plan.stripePriceEnvYearly);
       if (envVal && envVal === priceId) {
         return { plan: planId, interval: "year" };
       }
@@ -134,8 +156,8 @@ export function billingConfigSnapshot(): {
   for (const id of planIds) {
     const plan = getPlan(id);
     prices[id] = {
-      monthly: !!(plan.stripePriceEnvMonthly && process.env[plan.stripePriceEnvMonthly]),
-      yearly: !!(plan.stripePriceEnvYearly && process.env[plan.stripePriceEnvYearly]),
+      monthly: !!readEnvPrice(plan.stripePriceEnvMonthly),
+      yearly: !!readEnvPrice(plan.stripePriceEnvYearly),
       legacyMonthly: !!(plan.stripePriceEnvVar && process.env[plan.stripePriceEnvVar]),
     };
   }
@@ -174,12 +196,12 @@ export function priceIdFor(
   // because the legacy env var has always been monthly.
   if (interval === "year") {
     if (!plan.stripePriceEnvYearly) return null;
-    return process.env[plan.stripePriceEnvYearly] ?? null;
+    return readEnvPrice(plan.stripePriceEnvYearly) ?? null;
   }
 
   // Monthly path — prefer the new env var, then fall back to legacy.
   if (plan.stripePriceEnvMonthly) {
-    const fromNew = process.env[plan.stripePriceEnvMonthly];
+    const fromNew = readEnvPrice(plan.stripePriceEnvMonthly);
     if (fromNew) return fromNew;
   }
   if (plan.stripePriceEnvVar) {

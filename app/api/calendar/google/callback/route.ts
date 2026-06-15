@@ -4,6 +4,7 @@ import { errorResponse, getSession, HttpError } from "@/lib/auth";
 import { exchangeCode } from "@/lib/calendar/google";
 import { upsertGoogleConnection } from "@/lib/calendar/sync";
 import { audit, ipFromHeaders } from "@/lib/audit";
+import { consumeCalendarStateCookie } from "@/lib/calendar/oauth-state";
 
 const APP_BASE_URL = process.env.APP_BASE_URL ?? "http://localhost:3001";
 
@@ -32,7 +33,12 @@ export async function GET(req: NextRequest) {
 
     const session = await getSession();
     if (!session) throw new HttpError(401, "Sign in before connecting Google");
-    if (session.sub !== state) throw new HttpError(403, "OAuth state mismatch");
+    // CSRF: verify the single-use state nonce against the httpOnly cookie
+    // set at /connect (constant-time, cookie deleted on read). The user
+    // is taken from the verified session below, not from `state`.
+    if (!(await consumeCalendarStateCookie("google", state))) {
+      throw new HttpError(403, "OAuth state mismatch");
+    }
 
     const tokens = await exchangeCode(code);
     const connectionId = await upsertGoogleConnection({

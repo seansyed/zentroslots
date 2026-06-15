@@ -27,6 +27,21 @@ export async function POST(
       throw new HttpError(403, "Forbidden");
     }
 
+    // Cancellation must NOT go through this generic status flip. The
+    // dedicated cancel route (/api/bookings/[id]/cancel) runs the
+    // cancellations feature gate, the customer cancellation email, the
+    // external calendar-event deletion, and the waitlist release — none
+    // of which fire here. Accepting "cancelled" on this route would
+    // leave the DB cancelled while the calendar event lingers, the
+    // customer is never notified, and the freed slot is never offered to
+    // the waitlist. Reject it and direct callers to the cancel endpoint.
+    if (body.status === "cancelled") {
+      throw new HttpError(
+        400,
+        "Use the cancel endpoint to cancel a booking — POST /api/bookings/[id]/cancel runs the cancellation email, calendar removal, and waitlist release that this route does not."
+      );
+    }
+
     // Transitioning back to confirmed could conflict with another confirmed
     // booking on the same staff/time — the EXCLUDE constraint will reject it
     // and we surface 409.

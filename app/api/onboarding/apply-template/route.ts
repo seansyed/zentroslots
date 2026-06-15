@@ -3,7 +3,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "@/db/client";
-import { departments, intakeForms, services, tenants } from "@/db/schema";
+import { departments, intakeForms, services, serviceStaff, tenants } from "@/db/schema";
 import { errorResponse, HttpError, requireRole } from "@/lib/auth";
 import { getTemplate } from "@/lib/templates";
 import { recordOnboardingEvent } from "@/lib/onboarding/telemetry";
@@ -155,6 +155,16 @@ export async function POST(req: NextRequest) {
           })
           .returning();
         created.push(row.id);
+
+        // Link the onboarding admin as staff for every template service.
+        // Without this, the service has zero staff and the public booking
+        // page silently hides it (every booking surface inner-joins
+        // serviceStaff) — leaving the tenant "live" but unbookable.
+        await tx.insert(serviceStaff).values({
+          serviceId: row.id,
+          userId: admin.id,
+          tenantId: admin.tenantId,
+        });
       }
 
       return {

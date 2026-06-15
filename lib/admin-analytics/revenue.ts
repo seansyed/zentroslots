@@ -85,7 +85,7 @@ async function computeMonthlyRevenue(): Promise<{ data: MonthPoint[]; err?: stri
       sql`SELECT to_char(date_trunc('month', COALESCE(paid_at, created_at)), 'YYYY-MM') AS m,
                  SUM(CASE WHEN transaction_type = 'refund' THEN -amount_cents ELSE amount_cents END)::bigint AS n
             FROM billing_transactions
-           WHERE status = 'succeeded'
+           WHERE status = 'paid'
              AND COALESCE(paid_at, created_at) >= NOW() - INTERVAL '12 months'
            GROUP BY 1
            ORDER BY 1`,

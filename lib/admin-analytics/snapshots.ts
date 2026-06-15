@@ -127,11 +127,11 @@ export async function upsertDailySnapshot(date: string): Promise<void> {
             (SELECT COUNT(DISTINCT actor_user_id)::int FROM audit_logs
               WHERE created_at::date = ${date}::date AND actor_user_id IS NOT NULL),
             COALESCE((SELECT SUM(amount_cents)::bigint FROM billing_transactions
-                       WHERE status = 'succeeded' AND created_at::date = ${date}::date), 0),
+                       WHERE status = 'paid' AND created_at::date = ${date}::date), 0),
             COALESCE((SELECT SUM(amount_cents)::bigint FROM billing_transactions
-                       WHERE status = 'succeeded' AND created_at::date = ${date}::date), 0) * 12,
+                       WHERE status = 'paid' AND created_at::date = ${date}::date), 0) * 12,
             COALESCE((SELECT SUM(amount_cents)::bigint FROM billing_transactions
-                       WHERE status = 'succeeded' AND created_at::date = ${date}::date), 0),
+                       WHERE status = 'paid' AND created_at::date = ${date}::date), 0),
             COALESCE((SELECT SUM(amount_cents)::bigint FROM billing_transactions
                        WHERE status = 'refunded' AND created_at::date = ${date}::date), 0),
             (SELECT COUNT(*)::int FROM billing_transactions WHERE status = 'failed' AND created_at::date = ${date}::date),
@@ -318,7 +318,7 @@ export async function upsertTenantHealthSnapshots(date: string): Promise<{ rows:
               FROM (
                 SELECT
                   COALESCE((SELECT SUM(amount_cents)::bigint FROM billing_transactions
-                              WHERE tenant_id = ${t.id}::uuid AND status='succeeded' AND created_at > NOW() - INTERVAL '30 days'), 0) AS mrr_cents,
+                              WHERE tenant_id = ${t.id}::uuid AND status='paid' AND created_at > NOW() - INTERVAL '30 days'), 0) AS mrr_cents,
                   (SELECT COUNT(*)::int FROM bookings WHERE tenant_id = ${t.id}::uuid AND created_at > NOW() - INTERVAL '30 days') AS bookings_30d,
                   NULL::numeric(8,2) AS bookings_growth_pct,
                   (SELECT COUNT(*)::int FROM audit_logs WHERE tenant_id = ${t.id}::uuid AND action LIKE 'security.authentication.failed%' AND created_at > NOW() - INTERVAL '7 days') AS failed_logins_7d,
@@ -410,16 +410,16 @@ export async function upsertFinancialSnapshots(date: string): Promise<{ rows: nu
                  AND tenant_id IN (SELECT id FROM tenants WHERE plan = ${p.plan})),
               COALESCE((SELECT SUM(amount_cents)::bigint FROM billing_transactions bt
                          JOIN tenants t ON t.id = bt.tenant_id
-                        WHERE t.plan = ${p.plan} AND bt.status = 'succeeded' AND bt.created_at::date = ${date}::date), 0),
+                        WHERE t.plan = ${p.plan} AND bt.status = 'paid' AND bt.created_at::date = ${date}::date), 0),
               COALESCE((SELECT SUM(amount_cents)::bigint FROM billing_transactions bt
                          JOIN tenants t ON t.id = bt.tenant_id
-                        WHERE t.plan = ${p.plan} AND bt.status = 'succeeded' AND bt.created_at::date = ${date}::date), 0),
+                        WHERE t.plan = ${p.plan} AND bt.status = 'paid' AND bt.created_at::date = ${date}::date), 0),
               COALESCE((SELECT SUM(amount_cents)::bigint FROM billing_transactions bt
                          JOIN tenants t ON t.id = bt.tenant_id
                         WHERE t.plan = ${p.plan} AND bt.status = 'refunded' AND bt.created_at::date = ${date}::date), 0),
               COALESCE((SELECT SUM(amount_cents)::bigint FROM billing_transactions bt
                          JOIN tenants t ON t.id = bt.tenant_id
-                        WHERE t.plan = ${p.plan} AND bt.status = 'succeeded' AND bt.created_at::date = ${date}::date), 0) -
+                        WHERE t.plan = ${p.plan} AND bt.status = 'paid' AND bt.created_at::date = ${date}::date), 0) -
               COALESCE((SELECT SUM(amount_cents)::bigint FROM billing_transactions bt
                          JOIN tenants t ON t.id = bt.tenant_id
                         WHERE t.plan = ${p.plan} AND bt.status = 'refunded' AND bt.created_at::date = ${date}::date), 0),

@@ -6,6 +6,7 @@ import { tenants } from "@/db/schema";
 import { errorResponse, HttpError, requireRole } from "@/lib/auth";
 import { authUrl } from "@/lib/calendar/microsoft";
 import { isProviderEnabled, readEnabledIntegrations } from "@/lib/integrations";
+import { generateCalendarOAuthState, setCalendarStateCookie } from "@/lib/calendar/oauth-state";
 
 // GET /api/calendar/microsoft/connect — Wave C
 //
@@ -35,7 +36,12 @@ export async function GET() {
       throw new HttpError(403, "Microsoft Outlook is disabled by your workspace admin");
     }
 
-    return NextResponse.redirect(authUrl(user.id));
+    // CSRF: mint an unguessable single-use state nonce bound to an
+    // httpOnly cookie; the callback verifies it before accepting the
+    // code. User/tenant association comes from the verified session.
+    const state = generateCalendarOAuthState();
+    await setCalendarStateCookie("microsoft", state);
+    return NextResponse.redirect(authUrl(state));
   } catch (err) {
     return errorResponse(err);
   }

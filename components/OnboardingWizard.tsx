@@ -265,6 +265,15 @@ export default function OnboardingWizard(props: OnboardingWizardProps) {
   }
 
   async function saveHours() {
+    // Guard the all-days-off state: an empty schedule saves zero
+    // availability rows, which the API accepts but which leaves the
+    // tenant un-completable (the activation gate requires availability)
+    // and routes the user to the terminal "done" step. Require at least
+    // one working day before advancing.
+    if (days.length === 0) {
+      setError("Select at least one working day before continuing.");
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -1559,7 +1568,7 @@ function DoneStep({
             <span className="text-ink">
               Automated follow-ups, recurring appointments, waitlists, no-show recovery, custom
               domain — available whenever you&rsquo;re ready.{" "}
-              <span className="text-ink-muted">No charges during your free trial.</span>
+              <span className="text-ink-muted">Upgrade anytime · cancel anytime.</span>
             </span>
           </InsightCard>
         </FadeIn>
@@ -1663,7 +1672,7 @@ function StepFooter({
   return (
     <div className="relative mt-6 flex flex-col-reverse gap-3 border-t border-border/60 pt-5 sm:flex-row sm:items-center sm:justify-between">
       <div className="flex items-center gap-3">
-        {stepIndex > 0 && step !== "done" ? (
+        {stepIndex > 0 ? (
           <button
             type="button"
             onClick={onBack}
@@ -1677,16 +1686,19 @@ function StepFooter({
           <span />
         )}
 
-        {step !== "done" && (
-          <button
-            type="button"
-            onClick={onFinishLater}
-            disabled={busy}
-            className="text-[11.5px] font-medium text-ink-subtle underline-offset-4 hover:text-ink hover:underline disabled:opacity-50"
-          >
-            {busy ? "…" : "Finish later"}
-          </button>
-        )}
+        {/* "Finish later" stays available on every step — including the
+            terminal "done" step. If completion is blocked by an activation
+            integrity check (e.g. no availability / no bookable staff), this
+            is the user's escape hatch to /api/onboarding/skip; without it
+            the done step is a dead-end with no Back and no way out. */}
+        <button
+          type="button"
+          onClick={onFinishLater}
+          disabled={busy}
+          className="text-[11.5px] font-medium text-ink-subtle underline-offset-4 hover:text-ink hover:underline disabled:opacity-50"
+        >
+          {busy ? "…" : "Finish later"}
+        </button>
       </div>
 
       {/* Continue button — except on industry step, where each card IS the action */}

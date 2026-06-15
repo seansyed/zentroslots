@@ -427,9 +427,19 @@ export async function POST(req: NextRequest) {
             },
             // Stripe Checkout sessions expire automatically. Match our
             // soft-hold so the customer can't pay after the slot was
-            // released by the cleanup cron.
+            // released by the cleanup cron — BUT never below Stripe's hard
+            // floor of 30 minutes from now. The soft-hold default (15m, or
+            // a configured PAYMENT_HOLD_MINUTES that elapses below 30m by
+            // the time we create the session) would otherwise make Stripe
+            // reject expires_at and the whole booking 502s. We clamp to a
+            // small margin above the floor (31m) so the call always
+            // succeeds; the cleanup cron still releases the slot at the
+            // true hold expiry independently of the Checkout TTL.
             expires_at: Math.floor(
-              (pending.booking.paymentHoldExpiresAt?.getTime() ?? Date.now() + 30 * 60_000) / 1000
+              Math.max(
+                pending.booking.paymentHoldExpiresAt?.getTime() ?? 0,
+                Date.now() + 31 * 60_000
+              ) / 1000
             ),
           },
           { idempotencyKey: `booking-checkout:${pending.booking.id}` }

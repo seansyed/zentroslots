@@ -504,7 +504,7 @@ async function seedActivityEvents(
           amountCents: monthlyAmount,
           currency: "usd",
           transactionType: "subscription_payment",
-          status: failed ? "failed" : "succeeded",
+          status: failed ? "failed" : "paid",
           paidAt: failed ? null : ts,
           createdAt: ts,
         });
@@ -526,7 +526,7 @@ async function seedActivityEvents(
         amountCents: amt,
         currency: "usd",
         transactionType: "booking_payment",
-        status: failed ? "failed" : "succeeded",
+        status: failed ? "failed" : "paid",
         paidAt: failed ? null : ts,
         createdAt: ts,
       });

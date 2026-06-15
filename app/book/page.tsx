@@ -3,6 +3,12 @@ import { serviceStaff, services, tenants, users } from "@/db/schema";
 import { and, eq } from "drizzle-orm";
 import Link from "next/link";
 
+// Public directory backed by a live DB query — render at request time, not
+// at build. Statically prerendering this page makes `next build` depend on
+// DB connectivity (it fails with ECONNREFUSED when the DB is unreachable
+// during a deploy build). It is inherently request-time content.
+export const dynamic = "force-dynamic";
+
 // NOTE: This is a public directory page that lists all active services
 // across all tenants. In a true production multi-tenant deployment this
 // page would be replaced by per-tenant subdomains (`acme.app.com/book`).

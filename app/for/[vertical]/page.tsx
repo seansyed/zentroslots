@@ -119,7 +119,7 @@ export default async function VerticalLandingPage(props: {
             See pricing
           </Link>
         </div>
-        <div className="mt-3 text-xs text-slate-500">14-day free trial on paid plans · no credit card required</div>
+        <div className="mt-3 text-xs text-slate-500">Free plan to start · no credit card · upgrade or cancel anytime</div>
       </section>
 
       {/* What you get */}

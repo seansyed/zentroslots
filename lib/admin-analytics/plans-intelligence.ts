@@ -75,13 +75,13 @@ async function computePlanRow(
           (SELECT COUNT(*)::int FROM billing_transactions bt
              JOIN tenants t ON t.id = bt.tenant_id
             WHERE t.current_plan = ${slug}
-              AND bt.status = 'succeeded'
+              AND bt.status = 'paid'
               AND bt.created_at >= NOW() - INTERVAL '30 days') AS charges_30d,
           COALESCE(
             (SELECT SUM(bt.amount_cents)::bigint FROM billing_transactions bt
                JOIN tenants t ON t.id = bt.tenant_id
               WHERE t.current_plan = ${slug}
-                AND bt.status = 'succeeded'
+                AND bt.status = 'paid'
                 AND bt.created_at >= NOW() - INTERVAL '30 days'),
             0
           ) AS revenue_30d_cents,
