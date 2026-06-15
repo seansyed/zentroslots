@@ -12,6 +12,12 @@ next-env.d.ts
 .env.production
 .env.*.local
 
+# Android/Java signing keystores + credentials — NEVER commit these.
+# (The ZentroMeet upload key lives OUTSIDE the repo at C:\ZentroMeet-Signing.)
+*.jks
+*.keystore
+*keystore-credentials*.txt
+
 # Logs & dev artifacts
 *.log
 .devserver.log
