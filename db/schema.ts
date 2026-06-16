@@ -1401,6 +1401,13 @@ export const communicationLogs = pgTable(
     failureReason: text("failure_reason"),
     skippedReason: varchar("skipped_reason", { length: 60 }),
     sentAt: timestamp("sent_at", { withTimezone: true }),
+    // Optional discriminator folded into the success-dedup key so legitimately
+    // distinct events for the same booking (e.g. a 2nd reschedule to a NEW time)
+    // are not skipped as duplicates, while same-value retries still dedup.
+    // NULL for every existing caller (confirmation/reminder/cancel) → they keep
+    // deduping on (tenant,booking,event,channel) via comm_logs_unique_success.
+    // Migration: 0071_comm_logs_dedupe_key.sql
+    dedupeKey: varchar("dedupe_key", { length: 120 }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({

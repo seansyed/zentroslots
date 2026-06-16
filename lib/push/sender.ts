@@ -18,14 +18,17 @@
  *
  * 5xx + network errors → transient, schedule retry with backoff.
  *
- * Phase 1C scope: send + classify. Receipt-fetching (step 2 of the
- * Expo flow) is deferred — 'ok' from the send call is treated as
- * delivered. Worth adding in Phase 1D when we want strict delivery
- * confirmation for retention reporting.
+ * Send + classify is `sendExpoPushBatch`. Receipt-fetching (step 2 of the
+ * Expo flow) is `fetchExpoPushReceipts` — a 'sent' ticket is only a HANDOFF
+ * to Expo; the receipt is the authoritative delivery result and is where
+ * DeviceNotRegistered surfaces for tokens that died after registration.
+ * scripts/process-push-receipts.ts polls receipts and prunes dead tokens.
  */
 
 const EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send";
+const EXPO_RECEIPTS_URL = "https://exp.host/--/api/v2/push/getReceipts";
 const MAX_BATCH = 100;
+const MAX_RECEIPT_BATCH = 1000; // Expo accepts up to 1000 receipt ids per request
 // Hard ceiling so a single batch can't burn the worker — Expo accepts
 // 100 messages per request, we'll go up to that.
 
@@ -160,4 +163,85 @@ export async function sendExpoPushBatch(
   }
 
   return results;
+}
+
+// ─── Receipt fetching (step 2 of the Expo flow) ────────────────────────
+
+export type ExpoReceiptResult =
+  /** Expo confirmed delivery to the provider (FCM/APNs). */
+  | { status: "ok" }
+  /** A receipt error. tokenInvalid → delete the token; transient → re-check. */
+  | { status: "error"; message: string; errorCode: string | null; tokenInvalid: boolean; transient: boolean }
+  /** Receipt not yet available (Expo omits it) — re-check next tick. */
+  | { status: "pending" };
+
+type ExpoReceipt = {
+  status?: "ok" | "error";
+  message?: string;
+  details?: { error?: string };
+};
+
+/**
+ * Fetch Expo delivery receipts for a set of receipt ids. Returns a map keyed
+ * by receipt id. Ids that are NOT present in Expo's response are returned as
+ * `{ status: "pending" }` (still processing). NEVER throws — on network/5xx
+ * the whole requested chunk is returned as transient errors so the caller
+ * re-checks rather than dropping tokens.
+ */
+export async function fetchExpoPushReceipts(
+  receiptIds: string[],
+): Promise<Record<string, ExpoReceiptResult>> {
+  const out: Record<string, ExpoReceiptResult> = {};
+
+  for (let i = 0; i < receiptIds.length; i += MAX_RECEIPT_BATCH) {
+    const chunk = receiptIds.slice(i, i + MAX_RECEIPT_BATCH);
+    let data: Record<string, ExpoReceipt> | null = null;
+    let networkError: string | null = null;
+
+    try {
+      const res = await fetch(EXPO_RECEIPTS_URL, {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Accept-Encoding": "gzip, deflate",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ ids: chunk }),
+      });
+      if (!res.ok) {
+        networkError = `Expo HTTP ${res.status}`;
+      } else {
+        const json = (await res.json()) as { data?: Record<string, ExpoReceipt> };
+        data = json.data && typeof json.data === "object" ? json.data : null;
+        if (!data) networkError = "Expo returned unexpected receipts payload";
+      }
+    } catch (err) {
+      networkError = err instanceof Error ? err.message : "Unknown receipts error";
+    }
+
+    for (const id of chunk) {
+      if (networkError || !data) {
+        // Transient — re-check next tick; do NOT delete the token.
+        out[id] = { status: "error", message: networkError ?? "no data", errorCode: null, tokenInvalid: false, transient: true };
+        continue;
+      }
+      const r = data[id];
+      if (!r) {
+        out[id] = { status: "pending" }; // not ready yet
+      } else if (r.status === "ok") {
+        out[id] = { status: "ok" };
+      } else {
+        const code = r.details?.error ?? null;
+        out[id] = {
+          status: "error",
+          message: r.message ?? code ?? "Expo receipt error",
+          errorCode: code,
+          tokenInvalid: code ? PERMANENT_TOKEN_ERRORS.has(code) : false,
+          transient: code ? TRANSIENT_ERRORS.has(code) : false,
+        };
+      }
+    }
+  }
+
+  return out;
 }

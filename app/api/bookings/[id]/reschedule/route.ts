@@ -12,9 +12,7 @@ import { releaseSlot } from "@/lib/waitlists/releaseSlot";
 import { notifySlotAvailable } from "@/lib/waitlists/notifications";
 import { bookingRescheduleSchema } from "@/lib/validation";
 import { getAvailableSlots } from "@/lib/availability";
-import { renderReschedule, sendEmail, type BookingForEmail } from "@/lib/email";
-import { gateSchedulingEmail, logSuppressed } from "@/lib/communications/preferences";
-import { signBookingToken } from "@/lib/tokens";
+import { triggerAutomation } from "@/lib/communications/engine";
 import { audit } from "@/lib/audit";
 import { notify } from "@/lib/notify";
 
@@ -143,54 +141,20 @@ export async function POST(
       console.error("Waitlist release after reschedule failed:", wlErr);
     }
 
-    // Best-effort email — never fails the request. The reschedule
-    // itself already committed above.
+    // Best-effort email via the engine (pref gate + idempotency + ICS) — never
+    // fails the request; the reschedule already committed above. dedupeKey =
+    // the NEW start instant so each legit move emails once while a same-time
+    // retry dedups.
     try {
-      const gate = await gateSchedulingEmail({
+      await triggerAutomation({
         tenantId: updated.tenantId,
-        email: updated.clientEmail,
-        kind: "appointment_rescheduled",
+        bookingId: updated.id,
+        eventType: "appointment.rescheduled",
+        attachIcs: true,
+        dedupeKey: `r:${updated.startAt.getTime()}`,
       });
-      if (!gate.allowed) {
-        logSuppressed({
-          kind: "appointment_rescheduled",
-          reason: gate.reason,
-          tenantId: updated.tenantId,
-          email: updated.clientEmail,
-          bookingId: updated.id,
-        });
-      } else {
-        const tenant = await db.query.tenants.findFirst({
-          where: eq(tenants.id, updated.tenantId),
-        });
-        const [cancelToken, rescheduleToken] = await Promise.all([
-          signBookingToken({ bookingId: updated.id, tenantId: updated.tenantId, kind: "cancel" }),
-          signBookingToken({ bookingId: updated.id, tenantId: updated.tenantId, kind: "reschedule" }),
-        ]);
-        const payload: BookingForEmail = {
-          id: updated.id,
-          serviceName: service.name,
-          staffName: staff.name,
-          staffEmail: staff.email,
-          startAt: updated.startAt,
-          endAt: updated.endAt,
-          clientName: updated.clientName,
-          clientEmail: updated.clientEmail,
-          clientTimezone: staff.timezone,
-          meetLink: updated.meetLink,
-          tenantName: tenant?.name ?? "",
-          cancelToken,
-          rescheduleToken,
-          // Wave A — pass through so reschedule emails fall back to
-          // honest copy when a video service didn't regenerate a meet
-          // link on reschedule (e.g. host connection stale).
-          videoProvider: service.videoProvider ?? null,
-        };
-        const tpl = renderReschedule(payload);
-        await sendEmail({ to: updated.clientEmail, ...tpl });
-      }
     } catch (e) {
-      console.error("Reschedule email failed:", e);
+      console.error("Reschedule automation failed:", e);
     }
 
     audit({

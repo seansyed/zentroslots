@@ -9,8 +9,7 @@ import { onBookingCancelled } from "@/lib/calendar/sync";
 import { enqueueBookingPush } from "@/lib/push/enqueue";
 import { releaseSlot } from "@/lib/waitlists/releaseSlot";
 import { notifySlotAvailable } from "@/lib/waitlists/notifications";
-import { renderCancellation, sendEmail, type BookingForEmail } from "@/lib/email";
-import { gateSchedulingEmail, logSuppressed } from "@/lib/communications/preferences";
+import { triggerAutomation } from "@/lib/communications/engine";
 import { audit } from "@/lib/audit";
 import { notify } from "@/lib/notify";
 import { postTenantWebhook } from "@/lib/outbound";
@@ -92,51 +91,20 @@ export async function POST(
       console.error("Waitlist release failed (cancel kept):", wlErr);
     }
 
-    // Best-effort cancellation email — never fails the request. The
-    // booking is already cancelled in the DB above; the gate only
-    // affects whether the customer hears about it by email.
+    // Best-effort cancellation email via the engine (pref gate + idempotency +
+    // METHOD:CANCEL ICS) — never fails the request; the booking is already
+    // cancelled above. No dedupeKey: a booking cancels once, and the route
+    // early-returns on terminal states, so the (tenant,booking,event,channel)
+    // dedup is correct.
     try {
-      const gate = await gateSchedulingEmail({
-        tenantId: caller.tenantId,
-        email: updated.clientEmail,
-        kind: "appointment_cancelled",
+      await triggerAutomation({
+        tenantId: updated.tenantId,
+        bookingId: updated.id,
+        eventType: "appointment.cancelled",
+        attachIcs: true,
       });
-      if (!gate.allowed) {
-        logSuppressed({
-          kind: "appointment_cancelled",
-          reason: gate.reason,
-          tenantId: caller.tenantId,
-          email: updated.clientEmail,
-          bookingId: updated.id,
-        });
-      } else {
-        const [svc, staff, tenant] = await Promise.all([
-          db.query.services.findFirst({ where: eq(services.id, updated.serviceId) }),
-          db.query.users.findFirst({ where: eq(users.id, updated.staffUserId) }),
-          db.query.tenants.findFirst({ where: eq(tenants.id, updated.tenantId) }),
-        ]);
-        if (svc && staff && tenant) {
-          const payload: BookingForEmail = {
-            id: updated.id,
-            serviceName: svc.name,
-            staffName: staff.name,
-            staffEmail: staff.email,
-            startAt: updated.startAt,
-            endAt: updated.endAt,
-            clientName: updated.clientName,
-            clientEmail: updated.clientEmail,
-            clientTimezone: staff.timezone,
-            meetLink: updated.meetLink,
-            tenantName: tenant.name,
-            // Wave A — consistent hint across all email touchpoints.
-            videoProvider: svc.videoProvider ?? null,
-          };
-          const tpl = renderCancellation(payload);
-          await sendEmail({ to: updated.clientEmail, ...tpl });
-        }
-      }
     } catch (e) {
-      console.error("Cancellation email failed:", e);
+      console.error("Cancellation automation failed:", e);
     }
 
     audit({

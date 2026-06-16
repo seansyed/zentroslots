@@ -75,6 +75,7 @@ export type AdminAlertKind =
   | "plan_upgrade"
   | "plan_downgrade"
   | "payment_failed"
+  | "subscription_reconcile_drift"   // DB tenant subscription drifted from Stripe
   // Webhook / integration plane
   | "stripe_webhook_error"
   | "oauth_provider_error"
@@ -167,6 +168,8 @@ const DEFAULT_COOLDOWN_MS = Number(
 const PER_KIND_COOLDOWN_MS: Partial<Record<AdminAlertKind, number>> = {
   // Loud but rate-limited so we get hourly digests, not floods.
   payment_failed: 60 * 60_000,
+  // Chronic subscription drift should surface hourly, not every cron tick.
+  subscription_reconcile_drift: 60 * 60_000,
   stripe_webhook_error: 30 * 60_000,
   email_provider_error: 30 * 60_000,
   reminder_delivery_failure: 30 * 60_000,

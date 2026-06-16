@@ -27,10 +27,8 @@ import { isFeatureEnabled } from "@/lib/features";
 import { onBookingRescheduled } from "@/lib/calendar/sync";
 import { releaseSlot } from "@/lib/waitlists/releaseSlot";
 import { notifySlotAvailable } from "@/lib/waitlists/notifications";
-import { signBookingToken } from "@/lib/tokens";
 import { getAvailableSlots } from "@/lib/availability";
-import { renderReschedule, sendEmail, type BookingForEmail } from "@/lib/email";
-import { gateSchedulingEmail, logSuppressed } from "@/lib/communications/preferences";
+import { triggerAutomation } from "@/lib/communications/engine";
 
 export type RescheduleSource = "public_token" | "portal";
 
@@ -191,54 +189,21 @@ export async function performReschedule(args: RescheduleArgs): Promise<Reschedul
     console.error(`[reschedule:${args.source}] waitlist release failed:`, wlErr);
   }
 
-  // ── 6. Customer email (gated, best-effort) ──────────────────────
+  // ── 6. Customer email (via the engine — pref gate + idempotency + ICS) ──
+  // dedupeKey = the NEW start instant: each legitimate move emails once,
+  // while a retry of the SAME move (same new time) dedups. The engine owns
+  // the customer-preference gate, template resolution, token signing, the
+  // communication_logs row, and the ICS attachment.
   try {
-    const gate = await gateSchedulingEmail({
+    await triggerAutomation({
       tenantId: updated.tenantId,
-      email: updated.clientEmail,
-      kind: "appointment_rescheduled",
+      bookingId: updated.id,
+      eventType: "appointment.rescheduled",
+      attachIcs: true,
+      dedupeKey: `r:${updated.startAt.getTime()}`,
     });
-    if (!gate.allowed) {
-      logSuppressed({
-        kind: "appointment_rescheduled",
-        reason: gate.reason,
-        tenantId: updated.tenantId,
-        email: updated.clientEmail,
-        bookingId: updated.id,
-      });
-    } else {
-      const tenant = await db.query.tenants.findFirst({
-        where: eq(tenants.id, args.tenantId),
-      });
-      const [cancelToken, rescheduleToken] = await Promise.all([
-        signBookingToken({ bookingId: updated.id, tenantId: updated.tenantId, kind: "cancel" }),
-        signBookingToken({ bookingId: updated.id, tenantId: updated.tenantId, kind: "reschedule" }),
-      ]);
-      const ep: BookingForEmail = {
-        id: updated.id,
-        serviceName: service.name,
-        staffName: staff.name,
-        staffEmail: staff.email,
-        startAt: updated.startAt,
-        endAt: updated.endAt,
-        clientName: updated.clientName,
-        clientEmail: updated.clientEmail,
-        clientTimezone: staff.timezone,
-        meetLink: updated.meetLink,
-        tenantName: tenant?.name ?? "",
-        cancelToken,
-        rescheduleToken,
-        // Wave A — pass the service's video setting so the renderer
-        // can fall back to honest copy if the reschedule didn't
-        // produce a meet link (e.g. host's connection went stale
-        // between the original booking and the reschedule).
-        videoProvider: service.videoProvider ?? null,
-      };
-      const tpl = renderReschedule(ep);
-      await sendEmail({ to: updated.clientEmail, ...tpl });
-    }
   } catch (e) {
-    console.error(`[reschedule:${args.source}] email failed:`, e);
+    console.error(`[reschedule:${args.source}] automation failed:`, e);
   }
 
   return { ok: true, booking: updated, service, staff };

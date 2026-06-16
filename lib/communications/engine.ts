@@ -25,7 +25,7 @@
  * because we don't have a queue (intentional, per task rules).
  */
 
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import {
@@ -99,6 +99,12 @@ export type TriggerArgs = {
    *  flow passes their address here. Leave unset for all customer-facing
    *  appointment events (they correctly target the booking's client). */
   recipientOverride?: string;
+  /** Optional deterministic discriminator folded into the success-dedup key.
+   *  Used by reschedule (`r:<new-start-epoch>`) so each legit move to a NEW
+   *  time emails once while same-time retries (webhook/double-submit) dedup.
+   *  Leave unset for one-shot events (confirmation/cancellation/reminder) —
+   *  they dedup on (tenant, booking, event, channel). */
+  dedupeKey?: string;
 };
 
 export type TriggerResult =
@@ -116,13 +122,21 @@ export async function triggerAutomation(args: TriggerArgs): Promise<TriggerResul
 
   try {
     // ── (1) Idempotency — bail if we've already successfully sent.
+    // The dedupeKey term lets a legitimately-distinct event for the same
+    // booking (e.g. a 2nd reschedule to a NEW time, keyed on the new instant)
+    // proceed, while a same-key retry collides and is skipped. Callers that
+    // pass no dedupeKey match the NULL-key rows (confirmation/reminder/cancel)
+    // — unchanged behavior.
     const already = await db.query.communicationLogs.findFirst({
       where: and(
         eq(communicationLogs.tenantId, args.tenantId),
         eq(communicationLogs.bookingId, args.bookingId),
         eq(communicationLogs.eventType, args.eventType),
         eq(communicationLogs.channel, channel),
-        eq(communicationLogs.status, "sent")
+        eq(communicationLogs.status, "sent"),
+        args.dedupeKey
+          ? eq(communicationLogs.dedupeKey, args.dedupeKey)
+          : isNull(communicationLogs.dedupeKey)
       ),
     });
     if (already) {
@@ -465,6 +479,7 @@ type LogSkeleton = {
   templateId?: string | null;
   channel: string;
   eventType: string;
+  dedupeKey?: string | null;
 };
 
 function skeleton(
@@ -480,6 +495,7 @@ function skeleton(
     templateId: templateId ?? null,
     channel,
     eventType: args.eventType,
+    dedupeKey: args.dedupeKey ?? null,
   };
 }
 
@@ -509,6 +525,7 @@ async function writeLog(
         failureReason: s.failureReason ?? null,
         skippedReason: s.skippedReason ?? null,
         sentAt: s.sentAt ?? null,
+        dedupeKey: s.dedupeKey ?? null,
       })
       .returning({ id: communicationLogs.id });
 

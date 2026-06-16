@@ -1,4 +1,4 @@
-import { and, eq, gte, lt, or, sql } from "drizzle-orm";
+import { and, eq, gt, gte, lt, or, sql } from "drizzle-orm";
 import { fromZonedTime } from "date-fns-tz";
 import { addDays, addMinutes, areIntervalsOverlapping, parseISO } from "date-fns";
 
@@ -264,13 +264,29 @@ async function getBookingsInRange(
   staffUserId: string,
   window: Interval
 ): Promise<Interval[]> {
+  // Busy = confirmed bookings PLUS live (non-expired) pending_payment HOLDS.
+  // Including a slot that's mid-checkout stops two public customers from being
+  // shown the same slot during the ~15-min payment window. An EXPIRED hold
+  // (payment_hold_expires_at <= now — which the holds:expire cron will cancel)
+  // is deliberately NOT suppressed, so a stalled cron can never strand slots.
+  // Operator + free bookings never enter pending_payment, so they're unaffected.
+  // The DB constraints (bookings_no_overlap EXCLUDE + the pending_payment
+  // partial-unique) remain the authoritative hard backstop; this is a
+  // visibility layer above them, not a replacement.
+  const now = new Date();
   const rows = await db
     .select({ startAt: bookings.startAt, endAt: bookings.endAt })
     .from(bookings)
     .where(
       and(
         eq(bookings.staffUserId, staffUserId),
-        eq(bookings.status, "confirmed"),
+        or(
+          eq(bookings.status, "confirmed"),
+          and(
+            eq(bookings.status, "pending_payment"),
+            gt(bookings.paymentHoldExpiresAt, now)
+          )
+        ),
         gte(bookings.endAt, window.start),
         lt(bookings.startAt, window.end)
       )
