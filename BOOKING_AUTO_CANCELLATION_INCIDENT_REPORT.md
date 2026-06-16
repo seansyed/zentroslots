@@ -53,8 +53,10 @@ New `isInternalOperatorBooking(session, serviceTenantId)` in `lib/auth.ts`: true
 - `tests/booking-source.test.ts` (4) — operator (admin/manager/staff) of the service tenant → internal (no hold); anonymous (null session) → not internal; cross-tenant session → not internal; authority is session-derived (no spoofable client param).
 - Full backend suite + targeted booking/payment/hold tests — no regression.
 
-## Deployment
-Backend-only. Process: commit + push → pre-deploy PG backup → record prod commit → fast-forward prod to the exact commit → build once → PM2 restart once → `pm2 save` → verify `/api/health` → verify the `holds:expire` cron is still registered + the Stripe webhook endpoint healthy. (Filled in on deploy.)
+## Deployment — DONE + verified (2026-06-16)
+Backend-only. Commit `7c9a073` pushed to origin/main; prod (35.83.95.42) fast-forwarded `8349572 → 7c9a073` (backend diff = only `app/api/bookings/route.ts` + `lib/auth.ts`). Pre-deploy PG backup OK (1.87 MB, 619 restore-list lines). Built once → PM2 restart once → `pm2 save` (online, 0 unstable restarts). Verified: `/api/health` 200 (edge + local:3001); `isInternalOperatorBooking` live in the deployed route; `holds:expire` cron still registered; Stripe webhook endpoint healthy (400 on unsigned POST, not 5xx); **0 outstanding `pending_payment` holds**. No schema change, no migration.
+
+Because the fix is backend-only and server-authoritative, the **already-installed** mobile preview is fixed by this deploy — no app rebuild, no Codemagic, no version bump (the P0 build freeze is honored).
 
 ## Rollback
 Revert the `app/api/bookings/route.ts` gate + `lib/auth.ts` helper (single commit), rebuild, restart. No data migration to undo. The `holds:expire` cron and payment lifecycle are unchanged, so reverting restores the prior behavior exactly.
