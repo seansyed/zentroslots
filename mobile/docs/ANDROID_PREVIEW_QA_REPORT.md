@@ -1,3 +1,29 @@
+# UPDATE 10 — versionCode 16 preview: pre-launch push audit + fixes, 2026-06-16
+
+**Android versionCode:** 16 · **iOS buildNumber:** 12 · **Backend:** deployed (`69cacdf`). Full detail in [../../PRELAUNCH_EMAIL_PUSH_STRIPE_AUDIT_REPORT.md](../../PRELAUNCH_EMAIL_PUSH_STRIPE_AUDIT_REPORT.md).
+
+Pre-launch audit of mobile push (provider = **Expo Push** → FCM/APNs; tokens in `push_tokens.expo_token`; queue in `push_deliveries` with retries + receipt column; `push:deliver` cron runs every minute). **Production status: `push_tokens` = 0 and `push_deliveries` = 0 — push has NEVER been exercised in prod.** Mobile push is therefore **device-UNVERIFIED**.
+
+Fixes in this build:
+- **Sign-out now detaches only THIS device's token** (was clearing every device the user owns). `mobile/src/api/pushTokens.ts`, `usePushNotifications.ts`.
+- **Push body absolute time (>24h) now in the STAFF timezone with an explicit abbreviation** (was server-local) — same contract as the appointment-time fix. `lib/push/enqueue.ts` (backend, deployed).
+- **Notifications settings copy** corrected to "new bookings, reschedules, and cancellations" (reminder push is not wired). `mobile/app/settings/notifications.tsx`.
+
+Flagged (not fixed): no Expo **receipt-check** pass to prune `DeviceNotRegistered` tokens (P1, low urgency at 0 tokens); push body carries customer name (privacy-posture decision).
+
+**OPERATOR DEVICE QA REQUIRED (BLOCKER):** build android-preview (vc16) on Codemagic, install, then verify a token registers (`push_tokens` > 0), and that new-booking / reschedule / cancellation push delivers, taps deep-link to the appointment, and the time matches web. Foreground / background / force-closed all required. Push is NOT launch-verified until this passes.
+
+```
+ANDROID VERSION CODE:   16
+IOS BUILD NUMBER:       12
+PUSH PROVIDER:          Expo Push (FCM/APNs)
+PROD TOKENS / DELIVERIES: 0 / 0  (UNVERIFIED on device)
+CODEMAGIC BUILD:        OPERATOR ACTION — android-preview on main (versionCode 16)
+DEVICE QA:              PENDING (BLOCKER) — token registration + push delivery + tap routing + tz match
+```
+
+---
+
 # UPDATE 9 — versionCode 15 preview: P0 appointment timezone fix (7h-early), 2026-06-16
 
 **Android versionCode:** 15 · **iOS buildNumber:** 11 · **Backend:** additive viewer-tz display labels on the booking/customer endpoints — **deploy required**. Full detail in [MOBILE_APPOINTMENT_TIMEZONE_P0_REPORT.md](MOBILE_APPOINTMENT_TIMEZONE_P0_REPORT.md).

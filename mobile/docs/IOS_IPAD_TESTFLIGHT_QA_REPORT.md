@@ -4,6 +4,30 @@ Status of the iOS (iPhone + iPad) build + TestFlight pipeline.
 
 ---
 
+# UPDATE 2 — iOS push readiness (pre-launch audit), 2026-06-16
+
+**iOS buildNumber:** 12 (was 11). Full detail in [../../PRELAUNCH_EMAIL_PUSH_STRIPE_AUDIT_REPORT.md](../../PRELAUNCH_EMAIL_PUSH_STRIPE_AUDIT_REPORT.md).
+
+iOS push provider = **Expo Push → APNs**. The app requests notification permission and
+registers an Expo token (`getExpoPushTokenAsync`) which requires the **`aps-environment`**
+entitlement + an **APNs Auth Key (.p8)** on the Apple side. Backend queue (`push_deliveries`)
++ `push:deliver` cron are live. **Production tokens/deliveries = 0/0 → iOS push is UNVERIFIED.**
+
+**iOS PUSH — BLOCKED (OPERATOR):**
+- No APNs Auth Key configured; no signed TestFlight build yet (native iOS workflow is ready —
+  see [CODEMAGIC_NATIVE_IOS_BUILD.md](CODEMAGIC_NATIVE_IOS_BUILD.md), needs the App Store
+  Connect API key integration + APNs key).
+- The App Store provisioning profile must include **Push Notifications** + **Associated Domains**
+  capabilities (the only two entitlements the app genuinely uses).
+- Physical iPhone **and** iPad push verification is **PENDING** — do not claim iOS push
+  production-ready until a signed TestFlight build delivers a push on a real device. No iOS
+  device results are fabricated.
+
+Backend push fixes that also benefit iOS (deployed `69cacdf`): single-device logout token
+removal; push body absolute time rendered in the staff timezone with an explicit abbreviation.
+
+---
+
 # UPDATE 1 — ios-production converted to a NATIVE Codemagic build (EAS removed), 2026-06-16
 
 **Commit:** (this push to `main`) · **iOS buildNumber:** `11` (unchanged — CI
