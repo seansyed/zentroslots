@@ -6,8 +6,9 @@
  *   • ?status=pending|confirmed|cancelled|completed|no_show
  *   • ?cursor=<ISO timestamp> + ?limit=<n>
  *
- * It returns a raw array of bookings (no { rows, nextCursor } wrapper).
- * We normalize that here so screens don't learn the wire shape.
+ * It returns `{ rows, nextCursor }` (DESC by startAt, 90-day floor). Older
+ * builds returned a raw array, so the client tolerates both shapes. We
+ * normalize here so screens don't learn the wire shape.
  */
 
 import { apiDelete, apiGet, apiPost } from "./client";

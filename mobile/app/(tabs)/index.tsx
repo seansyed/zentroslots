@@ -24,7 +24,7 @@
 
 import * as React from "react";
 import { Pressable, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
-import { useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 
@@ -32,8 +32,10 @@ import { ApiError } from "@/api/client";
 import { ActivityRow } from "@/components/ui/ActivityRow";
 import { AppointmentRow } from "@/components/ui/AppointmentRow";
 import { Avatar } from "@/components/ui/Avatar";
+import { Button } from "@/components/ui/Button";
 import { Card, PressableCard } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { Logo } from "@/components/ui/Logo";
 import { ErrorState } from "@/components/ui/ErrorState";
 import { GradientHeroCard } from "@/components/ui/GradientHeroCard";
 import { KpiCard } from "@/components/ui/KpiCard";
@@ -47,7 +49,7 @@ import { SectionFade } from "@/components/ui/SectionFade";
 import { SectionHeader } from "@/components/ui/SectionHeader";
 import { Shimmer } from "@/components/ui/Shimmer";
 import { AppText } from "@/components/ui/Text";
-import { useAppointments } from "@/hooks/useAppointments";
+import { useAppointments, useUpcomingAppointments } from "@/hooks/useAppointments";
 import { useProfile } from "@/hooks/useProfile";
 import { usePresenceStore } from "@/store/presenceStore";
 import { colors, radius, spacing, typography } from "@/theme";
@@ -294,20 +296,27 @@ export default function HomeScreen() {
   });
   const appts = apptsQ.data;
   const apptsLoading = apptsQ.isLoading;
-  const isError = apptsQ.isError;
 
   const kpis = React.useMemo<Kpis | null>(() => {
     if (!appts?.rows) return null;
     return computeKpis(appts.rows, now);
   }, [appts, now]);
 
-  const upcoming = React.useMemo<Appointment[]>(() => {
-    if (!appts?.rows) return [];
-    return appts.rows
-      .filter((r) => new Date(r.startAt) >= now && (r.status === "confirmed" || r.status === "pending"))
-      .sort((a, b) => new Date(a.startAt).getTime() - new Date(b.startAt).getTime())
-      .slice(0, 3);
-  }, [appts, now]);
+  // "Up next" is sourced from a dedicated status-filtered query (NOT the KPI
+  // window), so cancelled/completed rows can't crowd out near-term bookings and
+  // a booking weeks out still shows. See useUpcomingAppointments.
+  const upcomingQ = useUpcomingAppointments(3);
+  const upcoming = upcomingQ.upcoming;
+
+  // The Home tab stays mounted across tab switches, so refetchOnMount won't fire
+  // on re-focus. Refetch upcoming whenever Home regains focus so a booking made
+  // from another screen (or elapsed time) is reflected. (`refetch` is stable.)
+  const refetchUpcoming = upcomingQ.refetch;
+  useFocusEffect(
+    React.useCallback(() => {
+      void refetchUpcoming();
+    }, [refetchUpcoming]),
+  );
 
   const activity = React.useMemo<ActivityItem[]>(() => {
     if (!appts?.rows) return [];
@@ -326,12 +335,12 @@ export default function HomeScreen() {
 
   const onRefresh = React.useCallback(() => {
     void Haptics.selectionAsync().catch(() => {});
-    return Promise.all([profileQ.refetch(), apptsQ.refetch()]);
-  }, [profileQ, apptsQ]);
+    return Promise.all([profileQ.refetch(), apptsQ.refetch(), upcomingQ.refetch()]);
+  }, [profileQ, apptsQ, upcomingQ]);
 
   const refresh = (
     <RefreshControl
-      refreshing={apptsQ.isFetching || profileQ.isFetching}
+      refreshing={apptsQ.isFetching || profileQ.isFetching || upcomingQ.isFetching}
       onRefresh={onRefresh}
       tintColor={colors.brand}
     />
@@ -352,6 +361,8 @@ export default function HomeScreen() {
           <View style={styles.heroTopRow}>
             <View style={{ flex: 1, minWidth: 0 }}>
               <View style={styles.eyebrowRow}>
+                {/* Official ZentroMeet platform badge (not tenant logo). */}
+                <Logo size={26} />
                 <AppText variant="eyebrow" color="brand">
                   {greeting}
                 </AppText>
@@ -525,34 +536,53 @@ export default function HomeScreen() {
             label="Share"
             icon="share-outline"
             tone="warning"
-            onPress={() => router.push("/(tabs)/settings")}
+            onPress={() => router.push("/share")}
           />
         </View>
       </SectionFade>
 
       {/* ── Up Next ──────────────────────────────────────────────── */}
       <SectionFade delay={200} style={{ marginTop: spacing.xl }}>
-        <SectionHeader
-          eyebrow="Up next"
-          title={upcoming.length === 0 ? "No upcoming bookings" : "Coming up"}
-          description={
-            upcoming.length === 0
-              ? "Confirmed bookings will appear here in real time."
-              : "Tap to see full details."
-          }
-        />
-        {isError ? (
+        <View style={styles.upNextHeader}>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <SectionHeader
+              eyebrow="Up next"
+              title={upcoming.length === 0 ? "No upcoming bookings" : "Coming up"}
+              description={
+                upcoming.length === 0
+                  ? "Confirmed bookings will appear here in real time."
+                  : "Tap to see full details."
+              }
+            />
+          </View>
+          {upcoming.length > 0 ? (
+            <Pressable
+              onPress={() => {
+                void Haptics.selectionAsync().catch(() => {});
+                router.push("/(tabs)/appointments");
+              }}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel="View all appointments"
+              style={styles.viewAllBtn}
+            >
+              <AppText variant="smallStrong" style={{ color: colors.brand }}>View all</AppText>
+              <Ionicons name="chevron-forward" size={14} color={colors.brand} />
+            </Pressable>
+          ) : null}
+        </View>
+        {upcomingQ.isError ? (
           <Card>
             <ErrorState
-              kind={apptsQ.error instanceof ApiError ? apptsQ.error.kind : "unknown"}
-              description={apptsQ.error instanceof Error ? apptsQ.error.message : undefined}
+              kind={upcomingQ.error instanceof ApiError ? upcomingQ.error.kind : "unknown"}
+              description={upcomingQ.error instanceof Error ? upcomingQ.error.message : undefined}
               onRetry={() => {
                 void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-                void apptsQ.refetch();
+                void upcomingQ.refetch();
               }}
             />
           </Card>
-        ) : apptsLoading && upcoming.length === 0 ? (
+        ) : upcomingQ.isLoading && upcoming.length === 0 ? (
           <View style={{ gap: spacing.sm }}>
             <Shimmer.Card height={84} />
             <Shimmer.Card height={84} />
@@ -563,8 +593,32 @@ export default function HomeScreen() {
             <EmptyState
               icon={<Ionicons name="sparkles-outline" size={26} color={colors.brand} />}
               title="No upcoming bookings"
-              body="When customers book, they'll show up here in real time."
+              body="Create a booking or share your booking page to start filling your calendar."
             />
+            <View style={styles.emptyActions}>
+              <Button
+                label="New booking"
+                variant="primary"
+                size="md"
+                onPress={() => {
+                  void Haptics.selectionAsync().catch(() => {});
+                  router.push("/quick-create");
+                }}
+                leftIcon={<Ionicons name="add" size={16} color={colors.inkOnBrand} />}
+                style={{ flex: 1 }}
+              />
+              <Button
+                label="Share link"
+                variant="secondary"
+                size="md"
+                onPress={() => {
+                  void Haptics.selectionAsync().catch(() => {});
+                  router.push("/share");
+                }}
+                leftIcon={<Ionicons name="share-outline" size={16} color={colors.ink} />}
+                style={{ flex: 1 }}
+              />
+            </View>
           </Card>
         ) : (
           <View style={{ gap: spacing.sm }}>
@@ -783,6 +837,23 @@ const styles = StyleSheet.create({
   quickRow: {
     flexDirection: "row",
     gap: spacing.sm,
+  },
+  upNextHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: spacing.sm,
+  },
+  viewAllBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 2,
+    paddingTop: 2,
+  },
+  emptyActions: {
+    flexDirection: "row",
+    gap: spacing.sm,
+    marginTop: spacing.md,
   },
   quickAction: {
     flex: 1,

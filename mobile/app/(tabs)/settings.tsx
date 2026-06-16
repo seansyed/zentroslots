@@ -379,9 +379,9 @@ export default function SettingsScreen() {
       </View>
 
       <View style={styles.brandFooter}>
-        <Logo variant="wordmark" size={28} />
+        <Logo size={64} accessibilityLabel="ZentroMeet" />
         <AppText variant="caption" color="subtle" align="center" style={styles.versionLabel}>
-          v{env.appVersion}
+          ZentroMeet · v{env.appVersion}
         </AppText>
       </View>
 

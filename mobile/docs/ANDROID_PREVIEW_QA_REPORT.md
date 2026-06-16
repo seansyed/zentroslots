@@ -1,3 +1,27 @@
+# UPDATE 6 — versionCode 12 preview: Home upcoming, official logo, booking-link sharing, 2026-06-15
+
+**Android versionCode:** 12 · **iOS buildNumber:** 8 · **Backend: NO changes (all mobile-only).**
+Full detail in [MOBILE_HOME_BRANDING_AND_SHARING_REPORT.md](MOBILE_HOME_BRANDING_AND_SHARING_REPORT.md). Fixes four issues:
+
+1. **Home shows no upcoming bookings** (MOBILE root cause): the list endpoint is `desc(startAt)`, 90-day floor, `status`/`cursor`/`limit` only. Home fetched newest-200 with **no status filter** + a client `+32d` clip, so cancelled/completed crowded out near-term and the clip dropped the rest. **Fix:** a dedicated status-filtered upcoming query (`confirmed`+`pending`) → pure `selectUpcoming` (`>=now`, ASC, slice 3), no clip, `refetchOnMount:"always"` + pull-to-refresh + mutation invalidation. Empty state gains New-booking/Share actions + a View-all link.
+2. **Official logo:** the **exact attached badge** is bundled byte-identically at `mobile/assets/zentromeet-logo.png` (1417×1417, transparent) and rendered by `Logo`/`ZentroMeetLogo` via `require()`+`<Image>` (explicit size, never collapses) on login/boot/Settings/Home. The generated RN-text wordmark + old `logo-mark.png` are removed. Tenant logo stays a separate override.
+3. **Service sharing:** the Share modal lists every active service's link; the service detail + services-list rows expose a share action (active+public only).
+4. **Share→Settings bug:** the Home Share quick action pushed `/(tabs)/settings`; now pushes **`/share`** — a Share Links modal showing the real workspace page `{base}/u/{tenantSlug}` + per-service `{base}/u/{tenantSlug}/{serviceSlug}` with Copy / native Share / Open / QR. No internal IDs/tokens, only active services, missing-slug/inactive-tenant → focused setup state (no dead link, no Settings redirect).
+
+**Local gates (all green):** backend `tsc`; **733/733** backend tests (no backend change → no regression); web build OK; mobile `tsc`; **50/50** mobile tests (incl. new `bookingLinks` 6, `upcoming` 5, `logo-asset` 3 — the logo test asserts byte-identity to the attachment); expo-doctor 18/18; export android+iOS; prebuild android `--clean`. Deps added: `expo-clipboard`, `react-native-qrcode-svg` (SDK-52 installed).
+
+```
+ANDROID VERSION CODE:     12
+IOS BUILD NUMBER:         8
+BACKEND DEPLOYED:         NOT REQUIRED — zero backend/API changes (public booking endpoints already in prod)
+CODEMAGIC BUILD:          OPERATOR ACTION — start android-preview on main (versionCode 12)
+DEVICE QA:                PENDING — physical Android device
+P0/P1:                    NOT resolved until the installed APK shows upcoming bookings, the official badge, and shares real working user + service links
+READY FOR NEXT PREVIEW BUILD: YES (no deploy needed)
+```
+
+---
+
 # UPDATE 5 — versionCode 11 preview: P0 service-template intake fields in New Booking, 2026-06-15
 
 **Android versionCode:** 11 · **iOS buildNumber:** 7.

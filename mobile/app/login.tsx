@@ -103,9 +103,9 @@ export default function LoginScreen() {
 
   return (
     <ScreenContainer scrollable padding keyboardAvoiding edges={["top", "bottom"]}>
-      {/* Brand wordmark — official ZentroMeet logo */}
+      {/* Official ZentroMeet badge */}
       <View style={styles.brandRow}>
-        <Logo variant="wordmark" size={44} showTagline />
+        <Logo size={108} />
       </View>
 
       {/* Heading */}

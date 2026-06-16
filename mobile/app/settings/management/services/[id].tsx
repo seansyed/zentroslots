@@ -52,6 +52,7 @@ import { Card } from "@/components/ui/Card";
 import { ErrorState } from "@/components/ui/ErrorState";
 import { IconButton } from "@/components/ui/IconButton";
 import { Input } from "@/components/ui/Input";
+import { LinkShareCard } from "@/components/ui/LinkShareCard";
 import { Pill } from "@/components/ui/Pill";
 import { ScreenContainer } from "@/components/ui/ScreenContainer";
 import { SectionFade } from "@/components/ui/SectionFade";
@@ -64,6 +65,8 @@ import {
   useService,
   useUpdateService,
 } from "@/hooks/useServices";
+import { hasSlug, serviceBookingUrl } from "@/lib/bookingLinks";
+import { env } from "@/lib/env";
 import { colors, layout, radius, spacing } from "@/theme";
 
 /** Brand-aligned palette for the color chip (no native color picker). */
@@ -348,6 +351,31 @@ export default function ServiceEditScreen() {
                 </View>
               </Card>
             </SectionFade>
+
+            {/* Share booking page — only for an existing, ACTIVE, public
+                (slugged) service in a public workspace. Paused/private services
+                are never shareable. URL is canonical (no internal IDs). */}
+            {!isCreate &&
+            service &&
+            isActiveTrue(service) &&
+            hasSlug(service.slug) &&
+            hasSlug(profileQ.data?.tenant?.slug) &&
+            profileQ.data?.tenant?.active !== false ? (
+              <SectionFade delay={40} style={{ marginTop: spacing.lg }}>
+                <AppText variant="eyebrow" color="brand" style={{ marginBottom: spacing.sm }}>
+                  Public booking page
+                </AppText>
+                <LinkShareCard
+                  title={service.name}
+                  subtitle="Direct booking link for this service"
+                  url={serviceBookingUrl(
+                    env.apiBaseUrl,
+                    profileQ.data.tenant.slug,
+                    service.slug as string,
+                  )}
+                />
+              </SectionFade>
+            ) : null}
 
             {/* Core fields */}
             <SectionFade delay={60} style={{ marginTop: spacing.lg }}>

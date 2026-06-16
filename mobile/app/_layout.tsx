@@ -380,7 +380,7 @@ function AuthBoot({ children }: { children: React.ReactNode }) {
 function BootLoading() {
   return (
     <View style={bootStyles.root}>
-      <Logo variant="mark" size={64} />
+      <Logo size={84} />
       <ActivityIndicator size="large" color={colors.brand} style={{ marginTop: 4 }} />
       <AppText variant="body" color="muted" style={bootStyles.label}>
         Loading…
@@ -462,6 +462,16 @@ export default function RootLayout() {
               {/* Quick Create — modal sheet for sub-15s booking flow */}
               <Stack.Screen
                 name="quick-create"
+                options={{
+                  animation: "slide_from_bottom",
+                  presentation: "modal",
+                  gestureEnabled: true,
+                }}
+              />
+              {/* Share booking link — modal sheet listing the user's real
+                  public booking URLs (workspace page + per-service links). */}
+              <Stack.Screen
+                name="share"
                 options={{
                   animation: "slide_from_bottom",
                   presentation: "modal",

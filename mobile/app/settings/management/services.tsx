@@ -24,7 +24,7 @@
  */
 
 import * as React from "react";
-import { Alert, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
+import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
@@ -45,7 +45,10 @@ import { Shimmer } from "@/components/ui/Shimmer";
 import { AppText } from "@/components/ui/Text";
 import { useProfile } from "@/hooks/useProfile";
 import { useServices, useUpdateService } from "@/hooks/useServices";
+import { hasSlug, serviceBookingUrl } from "@/lib/bookingLinks";
+import { env } from "@/lib/env";
 import { formatCurrencyCents } from "@/lib/format";
+import { shareLink } from "@/lib/share";
 import { colors, layout, radius, shadows, spacing } from "@/theme";
 
 type Filter = "active" | "paused";
@@ -249,10 +252,24 @@ function ServiceRow({
 }) {
   const active = isActiveTrue(service);
   const toggleMut = useUpdateService(service.id);
+  const profileQ = useProfile();
+  const tenantSlug = profileQ.data?.tenant?.slug;
+  const tenantPublic = profileQ.data?.tenant?.active !== false;
+  // Only active, public (slugged) services in a public workspace are shareable.
+  const shareable = active && hasSlug(service.slug) && hasSlug(tenantSlug) && tenantPublic;
   const accent =
     service.color && /^#[0-9a-fA-F]{6}$/.test(service.color)
       ? service.color
       : colors.brand;
+
+  function onShare() {
+    if (!shareable) return;
+    void Haptics.selectionAsync().catch(() => {});
+    void shareLink(
+      serviceBookingUrl(env.apiBaseUrl, tenantSlug as string, service.slug as string),
+      service.name,
+    );
+  }
 
   function onToggle() {
     if (toggleMut.isPending) return;
@@ -304,8 +321,19 @@ function ServiceRow({
         </View>
       </View>
 
-      {canManage ? (
-        <View style={styles.rowActions}>
+      <View style={styles.rowActions}>
+        {shareable ? (
+          <Pressable
+            onPress={onShare}
+            hitSlop={8}
+            style={styles.rowShareBtn}
+            accessibilityRole="button"
+            accessibilityLabel={`Share booking page for ${service.name}`}
+          >
+            <Ionicons name="share-social-outline" size={18} color={colors.brand} />
+          </Pressable>
+        ) : null}
+        {canManage ? (
           <View
             style={[
               styles.toggleBtn,
@@ -325,11 +353,9 @@ function ServiceRow({
               {toggleMut.isPending ? "…" : active ? "Pause" : "Activate"}
             </AppText>
           </View>
-          <Ionicons name="chevron-forward" size={18} color={colors.inkSubtle} />
-        </View>
-      ) : (
+        ) : null}
         <Ionicons name="chevron-forward" size={18} color={colors.inkSubtle} />
-      )}
+      </View>
     </PressableCard>
   );
 }
@@ -383,6 +409,14 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: spacing.sm,
+  },
+  rowShareBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: radius.md,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.brandSubtle,
   },
   toggleBtn: {
     paddingHorizontal: spacing.md,
