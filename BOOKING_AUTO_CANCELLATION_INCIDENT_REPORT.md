@@ -1,6 +1,10 @@
 # Incident Report — Mobile-Created Appointments Auto-Cancel
 
-**Date:** 2026-06-16 · **Severity:** P0 (booking integrity) · **Customer impact:** none (blast radius = 2 internal test bookings) · **Status:** root cause confirmed; fix implemented + validated; deploy pending.
+**Date:** 2026-06-16 · **Severity:** P0 (booking integrity) · **Customer impact:** none (blast radius = 2 internal test bookings)
+
+**P0 STATUS: RESOLVED** · **DEVICE CONFIRMATION: PASS** · **SAFE TO RESUME CODEMAGIC: YES** · **RELEASE FREEZE: LIFTED**
+
+**Device confirmation (2026-06-16):** a new paid-service appointment created from the installed mobile app started `confirmed`, **remained `confirmed` beyond 20 minutes** (past the old 15-min window), survived a `holds:expire` cron run, and stayed active + visible in both mobile and web — not auto-cancelled. The two original cancelled test appointments were intentionally **not** reactivated (notification/calendar/slot side-effects).
 
 ## Incident summary
 Two appointments created from the installed ZentroMeet mobile app were automatically changed to `cancelled` ~15–20 minutes after creation, with no user action. Confirmed from production evidence (audit log + cron log + DB): both were **paid** services booked through the **public** `POST /api/bookings` endpoint, which placed them in a `pending_payment` 15-minute payment hold; the `holds:expire` cron (every 5 min) then cancelled them because the mobile app has no checkout UI to complete payment. No real customer appointments were affected.
