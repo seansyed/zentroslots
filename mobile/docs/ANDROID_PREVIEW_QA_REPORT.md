@@ -13,7 +13,7 @@
 ```
 ANDROID VERSION CODE:     13
 IOS BUILD NUMBER:         9
-BACKEND DEPLOYED:         PENDING — additive validStatuses (no migration); needs deploy authorization
+BACKEND DEPLOYED:         DONE + verified — validStatuses live on prod (8349572); PG backup OK; health 200
 CODEMAGIC BUILD:          OPERATOR ACTION — start android-preview on main (versionCode 13)
 DEVICE QA:                PENDING — physical Android device
 PROFILE IMAGE:           NOT fixed (no stored customer image exists; initials correct + consistent with web)

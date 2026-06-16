@@ -93,7 +93,9 @@ ANDROID VERSION CODE:      13
 IOS BUILD NUMBER:          9
 COMMIT:                    a67f6ec
 PUSHED:                    YES → origin/main
-BACKEND DEPLOYED:          PENDING (validStatuses — additive, no migration; needs deploy authorization)
+BACKEND DEPLOYED:          DONE + verified — validStatuses live on prod (35.83.95.42, HEAD 8349572);
+                           pre-deploy PG backup OK (1.87 MB, 619 lines); build once + PM2 restart + save;
+                           /api/health 200 (edge + local); /api/bookings 401 (auth-gated, live). No migration.
 CODEMAGIC BUILD:           OPERATOR ACTION — start android-preview on main (versionCode 13)
 DEVICE QA:                 PENDING — physical Android device
 P0 ISSUES:                 Upcoming + Calendar + New-Booking fixed in code (device-QA gated). Profile image NOT
