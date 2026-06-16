@@ -95,7 +95,7 @@ WEB TESTS:                 733/733 (backend suite; no backend change → no regr
 WEB BUILD:                 OK
 ANDROID VERSION CODE:      12
 IOS BUILD NUMBER:          8
-COMMIT:                    035d473
+COMMIT:                    f9c03d6
 PUSHED:                    YES → origin/main
 BACKEND DEPLOYED:          NOT REQUIRED (zero backend changes)
 CODEMAGIC BUILD:           OPERATOR ACTION — start android-preview on main (versionCode 12)
