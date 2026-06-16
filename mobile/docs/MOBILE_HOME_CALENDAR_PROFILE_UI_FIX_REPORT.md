@@ -91,8 +91,8 @@ WEB TESTS:                 733/733 backend suite (incl. 9 bookings tests) — no
 WEB BUILD:                 OK
 ANDROID VERSION CODE:      13
 IOS BUILD NUMBER:          9
-COMMIT:                    PENDING
-PUSHED:                    PENDING
+COMMIT:                    a67f6ec
+PUSHED:                    YES → origin/main
 BACKEND DEPLOYED:          PENDING (validStatuses — additive, no migration; needs deploy authorization)
 CODEMAGIC BUILD:           OPERATOR ACTION — start android-preview on main (versionCode 13)
 DEVICE QA:                 PENDING — physical Android device
