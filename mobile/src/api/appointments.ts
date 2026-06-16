@@ -48,6 +48,15 @@ export type Appointment = {
   /** Managerial-only internal note, returned by the detail endpoint
    *  (GET /api/bookings/[id]) — absent on the list shape. */
   internalNotes?: string | null;
+  /** Server-formatted display labels in the SIGNED-IN VIEWER's timezone (the
+   *  same tz the web dashboard uses). Mobile renders these verbatim via
+   *  @/lib/appointmentTime — it never formats an IANA zone on-device (Hermes
+   *  can't). startAt/endAt stay the raw ISO-Z instants for mutations. */
+  startLabel?: string | null;
+  endLabel?: string | null;
+  startDayLabel?: string | null;
+  timezone?: string | null;
+  tzAbbrev?: string | null;
 };
 
 export type AppointmentListParams = {
@@ -77,6 +86,11 @@ type WireBooking = {
   meetLink?: string | null;
   serviceId?: string | null;
   staffUserId?: string | null;
+  startLabel?: string | null;
+  endLabel?: string | null;
+  startDayLabel?: string | null;
+  timezone?: string | null;
+  tzAbbrev?: string | null;
 };
 
 function normalize(wire: WireBooking): Appointment {
@@ -98,6 +112,11 @@ function normalize(wire: WireBooking): Appointment {
     location: null,
     amountCents: null,
     notes: wire.notes ?? null,
+    startLabel: wire.startLabel ?? null,
+    endLabel: wire.endLabel ?? null,
+    startDayLabel: wire.startDayLabel ?? null,
+    timezone: wire.timezone ?? null,
+    tzAbbrev: wire.tzAbbrev ?? null,
   };
 }
 

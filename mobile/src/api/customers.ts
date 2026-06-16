@@ -89,6 +89,10 @@ export type CustomerHistoryItem = {
   endAt: string;
   status: string;
   amountCents?: number | null;
+  /** Server viewer-tz display labels (matches appointments). */
+  startLabel?: string | null;
+  endLabel?: string | null;
+  startDayLabel?: string | null;
 };
 
 export type CustomerDetail = Customer & {

@@ -55,6 +55,7 @@ import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
 import { Shimmer } from "@/components/ui/Shimmer";
 import { AppText } from "@/components/ui/Text";
 import { useAppointments } from "@/hooks/useAppointments";
+import { apptStartMinutes, apptTime } from "@/lib/appointmentTime";
 import { isoDateLocal, isSameMonth, monthLabel } from "@/lib/dates";
 import { formatDateLong } from "@/lib/format";
 import { colors, radius, shadows, spacing } from "@/theme";
@@ -809,12 +810,13 @@ function WeekView({
               return selectedRows.map((row) => {
                 const start = new Date(row.startAt);
                 const end = new Date(row.endAt);
-                const h = start.getHours();
-                const m = start.getMinutes();
+                // Position by the VIEWER-tz minute-of-day (from the server label)
+                // so the lane matches the displayed time — never device-local.
+                const startMin = apptStartMinutes(row);
                 const rawMin = Math.round((end.getTime() - start.getTime()) / 60_000);
                 const duration = Number.isFinite(rawMin) && rawMin > 0 ? rawMin : 30;
                 const top =
-                  (h - WEEK_DAY_HOUR_START + m / 60) * WEEK_HOUR_HEIGHT;
+                  (startMin / 60 - WEEK_DAY_HOUR_START) * WEEK_HOUR_HEIGHT;
                 if (top < -WEEK_HOUR_HEIGHT || top > timelineHeight) return null;
                 const height = Math.max(
                   28,
@@ -830,10 +832,7 @@ function WeekView({
                         : row.status === "completed"
                           ? colors.inkSubtle
                           : colors.brand;
-                const timeLabel = start.toLocaleTimeString(undefined, {
-                  hour: "numeric",
-                  minute: "2-digit",
-                });
+                const timeLabel = apptTime(row);
                 const lane = lanes.get(row.id) ?? { laneIndex: 0, clusterLanes: 1 };
                 const totalLanes = Math.max(1, lane.clusterLanes);
                 const laneWidth = timelineInnerW / totalLanes;

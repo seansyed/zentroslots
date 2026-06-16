@@ -4,6 +4,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@/db/client";
 import { bookings, services, tenants, users } from "@/db/schema";
 import { errorResponse, isManagerial, requireUser, HttpError } from "@/lib/auth";
+import { buildBookingLabels } from "@/lib/appointment-labels";
 import { isFeatureEnabled } from "@/lib/features";
 import { onBookingRescheduled } from "@/lib/calendar/sync";
 import { enqueueBookingPush } from "@/lib/push/enqueue";
@@ -230,7 +231,12 @@ export async function POST(
       console.error("[push] reschedule enqueue failed:", pushErr);
     }
 
-    return NextResponse.json(updated);
+    // Viewer-tz display labels so the mobile detail/list shows the new time
+    // correctly without on-device IANA formatting (additive; instants unchanged).
+    return NextResponse.json({
+      ...updated,
+      ...buildBookingLabels(updated.startAt, updated.endAt, caller.timezone),
+    });
   } catch (err) {
     return errorResponse(err);
   }

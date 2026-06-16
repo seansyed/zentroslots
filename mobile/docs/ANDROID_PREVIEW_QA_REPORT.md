@@ -1,3 +1,27 @@
+# UPDATE 9 — versionCode 15 preview: P0 appointment timezone fix (7h-early), 2026-06-16
+
+**Android versionCode:** 15 · **iOS buildNumber:** 11 · **Backend:** additive viewer-tz display labels on the booking/customer endpoints — **deploy required**. Full detail in [MOBILE_APPOINTMENT_TIMEZONE_P0_REPORT.md](MOBILE_APPOINTMENT_TIMEZONE_P0_REPORT.md).
+
+**P0:** an appointment created for 5:00 PM showed **10:00 AM** on mobile — exactly **−7h** (US-Pacific PDT offset). Web showed 5:00 PM (correct).
+
+- **Root cause (code-evident):** mobile `src/lib/format.ts formatTime()` formatted the stored UTC instant with **device-local `getHours()`**. Hermes (SDK 52) ignores `Intl.DateTimeFormat({ timeZone })`, so on-device IANA formatting is impossible. A UTC-tenant 5 PM (`17:00Z`) on a Pacific (UTC−7) device printed 10 AM. The stored instant (`timestamp with time zone` → ISO-Z) was always correct — never a storage bug.
+- **Canonical fix (one contract, all surfaces):** format the label **once server-side** in the **signed-in viewer's** `user.timezone` — the *same* rule the web dashboard uses — and send `startLabel`/`endLabel`/`startDayLabel`/`tzAbbrev` alongside the raw instant. New `lib/appointment-labels.ts` (mirrors `lib/slots-display.ts`) attached to `GET/POST /api/bookings`, `GET /api/bookings/:id`, `POST /api/bookings/:id/reschedule`, `GET /api/customers/:id`.
+- **Mobile chokepoint:** new pure `src/lib/appointmentTime.ts` renders the label verbatim; fallback is a deterministic **UTC wall-clock slice** (never `getHours()`) — already matches web for a UTC viewer pre-deploy. Rerouted **all** appointment surfaces: Home "Next" chip, Calendar week lane+label, list row, detail, reschedule, customer activity. **Push** (relative time) / **emails / public booking / reminders / calendar** untouched (already correct, web-rendered).
+- **No** hardcoded ±7 correction; DST preserved (offset resolved per-instant from the IANA zone).
+
+**Gates (green):** backend tsc + **747/747** (incl. 5 new appointment-labels) + web build; mobile tsc + **75/75** (incl. 13 new appointment-time); expo-doctor 18/18; export android+iOS; prebuild android `--clean` (reverted).
+
+```
+ANDROID VERSION CODE:   15
+IOS BUILD NUMBER:       11
+BACKEND DEPLOY:         REQUIRED (additive viewer-tz labels) — pending authorization; web/booking/emails unaffected
+CODEMAGIC BUILD:        OPERATOR ACTION — start android-preview on main (versionCode 15) AFTER deploy + validation
+IOS / TESTFLIGHT / AAB: FROZEN — not triggered
+DEVICE QA:              PENDING — installed app must show the SAME time as web; P0 not resolved until then
+```
+
+---
+
 # UPDATE 8 — versionCode 14 preview: brand color → #2563EB, 2026-06-16
 
 **Android versionCode:** 14 · **iOS buildNumber:** 10. Visual-only platform-brand migration `#359df3 → #2563EB` (Tailwind blue 600); full detail in [ZENTROMEET_BRAND_COLOR_MIGRATION_REPORT.md](../../ZENTROMEET_BRAND_COLOR_MIGRATION_REPORT.md).

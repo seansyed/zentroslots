@@ -50,7 +50,7 @@ import { SectionHeader } from "@/components/ui/SectionHeader";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { StalenessHint } from "@/components/ui/StalenessHint";
 import { useAppointment } from "@/hooks/useAppointments";
-import { formatDateLong, formatTime, formatTimeRange } from "@/lib/format";
+import { apptDay, apptTimeRange } from "@/lib/appointmentTime";
 import { queryKeys } from "@/lib/query";
 import { colors, layout, radius, shadows, spacing, typography } from "@/theme";
 
@@ -403,7 +403,7 @@ function DetailBody({
           {appt.serviceName}
         </AppText>
         <AppText variant="body" color="muted" style={{ marginTop: spacing.xs }}>
-          {formatDateLong(appt.startAt)}
+          {apptDay(appt)}
         </AppText>
         <View style={styles.timeRow}>
           <Ionicons name="time-outline" size={16} color={colors.brand} />
@@ -411,7 +411,7 @@ function DetailBody({
             variant="bodyStrong"
             style={{ ...typography.bodyStrong, color: colors.brand, marginLeft: 6 }}
           >
-            {formatTimeRange(appt.startAt, appt.endAt)}
+            {apptTimeRange(appt)}
           </AppText>
           <View style={styles.dot} />
           <AppText variant="bodyStrong" color="muted">

@@ -52,9 +52,9 @@ import { ScreenContainer } from "@/components/ui/ScreenContainer";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { useAppointment } from "@/hooks/useAppointments";
 import { useProfile } from "@/hooks/useProfile";
+import { apptDay, apptTimeRange } from "@/lib/appointmentTime";
 import {
   formatDateLong,
-  formatTimeRange,
   isSameDay,
 } from "@/lib/format";
 import { dayLabel, isoDateLocal } from "@/lib/dates";
@@ -273,7 +273,7 @@ export default function RescheduleScreen() {
               <View style={styles.summaryTimeRow}>
                 <Ionicons name="time-outline" size={14} color={colors.inkMuted} />
                 <AppText variant="small" color="muted" style={{ marginLeft: 4 }}>
-                  {formatDateLong(appt.startAt)} · {formatTimeRange(appt.startAt, appt.endAt)}
+                  {apptDay(appt)} · {apptTimeRange(appt)}
                 </AppText>
               </View>
             </Card>

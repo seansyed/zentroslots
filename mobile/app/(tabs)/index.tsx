@@ -50,6 +50,7 @@ import { SectionHeader } from "@/components/ui/SectionHeader";
 import { Shimmer } from "@/components/ui/Shimmer";
 import { AppText } from "@/components/ui/Text";
 import { useAppointments, useUpcomingAppointments } from "@/hooks/useAppointments";
+import { apptTime } from "@/lib/appointmentTime";
 import { useProfile } from "@/hooks/useProfile";
 import { usePresenceStore } from "@/store/presenceStore";
 import { colors, radius, spacing, typography } from "@/theme";
@@ -218,6 +219,7 @@ type TodaysTeamMember = {
   totalCount: number;      // bookings today
   remainingCount: number;  // not yet started
   nextStartAt: string | null;
+  nextStartLabel: string | null; // server viewer-tz label for nextStartAt
   hasPending: boolean;
 };
 
@@ -241,6 +243,7 @@ function buildTodaysTeam(rows: Appointment[], now: Date): TodaysTeamMember[] {
         totalCount: 1,
         remainingCount: isUpcoming ? 1 : 0,
         nextStartAt: isUpcoming ? r.startAt : null,
+        nextStartLabel: isUpcoming ? (r.startLabel ?? null) : null,
         hasPending: r.status === "pending",
       });
     } else {
@@ -252,6 +255,7 @@ function buildTodaysTeam(rows: Appointment[], now: Date): TodaysTeamMember[] {
           new Date(r.startAt) < new Date(existing.nextStartAt)
         ) {
           existing.nextStartAt = r.startAt;
+          existing.nextStartLabel = r.startLabel ?? null;
         }
       }
       if (r.status === "pending") existing.hasPending = true;
@@ -267,14 +271,8 @@ function buildTodaysTeam(rows: Appointment[], now: Date): TodaysTeamMember[] {
   });
 }
 
-function formatTimeShort(iso: string): string {
-  const d = new Date(iso);
-  let h = d.getHours();
-  const m = d.getMinutes().toString().padStart(2, "0");
-  const ampm = h >= 12 ? "p" : "a";
-  h = h % 12 || 12;
-  return `${h}:${m}${ampm}`;
-}
+// (formatTimeShort removed — appointment times come from @/lib/appointmentTime
+//  server viewer-tz labels, never device-local getHours.)
 
 // ─── Screen ───────────────────────────────────────────────────────
 
@@ -738,7 +736,7 @@ const TeamMemberChip = React.memo(function TeamMemberChip({
         {member.remainingCount === 0
           ? `Done · ${member.totalCount} today`
           : member.nextStartAt
-            ? `Next ${formatTimeShort(member.nextStartAt)} · ${member.remainingCount} left`
+            ? `Next ${apptTime({ startAt: member.nextStartAt, startLabel: member.nextStartLabel })} · ${member.remainingCount} left`
             : `${member.remainingCount} upcoming`}
       </AppText>
     </PressableCard>

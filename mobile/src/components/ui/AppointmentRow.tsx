@@ -27,6 +27,7 @@ import { AppText } from "@/components/ui/Text";
 import { Avatar } from "@/components/ui/Avatar";
 import { Pill, type PillTone } from "@/components/ui/Pill";
 import { PressableCard } from "@/components/ui/Card";
+import { apptTime, apptTimeWithDay } from "@/lib/appointmentTime";
 import { colors, radius, spacing, typography } from "@/theme";
 
 import type { Appointment, BookingStatus } from "@/api/appointments";
@@ -74,20 +75,9 @@ const PROVIDER_ICON: Record<NonNullable<Appointment["meetingProvider"]>, React.C
   phone: "call-outline",
 };
 
-function formatTime(iso: string): string {
-  const d = new Date(iso);
-  let h = d.getHours();
-  const m = d.getMinutes().toString().padStart(2, "0");
-  const ampm = h >= 12 ? "PM" : "AM";
-  h = h % 12 || 12;
-  return `${h}:${m} ${ampm}`;
-}
-
-function formatTimeWithDay(iso: string): string {
-  const d = new Date(iso);
-  const day = d.toLocaleDateString(undefined, { weekday: "short" });
-  return `${day} · ${formatTime(iso)}`;
-}
+// Appointment time/day come from @/lib/appointmentTime (server viewer-tz labels,
+// UTC-slice fallback) — NEVER device-local getHours/toLocaleDateString, which
+// rendered times in the device tz instead of the business tz (the 7h-early bug).
 
 function durationMinutes(startAt: string, endAt: string): number {
   return Math.max(0, Math.round((new Date(endAt).getTime() - new Date(startAt).getTime()) / 60000));
@@ -161,7 +151,7 @@ function AppointmentRowBase({
                 fontVariant: ["tabular-nums"],
               }}
             >
-              {showDateInTime ? formatTimeWithDay(appt.startAt) : formatTime(appt.startAt)}
+              {showDateInTime ? apptTimeWithDay(appt) : apptTime(appt)}
             </AppText>
           ) : null}
           <Pill tone={tone} style={{ marginTop: hideTime ? 0 : 6 }}>
@@ -202,6 +192,9 @@ export const AppointmentRow = React.memo(AppointmentRowBase, (prev, next) => {
     a.status === b.status &&
     a.startAt === b.startAt &&
     a.endAt === b.endAt &&
+    a.startLabel === b.startLabel &&
+    a.endLabel === b.endLabel &&
+    a.startDayLabel === b.startDayLabel &&
     a.clientName === b.clientName &&
     a.serviceName === b.serviceName &&
     a.staffName === b.staffName &&

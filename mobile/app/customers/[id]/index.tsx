@@ -75,6 +75,10 @@ function asAppointment(h: CustomerHistoryItem, customerName: string): Appointmen
     location: null,
     amountCents: h.amountCents ?? null,
     notes: null,
+    // Server viewer-tz labels so AppointmentRow shows the correct time/day.
+    startLabel: h.startLabel ?? null,
+    endLabel: h.endLabel ?? null,
+    startDayLabel: h.startDayLabel ?? null,
   };
 }
 

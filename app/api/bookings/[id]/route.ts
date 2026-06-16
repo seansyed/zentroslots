@@ -21,6 +21,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@/db/client";
 import { bookings, customers, services, users } from "@/db/schema";
 import { errorResponse, HttpError, isManagerial, requireUser } from "@/lib/auth";
+import { buildBookingLabels } from "@/lib/appointment-labels";
 
 export const dynamic = "force-dynamic";
 
@@ -113,6 +114,9 @@ export async function GET(
         name: booking.staffName ?? "Staff",
         email: booking.staffEmail ?? null,
       },
+      // Viewer-tz display labels (matches the web dashboard); mobile renders
+      // these verbatim instead of formatting an IANA zone on-device.
+      ...buildBookingLabels(booking.startAt, booking.endAt, caller.timezone),
     });
   } catch (err) {
     return errorResponse(err);
