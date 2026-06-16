@@ -50,7 +50,7 @@ function statusCopy(s: PermissionStatus): { tone: PillTone; label: string; body:
       return {
         tone: "success",
         label: "Enabled",
-        body: "You'll get push notifications for new bookings, reschedules, and reminders.",
+        body: "You'll get push notifications for new bookings, reschedules, and cancellations.",
       };
     case "denied":
       return {

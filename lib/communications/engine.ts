@@ -92,6 +92,13 @@ export type TriggerArgs = {
    *  {{review_platform}}. The engine never invents these values; the
    *  caller is the source of truth. */
   contextExtras?: Partial<Record<string, string>>;
+  /** Override the recipient address. By default the engine emails the
+   *  ORIGINATING booking's clientEmail. The waitlist "slot available"
+   *  event must instead email the WAITLIST WINNER (a different person),
+   *  whose booking id is reused only as the idempotency key — so that
+   *  flow passes their address here. Leave unset for all customer-facing
+   *  appointment events (they correctly target the booking's client). */
+  recipientOverride?: string;
 };
 
 export type TriggerResult =
@@ -329,7 +336,9 @@ export async function triggerAutomation(args: TriggerArgs): Promise<TriggerResul
       : undefined;
 
     const sendResult = await sendEmail({
-      to: booking.clientEmail,
+      // Default to the booking's client; waitlist-slot-available overrides
+      // this with the waitlist winner's address (see TriggerArgs).
+      to: args.recipientOverride ?? booking.clientEmail,
       subject: rendered.subject,
       html: rendered.html,
       text: rendered.text,
@@ -420,6 +429,9 @@ function buildContext(args: {
     appointment_date: safeFormat(booking.startAt, tz, "EEEE, MMMM d, yyyy"),
     appointment_time: safeFormat(booking.startAt, tz, "h:mm a"),
     appointment_end_time: safeFormat(booking.endAt, tz, "h:mm a"),
+    // Timezone abbreviation (e.g. PDT/EST/UTC) so custom-template authors can
+    // render an unambiguous time: "{{appointment_time}} {{appointment_timezone}}".
+    appointment_timezone: safeFormat(booking.startAt, tz, "zzz"),
     location_name: undefined, // location join deferred; service+staff suffice for now
     meeting_link: booking.meetLink ?? undefined,
     booking_link: `${base}/u/${tenant.slug}`,
@@ -435,7 +447,14 @@ function safeFormat(d: Date, tz: string, pattern: string): string {
   try {
     return formatInTimeZone(d, tz, pattern);
   } catch {
-    return d.toISOString();
+    // Bad/unknown tz string — fall back to UTC formatted with the SAME
+    // pattern + an explicit "UTC" label. Never emit a raw ISO string
+    // (which reads as an unlabeled UTC timestamp in the email body).
+    try {
+      return `${formatInTimeZone(d, "UTC", pattern)} UTC`;
+    } catch {
+      return `${d.toISOString()} UTC`;
+    }
   }
 }
 

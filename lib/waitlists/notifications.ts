@@ -34,6 +34,9 @@ export async function notifySlotAvailable(input: NotifySlotAvailableInput): Prom
       tenantId: input.tenantId,
       bookingId: input.bookingId,
       eventType: "appointment.waitlist_slot_available",
+      // CRITICAL: email the WAITLIST WINNER, not the originating booking's
+      // client. The bookingId above is reused only as the idempotency key.
+      recipientOverride: input.customerEmail,
       contextExtras: {
         claim_url: input.claimUrl,
         claim_expires_at: formatInTimeZone(

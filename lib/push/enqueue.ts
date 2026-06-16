@@ -17,8 +17,10 @@
 
 import { and, eq } from "drizzle-orm";
 
+import { formatInTimeZone } from "date-fns-tz";
+
 import { db } from "@/db/client";
-import { pushDeliveries, pushTokens, type bookings } from "@/db/schema";
+import { pushDeliveries, pushTokens, users, type bookings } from "@/db/schema";
 import { isDemoTenant, logDemoSuppression } from "@/lib/demo-safe";
 
 export type PushEventType =
@@ -39,8 +41,8 @@ type EnqueueArgs = {
   event: PushEventType;
 };
 
-function copyFor(event: PushEventType, args: EnqueueArgs): { title: string; body: string } {
-  const when = formatRelativeBrief(new Date(args.booking.startAt));
+function copyFor(event: PushEventType, args: EnqueueArgs, staffTz: string): { title: string; body: string } {
+  const when = formatRelativeBrief(new Date(args.booking.startAt), staffTz);
   const who = args.booking.clientName || "A customer";
   const what = args.serviceName || "Appointment";
   switch (event) {
@@ -67,15 +69,21 @@ function copyFor(event: PushEventType, args: EnqueueArgs): { title: string; body
   }
 }
 
-function formatRelativeBrief(d: Date): string {
+export function formatRelativeBrief(d: Date, tz: string): string {
   const now = Date.now();
   const diff = d.getTime() - now;
   const absMin = Math.abs(diff) / 60_000;
   if (absMin < 60) return `${Math.round(absMin)}m`;
   const absH = absMin / 60;
   if (absH < 24) return diff > 0 ? `in ${Math.round(absH)}h` : `${Math.round(absH)}h ago`;
-  const opts: Intl.DateTimeFormatOptions = { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" };
-  return new Intl.DateTimeFormat("en-US", opts).format(d);
+  // >24h out: show an ABSOLUTE time. Format it in the staff member's
+  // timezone with an explicit abbreviation (zzz) so it's never an
+  // unlabeled server-local/UTC time — same rule as the appointment tz fix.
+  try {
+    return formatInTimeZone(d, tz || "UTC", "MMM d, h:mm a zzz");
+  } catch {
+    return formatInTimeZone(d, "UTC", "MMM d, h:mm a zzz");
+  }
 }
 
 /**
@@ -107,7 +115,16 @@ export async function enqueueBookingPush(args: EnqueueArgs): Promise<{ enqueued:
 
     if (tokens.length === 0) return { enqueued: 0 };
 
-    const { title, body } = copyFor(args.event, args);
+    // Resolve the staff member's timezone so any absolute time in the push
+    // body is rendered in their zone (not the server's). Default UTC.
+    const staffRow = await db
+      .select({ tz: users.timezone })
+      .from(users)
+      .where(eq(users.id, args.booking.staffUserId))
+      .limit(1);
+    const staffTz = staffRow[0]?.tz ?? "UTC";
+
+    const { title, body } = copyFor(args.event, args, staffTz);
     const dataPayload = {
       type: args.event,
       bookingId: args.booking.id,

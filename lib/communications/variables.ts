@@ -20,6 +20,9 @@ export const SUPPORTED_VARIABLES = [
   "appointment_date",
   "appointment_time",
   "appointment_end_time",
+  // Timezone abbreviation (PDT/EST/UTC) so authors can show an unambiguous
+  // time: "{{appointment_time}} {{appointment_timezone}}".
+  "appointment_timezone",
   "location_name",
   "meeting_link",
   "booking_link",

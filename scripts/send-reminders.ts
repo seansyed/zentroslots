@@ -63,6 +63,22 @@ async function processWindow(
     windowHours === 24 ? "appointment.reminder_24h" : "appointment.reminder_1h";
 
   for (const b of due) {
+    // Atomically CLAIM this reminder BEFORE sending. The flag IS the claim:
+    //   UPDATE ... SET flag=now() WHERE id=? AND flag IS NULL AND status='confirmed'
+    // Two effects, both correctness fixes:
+    //   1) Concurrency — if two cron runs overlap, only ONE claims the row
+    //      (the other's UPDATE matches zero rows), so we never double-SEND.
+    //      The engine's communication_logs idempotency is the backstop, but
+    //      this closes the window between its pre-check and its insert.
+    //   2) Status TOCTOU — re-checking status='confirmed' here means a booking
+    //      cancelled/rescheduled since the SELECT above is NOT reminded.
+    const claimed = await db
+      .update(bookings)
+      .set({ [flag]: new Date() })
+      .where(and(eq(bookings.id, b.id), isNull(reminderField), eq(bookings.status, "confirmed")))
+      .returning({ id: bookings.id });
+    if (claimed.length === 0) continue; // already claimed by another run, or no longer confirmed
+
     try {
       // The engine handles: idempotency, customer pref gate, template
       // resolution (service → tenant → system), variable rendering, send,
@@ -73,17 +89,10 @@ async function processWindow(
         eventType,
       });
 
-      // Whatever the engine decided (sent / skipped / failed), we mark
-      // the booking's flag so cron stops looking at this row. Skipped =
-      // customer opted out; we don't keep retrying that. Failed = log is
-      // already in communication_logs for admin review; retrying via
-      // cron isn't the right recovery vector (admins can manually
-      // re-fire later from the delivery log UI in a future session).
-      await db
-        .update(bookings)
-        .set({ [flag]: new Date() })
-        .where(eq(bookings.id, b.id));
-
+      // The claim above already set the flag. On a provider 'failed' we
+      // deliberately LEAVE it set and alert (rather than cron-retry) — the
+      // failure is captured in communication_logs for admin review. (Only a
+      // hard crash below releases the claim so the next tick can retry.)
       if (result.status === "failed") {
         console.error(`[reminders] send failed for ${b.id}:`, result.reason);
         // Phase 3 — admin alert on reminder delivery failure. The
@@ -111,6 +120,15 @@ async function processWindow(
         });
       }
     } catch (err) {
+      // Engine threw (not a provider 'failed' result): RELEASE the claim so
+      // the next cron tick can retry within the ±30min window. The engine's
+      // communication_logs idempotency prevents a double-send if the throw
+      // happened after the email actually went out.
+      await db
+        .update(bookings)
+        .set({ [flag]: null })
+        .where(eq(bookings.id, b.id))
+        .catch(() => {});
       console.error(`[reminders] booking ${b.id} failed:`, err);
       // Phase 3 — admin alert on uncaught exception in the loop.
       // Critical severity because this means the engine itself blew

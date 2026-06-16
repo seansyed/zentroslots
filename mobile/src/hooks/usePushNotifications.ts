@@ -260,7 +260,10 @@ export function usePushNotifications() {
  */
 export async function unregisterPushTokenForSignOut(): Promise<void> {
   try {
-    await pushTokensApi.unregister();
+    // Detach ONLY this device's token, not every device the user owns —
+    // signing out on a phone must not silence the user's other devices.
+    const thisDeviceToken = await storage.getItem(PUSH_TOKEN_STORAGE_KEY);
+    await pushTokensApi.unregister(thisDeviceToken ?? undefined);
   } catch {
     /* noop — already invalid token is fine */
   }

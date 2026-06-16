@@ -19,7 +19,11 @@ export const pushTokensApi = {
   register(payload: RegisterPushTokenInput): Promise<{ ok: true; persisted: boolean }> {
     return apiPost("/api/mobile/push-tokens", payload);
   },
-  unregister(): Promise<{ ok: true }> {
-    return apiDelete("/api/mobile/push-tokens");
+  /** Detach a push token. Pass THIS device's token to remove only this
+   *  device (the server scopes the delete to the authenticated user). With
+   *  no token the server clears ALL of the user's devices — only intended
+   *  for a full account wipe, NOT a normal sign-out. */
+  unregister(token?: string): Promise<{ ok: true }> {
+    return apiDelete("/api/mobile/push-tokens", token ? { data: { token } } : undefined);
   },
 };

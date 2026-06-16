@@ -126,10 +126,10 @@ export async function computeBillingValidation(): Promise<BillingValidationRepor
       const orphans = await safe(
         async () =>
           (await db.execute(
-            sql`SELECT id::text AS tenant_id, name, plan, subscription_status, stripe_subscription_id
+            sql`SELECT id::text AS tenant_id, name, current_plan AS plan, subscription_status, stripe_subscription_id
                   FROM tenants
                  WHERE active = true
-                   AND plan <> 'free'
+                   AND current_plan <> 'free'
                    AND stripe_subscription_id IS NOT NULL
                    AND (subscription_status IS NULL OR subscription_status IN ('canceled','incomplete_expired','unpaid'))
                  LIMIT 20`,
@@ -164,12 +164,12 @@ export async function computeBillingValidation(): Promise<BillingValidationRepor
       const desynced = await safe(
         async () =>
           (await db.execute(
-            sql`SELECT t.id::text AS tenant_id, t.name, t.plan, t.subscription_status,
+            sql`SELECT t.id::text AS tenant_id, t.name, t.current_plan AS plan, t.subscription_status,
                        (SELECT MAX(created_at) FROM billing_transactions
                           WHERE tenant_id = t.id AND status='paid') AS last_charge_at
                   FROM tenants t
                  WHERE t.active = true
-                   AND t.plan <> 'free'
+                   AND t.current_plan <> 'free'
                    AND t.subscription_status IN ('active','trialing')
                    AND NOT EXISTS (
                          SELECT 1 FROM billing_transactions
