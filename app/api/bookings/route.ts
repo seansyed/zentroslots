@@ -5,7 +5,7 @@ import { db } from "@/db/client";
 import { bookings, customers, intakeForms, serviceStaff, services, tenants, users } from "@/db/schema";
 import { sql, asc } from "drizzle-orm";
 import { validateResponses, type IntakeField } from "@/lib/intake";
-import { errorResponse, getSession, HttpError, isManagerial } from "@/lib/auth";
+import { errorResponse, getSession, HttpError, isInternalOperatorBooking, isManagerial } from "@/lib/auth";
 import { loadTenantFeatures } from "@/lib/features";
 import { assertResourcesShareTenant } from "@/lib/tenant";
 import { createBookingSchema } from "@/lib/validation";
@@ -126,6 +126,21 @@ export async function POST(req: NextRequest) {
 
     const service = await db.query.services.findFirst({ where: eq(services.id, body.serviceId) });
     if (!service || service.isActive !== 1) throw new HttpError(404, "Service not found");
+
+    // ─── Operator (internal) vs public-customer booking ──────────────────
+    // P0 FIX: this PUBLIC, payment-first endpoint is also called by the
+    // authenticated mobile OPERATOR app (Bearer/cookie session). A paid
+    // service booked by an operator was being dropped into the
+    // `pending_payment` 15-min hold — which the holds:expire cron then
+    // auto-cancelled (no checkout UI on mobile to pay). When the caller is an
+    // authenticated tenant user of THIS service's tenant, treat it as an
+    // INTERNAL operator create: confirm immediately, NO payment hold (payment,
+    // if any, is collected out-of-band — same rule as POST /api/tenant/
+    // appointments skipPayment). Authority is SERVER-DERIVED from the session +
+    // tenant match; public/anonymous callers have no session → unchanged
+    // checkout/hold path. Not spoofable (no client flag involved).
+    const session = await getSession();
+    const internalOperator = isInternalOperatorBooking(session, service.tenantId);
 
     // ─── Booking rules (additive, evaluated outside the engine) ─────────
     const now = new Date();
@@ -280,7 +295,10 @@ export async function POST(req: NextRequest) {
     }
 
     // ─── DIVERT: paid booking → Wave H tenant vault OR legacy Stripe ───
-    if (service.price > 0) {
+    // Skipped for internal operator bookings — they confirm without a hold
+    // (see the operator-detection note above). Public paid bookings are
+    // unaffected.
+    if (service.price > 0 && !internalOperator) {
       // Wave H Phase 3 — route resolution. Returns:
       //   • tenant_vault     → use the tenant's own provider creds
       //   • legacy_platform  → fall through to platform Stripe path
@@ -382,7 +400,10 @@ export async function POST(req: NextRequest) {
       // existing Stripe path below.
     }
 
-    const requiresPayment = service.price > 0 && isStripeConfigured();
+    // Internal operator bookings never require customer payment at create
+    // (collected out-of-band) — so they bypass the Stripe hold path and fall
+    // through to the confirmed insert below.
+    const requiresPayment = service.price > 0 && isStripeConfigured() && !internalOperator;
     if (requiresPayment) {
       const pending = await createPendingPaymentBooking({
         tenantId,

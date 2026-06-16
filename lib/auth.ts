@@ -156,6 +156,36 @@ export function isManagerial(role: Role): boolean {
 }
 
 /**
+ * Is a POST /api/bookings call an INTERNAL operator create (vs. a public
+ * customer self-checkout)?
+ *
+ * True only when there is a valid TENANT-USER session whose tenant matches the
+ * service's tenant — i.e. a logged-in staff/admin/manager (the mobile operator
+ * app, or a logged-in dashboard user) booking within their own workspace.
+ *
+ * This is SERVER-DERIVED authority: the public booking page is unauthenticated,
+ * so anonymous customers always get `false` (and keep the payment-hold/checkout
+ * path). It deliberately takes only the verified session + the service's tenant
+ * id — NEVER a client-supplied flag — so an internal booking cannot be spoofed.
+ *
+ * Internal operator bookings must skip the `pending_payment` hold path; payment
+ * (if any) is collected out-of-band, mirroring POST /api/tenant/appointments'
+ * skipPayment semantics. This prevents the holds:expire cron from auto-cancelling
+ * operator-created appointments.
+ */
+export function isInternalOperatorBooking(
+  session: Pick<SessionPayload, "tenantId" | "role"> | null,
+  serviceTenantId: string,
+): boolean {
+  if (!session || session.tenantId !== serviceTenantId) return false;
+  // ONLY tenant STAFF roles are operators. The external "client" role
+  // (roleEnum: "booking only") must NOT bypass the payment hold even when
+  // logged in — that would be a payment-integrity hole (a customer self-
+  // confirming a paid booking without paying).
+  return session.role === "admin" || session.role === "manager" || session.role === "staff";
+}
+
+/**
  * Cheap (cookie-only) read of the current tenant id, when a route
  * needs the tenant scope but doesn't otherwise need the full user row.
  * For anything that mutates state, prefer requireUser() so a deleted
