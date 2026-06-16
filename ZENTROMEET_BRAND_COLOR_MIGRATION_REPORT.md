@@ -62,10 +62,10 @@ IOS EXPORT:          OK
 ANDROID PREBUILD:    OK — generated colors.xml: colorPrimary/iconBackground/notification = #2563EB
 ANDROID VERSION CODE: 14 (was 13)
 IOS BUILD NUMBER:     10 (was 9)
-COMMIT:              [pending]
-PUSHED:              [pending]
-WEB DEPLOYED:        [pending — backup + health]
-PRODUCTION HEALTH:   [pending]
+COMMIT:              21b28ba
+PUSHED:              YES → origin/main
+WEB DEPLOYED:        YES — prod 35.83.95.42 at 21b28ba; pre-deploy PG backup OK (1.87 MB); build once + PM2 restart + save; built CSS contains #2563eb, no #359df3 remnant
+PRODUCTION HEALTH:   /api/health 200 (edge + local:3001); PM2 online
 CODEMAGIC BUILD:     OPERATOR ACTION — start android-preview on main (versionCode 14)
 APK:                 produced by the Codemagic build (versionCode 14)
 DEVICE QA:           PENDING — verify #2563EB on installed app; tenant override still renders tenant color; semantic colors unchanged
