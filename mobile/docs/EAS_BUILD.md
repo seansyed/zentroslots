@@ -2,6 +2,15 @@
 
 Cloud-hosted Expo builds so you can install + test the mobile app on a real device **without running Expo on your PC**. Everything runs on Expo's build servers; you get a hosted install link + QR code at the end.
 
+> **⚠️ UPDATE 2026-06-16 — iOS and Android now build NATIVELY on Codemagic; EAS is an OPTIONAL local fallback only.**
+> The `ios-production` Codemagic workflow compiles iOS on a macOS `mac_mini_m2`
+> (`expo prebuild` → CocoaPods → Xcode archive → App Store IPA → TestFlight via
+> Codemagic's `app-store-connect publish`) with **no EAS Build and no `EXPO_TOKEN`**.
+> Android builds via `expo prebuild` + Gradle on Codemagic. The `eas build` /
+> `eas submit` commands in this document are retained ONLY for optional
+> manual/laptop builds (`npm run build:*` / `submit:*`) — no CI workflow uses EAS.
+> Authoritative iOS pipeline: [CODEMAGIC_NATIVE_IOS_BUILD.md](CODEMAGIC_NATIVE_IOS_BUILD.md).
+
 ---
 
 ## TL;DR — Build a preview APK in 5 commands

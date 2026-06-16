@@ -7,6 +7,15 @@ builds → download APK → install on phone. No local Android SDK needed.
 > Use **this guide** when you want a quick APK on your phone.
 > Use **BETA_RELEASE.md** when submitting to Play Store or TestFlight.
 
+> **⚠️ UPDATE 2026-06-16 — EAS no longer performs the store builds; both platforms build NATIVELY on Codemagic.**
+> iOS now compiles on a Codemagic macOS `mac_mini_m2` (`expo prebuild` → Xcode
+> archive → App Store IPA → TestFlight via `app-store-connect publish`) with no
+> EAS and no `EXPO_TOKEN`; Android builds a signed AAB via `expo prebuild` +
+> Gradle on Codemagic. Statements below that call EAS "the authoritative build
+> system" are superseded — EAS (`eas build`/`eas submit`) is retained ONLY as an
+> optional manual/laptop fallback (`npm run build:*` / `submit:*`). See
+> [CODEMAGIC_NATIVE_IOS_BUILD.md](CODEMAGIC_NATIVE_IOS_BUILD.md).
+
 ---
 
 ## Architecture overview

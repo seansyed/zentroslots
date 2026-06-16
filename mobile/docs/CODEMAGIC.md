@@ -3,16 +3,23 @@
 The operational guide for building ZentroMeet Mobile Android and iOS
 binaries on Codemagic.
 
-> Companion to `docs/BETA_RELEASE.md` (the EAS-only release path) and
-> `docs/EAS_BUILD.md` (first-time EAS setup). This document covers the
-> **Codemagic** path — fast, directly-downloadable APK/AAB artifacts
-> without local Xcode/Android Studio, plus an iOS orchestration workflow
-> that delegates the native compile to EAS and republishes the `.ipa`
-> as a Codemagic artifact.
+> **⚠️ UPDATE 2026-06-16 — iOS now builds NATIVELY on Codemagic (no EAS).**
+> The `ios-production` workflow no longer delegates the compile to EAS. It now
+> runs the full native toolchain on a macOS `mac_mini_m2` (`expo prebuild` →
+> CocoaPods → Xcode archive → App Store IPA → TestFlight via Codemagic's
+> `app-store-connect publish`), with **no EAS Build and no `EXPO_TOKEN`**.
+> Sections below that describe iOS as "EAS-orchestrated" (the architecture
+> diagram, §6c, §9, §13) are **superseded** — the authoritative iOS pipeline is
+> [CODEMAGIC_NATIVE_IOS_BUILD.md](CODEMAGIC_NATIVE_IOS_BUILD.md). EAS is retained
+> only for optional manual/laptop builds (`npm run build:*` / `submit:*`).
 
-Use Codemagic when you want a build you can hand to a tester from a
-link in 15 minutes. Use EAS directly when you're cutting a store
-release and want EAS's credential management end-to-end.
+> Companion to `docs/BETA_RELEASE.md` (release runbook) and
+> `docs/EAS_BUILD.md` (optional EAS fallback). This document covers the
+> **Codemagic** path — fast, directly-downloadable APK/AAB/IPA artifacts
+> without a local Xcode/Android Studio, including the native iOS build.
+
+Use Codemagic for all CI builds (both platforms). Use EAS directly only as an
+optional manual/laptop fallback.
 
 ---
 
@@ -54,11 +61,13 @@ Android is compiled **locally on Codemagic** — `expo prebuild` regenerates
 the native project, then Gradle produces an APK or AAB. The artifact is
 downloadable directly from the Codemagic dashboard.
 
-iOS native compilation still happens on **EAS** (we're not paying for a
-mac_mini_m2 minute when EAS already does this well). Codemagic
-orchestrates the EAS build on a cheap `linux_x64` instance, waits for it
-to finish, downloads the `.ipa` via the EAS API, and republishes it as a
-Codemagic artifact so the same dashboard hands you both platforms.
+iOS is **also compiled locally on Codemagic** — on a macOS `mac_mini_m2`,
+`expo prebuild --platform ios` regenerates the native project, CocoaPods
+installs pods, and `xcode-project build-ipa` archives + exports a signed App
+Store `.ipa`. No EAS. The `.ipa` is a directly-downloadable Codemagic artifact,
+and an optional flag-gated step uploads it to TestFlight via
+`app-store-connect publish`. (The old ASCII diagram below is retained for
+history but is superseded — see CODEMAGIC_NATIVE_IOS_BUILD.md.)
 
 ---
 
@@ -68,7 +77,7 @@ Codemagic artifact so the same dashboard hands you both platforms.
 |---|---|---|---|---|
 | `android-preview` | push to `develop` + manual | APK (signed if keystore present, else debug) | `.apk` | Codemagic `linux_x64` |
 | `android-production` | push to `main` + manual | AAB (signed; keystore required) | `.aab` + `mapping.txt` | Codemagic `linux_x64` |
-| `ios-production` | push to `main` + manual | iOS build via EAS | `.ipa` | EAS, downloaded to Codemagic |
+| `ios-production` | push to `main` + manual | native iOS build (Xcode archive → App Store IPA; optional flag-gated TestFlight) | `.ipa` + dSYMs | Codemagic `mac_mini_m2` |
 
 `cancel_previous_builds: true` on `android-preview` (so rapid develop
 pushes don't queue up). `false` on both production workflows — every
@@ -94,23 +103,17 @@ main-branch build runs to completion.
    `working_directory: mobile` so every script step runs
    from the mobile-app root.
 
-### 3b. Add `EXPO_TOKEN`
+### 3b. `EXPO_TOKEN` — NOT required (legacy)
 
-1. `expo.dev` → **Account** → **Access Tokens** → **Create** →
-   name it `codemagic-ci`. Copy the token (you only see it once).
-2. Codemagic → **Teams** → **<your team>** → **Global environment
-   variables** → **Add new group** named `expo_credentials`.
-3. Add variable `EXPO_TOKEN` with the token value. Mark **Secure**.
-
-This token lets the iOS workflow run `eas build` non-interactively and
-the Android workflows resolve `expo-*` packages that gate on auth.
-
-> **Scope note:** Expo personal access tokens are **not** action-scoped
-> today — they inherit the full permissions of the account that minted
-> them. The expo.dev token UI only exposes a Note + Expiration. For a
-> machine identity, create a **Robot user** under your Expo
-> organisation with the `Developer` role (or higher) and mint the token
-> from that robot account.
+> **`EXPO_TOKEN` / the `expo_credentials` group are no longer required.** After
+> the iOS workflow became a native Codemagic build, no workflow needs an Expo
+> login. `android-production` still references the `expo_credentials` group in a
+> **non-fatal** "Verify EAS authentication" step (the Gradle build succeeds
+> without it); `android-preview` and `ios-production` do not reference it at all.
+> You can skip creating `EXPO_TOKEN` entirely. (If you keep the group, it's
+> harmless; removing the vestigial android-production reference is a safe future
+> cleanup.) For an optional manual `eas build`/`submit` from a laptop you'd log
+> in interactively (`npx eas-cli login`) rather than set a CI token.
 
 ### 3c. Add the public API URL group
 
@@ -165,16 +168,17 @@ references the keystore:
 
 | Variable | Where to set | Required for | Purpose |
 |---|---|---|---|
-| `EXPO_TOKEN` | `expo_credentials` group | all workflows | EAS / Expo CLI authentication. Tokens are NOT action-scoped — they inherit the minting account's full permissions. Use a Robot user for machine identity. |
-| `EAS_PROJECT_ID` | `zentromeet_api` group | rarely | Only needed if `app.json` lacks `extra.eas.projectId`. Once `npx eas-cli init` has been run and the result committed, this variable does nothing. |
+| `EXPO_TOKEN` | `expo_credentials` group | **none (legacy)** | No longer required. Only a non-fatal `android-production` step still references it; `ios-production` does not. Safe to omit. |
+| `APP_STORE_CONNECT_ISSUER_ID` | `app_store_credentials` group (Secure) | `ios-production` (only when publishing) | App Store Connect API key Issuer ID. Read by `app-store-connect publish` for the TestFlight upload. |
+| `APP_STORE_CONNECT_KEY_IDENTIFIER` | `app_store_credentials` group (Secure) | `ios-production` (only when publishing) | App Store Connect API key ID. |
+| `APP_STORE_CONNECT_PRIVATE_KEY` | `app_store_credentials` group (Secure) | `ios-production` (only when publishing) | The `.p8` private-key contents. |
+| `PUBLISH_TO_TESTFLIGHT` | `ios-production` workflow env (UI) | optional | `"false"` (default) builds + validates the IPA without uploading; `"true"` uploads to TestFlight via `app-store-connect publish` (beta review only). |
 | `EXPO_PUBLIC_API_BASE_URL` | `zentromeet_api` group | all workflows | Backend the app talks to (default `https://app.zentromeet.com`). **MUST be named with the `EXPO_PUBLIC_` prefix** — Expo only inlines vars with that prefix into the JS bundle, and Codemagic does not substitute `$VAR` inside YAML `vars:` blocks. |
 | `ANDROID_KEYSTORE` | Code signing → Android keystores (UI upload form) | `android-production` (required), `android-preview` (optional) | The `.keystore` file itself. Codemagic exposes it at runtime as `CM_KEYSTORE_PATH`. |
 | `ANDROID_KEYSTORE_PASSWORD` | same | same | Keystore password. Runtime name: `CM_KEYSTORE_PASSWORD`. |
 | `ANDROID_KEY_ALIAS` | same | same | Key alias. Runtime name: `CM_KEY_ALIAS`. |
 | `ANDROID_KEY_PASSWORD` | same | same | Key password. Runtime name: `CM_KEY_PASSWORD`. |
-| `SUBMIT_TO_TESTFLIGHT` | `ios-production` workflow env (UI) | optional | When `"true"`, the workflow runs `eas submit` after the build finishes. Requires the one-time ASC credentials upload (see §9 Option A). |
-| `APPLE_APP_SPECIFIC_PASSWORD` | **NOT in Codemagic — cached on EAS after first `eas credentials -p ios`** | optional | Apple ID auth fallback for `eas submit`. EAS prompts on first interactive run and caches it server-side. Do not store in Codemagic. |
-| `APP_STORE_CONNECT_API_KEY` | **NOT in Codemagic — cached on EAS after first `eas credentials -p ios`** | preferred | Preferred non-interactive auth path for `eas submit`. EAS prompts for the Issuer ID + Key ID + `.p8` on first interactive run and caches them. Do not store in Codemagic. |
+| App Store Connect API key **integration** | Codemagic → Teams → Team integrations → Developer Portal (named `zentromeet_asc_api_key`) | `ios-production` (signing) | Drives automatic iOS code signing (cert + profile fetch). Referenced via `integrations.app_store_connect`. Not an env var. |
 
 > **Note on Android keystore naming:** when you upload a keystore via
 > the **Code signing identities** UI, Codemagic re-exposes it as
@@ -183,13 +187,14 @@ references the keystore:
 > conceptual fields you populate in the upload form — `codemagic.yaml`
 > consumes the `CM_*` versions.
 
-> **Note on iOS submission credentials:** Apple submission credentials
-> (`APPLE_APP_SPECIFIC_PASSWORD` and `APP_STORE_CONNECT_API_KEY`) are
-> NOT stored as Codemagic environment variables. They are uploaded to
-> EAS once via `npx eas-cli credentials -p ios` from your laptop, cached
-> on EAS infrastructure, and reused by every subsequent `eas submit`
-> call — including the one inside the `ios-production` workflow when
-> `SUBMIT_TO_TESTFLIGHT=true`. See § 9.
+> **Note on iOS signing + publishing credentials:** the App Store Connect API
+> key is configured TWICE in Codemagic — once as a **Developer Portal
+> integration** (`zentromeet_asc_api_key`) for automatic code signing, and once
+> as the `app_store_credentials` env group (`APP_STORE_CONNECT_ISSUER_ID` /
+> `_KEY_IDENTIFIER` / `_PRIVATE_KEY`) read by `app-store-connect publish` for
+> the TestFlight upload. Nothing is committed to git. See
+> [CODEMAGIC_NATIVE_IOS_BUILD.md](CODEMAGIC_NATIVE_IOS_BUILD.md) §10. EAS submit
+> is no longer used by CI.
 
 ---
 
@@ -249,12 +254,13 @@ references the keystore:
 
 ### 6c. `ios-production`
 
-- `.ipa` downloaded into
-  `mobile/ios-artifacts/zentromeet-<build-id>.ipa`.
-- Available as a Codemagic artifact (direct download).
-- The original EAS build remains on `expo.dev` → **Builds** for the
-  ZentroMeet project — redundancy in case Codemagic prunes the
-  artifact.
+- Signed App Store `.ipa` at `build/ios/ipa/*.ipa` (built natively by
+  `xcode-project build-ipa`; no EAS).
+- dSYMs at `zentromeet-dsyms.zip`; Xcode log at `/tmp/xcodebuild_logs/*.log`.
+- All available as Codemagic artifacts (direct download).
+- The "Validate IPA" step gates the build (universal iPhone+iPad, App
+  Store-signed, correct bundle id + build number) — see
+  [CODEMAGIC_NATIVE_IOS_BUILD.md](CODEMAGIC_NATIVE_IOS_BUILD.md) §5.
 
 ---
 
@@ -325,67 +331,52 @@ See `docs/BETA_RELEASE.md` § Android for the full EAS submit playbook.
 
 ## 9. Submitting the iOS build to TestFlight
 
-### Option A — Auto-submit from Codemagic
+The native `ios-production` workflow uploads to TestFlight itself, using
+Codemagic's own `app-store-connect publish` CLI — **not** `eas submit`. It is
+held behind the `PUBLISH_TO_TESTFLIGHT` flag. Full detail in
+[CODEMAGIC_NATIVE_IOS_BUILD.md](CODEMAGIC_NATIVE_IOS_BUILD.md) §4 + §10.
 
-> **PREREQUISITE — must complete BEFORE flipping the toggle.** `eas
-> submit ios --non-interactive` has no credential-prompt fallback. The
-> first auto-submit will hard-fail with `No ASC API key configured` (or
-> equivalent) unless you've already cached Apple credentials on EAS.
+### Enable TestFlight upload from Codemagic
 
-1. **One-time on your laptop:**
+1. **One-time in the Codemagic UI:**
+   - Create an **App Store Connect API key integration** named
+     `zentromeet_asc_api_key` (Teams → Team integrations → Developer Portal):
+     upload the `.p8` + Issuer ID + Key ID. This drives automatic signing.
+   - Create the `app_store_credentials` env group (Secure) with
+     `APP_STORE_CONNECT_ISSUER_ID`, `APP_STORE_CONNECT_KEY_IDENTIFIER`,
+     `APP_STORE_CONNECT_PRIVATE_KEY` (the same key's values; read by the
+     publish CLI).
+
+2. On the `ios-production` workflow → **Environment variables** → set
+   `PUBLISH_TO_TESTFLIGHT` = `"true"`.
+
+3. Next time `ios-production` runs, after building + validating the IPA it
+   executes:
    ```bash
-   cd mobile
-   npx eas-cli credentials -p ios
+   app-store-connect publish --path "build/ios/ipa/*.ipa" --testflight
    ```
-   When prompted, choose either:
-   - **App Store Connect API key (preferred)** — paste Issuer ID,
-     Key ID, and upload the `.p8` file from `appstoreconnect.apple.com →
-     Users and Access → Integrations → App Store Connect API`.
-   - **Apple ID + app-specific password** — paste your Apple ID and a
-     password minted at `appleid.apple.com → Sign-In and Security →
-     App-Specific Passwords`.
-
-   EAS caches whichever you chose on its infrastructure. Subsequent
-   `eas submit` runs from anywhere reuse it.
-
-2. Codemagic → `ios-production` workflow → **Environment variables**
-   → add `SUBMIT_TO_TESTFLIGHT` = `"true"`.
-
-3. Next time `ios-production` runs, it executes:
-   ```bash
-   eas submit --platform ios --latest --profile production --non-interactive
-   ```
-   right after the build finishes.
+   `--testflight` = TestFlight beta review only. It deliberately omits
+   `--app-store`, so it **never** submits for App Store review.
 
 4. App Store Connect → TestFlight → **Builds** shows the new build in
-   ~10-30 min once Apple's notarisation completes.
+   ~10-30 min once Apple finishes processing.
 
-If step 3 fails with a credential error despite step 1 succeeding, the
-ASC API key probably expired or was revoked. Re-run `eas credentials
--p ios` to upload a fresh key.
+While `PUBLISH_TO_TESTFLIGHT="false"` (the default), the workflow still
+produces + validates a signed `.ipa` artifact but uploads nothing — safe for
+iterating on the build config.
 
-### Option B — Manual from your laptop
+### Optional fallback — manual from your laptop (EAS)
 
-After Codemagic finishes the `ios-production` build:
+The `eas submit` path still works as an optional fallback if you ever build via
+EAS instead of Codemagic:
 
 ```bash
 cd mobile
 npx eas-cli submit --platform ios --latest --profile production
 ```
 
-This pulls the most recent EAS build (which is the one Codemagic just
-orchestrated) and uploads it to App Store Connect. First run prompts
-for ASC API key or Apple ID + app-specific password — both cached on
-EAS servers after the first submission.
-
-### First-time iOS submissions
-
-- Apple expects either an **ASC API key** (preferred — non-interactive)
-  or an **Apple ID + app-specific password**. `eas-cli` prompts you the
-  first time, then caches whichever you chose on EAS infrastructure.
-- `submit.production.ios.ascAppId` is intentionally left blank in
-  `eas.json` — `eas-cli` will prompt for it on the first run and
-  remember it for future runs.
+This requires a prior `eas build` (EAS owns that artifact) and cached Apple
+credentials (`npx eas-cli credentials -p ios`). It is **not** part of CI.
 
 ---
 
@@ -400,11 +391,11 @@ workflow — nothing in `app.json` or `eas.json` needs to change.
 | `app.json` `experiments.baseUrl` | `/mobile` | Read by Expo Router at JS-bundle time — untouched by prebuild |
 | `app.json` `version` | `0.3.0` | Used as the human-readable version string in both stores |
 | `android.package` | `com.zentromeet.app` | Written to `applicationId` in `android/app/build.gradle` by prebuild |
-| `android.versionCode` | `3` | Read by Codemagic's local Gradle build at AAB compile time. **Must be manually bumped** before each push to `main` that fires `android-production`, otherwise Play Console rejects with "Version code N already used." Alternatively, route Android production through `eas build` and let `autoIncrement` handle it server-side. |
-| `ios.bundleIdentifier` | `com.zentromeet.app` | Used by EAS during `ios-production` |
-| `ios.buildNumber` | `"3"` | Starting point — `autoIncrement: true` in `eas.json` bumps it server-side for the EAS-driven iOS build |
+| `android.versionCode` | `15` (live value in `app.json`) | Read by Codemagic's local Gradle build at AAB compile time. **Must be manually bumped** before each push to `main` that fires `android-production`, otherwise Play Console rejects with "Version code N already used." |
+| `ios.bundleIdentifier` | `com.zentromeet.app` | Used by the native `ios-production` build for automatic signing (`ios_signing.bundle_identifier`) + asserted against the built IPA |
+| `ios.buildNumber` | `"11"` | Read by `expo prebuild` → `CFBundleVersion`. The native iOS workflow uses it as-is (NO auto-increment) — bump it by hand in `app.json` before a real TestFlight cut |
 | `eas.json` `cli.appVersionSource` | `"remote"` (top-level `cli` block, applies to all profiles) | EAS owns the canonical version number remotely. **Important caveat:** Codemagic-built AABs cannot be uploaded via `eas submit --platform android` because the version source mismatch confuses EAS. Upload Codemagic AABs to Play Console directly (§ 8). |
-| `eas.json` production profile | `autoIncrement: true` (production-only), `android.buildType: "app-bundle"`, `distribution: "store"`, `channel: "production"` | Drives `ios-production`. Android workflows compile locally via Gradle and don't read this profile, but the `app-bundle` build type matches what Codemagic produces. |
+| `eas.json` production profile | `autoIncrement: true` (production-only), `android.buildType: "app-bundle"`, `distribution: "store"`, `channel: "production"` | **Not read by any Codemagic workflow** (both platforms build natively on Codemagic now). Retained only for optional manual `eas build`/`submit` from a laptop. |
 | `eas.json` preview profile | `distribution: "internal"`, `android.gradleCommand: ":app:assembleRelease"` | Not used by Codemagic — Codemagic's `android-preview` workflow drives the equivalent Gradle command directly |
 | `eas.json` submit production android | `track: "internal"`, `releaseStatus: "draft"` | Used only if you run `eas submit` manually on the AAB — Codemagic does not auto-submit Android |
 | Expo Router 4.0.9 | `typedRoutes: true` + `baseUrl: "/mobile"` | Preserved through prebuild (config-plugin only touches native files) |
@@ -413,9 +404,9 @@ workflow — nothing in `app.json` or `eas.json` needs to change.
 | `expo-secure-store`, `expo-web-browser`, `expo-font` | Listed in `app.json` plugins | Same — prebuild handles all of them |
 | Deep links | iOS: `applinks:app.zentromeet.com`. Android: `zentromeet://oauth` (custom scheme) + `https://app.zentromeet.com/m` (App Links with `pathPrefix: /m`, `autoVerify: true`). | Prebuild regenerates `Info.plist` `CFBundleURLTypes` + `AndroidManifest.xml` `<intent-filter android:autoVerify="true">` from `app.json`. **Note:** the Android App Links use path prefix `/m` — intentionally distinct from the web app's `baseUrl: "/mobile"`. The backend at `https://app.zentromeet.com/.well-known/assetlinks.json` must serve a valid `assetlinks.json` for Android verified-link routing to succeed. |
 | Google + Microsoft OAuth | Built on `expo-auth-session` + the scheme above | Works because the scheme is preserved end-to-end |
-| `package-lock.json` git-ignored | Yes (`.gitignore` lines 19-21) | The workflow tries `npm ci` first, falls back to `npm install --no-audit --no-fund` |
+| `package-lock.json` | **Committed** (un-ignored 2026-06-15) | All workflows use `npm ci` for reproducible installs (the iOS workflow fails fast if it's missing) |
 | `node_modules` git-ignored | Yes | Fresh install on every build; `$HOME/.npm` is cached |
-| `android/` and `ios/` git-ignored | Yes | `npx expo prebuild --platform <p> --clean` regenerates them on every Android run |
+| `android/` and `ios/` git-ignored | Yes | `npx expo prebuild --platform <p> --clean` regenerates them on every build (Android on Linux, iOS on the macOS machine) |
 
 ---
 
@@ -424,8 +415,11 @@ workflow — nothing in `app.json` or `eas.json` needs to change.
 1. Push `codemagic.yaml` and this doc to GitHub.
 2. Connect the monorepo in the Codemagic dashboard.
 3. Set **Configuration file path** to `codemagic.yaml`.
-4. Add the `expo_credentials` and `zentromeet_api` global env-var
-   groups (§ 3b, § 3c).
+4. Add the `zentromeet_api` global env-var group (§ 3c). For iOS, also add
+   the App Store Connect API key integration (`zentromeet_asc_api_key`) and
+   the `app_store_credentials` group — see
+   [CODEMAGIC_NATIVE_IOS_BUILD.md](CODEMAGIC_NATIVE_IOS_BUILD.md) §10.
+   (`expo_credentials` / `EXPO_TOKEN` are no longer required — § 3b.)
 5. (Optional for preview / required for production) upload the Android
    keystore as `zentromeet_android_keystore` (§ 3d).
 6. Manually start the `android-preview` workflow from the Codemagic
@@ -459,29 +453,24 @@ workflow — nothing in `app.json` or `eas.json` needs to change.
 
 ---
 
-## 13. Relationship to EAS and `docs/BETA_RELEASE.md`
+## 13. Relationship to EAS
 
-Both pipelines coexist — they're not competitors.
+**Codemagic is now the build system for both platforms** — Android (Gradle)
+and iOS (native Xcode). EAS is no longer in the CI path.
 
-- **Codemagic** = fast remote APK/AAB without local Android Studio.
-  Best when: a tester needs the app on a phone in 15 minutes, you're
-  iterating on develop, or you don't have Java 17 installed locally.
-  Downloadable artifact, QR code, email — everything in one dashboard.
+- **Codemagic** = all CI builds. Android APK/AAB via `expo prebuild` + Gradle;
+  iOS signed App Store IPA via `expo prebuild` + CocoaPods + Xcode archive, with
+  flag-gated TestFlight upload through `app-store-connect publish`. Downloadable
+  artifacts, QR code, email — one dashboard, both platforms.
 
-- **EAS** = source of truth for **store submissions**, **server-side
-  version bumps** (`autoIncrement: true`), and **credential
-  management**. Best when: cutting a real store release, dealing with
-  iOS provisioning, or you want `eas submit` to handle the Play
-  Console / TestFlight upload for you.
+- **EAS** = OPTIONAL manual/laptop fallback only. The `mobile/package.json`
+  `build:*` / `submit:*` scripts still call `eas-cli` (and `eas.json` is kept
+  for them), but **no Codemagic workflow uses EAS**. Reach for it only if you
+  want to build off-CI from a laptop.
 
-The Codemagic `ios-production` workflow is a thin orchestration over
-EAS — Codemagic doesn't compile iOS itself; it queues an EAS build,
-waits, and republishes the resulting `.ipa` so you have a single
-artifact source for both platforms.
-
-If `docs/BETA_RELEASE.md` and this doc ever disagree, **BETA_RELEASE
-wins for store submissions**, and this doc wins for the
-"give-me-an-APK-now" path.
+The `ios-production` workflow **compiles iOS itself** on a `mac_mini_m2` — it no
+longer queues an EAS build. See
+[CODEMAGIC_NATIVE_IOS_BUILD.md](CODEMAGIC_NATIVE_IOS_BUILD.md).
 
 ---
 

@@ -7,17 +7,23 @@
 #   1) android-preview      — Builds an installable APK (debug or release) for
 #                             direct sideload onto an Android device. Use this
 #                             for internal testing and QA without going through
-#                             EAS or Play Store review.
+#                             EAS or Play Store review. Built on Codemagic via
+#                             `expo prebuild` + Gradle (no EAS).
 #
 #   2) android-production   — Builds a signed Android App Bundle (.aab) ready
 #                             for upload to Play Console (Internal/Closed/Open
 #                             testing or Production track). Requires a release
-#                             keystore configured in Codemagic.
+#                             keystore configured in Codemagic. Built on
+#                             Codemagic via `expo prebuild` + Gradle (no EAS).
 #
-#   3) ios-production       — Orchestrates an EAS production iOS build, then
-#                             downloads the resulting .ipa so it is available
-#                             as a Codemagic artifact. Optionally auto-submits
-#                             to TestFlight when SUBMIT_TO_TESTFLIGHT="true".
+#   3) ios-production       — Builds the iOS app NATIVELY on a Codemagic macOS
+#                             (Apple-silicon) machine — NO EAS Build. Runs
+#                             `expo prebuild` + CocoaPods + Xcode archive +
+#                             Apple code signing + App Store IPA export, then
+#                             OPTIONALLY uploads to TestFlight (held behind the
+#                             PUBLISH_TO_TESTFLIGHT flag) using Codemagic's own
+#                             App Store Connect publishing — never EAS submit,
+#                             never App Store review.
 #
 # MONOREPO LAYOUT
 # ---------------
@@ -34,32 +40,59 @@
 # REQUIRED ENVIRONMENT-VARIABLE GROUPS (configure in Codemagic UI under
 # Teams → Global / App environment variables):
 #
-#   expo_credentials:
-#     EXPO_TOKEN        — Expo access token (expo.dev → Account → Access Tokens)
-#
-#   zentromeet_api:
+#   zentromeet_api:       (all three workflows)
 #     EXPO_PUBLIC_API_BASE_URL — Defaults to https://app.zentromeet.com
 #                                MUST be named exactly this — Expo inlines all
 #                                EXPO_PUBLIC_* vars into the JS bundle at
 #                                build time. (Codemagic does NOT perform
 #                                $VAR substitution inside `vars:`, so we
 #                                bind the public name in the group itself.)
-#     EAS_PROJECT_ID            — Optional. Only required if `eas init` has not
-#                                 yet been run for this repo and app.json's
-#                                 extra.eas.projectId is missing.
+#
+#   app_store_credentials:  (ios-production only; used ONLY when
+#                            PUBLISH_TO_TESTFLIGHT="true")
+#     APP_STORE_CONNECT_ISSUER_ID      — App Store Connect API key Issuer ID
+#     APP_STORE_CONNECT_KEY_IDENTIFIER — App Store Connect API key ID
+#     APP_STORE_CONNECT_PRIVATE_KEY    — the .p8 private key contents (Secure)
+#     Read by `app-store-connect publish` for the flag-gated TestFlight upload.
+#     Mark all three Secure. (You configure the SAME key as a Codemagic App
+#     Store Connect *integration* too — see "iOS code signing" below — but the
+#     integration is for automatic signing; this group is what the publish
+#     CLI reads.)
+#
+#   expo_credentials:     (VESTIGIAL — android-production only)
+#     EXPO_TOKEN        — Historically used by EAS. After the iOS workflow was
+#                         converted to a native Codemagic build, NO workflow
+#                         requires EXPO_TOKEN. android-production still
+#                         references this group in a NON-FATAL "Verify EAS
+#                         authentication" step (the Gradle build works without
+#                         it). It is NOT required and can be removed in a
+#                         future cleanup. android-preview and ios-production do
+#                         NOT reference it. eas.json is retained ONLY for the
+#                         optional local `npm run build:*` / `submit:*` scripts
+#                         (manual EAS fallback) — no Codemagic workflow uses it.
 #
 # REQUIRED CODE-SIGNING ASSETS
 # ----------------------------
-# Upload an Android release keystore to:
+# ANDROID — upload a release keystore to:
 #   Codemagic → Teams → Code Signing → Android keystores
 # and name the entry exactly:  ZentroMeet
 # Codemagic will automatically inject these env vars into the build:
 #   CM_KEYSTORE_PATH, CM_KEYSTORE_PASSWORD, CM_KEY_ALIAS, CM_KEY_PASSWORD
 #
+# iOS — automatic signing via a Codemagic App Store Connect API key INTEGRATION
+# (NOT a committed cert/profile). Codemagic → Teams → Team integrations →
+# Developer Portal → connect an App Store Connect API key (.p8 + Issuer ID +
+# Key ID) and NAME it.  Reference that name under `integrations.app_store_connect`
+# in ios-production (default below: zentromeet_asc_api_key). At build time
+# Codemagic fetches/creates the Apple Distribution certificate + App Store
+# provisioning profile for com.zentromeet.app. NOTHING sensitive lives in git.
+#
 # DOCS
 # ----
-# See docs/CODEMAGIC.md for end-to-end setup, troubleshooting, and how to
-# enable TestFlight auto-submit for the ios-production workflow.
+# See docs/CODEMAGIC.md for end-to-end setup and troubleshooting, and
+# docs/CODEMAGIC_NATIVE_IOS_BUILD.md for the native iOS build + signing +
+# TestFlight specifics (what to configure in the Codemagic UI before the
+# ios-production workflow can run).
 # =============================================================================
 
 workflows:
@@ -463,38 +496,74 @@ workflows:
   # ===========================================================================
   # WORKFLOW 3: ios-production
   # ---------------------------------------------------------------------------
-  # Orchestrates an EAS production iOS build. The actual compile happens on
-  # EAS's macOS workers; this Codemagic workflow simply:
+  # Builds the iOS app NATIVELY on a Codemagic macOS (Apple-silicon) machine —
+  # NO EAS Build. Full native pipeline, all on Codemagic:
   #
-  #   1) Authenticates with EAS using EXPO_TOKEN
-  #   2) Kicks off the build and waits for it to complete
-  #   3) Downloads the resulting .ipa so it's a Codemagic artifact
-  #   4) Optionally submits to TestFlight (toggle via SUBMIT_TO_TESTFLIGHT)
+  #   npm ci → tsc / expo-doctor / unit tests → expo export (validate JS) →
+  #   expo prebuild --platform ios --clean → pod install →
+  #   discover workspace + scheme → xcode-project use-profiles (automatic
+  #   signing) → xcode-project build-ipa (Xcode archive + App Store export) →
+  #   validate the .ipa → (optional, flag-gated) upload to TestFlight.
   #
-  # Because we are not compiling natively on Codemagic, we use linux_x2
-  # (cheaper than mac_mini_m2). All heavy lifting runs on EAS.
+  # CODE SIGNING — AUTOMATIC, via the Codemagic App Store Connect API key
+  # integration (integrations.app_store_connect) + environment.ios_signing.
+  # Codemagic fetches/creates the Apple Distribution certificate + App Store
+  # provisioning profile for com.zentromeet.app at build time. No .p8 / .p12 /
+  # cert / profile / password is ever stored in git.
+  #
+  # TESTFLIGHT UPLOAD is HELD behind PUBLISH_TO_TESTFLIGHT (default "false"):
+  # the workflow ALWAYS produces + validates a signed IPA artifact, and only
+  # uploads to TestFlight — via Codemagic's own `app-store-connect publish`
+  # (NOT EAS submit) — when PUBLISH_TO_TESTFLIGHT="true". It NEVER submits for
+  # App Store review (that would require the `--app-store` flag, which we omit).
   #
   # Triggers: manual + push to `main`.
-  #
-  # To enable TestFlight auto-submit: set SUBMIT_TO_TESTFLIGHT="true" in the
-  # Codemagic UI for this workflow (overrides the "false" default below).
   # ===========================================================================
   ios-production:
-    name: "iOS Production — App Store / TestFlight (via EAS)"
-    instance_type: linux_x2
+    name: "iOS Production — App Store / TestFlight (native Codemagic build)"
+    instance_type: mac_mini_m2
     max_build_duration: 120
     working_directory: mobile
 
+    # App Store Connect API key INTEGRATION (created in the Codemagic UI:
+    # Teams → <team> → Team integrations → Developer Portal → connect an App
+    # Store Connect API key (.p8 + Issuer ID + Key ID) and NAME it). The name
+    # below MUST match. Used for AUTOMATIC code signing (cert + profile fetch).
+    integrations:
+      app_store_connect: zentromeet_asc_api_key
+
     environment:
+      # AUTOMATIC iOS signing. Combined with the integration above, Codemagic
+      # fetches a distribution certificate + App Store provisioning profile for
+      # this exact bundle id. distribution_type app_store covers TestFlight too.
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.zentromeet.app
       node: 20.17.0
+      # Pin Xcode 16.2 — known-good for Expo SDK 52 / RN 0.76.9. Xcode 16.3 has
+      # a C++ compile regression with RN 0.76 (expo/expo#35807). 16.0–16.2 OK.
+      # Quoted so YAML keeps it a string (e.g. a future "16.0" won't coerce to 16).
+      xcode: "16.2"
+      cocoapods: default
       groups:
-        - expo_credentials
+        # EXPO_PUBLIC_API_BASE_URL — inlined into the JS bundle at build time.
         - zentromeet_api
+        # APP_STORE_CONNECT_ISSUER_ID / _KEY_IDENTIFIER / _PRIVATE_KEY — read by
+        # `app-store-connect publish` for the flag-gated TestFlight upload.
+        # ONLY consumed when PUBLISH_TO_TESTFLIGHT="true".
+        - app_store_credentials
       vars:
         EXPO_NO_TELEMETRY: "1"
-        # Default off — flip to "true" in Codemagic UI to auto-submit to
-        # TestFlight after a successful EAS build.
-        SUBMIT_TO_TESTFLIGHT: "false"
+        # Asserted against the built IPA's CFBundleIdentifier.
+        BUNDLE_ID: "com.zentromeet.app"
+        # HELD by default. Flip to "true" in the Codemagic UI for this workflow
+        # ONLY AFTER the App Store Connect integration + app_store_credentials
+        # group are configured and verified. "false" → build + validate the IPA
+        # but DO NOT upload anywhere (see "Upload to TestFlight" step).
+        PUBLISH_TO_TESTFLIGHT: "false"
+        # Minimum believable IPA size (bytes). A real Expo/RN IPA is tens of MB;
+        # this guards against shipping an empty/tiny zip as the artifact.
+        MIN_IPA_BYTES: "3000000"
 
     triggering:
       events:
@@ -507,162 +576,296 @@ workflows:
     cache:
       cache_paths:
         - $HOME/.npm
+        - $HOME/Library/Caches/CocoaPods
 
     scripts:
       # ----- 1. Environment info -------------------------------------------
       - name: Environment info
         script: |
-          echo "Node:    $(node --version)"
-          echo "npm:     $(npm --version)"
-          echo "Branch:  $CM_BRANCH"
-          echo "Commit:  $CM_COMMIT"
-          echo "Build:   $CM_BUILD_ID"
-          echo "Submit to TestFlight: $SUBMIT_TO_TESTFLIGHT"
+          echo "Node:      $(node --version)"
+          echo "npm:       $(npm --version)"
+          echo "Xcode:     $(xcodebuild -version 2>/dev/null | head -1)"
+          echo "CocoaPods: $(pod --version 2>/dev/null)"
+          echo "Branch:    $CM_BRANCH"
+          echo "Commit:    $CM_COMMIT"
+          echo "Build:     $CM_BUILD_ID"
+          echo "Workdir:   $(pwd)"
+          echo "Publish to TestFlight: $PUBLISH_TO_TESTFLIGHT"
 
-      # ----- 2. Install dependencies ---------------------------------------
+      # ----- 2. Install dependencies (reproducible) ------------------------
+      # package-lock.json IS committed, so use `npm ci` for a clean,
+      # reproducible install pinned to the SDK-52-aligned versions.
       - name: Install dependencies
         script: |
-          # pipefail so a failing npm step propagates through `tee`.
-          # Without it, `set -e` only checks tee's exit status (always 0).
           set -euo pipefail
           mkdir -p /tmp
-          if [ -f package-lock.json ]; then
-            echo "package-lock.json found — using npm ci"
-            npm ci --no-audit --no-fund 2>&1 | tee /tmp/install.log
-          else
-            echo "No package-lock.json — using npm install"
-            npm install --no-audit --no-fund 2>&1 | tee /tmp/install.log
+          if [ ! -f package-lock.json ]; then
+            echo "ERROR: package-lock.json is missing — it must be committed for reproducible CI." >&2
+            exit 1
           fi
+          npm ci --no-audit --no-fund 2>&1 | tee /tmp/install.log
 
-      # ----- 3. Verify EAS authentication ----------------------------------
-      # EXPO_TOKEN is REQUIRED for this workflow — without it, eas-cli
-      # cannot trigger a remote build. Fail fast.
-      - name: Verify EAS authentication
+      # ----- 3. Quality gates (fail fast BEFORE the expensive native build) -
+      - name: TypeScript check (tsc --noEmit)
         script: |
           set -e
-          if [ -z "$EXPO_TOKEN" ]; then
-            echo "ERROR: EXPO_TOKEN is not set."
-            echo "Configure it in Codemagic UI under the 'expo_credentials' group."
-            exit 1
-          fi
-          echo "EXPO_TOKEN is set. Checking eas-cli session..."
-          npx --yes eas-cli whoami
+          npx tsc --noEmit
 
-      # ----- 4. Trigger EAS production iOS build ---------------------------
-      # --non-interactive  : no prompts; fails fast on missing config
-      # --wait             : block until EAS reports success or failure
-      # --json             : emit machine-readable build metadata to stdout
-      #                      so step 5 can read THIS build's id directly,
-      #                      avoiding the race where `eas build:list
-      #                      --limit 1` returns a different (concurrent)
-      #                      build's id.
-      # Output teed to /tmp/eas-build.log (human-readable) AND
-      # /tmp/eas-build.json (machine-readable) for the next step.
-      - name: Trigger EAS production iOS build
+      - name: Expo doctor (dependency + config health)
         script: |
-          set -euo pipefail
-          mkdir -p /tmp
-          # Run the build and stream JSON output. --json on `build` makes
-          # eas-cli print a final JSON object with the build record.
-          npx --yes eas-cli build \
-            --platform ios \
-            --profile production \
-            --non-interactive \
-            --wait \
-            --json > /tmp/eas-build.json 2> /tmp/eas-build.log
-          echo "=== eas-build.log (stderr) ==="
-          cat /tmp/eas-build.log
-          echo "=== eas-build.json (head) ==="
-          head -c 4000 /tmp/eas-build.json || true
+          set -e
+          npx --yes expo-doctor
 
-      # ----- 5. Download the built .ipa ------------------------------------
-      # Read the build id from THIS build's JSON output (step 4), then
-      # pull its artifact URL. Falls back across the historical eas-cli
-      # field names (`buildUrl` is current; `applicationArchiveUrl` and
-      # `artifactsUrl` appeared in older versions) so a future eas-cli
-      # rename does not silently break the download.
-      - name: Download the built .ipa
+      - name: Mobile unit tests
         script: |
-          set -euo pipefail
-          mkdir -p ios-artifacts
-
-          # eas-cli build --json may emit either a single object or an
-          # array; the jq `if-then-else` handles both shapes safely.
-          BUILD_ID=$(jq -r 'if type=="array" then .[0].id else .id end' /tmp/eas-build.json)
-          if [ -z "$BUILD_ID" ] || [ "$BUILD_ID" = "null" ]; then
-            echo "ERROR: Could not extract BUILD_ID from /tmp/eas-build.json."
-            echo "--- json head ---"
-            head -c 2000 /tmp/eas-build.json
-            exit 1
-          fi
-          echo "BUILD_ID (from this run's eas build --json): $BUILD_ID"
-
-          # Re-query build:view to get a fresh URL — the URL embedded in
-          # the build event is sometimes a placeholder until EAS finishes
-          # the post-build copy.
-          URL=$(npx --yes eas-cli build:view "$BUILD_ID" --json --non-interactive \
-                | jq -r '.artifacts.buildUrl // .artifacts.applicationArchiveUrl // .artifactsUrl // empty')
-          if [ -z "$URL" ]; then
-            echo "ERROR: No buildUrl / applicationArchiveUrl / artifactsUrl in eas-cli build:view output."
-            exit 1
-          fi
-          echo "Downloading IPA from: $URL"
-          curl -L -o "ios-artifacts/zentromeet-${BUILD_ID}.ipa" "$URL"
-          echo "Downloaded:"
-          ls -lah ios-artifacts/
-
-      # ----- 6. Optionally submit to TestFlight ----------------------------
-      # PREREQUISITE (one-time, BEFORE flipping SUBMIT_TO_TESTFLIGHT to "true"):
-      #
-      #   cd mobile
-      #   npx eas-cli credentials -p ios
-      #
-      # and upload either an App Store Connect API key (.p8 + Issuer ID +
-      # Key ID) OR an Apple ID + app-specific password to EAS. Credentials
-      # are then cached on EAS infrastructure and the --non-interactive
-      # run below will succeed. Without this one-time setup, the first
-      # auto-submit will hard-fail with "No ASC API key configured" — eas
-      # submit has no prompt fallback under --non-interactive.
-      # See docs/CODEMAGIC.md §9 Option A for the full prereq sequence.
-      - name: Optionally submit to TestFlight
-        script: |
-          if [ "$SUBMIT_TO_TESTFLIGHT" = "true" ]; then
-            echo "SUBMIT_TO_TESTFLIGHT=true — submitting latest iOS build to TestFlight..."
-            echo "NOTE: requires ASC API key OR Apple ID/app-password pre-uploaded via"
-            echo "      \`eas credentials -p ios\`. If you see a credentials error,"
-            echo "      run that command locally once and re-run this workflow."
-            npx --yes eas-cli submit \
-              --platform ios \
-              --latest \
-              --profile production \
-              --non-interactive
+          set -e
+          if ls tests/*.test.ts >/dev/null 2>&1; then
+            npx --yes tsx --test tests/*.test.ts
           else
-            echo "SUBMIT_TO_TESTFLIGHT is '$SUBMIT_TO_TESTFLIGHT' — skipping submission."
-            echo "To enable auto-submit:"
-            echo "  1. Run \`npx eas-cli credentials -p ios\` from your laptop once,"
-            echo "     uploading an App Store Connect API key (preferred) or"
-            echo "     Apple ID + app-specific password."
-            echo "  2. In Codemagic UI for this workflow, set SUBMIT_TO_TESTFLIGHT=\"true\"."
-            echo "Or submit manually from your laptop after this Codemagic build:"
-            echo "  npx eas-cli submit --platform ios --latest --profile production"
+            echo "No test files under tests/ — skipping."
           fi
 
-      # ----- 7. Display artifact location ----------------------------------
-      - name: Display artifact location
+      - name: Expo export (validate iOS JS bundle compiles)
         script: |
-          echo "Local IPA artifact(s):"
-          ls -lah ios-artifacts/ || true
-          echo ""
-          echo "Download from Codemagic dashboard → Builds → this build → Artifacts."
+          set -e
+          npx expo export --platform ios
+          rm -rf dist   # validation only; the installable build is via Xcode below
+
+      # ----- 4. Pre-prebuild config assertions -----------------------------
+      # Confirm the app config is correct BEFORE generating native code, so a
+      # misconfig fails here with a clear message instead of deep in Xcode.
+      - name: Assert app config (bundle id / build number / iPad / scheme / API)
+        script: |
+          set -euo pipefail
+          node -e '
+            const app = require("./app.json").expo;
+            const ios = app.ios || {};
+            const fail = (m) => { console.error("ASSERT FAILED: " + m); process.exit(1); };
+            if (ios.bundleIdentifier !== "com.zentromeet.app") fail("ios.bundleIdentifier != com.zentromeet.app (got " + ios.bundleIdentifier + ")");
+            if (!ios.buildNumber || !String(ios.buildNumber).trim()) fail("ios.buildNumber missing");
+            if (ios.supportsTablet !== true) fail("ios.supportsTablet must be true (iPhone + iPad)");
+            if (app.scheme !== "zentromeet") fail("scheme != zentromeet (OAuth callback URL scheme)");
+            const ip = ios.infoPlist || {};
+            if (ip.ITSAppUsesNonExemptEncryption !== false) fail("infoPlist.ITSAppUsesNonExemptEncryption must be false (export compliance)");
+            for (const k of ["NSCameraUsageDescription","NSPhotoLibraryUsageDescription","NSContactsUsageDescription","NSLocationWhenInUseUsageDescription"]) {
+              if (!ip[k]) fail("missing permission description " + k);
+            }
+            if (!Array.isArray(ios.associatedDomains) || !ios.associatedDomains.includes("applinks:app.zentromeet.com")) fail("associatedDomains missing applinks:app.zentromeet.com");
+            const api = app.extra && app.extra.apiBaseUrl;
+            if (!api || !/^https:\/\//.test(api)) fail("extra.apiBaseUrl must be an https URL");
+            console.log("app config OK — bundle=" + ios.bundleIdentifier + " build=" + ios.buildNumber + " iPad=" + ios.supportsTablet + " scheme=" + app.scheme + " api=" + api);
+          '
+          for f in assets/icon.png assets/splash.png assets/notification-icon.png; do
+            [ -f "$f" ] || { echo "ERROR: missing required asset $f"; exit 1; }
+          done
+          echo "Required assets present."
+
+      # ----- 5. Expo prebuild — generate iOS native project ----------------
+      # ios/ is .gitignored, so always regenerate. --clean = deterministic.
+      - name: Expo prebuild — generate iOS native project
+        script: |
+          set -e
+          npx expo prebuild --platform ios --clean
+          echo "Prebuild complete. ios/ contents:"
+          ls -la ios/
+
+      # ----- 6. CocoaPods install (creates the .xcworkspace) ---------------
+      # The .xcworkspace consumed by build-ipa only exists AFTER pod install.
+      - name: Install CocoaPods dependencies
+        script: |
+          set -euo pipefail
+          cd ios
+          pod install
+          echo "Pods installed."
+
+      # ----- 7. Discover workspace + scheme (do NOT hardcode) --------------
+      # Verify the generated names rather than assuming them. Export to
+      # $CM_ENV so the build step can read them. Expected: ZentroMeet.
+      - name: Discover Xcode workspace + scheme
+        script: |
+          set -euo pipefail
+          # NOTE: every command substitution that pipes through `head`/`grep`
+          # ends with `|| true` — under `set -euo pipefail` a no-match `ls`/grep
+          # or an early-closing `head` (SIGPIPE) returns non-zero and would
+          # otherwise ABORT the step before our own explicit checks can report.
+          WORKSPACE=$(ls -d ios/*.xcworkspace 2>/dev/null | head -1 || true)
+          if [ -z "$WORKSPACE" ]; then
+            echo "ERROR: no .xcworkspace under ios/ (did pod install fail?)"; exit 1
+          fi
+          WORKSPACE_NAME=$(basename "$WORKSPACE")
+          # Shared schemes listed by the workspace (Pods schemes are not shared).
+          # `|| true` on the whole substitution: xcodebuild -list can return
+          # non-zero while still emitting valid JSON; don't let that abort us.
+          SCHEMES=$(xcodebuild -workspace "$WORKSPACE" -list -json 2>/dev/null \
+            | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const j=JSON.parse(s);console.log((j.workspace.schemes||[]).join("\n"))}catch(e){process.exit(0)}})' || true)
+          echo "Schemes found:"; echo "$SCHEMES"
+          PROJ=$(ls -d ios/*.xcodeproj 2>/dev/null | head -1 || true)
+          EXPECT=$(basename "${PROJ%.xcodeproj}")
+          SCHEME=$(echo "$SCHEMES" | grep -x "$EXPECT" || true)
+          if [ -z "$SCHEME" ]; then SCHEME=$(echo "$SCHEMES" | grep -v '^$' | head -1 || true); fi
+          if [ -z "$SCHEME" ]; then echo "ERROR: could not determine a build scheme"; exit 1; fi
+          echo "Using workspace: $WORKSPACE_NAME"
+          echo "Using scheme:    $SCHEME"
+          echo "XCODE_WORKSPACE=$WORKSPACE_NAME" >> $CM_ENV
+          echo "XCODE_SCHEME=$SCHEME" >> $CM_ENV
+
+      # ----- 8. Apply provisioning profiles (automatic signing) ------------
+      # Applies the Codemagic-fetched App Store profile to the app's Xcode
+      # project AND writes $HOME/export_options.plist (which build-ipa reads).
+      # --project scopes the glob to the app project so it can't pick up a
+      # stray node_modules/*.xcodeproj; --warn-only stays as belt-and-braces.
+      - name: Set up code signing (use-profiles)
+        script: |
+          set -euo pipefail
+          xcode-project use-profiles --project "ios/*.xcodeproj" --warn-only
+          # Make the use-profiles → build-ipa export-options contract explicit
+          # and fail-closed: if signing setup didn't produce the plist, stop
+          # here (instead of burning a 20-min archive that exports the wrong way).
+          EXPORT_PLIST="$HOME/export_options.plist"
+          if [ ! -f "$EXPORT_PLIST" ]; then
+            echo "ERROR: use-profiles did not write $EXPORT_PLIST — code-signing setup failed."
+            echo "Check the App Store Connect API key integration + environment.ios_signing."
+            exit 1
+          fi
+          echo "Export options method: $(/usr/libexec/PlistBuddy -c 'Print :method' "$EXPORT_PLIST" 2>/dev/null || echo '(unreadable)')"
+
+      # ----- 9. Build + archive + export the signed App Store IPA ----------
+      # Must use --workspace (CocoaPods produces it), NOT --project. Paths are
+      # relative to working_directory (mobile). build-ipa writes the .ipa to
+      # build/ios/ipa and the raw xcodebuild log to /tmp/xcodebuild_logs.
+      - name: Build signed IPA (Xcode archive → App Store export)
+        script: |
+          set -euo pipefail
+          xcode-project build-ipa \
+            --workspace "ios/$XCODE_WORKSPACE" \
+            --scheme "$XCODE_SCHEME" \
+            --export-options-plist "$HOME/export_options.plist"
+
+      # ----- 10. Validate the IPA (HARD gates) -----------------------------
+      # Fails the build unless the IPA exists, is a believable size, has the
+      # right bundle id + a build number, is universal (iPhone + iPad), is
+      # signed with an Apple Distribution cert, and was exported App Store
+      # (not ad-hoc / not development).
+      - name: Validate IPA (size / bundle id / build number / signing / export)
+        script: |
+          set -euo pipefail
+          # `|| true` on these substitutions so a no-match glob / SIGPIPE from
+          # head doesn't abort under pipefail BEFORE the explicit checks below.
+          IPA=$(ls -1 build/ios/ipa/*.ipa 2>/dev/null | head -1 || true)
+          if [ -z "$IPA" ]; then echo "ERROR: no IPA was produced"; exit 1; fi
+          echo "IPA: $IPA"
+          SIZE=$(stat -f%z "$IPA")
+          echo "Size: $SIZE bytes (min $MIN_IPA_BYTES)"
+          if [ "$SIZE" -lt "$MIN_IPA_BYTES" ]; then
+            echo "ERROR: IPA size $SIZE < minimum $MIN_IPA_BYTES — likely an empty/broken archive"; exit 1
+          fi
+          WORK=$(mktemp -d)
+          unzip -q "$IPA" -d "$WORK"
+          APP=$(ls -d "$WORK"/Payload/*.app 2>/dev/null | head -1 || true)
+          if [ -z "$APP" ]; then echo "ERROR: no .app inside the IPA Payload"; exit 1; fi
+          PLIST="$APP/Info.plist"
+          BID=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$PLIST")
+          BVER=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$PLIST")
+          echo "CFBundleIdentifier: $BID"
+          echo "CFBundleVersion:    $BVER"
+          [ "$BID" = "$BUNDLE_ID" ] || { echo "ERROR: bundle id '$BID' != '$BUNDLE_ID'"; exit 1; }
+          [ -n "$BVER" ] || { echo "ERROR: CFBundleVersion (build number) is missing"; exit 1; }
+          # Universal: UIDeviceFamily must contain BOTH 1 (iPhone) and 2 (iPad).
+          # Read the whole array once and word-match — robust to ordering/extra
+          # entries, and set -e-safe (grep failure is consumed by `|| {...}`).
+          FAMILIES=$(/usr/libexec/PlistBuddy -c "Print :UIDeviceFamily" "$PLIST" 2>/dev/null || echo "")
+          echo "UIDeviceFamily:"; echo "$FAMILIES"
+          echo "$FAMILIES" | grep -qw 1 || { echo "ERROR: missing iPhone family (UIDeviceFamily 1)"; exit 1; }
+          echo "$FAMILIES" | grep -qw 2 || { echo "ERROR: missing iPad family (UIDeviceFamily 2) — not universal"; exit 1; }
+          # Signing identity must be an Apple Distribution certificate.
+          echo "=== codesign ==="
+          codesign -dvv "$APP" 2>&1 | tee /tmp/codesign.txt | grep -iE "Authority|TeamIdentifier" || true
+          if ! grep -qiE "Authority=Apple Distribution|Authority=iPhone Distribution" /tmp/codesign.txt; then
+            echo "ERROR: signing identity is not an Apple Distribution certificate"; exit 1
+          fi
+          # Export method must be App Store. Decode the embedded profile
+          # FAIL-CLOSED: if it can't be decoded to a real plist we must NOT
+          # treat 'keys absent' as a pass (that would let a broken profile slip).
+          if ! security cms -D -i "$APP/embedded.mobileprovision" > /tmp/profile.plist 2>/dev/null; then
+            echo "ERROR: could not decode embedded.mobileprovision"; exit 1
+          fi
+          /usr/libexec/PlistBuddy -c "Print :Entitlements" /tmp/profile.plist >/dev/null 2>&1 \
+            || { echo "ERROR: embedded profile did not decode to a valid plist (cannot verify export method)"; exit 1; }
+          # App Store profiles have NO ProvisionedDevices (ad-hoc lists them)…
+          if /usr/libexec/PlistBuddy -c "Print :ProvisionedDevices" /tmp/profile.plist >/dev/null 2>&1; then
+            echo "ERROR: embedded profile lists ProvisionedDevices → ad-hoc, not an App Store export"; exit 1
+          fi
+          # …and get-task-allow=false (true would mean a development build).
+          GTA=$(/usr/libexec/PlistBuddy -c "Print :Entitlements:get-task-allow" /tmp/profile.plist 2>/dev/null || echo "")
+          echo "get-task-allow: $GTA"
+          if [ "$GTA" = "true" ]; then
+            echo "ERROR: get-task-allow=true → development signing, not distribution"; exit 1
+          fi
+          echo "IPA validation PASSED — universal App Store-signed build $BVER for $BID."
+
+      # ----- 11. Collect dSYMs ---------------------------------------------
+      - name: Collect dSYMs
+        script: |
+          set -e
+          mkdir -p ios-dsyms
+          find "$HOME/Library/Developer/Xcode/DerivedData" -name "*.dSYM" -exec cp -R {} ios-dsyms/ \; 2>/dev/null || true
+          find build -name "*.dSYM" -exec cp -R {} ios-dsyms/ \; 2>/dev/null || true
+          if [ -n "$(ls -A ios-dsyms 2>/dev/null)" ]; then
+            ( cd ios-dsyms && zip -qr ../zentromeet-dsyms.zip . )
+            echo "dSYM archive: zentromeet-dsyms.zip"
+            ls -la ios-dsyms/
+          else
+            echo "WARNING: no dSYMs found (debug symbols will be unavailable for crash symbolication)."
+          fi
+
+      # ----- 12. Upload to TestFlight (HELD behind PUBLISH_TO_TESTFLIGHT) ---
+      # Uses Codemagic's own `app-store-connect publish` CLI (NOT EAS submit).
+      # --testflight  = upload + submit to TestFlight BETA review ONLY.
+      # (We deliberately omit --app-store, so it NEVER submits for App Store
+      # review.) Auth reads APP_STORE_CONNECT_ISSUER_ID / _KEY_IDENTIFIER /
+      # _PRIVATE_KEY from the app_store_credentials group. These MUST be the
+      # SAME App Store Connect API key used by the signing integration (paste
+      # the .p8 with real newlines). Default skips the upload so the config
+      # rollout produces a signed IPA without publishing.
+      - name: Upload to TestFlight (flag-gated)
+        script: |
+          set -euo pipefail
+          if [ "$PUBLISH_TO_TESTFLIGHT" != "true" ]; then
+            echo "PUBLISH_TO_TESTFLIGHT='$PUBLISH_TO_TESTFLIGHT' — skipping TestFlight upload."
+            echo "The signed IPA is available as a Codemagic artifact (build/ios/ipa/*.ipa)."
+            echo "To enable: set PUBLISH_TO_TESTFLIGHT=\"true\" in the Codemagic UI for this"
+            echo "workflow AFTER the App Store Connect API key integration + the"
+            echo "app_store_credentials group are configured. It uploads to TestFlight"
+            echo "ONLY — it never submits for App Store review."
+            exit 0
+          fi
+          : "${APP_STORE_CONNECT_ISSUER_ID:?app_store_credentials group is missing APP_STORE_CONNECT_ISSUER_ID}"
+          : "${APP_STORE_CONNECT_KEY_IDENTIFIER:?app_store_credentials group is missing APP_STORE_CONNECT_KEY_IDENTIFIER}"
+          : "${APP_STORE_CONNECT_PRIVATE_KEY:?app_store_credentials group is missing APP_STORE_CONNECT_PRIVATE_KEY}"
+          echo "Publishing with App Store Connect key id: $APP_STORE_CONNECT_KEY_IDENTIFIER (issuer $APP_STORE_CONNECT_ISSUER_ID)"
+          echo "Uploading IPA to TestFlight (beta review only — never App Store review)…"
+          app-store-connect publish \
+            --path "build/ios/ipa/*.ipa" \
+            --testflight \
+            --max-build-processing-wait 20
+          echo "TestFlight upload complete. App Store Connect → TestFlight shows the build in ~10-30 min."
 
     artifacts:
-      # Relative to working_directory (mobile) — no `mobile/` prefix (same
-      # resolution rule as the Android workflows; prefix would match nothing).
-      - ios-artifacts/*.ipa
+      # Relative to working_directory (mobile), except the absolute /tmp logs.
+      - build/ios/ipa/*.ipa
+      - zentromeet-dsyms.zip
+      # Belt-and-braces: also publish dSYMs straight from the archive in case
+      # the zip step found none in DerivedData.
+      - build/ios/xcarchive/**/*.dSYM
+      - /tmp/xcodebuild_logs/*.log
       - /tmp/install.log
-      - /tmp/eas-build.log
+      - /tmp/codesign.txt
 
     publishing:
+      # Build/result notification only. The TestFlight UPLOAD is handled by the
+      # flag-gated `app-store-connect publish` step above (NOT a declarative
+      # app_store_connect publishing block) so it can be HELD behind an env var
+      # — Codemagic's submit_to_testflight boolean cannot be variable-driven.
       email:
         recipients:
           - support@zentromeet.com

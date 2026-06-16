@@ -8,6 +8,16 @@ TestFlight and Google Play Internal Testing.
 > This file is the **operational** runbook — what you actually run on
 > release day.
 
+> **⚠️ UPDATE 2026-06-16 — iOS and Android now build NATIVELY on Codemagic; EAS is an OPTIONAL local fallback only.**
+> The `ios-production` Codemagic workflow compiles iOS on a macOS `mac_mini_m2`
+> (`expo prebuild` → CocoaPods → Xcode archive → App Store IPA → TestFlight via
+> Codemagic's `app-store-connect publish`) with **no EAS Build and no `EXPO_TOKEN`**;
+> Android ships a signed AAB via `expo prebuild` + Gradle on Codemagic. The
+> `eas build` / `eas submit` steps below are retained ONLY for optional
+> manual/laptop builds (`npm run build:*` / `submit:*`) — no CI workflow uses EAS.
+> For release day, prefer the Codemagic workflows. Authoritative iOS pipeline:
+> [CODEMAGIC_NATIVE_IOS_BUILD.md](CODEMAGIC_NATIVE_IOS_BUILD.md).
+
 ---
 
 ## 0. Pre-release checklist (run this every time)
