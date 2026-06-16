@@ -1084,7 +1084,7 @@ function ToggleCard({
       className={
         "flex items-start gap-3 rounded-xl border p-4 transition-all duration-150 " +
         (checked
-          ? "border-brand-accent/30 bg-brand-accent/[0.04] shadow-[0_0_0_1px_rgba(53,157,243,0.08)]"
+          ? "border-brand-accent/30 bg-brand-accent/[0.04] shadow-[0_0_0_1px_rgba(37,99,235,0.08)]"
           : "border-border bg-surface hover:border-border/80")
       }
     >

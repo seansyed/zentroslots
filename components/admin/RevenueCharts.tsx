@@ -43,7 +43,7 @@ import type { RevenueSeries } from "@/lib/admin-analytics/revenue";
 import type { RevenueInsight } from "@/lib/admin-analytics/revenue-intelligence";
 
 // Brand-tuned palette. Order = render order in donuts/legends.
-const PALETTE = ["#359df3", "#0ea5e9", "#06b6d4", "#10b981", "#a78bfa", "#f59e0b", "#ef4444", "#64748b"];
+const PALETTE = ["#2563EB", "#0ea5e9", "#06b6d4", "#10b981", "#a78bfa", "#f59e0b", "#ef4444", "#64748b"];
 
 // ─── Insight chip (chart-adjacent annotation) ───────────────────
 function InsightAnnotation({ insight }: { insight: RevenueInsight }) {

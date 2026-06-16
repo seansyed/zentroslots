@@ -422,7 +422,7 @@ export default function CalendarView({
         <a
           href="/dashboard/services"
           aria-label="New booking"
-          className="fixed bottom-6 right-6 z-30 inline-flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-br from-brand-accent to-brand-hover text-white shadow-[0_12px_30px_rgba(53,157,243,0.45)] transition-all duration-200 ease-out hover:-translate-y-0.5 hover:shadow-[0_16px_40px_rgba(53,157,243,0.55)] active:scale-95 lg:hidden"
+          className="fixed bottom-6 right-6 z-30 inline-flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-br from-brand-accent to-brand-hover text-white shadow-[0_12px_30px_rgba(37,99,235,0.45)] transition-all duration-200 ease-out hover:-translate-y-0.5 hover:shadow-[0_16px_40px_rgba(37,99,235,0.55)] active:scale-95 lg:hidden"
         >
           <Plus className="h-6 w-6" strokeWidth={2.25} />
         </a>
@@ -525,7 +525,7 @@ function SegmentedViewSwitcher({ view, onView }: { view: View; onView: (v: View)
             {active && (
               <motion.span
                 layoutId="calendar-view-indicator"
-                className="absolute inset-0 rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover shadow-[0_4px_12px_rgba(53,157,243,0.35)]"
+                className="absolute inset-0 rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover shadow-[0_4px_12px_rgba(37,99,235,0.35)]"
                 aria-hidden
                 transition={reduced ? { duration: 0 } : { duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
               />
@@ -817,7 +817,7 @@ function UtilizationRing({ pct }: { pct: number }) {
           strokeWidth="4"
           strokeLinecap="round"
           strokeDasharray={`${dash} ${c}`}
-          style={{ filter: "drop-shadow(0 0 5px rgba(53,157,243,0.35))" }}
+          style={{ filter: "drop-shadow(0 0 5px rgba(37,99,235,0.35))" }}
         />
       </svg>
       <div className="absolute inset-0 flex items-center justify-center">
@@ -935,7 +935,7 @@ function MiniCalendar({
                 "relative flex h-8 items-center justify-center rounded-lg text-[12px] transition-all duration-150 ease-out",
                 "hover:ring-1 hover:ring-brand-accent/25",
                 isAnchor
-                  ? "bg-gradient-to-br from-brand-accent to-brand-hover text-white shadow-[0_4px_10px_rgba(53,157,243,0.35)] hover:ring-0"
+                  ? "bg-gradient-to-br from-brand-accent to-brand-hover text-white shadow-[0_4px_10px_rgba(37,99,235,0.35)] hover:ring-0"
                   : isToday
                     ? "bg-brand-subtle/70 font-semibold text-brand-accent ring-1 ring-brand-accent/20 zm-pulse-glow"
                     : inMonth
@@ -1043,7 +1043,7 @@ function WeekView({
                   className={cn(
                     "mx-auto mt-1 inline-flex h-7 w-7 items-center justify-center rounded-lg text-[13px] font-semibold tabular-nums",
                     today
-                      ? "bg-gradient-to-br from-brand-accent to-brand-hover text-white shadow-[0_2px_8px_rgba(53,157,243,0.35)]"
+                      ? "bg-gradient-to-br from-brand-accent to-brand-hover text-white shadow-[0_2px_8px_rgba(37,99,235,0.35)]"
                       : "text-ink",
                   )}
                 >
@@ -1250,7 +1250,7 @@ function DayColumn({
       {hoverY !== null && (
         <>
           <div
-            className="pointer-events-none absolute inset-x-1 h-0.5 rounded-full bg-brand-accent shadow-[0_0_10px_rgba(53,157,243,0.55)]"
+            className="pointer-events-none absolute inset-x-1 h-0.5 rounded-full bg-brand-accent shadow-[0_0_10px_rgba(37,99,235,0.55)]"
             style={{ top: hoverY - 1 }}
             aria-hidden
           />
@@ -1260,7 +1260,7 @@ function DayColumn({
               style={{ top: hoverY }}
               aria-hidden
             >
-              <div className="inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-brand-accent to-brand-hover px-2 py-0.5 text-[10px] font-semibold tabular-nums text-white shadow-[0_4px_12px_rgba(53,157,243,0.45)]">
+              <div className="inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-brand-accent to-brand-hover px-2 py-0.5 text-[10px] font-semibold tabular-nums text-white shadow-[0_4px_12px_rgba(37,99,235,0.45)]">
                 <ArrowRight className="h-2.5 w-2.5" strokeWidth={2.25} />
                 {dragTime}
               </div>
@@ -1758,13 +1758,13 @@ function CurrentTimeLine({ timezone, leftPx }: { timezone: string; leftPx: numbe
       aria-label="Current time"
     >
       <div className="relative -ml-1.5">
-        <div className="h-3 w-3 rounded-full bg-brand-accent shadow-[0_0_10px_rgba(53,157,243,0.6)]" />
+        <div className="h-3 w-3 rounded-full bg-brand-accent shadow-[0_0_10px_rgba(37,99,235,0.6)]" />
         <div className="absolute inset-0 h-3 w-3 animate-ping rounded-full bg-brand-accent/40" />
       </div>
       {/* Floating "Now · h:mm" pill — rides alongside the dot so the
           time of the indicator is always legible at a glance. */}
       <div className="shrink-0">
-        <div className="inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-brand-accent to-brand-hover px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-white shadow-[0_4px_10px_rgba(53,157,243,0.35)]">
+        <div className="inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-brand-accent to-brand-hover px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-white shadow-[0_4px_10px_rgba(37,99,235,0.35)]">
           <span className="h-1 w-1 rounded-full bg-white/90" />
           Now · {label}
         </div>
@@ -1773,7 +1773,7 @@ function CurrentTimeLine({ timezone, leftPx }: { timezone: string; leftPx: numbe
         className="h-px flex-1"
         style={{
           background:
-            "linear-gradient(to right, var(--color-accent, #359df3) 0%, rgba(53,157,243,0.55) 40%, rgba(53,157,243,0) 100%)",
+            "linear-gradient(to right, var(--color-accent, #2563EB) 0%, rgba(37,99,235,0.55) 40%, rgba(37,99,235,0) 100%)",
         }}
       />
     </div>
@@ -1828,7 +1828,7 @@ function MonthView({
                     className={cn(
                       "inline-flex h-6 w-6 items-center justify-center rounded-lg text-[11px] font-semibold tabular-nums",
                       today
-                        ? "bg-gradient-to-br from-brand-accent to-brand-hover text-white shadow-[0_2px_6px_rgba(53,157,243,0.35)]"
+                        ? "bg-gradient-to-br from-brand-accent to-brand-hover text-white shadow-[0_2px_6px_rgba(37,99,235,0.35)]"
                         : outside ? "text-ink-subtle" : "text-ink",
                     )}
                   >

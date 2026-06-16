@@ -246,7 +246,7 @@ function CtaButton({ label, href, large }: Cta & { large?: boolean }) {
     <Link
       href={href}
       className={cn(
-        "group inline-flex items-center gap-1.5 rounded-full bg-brand-accent font-semibold text-white shadow-[0_8px_24px_rgba(53,157,243,0.32)] transition-all duration-[260ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:bg-brand-accent/95 hover:shadow-[0_12px_32px_rgba(53,157,243,0.42)]",
+        "group inline-flex items-center gap-1.5 rounded-full bg-brand-accent font-semibold text-white shadow-[0_8px_24px_rgba(37,99,235,0.32)] transition-all duration-[260ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:bg-brand-accent/95 hover:shadow-[0_12px_32px_rgba(37,99,235,0.42)]",
         large ? "px-5 py-2.5 text-[14px]" : "px-4 py-2 text-[13px]",
       )}
     >
@@ -314,7 +314,7 @@ function PlanColumn({
       className={cn(
         "relative overflow-hidden rounded-2xl p-5 transition-all duration-[260ms]",
         isUpgrade
-          ? "border-2 border-brand-accent/40 bg-gradient-to-br from-brand-subtle/40 via-surface to-surface shadow-[0_8px_24px_rgba(53,157,243,0.16)]"
+          ? "border-2 border-brand-accent/40 bg-gradient-to-br from-brand-subtle/40 via-surface to-surface shadow-[0_8px_24px_rgba(37,99,235,0.16)]"
           : "border border-border/60 bg-surface",
       )}
     >

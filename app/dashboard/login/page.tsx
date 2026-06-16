@@ -436,7 +436,7 @@ function AmbientMesh() {
   return (
     <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">
       {/* Base gradient wash */}
-      <div className="absolute inset-0 bg-[radial-gradient(125%_120%_at_0%_0%,rgba(53,157,243,0.10)_0%,rgba(53,157,243,0)_55%),radial-gradient(95%_100%_at_100%_100%,rgba(15,23,42,0.06)_0%,rgba(15,23,42,0)_60%)]" />
+      <div className="absolute inset-0 bg-[radial-gradient(125%_120%_at_0%_0%,rgba(37,99,235,0.10)_0%,rgba(37,99,235,0)_55%),radial-gradient(95%_100%_at_100%_100%,rgba(15,23,42,0.06)_0%,rgba(15,23,42,0)_60%)]" />
       {/* Floating blurred blobs */}
       <div className="zm-mesh-a absolute -left-32 -top-32 h-[34rem] w-[34rem] rounded-full bg-sky-400/40 blur-[120px]" />
       <div className="zm-mesh-b absolute -bottom-40 left-1/4 h-[28rem] w-[28rem] rounded-full bg-indigo-300/30 blur-[140px]" />

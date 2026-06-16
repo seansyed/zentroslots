@@ -437,7 +437,7 @@ export default function BrandingForm({
           <button
             onClick={save}
             disabled={busy || disabled}
-            className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg bg-brand-accent px-3.5 text-[12.5px] font-semibold text-white shadow-[0_4px_14px_rgba(53,157,243,0.32)] transition-all duration-[200ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:bg-brand-hover hover:shadow-[0_8px_22px_rgba(53,157,243,0.40)] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0"
+            className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg bg-brand-accent px-3.5 text-[12.5px] font-semibold text-white shadow-[0_4px_14px_rgba(37,99,235,0.32)] transition-all duration-[200ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:bg-brand-hover hover:shadow-[0_8px_22px_rgba(37,99,235,0.40)] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0"
           >
             {busy ? (
               <>

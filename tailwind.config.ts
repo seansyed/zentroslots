@@ -55,9 +55,9 @@ export default {
       },
       backgroundImage: {
         "app-mesh":
-          "radial-gradient(at 0% 0%, rgba(53,157,243,0.08) 0px, transparent 50%), radial-gradient(at 100% 0%, rgba(120,180,255,0.05) 0px, transparent 50%)",
+          "radial-gradient(at 0% 0%, rgba(37,99,235,0.08) 0px, transparent 50%), radial-gradient(at 100% 0%, rgba(120,180,255,0.05) 0px, transparent 50%)",
         "hero-glow":
-          "radial-gradient(circle at 100% 0%, rgba(53,157,243,0.10) 0px, transparent 60%), linear-gradient(135deg, rgba(53,157,243,0.04) 0%, transparent 50%)",
+          "radial-gradient(circle at 100% 0%, rgba(37,99,235,0.10) 0px, transparent 60%), linear-gradient(135deg, rgba(37,99,235,0.04) 0%, transparent 50%)",
       },
       fontFamily: {
         sans: [

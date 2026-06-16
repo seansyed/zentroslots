@@ -3,7 +3,7 @@
  * generate-placeholder-assets.js — Produce the 5 PNG assets that
  * `app.json` references so EAS Build doesn't fail on missing files.
  *
- * Brand-color (#359df3) backgrounds with a centered white "Z" mark.
+ * Brand-color (#2563EB) backgrounds with a centered white "Z" mark.
  * Pure Node (zlib + crypto + Buffer) — no external dependencies and
  * no native binaries needed. Run once after `git clone`:
  *
@@ -96,8 +96,8 @@ function encodePngRgba(width, height, pixelsRGBA) {
 // We work directly with a Uint8Array of RGBA bytes. Tiny custom raster
 // is easier than pulling a Canvas polyfill.
 
-const BRAND = { r: 0x35, g: 0x9d, b: 0xf3 }; // #359df3
-const BRAND_DEEP = { r: 0x1d, g: 0x7b, b: 0xd1 }; // #1d7bd1 — deeper brand
+const BRAND = { r: 0x25, g: 0x63, b: 0xeb }; // #2563EB
+const BRAND_DEEP = { r: 0x1e, g: 0x40, b: 0xaf }; // #1E40AF — deeper brand (800)
 const VIOLET = { r: 0x8b, g: 0x5c, b: 0xf6 }; // #8b5cf6 accent
 const WHITE = { r: 0xff, g: 0xff, b: 0xff };
 const INK = { r: 0x0f, g: 0x17, b: 0x2a };

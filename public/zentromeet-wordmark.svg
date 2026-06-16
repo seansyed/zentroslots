@@ -7,7 +7,7 @@
 
   <!-- Inline mark, scaled to fit the 100px lockup height -->
   <g transform="translate(0,5) scale(0.5625)">
-    <circle cx="80" cy="80" r="80" fill="#359df3"/>
+    <circle cx="80" cy="80" r="80" fill="#2563EB"/>
     <circle cx="80" cy="80" r="71" fill="none" stroke="#1e293b" stroke-width="0.8" opacity="0.4"/>
     <g fill="#0f172a">
       <rect x="40" y="40" width="80" height="15"/>
@@ -22,7 +22,7 @@
 
   <!-- Wordmark — "Zentro" blue + "Meet" ink -->
   <text x="110" y="55" font-family="ui-sans-serif, -apple-system, system-ui, 'Segoe UI', Roboto, sans-serif" font-size="44" font-weight="800" letter-spacing="-1.2">
-    <tspan fill="#359df3">Zentro</tspan><tspan fill="#0f172a">Meet</tspan>
+    <tspan fill="#2563EB">Zentro</tspan><tspan fill="#0f172a">Meet</tspan>
   </text>
 
   <!-- Tagline -->

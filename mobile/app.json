@@ -4,7 +4,7 @@
     "slug": "zentromeet-mobile",
     "version": "0.3.0",
     "description": "Mobile command center for ZentroMeet — manage bookings, confirm appointments, message customers, and run your schedule from anywhere.",
-    "primaryColor": "#359df3",
+    "primaryColor": "#2563EB",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "zentromeet",
@@ -18,7 +18,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.zentromeet.app",
-      "buildNumber": "9",
+      "buildNumber": "10",
       "config": {
         "usesNonExemptEncryption": false
       },
@@ -38,10 +38,10 @@
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#359df3"
+        "backgroundColor": "#2563EB"
       },
       "package": "com.zentromeet.app",
-      "versionCode": 13,
+      "versionCode": 14,
       "permissions": [
         "INTERNET",
         "POST_NOTIFICATIONS",
@@ -99,7 +99,7 @@
         "expo-notifications",
         {
           "icon": "./assets/notification-icon.png",
-          "color": "#359df3",
+          "color": "#2563EB",
           "defaultChannel": "default"
         }
       ],

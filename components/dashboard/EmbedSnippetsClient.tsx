@@ -95,7 +95,7 @@ export default function EmbedSnippetsClient({
   const [cfg, setCfg] = React.useState<EmbedConfig>({
     mode: "inline",
     serviceSlug: firstWithStaff?.slug ?? "",
-    color: tenantPrimaryColor || "#359df3",
+    color: tenantPrimaryColor || "#2563EB",
     radius: 12,
     compact: false,
     hideHeader: false,
@@ -213,7 +213,7 @@ export default function EmbedSnippetsClient({
                     className={cn(
                       "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10.5px] font-semibold ring-1 transition-all duration-[200ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-px",
                       applied
-                        ? "bg-brand-accent text-white ring-brand-accent shadow-[0_2px_8px_-2px_rgba(53,157,243,0.40),inset_0_1px_0_rgba(255,255,255,0.18)]"
+                        ? "bg-brand-accent text-white ring-brand-accent shadow-[0_2px_8px_-2px_rgba(37,99,235,0.40),inset_0_1px_0_rgba(255,255,255,0.18)]"
                         : "bg-surface text-ink-muted ring-border/60 hover:bg-brand-subtle hover:text-brand-accent hover:ring-brand-accent/30",
                     )}
                   >
@@ -371,12 +371,12 @@ function ModeSelector({ mode, onChange }: { mode: WidgetMode; onChange: (m: Widg
             className={cn(
               "group relative overflow-hidden rounded-2xl border p-3.5 text-left transition-all duration-[220ms] ease-[cubic-bezier(0.16,1,0.3,1)]",
               active
-                ? "border-brand-accent bg-gradient-to-br from-brand-subtle/55 via-surface to-surface ring-2 ring-brand-accent/15 ring-offset-1 ring-offset-surface shadow-[0_1px_2px_rgba(15,23,42,0.06),0_8px_22px_-8px_rgba(53,157,243,0.30),inset_0_1px_0_rgba(255,255,255,0.70)]"
+                ? "border-brand-accent bg-gradient-to-br from-brand-subtle/55 via-surface to-surface ring-2 ring-brand-accent/15 ring-offset-1 ring-offset-surface shadow-[0_1px_2px_rgba(15,23,42,0.06),0_8px_22px_-8px_rgba(37,99,235,0.30),inset_0_1px_0_rgba(255,255,255,0.70)]"
                 : "border-border/70 bg-surface shadow-[0_1px_2px_rgba(15,23,42,0.04),inset_0_1px_0_rgba(255,255,255,0.45)] hover:-translate-y-px hover:border-border hover:shadow-[0_6px_16px_-10px_rgba(15,23,42,0.16)]",
             )}
           >
             <div className="flex items-start gap-2.5">
-              <span className={cn("inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ring-1 transition-transform duration-200 group-hover:scale-105", active ? "bg-brand-accent text-white ring-brand-accent/30 shadow-[0_2px_8px_-2px_rgba(53,157,243,0.40),inset_0_1px_0_rgba(255,255,255,0.22)]" : "bg-gradient-to-br from-brand-subtle to-surface text-brand-accent ring-brand-accent/15 shadow-[inset_0_1px_0_rgba(255,255,255,0.55)]")}>
+              <span className={cn("inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ring-1 transition-transform duration-200 group-hover:scale-105", active ? "bg-brand-accent text-white ring-brand-accent/30 shadow-[0_2px_8px_-2px_rgba(37,99,235,0.40),inset_0_1px_0_rgba(255,255,255,0.22)]" : "bg-gradient-to-br from-brand-subtle to-surface text-brand-accent ring-brand-accent/15 shadow-[inset_0_1px_0_rgba(255,255,255,0.55)]")}>
                 <Icon className="h-4 w-4" strokeWidth={2} />
               </span>
               <div className="min-w-0 flex-1">
@@ -622,7 +622,7 @@ function InstallCard({ framework, setFramework, snippet, directLink, previewUrl,
             href={sandboxUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="group/sb inline-flex h-8 items-center gap-1.5 rounded-md bg-gradient-to-b from-brand-accent to-brand-hover px-2.5 text-[11.5px] font-semibold text-white shadow-[0_2px_8px_-2px_rgba(53,157,243,0.30),inset_0_1px_0_rgba(255,255,255,0.18)] transition-all duration-[220ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-px hover:shadow-[0_6px_18px_-4px_rgba(53,157,243,0.42)]"
+            className="group/sb inline-flex h-8 items-center gap-1.5 rounded-md bg-gradient-to-b from-brand-accent to-brand-hover px-2.5 text-[11.5px] font-semibold text-white shadow-[0_2px_8px_-2px_rgba(37,99,235,0.30),inset_0_1px_0_rgba(255,255,255,0.18)] transition-all duration-[220ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-px hover:shadow-[0_6px_18px_-4px_rgba(37,99,235,0.42)]"
           >
             <Play className="h-3 w-3" strokeWidth={2} />
             {mode === "popup" ? "Test popup" : mode === "floating" ? "Test floating button" : mode === "inline" ? "Open live sandbox" : "Open preview"}
@@ -757,7 +757,7 @@ function DirectLinkCard({ directLink }: { directLink: string }) {
                 <a
                   href={qrUrl}
                   download="zentromeet-booking-qr.png"
-                  className="inline-flex h-8 items-center gap-1.5 rounded-md bg-gradient-to-b from-brand-accent to-brand-hover px-2.5 text-[11.5px] font-semibold text-white shadow-[0_2px_8px_-2px_rgba(53,157,243,0.30),inset_0_1px_0_rgba(255,255,255,0.18)] transition-all duration-[220ms] hover:-translate-y-px hover:shadow-[0_6px_18px_-4px_rgba(53,157,243,0.42)]"
+                  className="inline-flex h-8 items-center gap-1.5 rounded-md bg-gradient-to-b from-brand-accent to-brand-hover px-2.5 text-[11.5px] font-semibold text-white shadow-[0_2px_8px_-2px_rgba(37,99,235,0.30),inset_0_1px_0_rgba(255,255,255,0.18)] transition-all duration-[220ms] hover:-translate-y-px hover:shadow-[0_6px_18px_-4px_rgba(37,99,235,0.42)]"
                 >
                   <Download className="h-3 w-3" strokeWidth={2} />
                   Download PNG
@@ -808,7 +808,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 function Toggle({ checked, onChange, label, sub, disabled, lock }: { checked: boolean; onChange: (v: boolean) => void; label: string; sub: string; disabled?: boolean; lock?: boolean }) {
   return (
     <button type="button" role="switch" aria-checked={checked} onClick={() => !disabled && onChange(!checked)} disabled={disabled} className={cn("group flex items-center gap-2.5 rounded-lg border border-border/65 bg-surface p-2 text-left shadow-[0_1px_2px_rgba(15,23,42,0.03),inset_0_1px_0_rgba(255,255,255,0.45)] transition-all duration-[200ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-px hover:border-border hover:shadow-md", disabled && "cursor-not-allowed opacity-60 hover:translate-y-0")}>
-      <span className={cn("relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors duration-200", checked ? "bg-brand-accent shadow-[inset_0_1px_2px_rgba(15,23,42,0.10),0_0_0_3px_rgba(53,157,243,0.16)]" : "bg-surface-inset ring-1 ring-border/70")}>
+      <span className={cn("relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors duration-200", checked ? "bg-brand-accent shadow-[inset_0_1px_2px_rgba(15,23,42,0.10),0_0_0_3px_rgba(37,99,235,0.16)]" : "bg-surface-inset ring-1 ring-border/70")}>
         <span aria-hidden className={cn("inline-block h-4 w-4 transform rounded-full bg-white shadow-[0_1px_3px_rgba(15,23,42,0.22),inset_0_0.5px_0_rgba(255,255,255,0.65)] transition-transform duration-200", checked ? "translate-x-[18px]" : "translate-x-0.5")} />
       </span>
       <span className="min-w-0 flex-1">
@@ -1127,7 +1127,7 @@ function EmbedEmptyState() {
           </p>
           <a
             href="/dashboard/settings/services"
-            className="mt-4 inline-flex h-9 items-center gap-1.5 rounded-lg bg-gradient-to-b from-brand-accent to-brand-hover px-3.5 text-[12px] font-semibold text-white shadow-[0_2px_8px_-2px_rgba(53,157,243,0.30),inset_0_1px_0_rgba(255,255,255,0.18)] transition-all duration-[220ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-px hover:shadow-[0_6px_18px_-4px_rgba(53,157,243,0.42)]"
+            className="mt-4 inline-flex h-9 items-center gap-1.5 rounded-lg bg-gradient-to-b from-brand-accent to-brand-hover px-3.5 text-[12px] font-semibold text-white shadow-[0_2px_8px_-2px_rgba(37,99,235,0.30),inset_0_1px_0_rgba(255,255,255,0.18)] transition-all duration-[220ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-px hover:shadow-[0_6px_18px_-4px_rgba(37,99,235,0.42)]"
           >
             Create your first service
             <ArrowRight className="h-3.5 w-3.5" strokeWidth={2.25} />
@@ -1198,7 +1198,7 @@ export function EmbedTrustStrip() {
               key={t.label}
               className="group/trust flex items-start gap-2 rounded-lg p-1.5 transition-all duration-[220ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:bg-surface-inset/40"
             >
-              <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-brand-subtle to-surface text-brand-accent ring-1 ring-brand-accent/20 shadow-[0_1px_3px_-1px_rgba(53,157,243,0.22),inset_0_1px_0_rgba(255,255,255,0.55)] transition-all duration-[220ms] group-hover/trust:scale-[1.03] group-hover/trust:shadow-[0_2px_8px_-1px_rgba(53,157,243,0.30),inset_0_1px_0_rgba(255,255,255,0.55)]">
+              <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-brand-subtle to-surface text-brand-accent ring-1 ring-brand-accent/20 shadow-[0_1px_3px_-1px_rgba(37,99,235,0.22),inset_0_1px_0_rgba(255,255,255,0.55)] transition-all duration-[220ms] group-hover/trust:scale-[1.03] group-hover/trust:shadow-[0_2px_8px_-1px_rgba(37,99,235,0.30),inset_0_1px_0_rgba(255,255,255,0.55)]">
                 <Icon className="h-3.5 w-3.5" strokeWidth={2.25} />
               </span>
               <div className="min-w-0">

@@ -1,3 +1,24 @@
+# UPDATE 8 — versionCode 14 preview: brand color → #2563EB, 2026-06-16
+
+**Android versionCode:** 14 · **iOS buildNumber:** 10. Visual-only platform-brand migration `#359df3 → #2563EB` (Tailwind blue 600); full detail in [ZENTROMEET_BRAND_COLOR_MIGRATION_REPORT.md](../../ZENTROMEET_BRAND_COLOR_MIGRATION_REPORT.md).
+
+- **Mobile theme:** `mobile/src/theme/colors.ts` brand `#2563EB` (+ hover #1D4ED8 / pressed #1E40AF / subtle #EFF6FF); shadows + notification LED tint; the ~24 components consuming `colors.brand*` inherit automatically. Bundled logo PNG untouched.
+- **Native:** `app.json` primaryColor + adaptiveIcon background + notification color → `#2563EB`; splash kept `#f5faff`. Prebuild verified — generated `colors.xml`: colorPrimary / iconBackground / notification = `#2563EB`.
+- **Preserved:** semantic success/warning/danger + decorative violet/sky/rose/etc.; tenant overrides authoritative (only platform fallback changed).
+- **P0 auto-cancel:** RESOLVED + device-confirmed; freeze lifted (see BOOKING_AUTO_CANCELLATION_INCIDENT_REPORT.md).
+
+**Gates (green):** web tsc + 742/742 backend + web build; mobile tsc + 62/62 tests (incl. theme-brand + web brand-color); expo-doctor 18/18; export android+iOS; prebuild android `--clean`.
+
+```
+ANDROID VERSION CODE:   14
+IOS BUILD NUMBER:       10
+WEB DEPLOYED:           see migration report (web styles changed → deploy)
+CODEMAGIC BUILD:        OPERATOR ACTION — start android-preview on main (versionCode 14)
+DEVICE QA:              PENDING — confirm #2563EB on the installed app + tenant override still renders tenant color
+```
+
+---
+
 # UPDATE 7 — versionCode 13 preview: pending_payment upcoming, calendar month nav, profile-image readiness, UI polish, 2026-06-15
 
 **Android versionCode:** 13 · **iOS buildNumber:** 9 · **Backend:** one additive `validStatuses` line in `/api/bookings` (deploy). Full detail in [MOBILE_HOME_CALENDAR_PROFILE_UI_FIX_REPORT.md](MOBILE_HOME_CALENDAR_PROFILE_UI_FIX_REPORT.md).

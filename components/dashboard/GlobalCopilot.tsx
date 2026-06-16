@@ -194,9 +194,9 @@ function CopilotLauncher({
         "group fixed bottom-5 right-5 z-40 inline-flex h-12 w-12 items-center justify-center rounded-full",
         "bg-gradient-to-br from-brand-accent to-brand-hover text-white",
         // Phase 14D: softer base shadow + smaller glow → calmer idle state
-        "shadow-[0_6px_18px_rgba(53,157,243,0.28)] ring-1 ring-brand-accent/25",
+        "shadow-[0_6px_18px_rgba(37,99,235,0.28)] ring-1 ring-brand-accent/25",
         "transition-all duration-[220ms] ease-[cubic-bezier(0.16,1,0.3,1)]",
-        "hover:-translate-y-px hover:shadow-[0_10px_26px_rgba(53,157,243,0.36)]",
+        "hover:-translate-y-px hover:shadow-[0_10px_26px_rgba(37,99,235,0.36)]",
         "active:translate-y-0",
         "sm:bottom-6 sm:right-6 sm:h-13 sm:w-13",
       )}
@@ -215,7 +215,7 @@ function CopilotLauncher({
             className="absolute -inset-1 rounded-full"
             style={{
               background:
-                "conic-gradient(from 0deg, rgba(53,157,243,0.22), rgba(16,185,129,0.16), rgba(53,157,243,0.22))",
+                "conic-gradient(from 0deg, rgba(37,99,235,0.22), rgba(16,185,129,0.16), rgba(37,99,235,0.22))",
               filter: "blur(8px)",
               opacity: 0.40,
             }}
@@ -302,7 +302,7 @@ function CopilotPanel({
         {/* Header */}
         <header className="relative flex items-start justify-between gap-3 border-b border-border/70 px-4 py-3.5 sm:px-5">
           <div className="flex min-w-0 items-center gap-2.5">
-            <div className="zm-pulse-glow relative inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-brand-accent to-brand-hover text-white shadow-[0_4px_14px_rgba(53,157,243,0.40)]">
+            <div className="zm-pulse-glow relative inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-brand-accent to-brand-hover text-white shadow-[0_4px_14px_rgba(37,99,235,0.40)]">
               <Sparkles className="h-4 w-4" strokeWidth={2} />
               <span aria-hidden className="absolute -right-0.5 -top-0.5 inline-flex h-2.5 w-2.5 items-center justify-center">
                 <span className="absolute inset-0 animate-ping rounded-full bg-emerald-400/55" />
@@ -476,7 +476,7 @@ function SignalCard({
   const rail =
     signal.tone === "warning"  ? "bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.35)]" :
     signal.tone === "positive" ? "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.35)]" :
-    signal.tone === "brand"    ? "bg-brand-accent shadow-[0_0_8px_rgba(53,157,243,0.35)]" :
+    signal.tone === "brand"    ? "bg-brand-accent shadow-[0_0_8px_rgba(37,99,235,0.35)]" :
                                   "bg-slate-300";
   const tint =
     signal.tone === "warning"  ? "bg-amber-50/30 ring-amber-200/30" :

@@ -416,7 +416,7 @@ function SegmentedFilterBar({
               {active && (
                 <motion.span
                   layoutId="tasks-filter-indicator"
-                  className="absolute inset-0 rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover shadow-[0_4px_12px_rgba(53,157,243,0.35),inset_0_1px_0_rgba(255,255,255,0.25)]"
+                  className="absolute inset-0 rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover shadow-[0_4px_12px_rgba(37,99,235,0.35),inset_0_1px_0_rgba(255,255,255,0.25)]"
                   aria-hidden
                   transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
                 />
@@ -440,7 +440,7 @@ function SegmentedFilterBar({
       <button
         type="button"
         onClick={onAddTask}
-        className="group/new inline-flex h-9 items-center gap-1.5 rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover px-3 text-[12px] font-medium text-white shadow-[0_6px_16px_rgba(53,157,243,0.35)] transition-all duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:shadow-[0_10px_24px_rgba(53,157,243,0.45)]"
+        className="group/new inline-flex h-9 items-center gap-1.5 rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover px-3 text-[12px] font-medium text-white shadow-[0_6px_16px_rgba(37,99,235,0.35)] transition-all duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:shadow-[0_10px_24px_rgba(37,99,235,0.45)]"
         title="New task · press N"
       >
         <Plus className="h-3.5 w-3.5" strokeWidth={2.25} />
@@ -648,7 +648,7 @@ function TaskCard({
         className="pointer-events-none absolute -inset-px rounded-2xl opacity-0 transition-opacity duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] group-hover:opacity-100"
         style={{
           boxShadow:
-            "0 0 0 1px rgba(53,157,243,0.18), 0 10px 28px rgba(53,157,243,0.10), 0 24px 52px -8px rgba(53,157,243,0.07)",
+            "0 0 0 1px rgba(37,99,235,0.18), 0 10px 28px rgba(37,99,235,0.10), 0 24px 52px -8px rgba(37,99,235,0.07)",
         }}
       />
 
@@ -884,7 +884,7 @@ function PrioritySelector({
             {active && (
               <motion.span
                 layoutId={`priority-indicator-${layoutGroupId}`}
-                className="absolute inset-0 rounded-md bg-gradient-to-br from-brand-accent to-brand-hover shadow-[0_4px_12px_rgba(53,157,243,0.35),inset_0_1px_0_rgba(255,255,255,0.25)]"
+                className="absolute inset-0 rounded-md bg-gradient-to-br from-brand-accent to-brand-hover shadow-[0_4px_12px_rgba(37,99,235,0.35),inset_0_1px_0_rgba(255,255,255,0.25)]"
                 aria-hidden
                 transition={reduced ? { duration: 0 } : { duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
               />
@@ -1126,7 +1126,7 @@ function FilterEmptyState({ filter, onAddTask }: { filter: Filter; onAddTask: ()
             <button
               type="button"
               onClick={onAddTask}
-              className="mt-3 inline-flex h-8 items-center gap-1.5 rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover px-3 text-[12px] font-medium text-white shadow-[0_6px_16px_rgba(53,157,243,0.35)] transition-all hover:-translate-y-0.5 hover:shadow-[0_10px_24px_rgba(53,157,243,0.45)]"
+              className="mt-3 inline-flex h-8 items-center gap-1.5 rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover px-3 text-[12px] font-medium text-white shadow-[0_6px_16px_rgba(37,99,235,0.35)] transition-all hover:-translate-y-0.5 hover:shadow-[0_10px_24px_rgba(37,99,235,0.45)]"
             >
               <Plus className="h-3.5 w-3.5" strokeWidth={2.25} />
               {c.cta}
@@ -1343,7 +1343,7 @@ function NewTaskDrawer({
                 type="button"
                 onClick={save}
                 disabled={busy || !title.trim()}
-                className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover px-3 text-[12px] font-medium text-white shadow-[0_6px_16px_rgba(53,157,243,0.35)] transition-all hover:-translate-y-0.5 hover:shadow-[0_10px_24px_rgba(53,157,243,0.45)] disabled:cursor-not-allowed disabled:opacity-50"
+                className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover px-3 text-[12px] font-medium text-white shadow-[0_6px_16px_rgba(37,99,235,0.35)] transition-all hover:-translate-y-0.5 hover:shadow-[0_10px_24px_rgba(37,99,235,0.45)] disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {busy ? "Creating…" : (
                   <>
@@ -1475,7 +1475,7 @@ function TaskDetailBody({
               <div className="mt-2 inline-flex items-center gap-1.5 flex-wrap">
                 <span
                   className={cn(
-                    "zm-pulse-glow inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-white shadow-[0_4px_10px_rgba(53,157,243,0.3)]",
+                    "zm-pulse-glow inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-white shadow-[0_4px_10px_rgba(37,99,235,0.3)]",
                     isOverdue
                       ? "bg-gradient-to-r from-red-500 to-red-600"
                       : "bg-gradient-to-r from-brand-accent to-brand-hover",
@@ -1609,7 +1609,7 @@ function TaskDetailBody({
               <button
                 type="button"
                 onClick={() => onToggle(task)}
-                className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover px-3 text-[12px] font-medium text-white shadow-[0_6px_16px_rgba(53,157,243,0.35)] transition-all hover:-translate-y-0.5 hover:shadow-[0_10px_24px_rgba(53,157,243,0.45)]"
+                className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover px-3 text-[12px] font-medium text-white shadow-[0_6px_16px_rgba(37,99,235,0.35)] transition-all hover:-translate-y-0.5 hover:shadow-[0_10px_24px_rgba(37,99,235,0.45)]"
               >
                 <CheckCircle2 className="h-3.5 w-3.5" strokeWidth={2} />
                 Mark complete

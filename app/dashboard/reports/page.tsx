@@ -796,7 +796,7 @@ function ReportsHero({
                 className={cn(
                   "rounded-full px-2.5 py-1 text-[11px] font-semibold transition-all",
                   d === days
-                    ? "bg-brand-accent text-white shadow-[0_2px_8px_rgba(53,157,243,0.32)]"
+                    ? "bg-brand-accent text-white shadow-[0_2px_8px_rgba(37,99,235,0.32)]"
                     : "text-ink-muted hover:text-ink",
                 )}
               >
@@ -815,7 +815,7 @@ function ReportsHero({
           {!hasAnalytics && (
             <Link
               href="/dashboard/billing"
-              className="zm-pulse-glow inline-flex h-9 items-center gap-1.5 rounded-lg bg-gradient-to-r from-brand-accent to-brand-hover px-3 text-[12px] font-semibold text-white shadow-[0_6px_16px_rgba(53,157,243,0.35)] transition-all hover:-translate-y-0.5 hover:shadow-[0_10px_24px_rgba(53,157,243,0.45)]"
+              className="zm-pulse-glow inline-flex h-9 items-center gap-1.5 rounded-lg bg-gradient-to-r from-brand-accent to-brand-hover px-3 text-[12px] font-semibold text-white shadow-[0_6px_16px_rgba(37,99,235,0.35)] transition-all hover:-translate-y-0.5 hover:shadow-[0_10px_24px_rgba(37,99,235,0.45)]"
             >
               <Sparkles className="h-3.5 w-3.5" strokeWidth={2} />
               Schedule reports
@@ -914,15 +914,15 @@ function Sparkline({
     return `${x.toFixed(1)},${y.toFixed(1)}`;
   });
   const stroke =
-    tone === "positive" ? "#059669" : tone === "warning" ? "#d97706" : "#359df3";
+    tone === "positive" ? "#059669" : tone === "warning" ? "#d97706" : "#2563EB";
   const fill =
     tone === "positive" ? "url(#sparkFillG)" : tone === "warning" ? "url(#sparkFillA)" : "url(#sparkFillB)";
   return (
     <svg viewBox={`0 0 ${W} ${H}`} className="h-6 w-full" preserveAspectRatio="none">
       <defs>
         <linearGradient id="sparkFillB" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#359df3" stopOpacity="0.30" />
-          <stop offset="100%" stopColor="#359df3" stopOpacity="0" />
+          <stop offset="0%" stopColor="#2563EB" stopOpacity="0.30" />
+          <stop offset="100%" stopColor="#2563EB" stopOpacity="0" />
         </linearGradient>
         <linearGradient id="sparkFillG" x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stopColor="#059669" stopOpacity="0.30" />
@@ -1440,7 +1440,7 @@ function ExecutiveSummaryCard({
               {hasAnalytics ? (
                 <Link
                   href="/dashboard/analytics/executive"
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-brand-accent px-3 py-1.5 text-[11.5px] font-semibold text-white shadow-[0_4px_14px_rgba(53,157,243,0.32)] transition-all hover:-translate-y-0.5 hover:shadow-[0_8px_20px_rgba(53,157,243,0.40)]"
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-brand-accent px-3 py-1.5 text-[11.5px] font-semibold text-white shadow-[0_4px_14px_rgba(37,99,235,0.32)] transition-all hover:-translate-y-0.5 hover:shadow-[0_8px_20px_rgba(37,99,235,0.40)]"
                 >
                   <Target className="h-3.5 w-3.5" strokeWidth={2} />
                   Open executive cockpit
@@ -1449,7 +1449,7 @@ function ExecutiveSummaryCard({
               ) : (
                 <Link
                   href="/dashboard/billing"
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-brand-accent px-3 py-1.5 text-[11.5px] font-semibold text-white shadow-[0_4px_14px_rgba(53,157,243,0.32)] transition-all hover:-translate-y-0.5 hover:shadow-[0_8px_20px_rgba(53,157,243,0.40)]"
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-brand-accent px-3 py-1.5 text-[11.5px] font-semibold text-white shadow-[0_4px_14px_rgba(37,99,235,0.32)] transition-all hover:-translate-y-0.5 hover:shadow-[0_8px_20px_rgba(37,99,235,0.40)]"
                 >
                   <Zap className="h-3.5 w-3.5" strokeWidth={2} />
                   Unlock executive analytics
@@ -1610,7 +1610,7 @@ function LockedSection({
       </div>
       <Link
         href="/dashboard/billing"
-        className="zm-pulse-glow inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-brand-accent px-3 py-1.5 text-[11.5px] font-semibold text-white shadow-[0_4px_14px_rgba(53,157,243,0.32)] transition-all hover:-translate-y-0.5 hover:shadow-[0_8px_20px_rgba(53,157,243,0.40)]"
+        className="zm-pulse-glow inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-brand-accent px-3 py-1.5 text-[11.5px] font-semibold text-white shadow-[0_4px_14px_rgba(37,99,235,0.32)] transition-all hover:-translate-y-0.5 hover:shadow-[0_8px_20px_rgba(37,99,235,0.40)]"
       >
         <Sparkles className="h-3.5 w-3.5" strokeWidth={2} />
         {ctaLabel}

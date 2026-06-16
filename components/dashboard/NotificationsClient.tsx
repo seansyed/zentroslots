@@ -384,7 +384,7 @@ function AIOperationalStrip({ summary }: { summary: string }) {
               with a live emerald sync dot in the corner. The
               container itself carries zm-pulse-glow so the dot has
               a slow breathing halo. */}
-          <div className="zm-pulse-glow relative inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-brand-accent to-brand-hover text-white shadow-[0_4px_12px_rgba(53,157,243,0.35)]">
+          <div className="zm-pulse-glow relative inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-brand-accent to-brand-hover text-white shadow-[0_4px_12px_rgba(37,99,235,0.35)]">
             <Sparkles className="h-4 w-4" strokeWidth={2} />
             <span aria-hidden className="absolute -right-0.5 -top-0.5 inline-flex h-2.5 w-2.5 items-center justify-center">
               <span className="absolute inset-0 animate-ping rounded-full bg-emerald-400/55" />
@@ -449,7 +449,7 @@ function FilterBar({
               {active && (
                 <motion.span
                   layoutId="notifications-filter-indicator"
-                  className="absolute inset-0 rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover shadow-[0_4px_12px_rgba(53,157,243,0.35),inset_0_1px_0_rgba(255,255,255,0.25)]"
+                  className="absolute inset-0 rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover shadow-[0_4px_12px_rgba(37,99,235,0.35),inset_0_1px_0_rgba(255,255,255,0.25)]"
                   aria-hidden
                   transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
                 />
@@ -577,7 +577,7 @@ function NotificationCard({
         className="pointer-events-none absolute -inset-px rounded-2xl opacity-0 transition-opacity duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] group-hover/notif:opacity-100"
         style={{
           boxShadow:
-            "0 0 0 1px rgba(53,157,243,0.18), 0 10px 28px rgba(53,157,243,0.10), 0 24px 52px -8px rgba(53,157,243,0.07)",
+            "0 0 0 1px rgba(37,99,235,0.18), 0 10px 28px rgba(37,99,235,0.10), 0 24px 52px -8px rgba(37,99,235,0.07)",
         }}
       />
       {/* Tactile inner top highlight */}
@@ -590,7 +590,7 @@ function NotificationCard({
         aria-hidden
         className={cn(
           "absolute inset-y-0 left-0 w-1 rounded-l-2xl transition-shadow duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)]",
-          unread ? "bg-brand-accent shadow-[0_0_10px_rgba(53,157,243,0.45)]" : meta.railBg + " opacity-30",
+          unread ? "bg-brand-accent shadow-[0_0_10px_rgba(37,99,235,0.45)]" : meta.railBg + " opacity-30",
         )}
       />
 

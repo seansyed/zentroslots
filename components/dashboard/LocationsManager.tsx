@@ -156,7 +156,7 @@ export default function LocationsManager({
         {/* Ultra-soft operational gradient wash */}
         <span
           aria-hidden
-          className="pointer-events-none absolute inset-0 bg-[linear-gradient(135deg,rgba(53,157,243,0.04)_0%,rgba(255,255,255,0)_55%,rgba(124,58,237,0.04)_100%)]"
+          className="pointer-events-none absolute inset-0 bg-[linear-gradient(135deg,rgba(37,99,235,0.04)_0%,rgba(255,255,255,0)_55%,rgba(124,58,237,0.04)_100%)]"
         />
         {/* Subtle topology — dotted background, extremely low opacity */}
         <span
@@ -192,7 +192,7 @@ export default function LocationsManager({
           <div className="relative">
             <span
               aria-hidden
-              className="pointer-events-none absolute -inset-3 rounded-2xl bg-[radial-gradient(circle_at_50%_50%,rgba(53,157,243,0.06)_0%,rgba(53,157,243,0)_70%)]"
+              className="pointer-events-none absolute -inset-3 rounded-2xl bg-[radial-gradient(circle_at_50%_50%,rgba(37,99,235,0.06)_0%,rgba(37,99,235,0)_70%)]"
             />
             <div className="relative flex max-w-full flex-wrap items-center gap-1.5">
               <CountChip icon={Building2} label={`${counts.active} ${counts.active === 1 ? "active hub" : "active hubs"}`} tone="brand" />
@@ -474,13 +474,13 @@ function EmptyState({
         <div className="relative mx-auto inline-flex h-14 w-14 items-center justify-center">
           <span
             aria-hidden
-            className="pointer-events-none absolute inset-0 -m-3 rounded-full bg-[radial-gradient(circle_at_50%_50%,rgba(53,157,243,0.18)_0%,rgba(53,157,243,0)_70%)]"
+            className="pointer-events-none absolute inset-0 -m-3 rounded-full bg-[radial-gradient(circle_at_50%_50%,rgba(37,99,235,0.18)_0%,rgba(37,99,235,0)_70%)]"
           />
           <span
             aria-hidden
             className="pointer-events-none absolute inset-0 animate-pulse rounded-2xl bg-brand-accent/8 blur-md"
           />
-          <span className="relative inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-brand-subtle to-brand-subtle/50 text-brand-accent shadow-[0_4px_18px_rgba(53,157,243,0.18)] ring-1 ring-brand-accent/25">
+          <span className="relative inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-brand-subtle to-brand-subtle/50 text-brand-accent shadow-[0_4px_18px_rgba(37,99,235,0.18)] ring-1 ring-brand-accent/25">
             <Building2 className="h-6 w-6" strokeWidth={1.75} />
           </span>
         </div>
@@ -575,7 +575,7 @@ function EmptyTile({
             iconText: "text-brand-accent",
             wash: "from-brand-subtle/30",
             border: "hover:border-brand-accent/40",
-            shadow: "shadow-[0_2px_8px_rgba(53,157,243,0.07)]",
+            shadow: "shadow-[0_2px_8px_rgba(37,99,235,0.07)]",
           };
   return (
     <div
@@ -803,7 +803,7 @@ function ScaffoldTile({
       {/* Hover ambient — warmer brand tint */}
       <span aria-hidden className="pointer-events-none absolute -right-10 -top-10 h-20 w-20 rounded-full bg-brand-accent/0 blur-2xl transition-colors duration-[420ms] ease-[cubic-bezier(0.16,1,0.3,1)] group-hover:bg-brand-accent/12" />
       <div className="relative flex items-start gap-2.5">
-        <div className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/70 text-ink-subtle ring-1 ring-border/40 transition-all duration-[280ms] ease-[cubic-bezier(0.16,1,0.3,1)] group-hover:bg-brand-subtle/60 group-hover:text-brand-accent group-hover:ring-brand-accent/20 group-hover:shadow-[0_1px_3px_rgba(53,157,243,0.10)]">
+        <div className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/70 text-ink-subtle ring-1 ring-border/40 transition-all duration-[280ms] ease-[cubic-bezier(0.16,1,0.3,1)] group-hover:bg-brand-subtle/60 group-hover:text-brand-accent group-hover:ring-brand-accent/20 group-hover:shadow-[0_1px_3px_rgba(37,99,235,0.10)]">
           <Icon className="h-4 w-4" strokeWidth={1.75} />
         </div>
         <div className="min-w-0 flex-1">

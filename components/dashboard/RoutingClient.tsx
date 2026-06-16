@@ -698,7 +698,7 @@ function RoutingModesOverview({ bootstrap }: { bootstrap: RoutingPageBootstrap }
               className={
                 "p-5 transition-shadow " +
                 (isActive
-                  ? "border-brand-accent/40 shadow-[0_0_0_1px_rgba(53,157,243,0.18),0_8px_24px_-8px_rgba(53,157,243,0.18)]"
+                  ? "border-brand-accent/40 shadow-[0_0_0_1px_rgba(37,99,235,0.18),0_8px_24px_-8px_rgba(37,99,235,0.18)]"
                   : "hover:shadow-md")
               }
             >

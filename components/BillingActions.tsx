@@ -139,7 +139,7 @@ export default function BillingActions({
       <button
         onClick={checkout}
         disabled={buttonDisabled}
-        className="w-full rounded-md bg-brand-accent px-3 py-2 text-[12px] font-semibold text-white shadow-[0_4px_14px_rgba(53,157,243,0.32)] transition-all hover:-translate-y-0.5 hover:shadow-[0_8px_20px_rgba(53,157,243,0.40)] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-[0_4px_14px_rgba(53,157,243,0.32)]"
+        className="w-full rounded-md bg-brand-accent px-3 py-2 text-[12px] font-semibold text-white shadow-[0_4px_14px_rgba(37,99,235,0.32)] transition-all hover:-translate-y-0.5 hover:shadow-[0_8px_20px_rgba(37,99,235,0.40)] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-[0_4px_14px_rgba(37,99,235,0.32)]"
         title={
           !stripePriceConfigured
             ? `Set the matching STRIPE_PRICE_* env var to enable ${interval}ly ${planId} checkout.`

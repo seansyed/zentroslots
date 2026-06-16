@@ -305,7 +305,7 @@ function Hero({
             <button
               type="button"
               onClick={onAdd}
-              className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover px-3 text-[12px] font-medium text-white shadow-[0_6px_16px_rgba(53,157,243,0.35)] transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:shadow-[0_10px_24px_rgba(53,157,243,0.45)]"
+              className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover px-3 text-[12px] font-medium text-white shadow-[0_6px_16px_rgba(37,99,235,0.35)] transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:shadow-[0_10px_24px_rgba(37,99,235,0.45)]"
             >
               <Plus className="h-3.5 w-3.5" strokeWidth={2.25} />
               Add customer
@@ -403,7 +403,7 @@ function ComingSoonModal({
                   className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/60 to-transparent"
                 />
                 <div className="relative flex items-start gap-3 p-5">
-                  <div className="zm-pulse-glow inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-brand-accent to-brand-hover text-white shadow-[0_4px_12px_rgba(53,157,243,0.35)]">
+                  <div className="zm-pulse-glow inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-brand-accent to-brand-hover text-white shadow-[0_4px_12px_rgba(37,99,235,0.35)]">
                     <Icon className="h-5 w-5" strokeWidth={1.75} />
                   </div>
                   <div className="min-w-0 flex-1">
@@ -434,7 +434,7 @@ function ComingSoonModal({
                   <button
                     type="button"
                     onClick={onClose}
-                    className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover px-3 text-[12px] font-medium text-white shadow-[0_6px_16px_rgba(53,157,243,0.35)] transition-all hover:-translate-y-0.5 hover:shadow-[0_10px_24px_rgba(53,157,243,0.45)]"
+                    className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover px-3 text-[12px] font-medium text-white shadow-[0_6px_16px_rgba(37,99,235,0.35)] transition-all hover:-translate-y-0.5 hover:shadow-[0_10px_24px_rgba(37,99,235,0.45)]"
                   >
                     Got it
                   </button>
@@ -522,7 +522,7 @@ function CRMIntelligenceStrip({ signal }: { signal: string }) {
         />
 
         <div className="relative flex items-center gap-3 px-4 py-3 sm:px-5">
-          <div className="zm-pulse-glow relative inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-brand-accent to-brand-hover text-white shadow-[0_4px_12px_rgba(53,157,243,0.35)]">
+          <div className="zm-pulse-glow relative inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-brand-accent to-brand-hover text-white shadow-[0_4px_12px_rgba(37,99,235,0.35)]">
             <Sparkles className="h-4 w-4" strokeWidth={2} />
             <span aria-hidden className="absolute -right-0.5 -top-0.5 inline-flex h-2.5 w-2.5 items-center justify-center">
               <span className="absolute inset-0 animate-ping rounded-full bg-emerald-400/55" />
@@ -641,7 +641,7 @@ function SearchAndFilters({
               {active && (
                 <motion.span
                   layoutId="customers-filter-indicator"
-                  className="absolute inset-0 rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover shadow-[0_4px_12px_rgba(53,157,243,0.35),inset_0_1px_0_rgba(255,255,255,0.25)]"
+                  className="absolute inset-0 rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover shadow-[0_4px_12px_rgba(37,99,235,0.35),inset_0_1px_0_rgba(255,255,255,0.25)]"
                   aria-hidden
                   transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
                 />
@@ -721,7 +721,7 @@ function CustomerRowCard({
           className="pointer-events-none absolute -inset-px rounded-2xl opacity-0 transition-opacity duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] group-hover:opacity-100"
           style={{
             boxShadow:
-              "0 0 0 1px rgba(53,157,243,0.18), 0 10px 28px rgba(53,157,243,0.10), 0 24px 52px -8px rgba(53,157,243,0.07)",
+              "0 0 0 1px rgba(37,99,235,0.18), 0 10px 28px rgba(37,99,235,0.10), 0 24px 52px -8px rgba(37,99,235,0.07)",
           }}
         />
         {/* Top inner highlight */}
@@ -877,7 +877,7 @@ function PremiumEmptyState({
         className="pointer-events-none absolute inset-0 opacity-40"
         style={{
           backgroundImage:
-            "radial-gradient(circle at 1px 1px, rgba(53,157,243,0.10) 1px, transparent 0)",
+            "radial-gradient(circle at 1px 1px, rgba(37,99,235,0.10) 1px, transparent 0)",
           backgroundSize: "22px 22px",
           maskImage:
             "radial-gradient(ellipse at center, rgba(0,0,0,1) 30%, transparent 75%)",
@@ -905,7 +905,7 @@ function PremiumEmptyState({
             <button
               type="button"
               onClick={onAdd}
-              className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover px-3 text-[12px] font-medium text-white shadow-[0_6px_16px_rgba(53,157,243,0.35)] transition-all hover:-translate-y-0.5 hover:shadow-[0_10px_24px_rgba(53,157,243,0.45)]"
+              className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover px-3 text-[12px] font-medium text-white shadow-[0_6px_16px_rgba(37,99,235,0.35)] transition-all hover:-translate-y-0.5 hover:shadow-[0_10px_24px_rgba(37,99,235,0.45)]"
             >
               <Plus className="h-3.5 w-3.5" strokeWidth={2.25} />
               Add customer
@@ -1211,7 +1211,7 @@ function NewCustomerDrawer({
                 type="button"
                 onClick={save}
                 disabled={busy || !name.trim() || !email.trim()}
-                className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover px-3 text-[12px] font-medium text-white shadow-[0_6px_16px_rgba(53,157,243,0.35)] transition-all hover:-translate-y-0.5 hover:shadow-[0_10px_24px_rgba(53,157,243,0.45)] disabled:cursor-not-allowed disabled:opacity-50"
+                className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover px-3 text-[12px] font-medium text-white shadow-[0_6px_16px_rgba(37,99,235,0.35)] transition-all hover:-translate-y-0.5 hover:shadow-[0_10px_24px_rgba(37,99,235,0.45)] disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {busy ? "Adding…" : (
                   <>

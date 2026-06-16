@@ -86,7 +86,7 @@ async function ensureAndroidChannel(): Promise<void> {
     await Notifications.setNotificationChannelAsync("default", {
       name: "ZentroMeet",
       importance: Notifications.AndroidImportance.HIGH,
-      lightColor: "#359df3",
+      lightColor: "#2563EB",
       vibrationPattern: [0, 240, 240, 240],
     });
   } catch {

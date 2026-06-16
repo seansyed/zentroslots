@@ -335,7 +335,7 @@ function LockedPreviewCard({ planName }: { planName: string }) {
         </div>
         <Link
           href="/dashboard/billing"
-          className="zm-pulse-glow inline-flex shrink-0 items-center gap-1.5 self-start rounded-md bg-brand-accent px-3 py-1.5 text-[11.5px] font-semibold text-white shadow-[0_4px_14px_rgba(53,157,243,0.32)] transition-all duration-[200ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:bg-brand-hover hover:shadow-[0_8px_22px_rgba(53,157,243,0.42)] sm:self-center"
+          className="zm-pulse-glow inline-flex shrink-0 items-center gap-1.5 self-start rounded-md bg-brand-accent px-3 py-1.5 text-[11.5px] font-semibold text-white shadow-[0_4px_14px_rgba(37,99,235,0.32)] transition-all duration-[200ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:bg-brand-hover hover:shadow-[0_8px_22px_rgba(37,99,235,0.42)] sm:self-center"
         >
           <Sparkles className="h-3.5 w-3.5" strokeWidth={2} />
           Unlock branding

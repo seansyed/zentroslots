@@ -62,7 +62,7 @@ export default async function EmbedDemoPage(props: {
   const tenant = sanitizeSlug(sp.tenant);
   const service = sanitizeSlug(sp.service);
   const mode = sanitizeMode(sp.mode);
-  const color = sanitizeColor(sp.color) || "#359df3";
+  const color = sanitizeColor(sp.color) || "#2563EB";
   const label = sanitizeText(sp.label) || "Book a meeting";
   const radius = sanitizeRadius(sp.radius);
 

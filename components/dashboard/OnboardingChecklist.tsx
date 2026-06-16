@@ -271,7 +271,7 @@ export default function OnboardingChecklist({
           </div>
           <div className="relative mt-2 h-2 overflow-hidden rounded-full bg-surface-inset ring-1 ring-border/60">
             <div
-              className="relative h-full rounded-full bg-gradient-to-r from-brand-accent via-brand-accent to-brand-hover shadow-[0_0_12px_rgba(53,157,243,0.45)] transition-[width] duration-700 ease-out"
+              className="relative h-full rounded-full bg-gradient-to-r from-brand-accent via-brand-accent to-brand-hover shadow-[0_0_12px_rgba(37,99,235,0.45)] transition-[width] duration-700 ease-out"
               style={{ width: `${pct}%` }}
             >
               <div
@@ -360,7 +360,7 @@ function CircularProgress({ pct }: { pct: number }) {
           strokeWidth="4"
           strokeLinecap="round"
           strokeDasharray={`${dash} ${c}`}
-          style={{ filter: "drop-shadow(0 0 6px rgba(53,157,243,0.35))" }}
+          style={{ filter: "drop-shadow(0 0 6px rgba(37,99,235,0.35))" }}
         />
       </svg>
       <div className="absolute inset-0 flex items-center justify-center">

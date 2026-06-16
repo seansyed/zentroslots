@@ -11,7 +11,7 @@ export default function MarketingNav() {
             className="h-6 w-6 rounded-full"
             aria-hidden
           >
-            <circle cx="80" cy="80" r="80" fill="#359df3" />
+            <circle cx="80" cy="80" r="80" fill="#2563EB" />
             <g fill="#0f172a">
               <rect x="40" y="40" width="80" height="15" />
               <rect x="40" y="105" width="80" height="15" />

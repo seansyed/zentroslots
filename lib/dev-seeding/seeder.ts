@@ -183,7 +183,7 @@ async function seedTenants(
           currentPlan: plan,
           active: rng.bool(0.95),
           billingEmail: `billing+${slug}@example-zm.test`,
-          primaryColor: rng.pick(["#359df3", "#7c3aed", "#ef4444", "#10b981", "#f59e0b"]),
+          primaryColor: rng.pick(["#2563EB", "#7c3aed", "#ef4444", "#10b981", "#f59e0b"]),
           subscriptionStatus: (subscriptionStatus ?? null) as string | null,
           trialEnd,
           onboardingCompletedAt: onboardingDone ? createdAt : null,

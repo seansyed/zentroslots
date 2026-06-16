@@ -721,7 +721,7 @@ function LockedAnalyticsPreview({ currentPlanName }: { currentPlanName: string }
           </div>
           <Link
             href="/dashboard/billing"
-            className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-brand-accent px-4 py-2.5 text-[12.5px] font-semibold text-white shadow-[0_4px_18px_rgba(53,157,243,0.30)] transition-all duration-[260ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:shadow-[0_8px_24px_rgba(53,157,243,0.40)]"
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-brand-accent px-4 py-2.5 text-[12.5px] font-semibold text-white shadow-[0_4px_18px_rgba(37,99,235,0.30)] transition-all duration-[260ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:shadow-[0_8px_24px_rgba(37,99,235,0.40)]"
           >
             {/* Live pulse dot — subtle "system is alive" indicator
                 per Phase 11B Part 2 (without inventing fake live
@@ -918,8 +918,8 @@ function LockedAnalyticsPreview({ currentPlanName }: { currentPlanName: string }
           </div>
 
           {/* Pro plan side — highlighted */}
-          <div className="relative rounded-xl border-2 border-brand-accent/40 bg-gradient-to-br from-brand-subtle/40 via-surface to-surface p-4 shadow-[0_8px_24px_rgba(53,157,243,0.12)]">
-            <div className="absolute -top-2 right-3 inline-flex items-center gap-1 rounded-full bg-brand-accent px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.08em] text-white shadow-[0_4px_12px_rgba(53,157,243,0.32)]">
+          <div className="relative rounded-xl border-2 border-brand-accent/40 bg-gradient-to-br from-brand-subtle/40 via-surface to-surface p-4 shadow-[0_8px_24px_rgba(37,99,235,0.12)]">
+            <div className="absolute -top-2 right-3 inline-flex items-center gap-1 rounded-full bg-brand-accent px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.08em] text-white shadow-[0_4px_12px_rgba(37,99,235,0.32)]">
               <Sparkles className="h-2.5 w-2.5" strokeWidth={2} />
               Recommended
             </div>
@@ -952,7 +952,7 @@ function LockedAnalyticsPreview({ currentPlanName }: { currentPlanName: string }
           <div className="flex flex-col items-stretch gap-2 lg:items-end">
             <Link
               href="/dashboard/billing"
-              className="inline-flex items-center justify-center gap-1.5 rounded-md bg-brand-accent px-4 py-2.5 text-[12.5px] font-semibold text-white shadow-[0_4px_18px_rgba(53,157,243,0.30)] transition-all duration-[260ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:shadow-[0_8px_24px_rgba(53,157,243,0.40)]"
+              className="inline-flex items-center justify-center gap-1.5 rounded-md bg-brand-accent px-4 py-2.5 text-[12.5px] font-semibold text-white shadow-[0_4px_18px_rgba(37,99,235,0.30)] transition-all duration-[260ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:shadow-[0_8px_24px_rgba(37,99,235,0.40)]"
             >
               <Zap className="h-3.5 w-3.5" strokeWidth={2} />
               Unlock analytics
@@ -1036,8 +1036,8 @@ function AreaSilhouette() {
     <svg viewBox="0 0 400 110" className="w-full" preserveAspectRatio="none" role="presentation">
       <defs>
         <linearGradient id="zm-locked-area" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#359df3" stopOpacity="0.35" />
-          <stop offset="100%" stopColor="#359df3" stopOpacity="0.02" />
+          <stop offset="0%" stopColor="#2563EB" stopOpacity="0.35" />
+          <stop offset="100%" stopColor="#2563EB" stopOpacity="0.02" />
         </linearGradient>
       </defs>
       <path
@@ -1047,7 +1047,7 @@ function AreaSilhouette() {
       <path
         d="M 0 80 L 25 70 L 55 75 L 90 55 L 130 60 L 165 40 L 200 50 L 235 30 L 275 38 L 310 22 L 345 30 L 380 15 L 400 18"
         fill="none"
-        stroke="#359df3"
+        stroke="#2563EB"
         strokeWidth="2"
         strokeLinecap="round"
         strokeLinejoin="round"
@@ -1123,7 +1123,7 @@ function HowItWorksStep({
 }) {
   return (
     <div className="relative rounded-xl border border-border bg-surface p-3.5 transition-all duration-[260ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:shadow-soft">
-      <span className="absolute -top-2 left-3 inline-flex h-4 items-center rounded-full bg-brand-accent px-1.5 text-[9px] font-semibold uppercase tracking-[0.10em] text-white shadow-[0_2px_8px_rgba(53,157,243,0.20)]">
+      <span className="absolute -top-2 left-3 inline-flex h-4 items-center rounded-full bg-brand-accent px-1.5 text-[9px] font-semibold uppercase tracking-[0.10em] text-white shadow-[0_2px_8px_rgba(37,99,235,0.20)]">
         Step {step}
       </span>
       <div className="flex items-start gap-2.5 pt-1">

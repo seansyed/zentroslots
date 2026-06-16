@@ -484,7 +484,7 @@ function HeroAction({
   primary?: boolean;
 }) {
   const className = primary
-    ? "inline-flex h-8 items-center gap-1.5 rounded-lg bg-brand-accent px-3 text-[11.5px] font-semibold text-white shadow-[0_2px_8px_-2px_rgba(53,157,243,0.30)] transition-all duration-[220ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-px hover:shadow-[0_6px_18px_-4px_rgba(53,157,243,0.42)]"
+    ? "inline-flex h-8 items-center gap-1.5 rounded-lg bg-brand-accent px-3 text-[11.5px] font-semibold text-white shadow-[0_2px_8px_-2px_rgba(37,99,235,0.30)] transition-all duration-[220ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-px hover:shadow-[0_6px_18px_-4px_rgba(37,99,235,0.42)]"
     : "inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-surface px-2.5 text-[11.5px] font-medium text-ink-muted shadow-sm transition-all duration-[220ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-px hover:bg-surface-inset hover:text-ink hover:shadow-md";
   return (
     <Link href={href} className={className}>
@@ -607,7 +607,7 @@ function SecurityTrustStrip() {
               key={t.label}
               className="group/trust flex items-start gap-2 rounded-lg p-1.5 transition-all duration-[220ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:bg-surface-inset/40"
             >
-              <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-brand-subtle to-surface text-brand-accent ring-1 ring-brand-accent/15 shadow-[0_1px_3px_-1px_rgba(53,157,243,0.18)] transition-all duration-[220ms] ease-[cubic-bezier(0.16,1,0.3,1)] group-hover/trust:shadow-[0_2px_8px_-1px_rgba(53,157,243,0.26)] group-hover/trust:ring-brand-accent/30">
+              <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-brand-subtle to-surface text-brand-accent ring-1 ring-brand-accent/15 shadow-[0_1px_3px_-1px_rgba(37,99,235,0.18)] transition-all duration-[220ms] ease-[cubic-bezier(0.16,1,0.3,1)] group-hover/trust:shadow-[0_2px_8px_-1px_rgba(37,99,235,0.26)] group-hover/trust:ring-brand-accent/30">
                 <Icon className="h-3.5 w-3.5" strokeWidth={2} />
               </span>
               <div className="min-w-0">
@@ -962,7 +962,7 @@ function ProviderToggle({
   disabled?: boolean;
   brandColor?: string;
 }) {
-  const c = brandColor ?? "#359df3";
+  const c = brandColor ?? "#2563EB";
   return (
     <button
       type="button"
@@ -974,7 +974,7 @@ function ProviderToggle({
         "group/toggle relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-all duration-[220ms] ease-[cubic-bezier(0.16,1,0.3,1)] focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1",
         on
           ? // Live: dual inset depth + soft brand-tinted glow → operational feel
-            "shadow-[inset_0_1px_2px_rgba(15,23,42,0.14),inset_0_-1px_0_rgba(255,255,255,0.12),0_0_0_3px_var(--toggle-glow,rgba(53,157,243,0.14))]"
+            "shadow-[inset_0_1px_2px_rgba(15,23,42,0.14),inset_0_-1px_0_rgba(255,255,255,0.12),0_0_0_3px_var(--toggle-glow,rgba(37,99,235,0.14))]"
           : // Off: better track contrast + hover lift
             "bg-surface-inset ring-1 ring-border/70 hover:ring-border hover:bg-surface-inset/80",
         // Disabled state: staged-but-unavailable — slightly more visible than 0.5
@@ -1007,7 +1007,7 @@ function ProviderToggle({
 // Lightweight hex → rgba helper (no deps).
 function hexAlpha(hex: string, alpha: number): string {
   const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
-  if (!m) return `rgba(53,157,243,${alpha})`;
+  if (!m) return `rgba(37,99,235,${alpha})`;
   const n = parseInt(m[1], 16);
   return `rgba(${(n >> 16) & 0xff}, ${(n >> 8) & 0xff}, ${n & 0xff}, ${alpha})`;
 }

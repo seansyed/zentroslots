@@ -34,7 +34,7 @@ export type Department = {
   id: string;
   tenantId: string;
   name: string;
-  /** Brand hex like "#359df3", or null when none was chosen. */
+  /** Brand hex like "#2563EB", or null when none was chosen. */
   color: string | null;
   description: string | null;
   createdAt?: string | null;

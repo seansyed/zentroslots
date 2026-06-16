@@ -256,22 +256,22 @@
       padding: "11px 16px",
       border: "0",
       borderRadius: "999px",
-      background: cfg.color || "#359df3",
+      background: cfg.color || "#2563EB",
       color: "#ffffff",
       cursor: "pointer",
       font: "600 13.5px/1 -apple-system,system-ui,sans-serif",
       letterSpacing: "0.005em",
-      boxShadow: "0 8px 22px -4px rgba(53,157,243,0.45), 0 2px 6px -2px rgba(15,23,42,0.18)",
+      boxShadow: "0 8px 22px -4px rgba(37,99,235,0.45), 0 2px 6px -2px rgba(15,23,42,0.18)",
       transition: "transform 200ms cubic-bezier(0.16,1,0.3,1), box-shadow 200ms",
     }, pos));
 
     btn.onmouseenter = function () {
       btn.style.transform = "translateY(-1px)";
-      btn.style.boxShadow = "0 14px 32px -4px rgba(53,157,243,0.55), 0 4px 10px -2px rgba(15,23,42,0.22)";
+      btn.style.boxShadow = "0 14px 32px -4px rgba(37,99,235,0.55), 0 4px 10px -2px rgba(15,23,42,0.22)";
     };
     btn.onmouseleave = function () {
       btn.style.transform = "";
-      btn.style.boxShadow = "0 8px 22px -4px rgba(53,157,243,0.45), 0 2px 6px -2px rgba(15,23,42,0.18)";
+      btn.style.boxShadow = "0 8px 22px -4px rgba(37,99,235,0.45), 0 2px 6px -2px rgba(15,23,42,0.18)";
     };
 
     var icon = el("span", { "aria-hidden": "true" }, {

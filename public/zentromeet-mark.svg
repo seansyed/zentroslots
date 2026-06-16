@@ -1,9 +1,9 @@
 <svg viewBox="0 0 160 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="ZentroMeet">
   <!-- ZentroMeet brand mark — vector approximation of the circular badge.
-       Brand blue #359df3, ink #0f172a. The PNG artwork can replace this
+       Brand blue #2563EB, ink #0f172a. The PNG artwork can replace this
        file at any time without code changes; route paths reference
        "/zentromeet-mark.svg" so any swap is just a drop-in. -->
-  <circle cx="80" cy="80" r="80" fill="#359df3"/>
+  <circle cx="80" cy="80" r="80" fill="#2563EB"/>
   <circle cx="80" cy="80" r="71" fill="none" stroke="#1e293b" stroke-width="0.8" opacity="0.4"/>
 
   <!-- Bold "Z" — three primitives stacked: top bar, diagonal, bottom bar -->

@@ -74,7 +74,7 @@ export async function notifyReconnectRequired(args: {
     const appBase = (process.env.APP_BASE_URL ?? "http://localhost:3001").replace(/\/+$/, "");
     const reconnectUrl = `${appBase}/dashboard/settings/calendar`;
     const tenantName = tenant?.name ?? "your workspace";
-    const accent = tenant?.primaryColor ?? "#359df3";
+    const accent = tenant?.primaryColor ?? "#2563EB";
     // Wave C.1 — Microsoft connections double as the Teams meeting
     // source, so when an Outlook connection breaks the staff member
     // also loses Teams auto-creation. Label accordingly so the email

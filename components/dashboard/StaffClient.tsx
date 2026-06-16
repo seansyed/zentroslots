@@ -582,7 +582,7 @@ function StaffHero({
         className="pointer-events-none absolute inset-0 opacity-[0.32]"
         style={{
           backgroundImage:
-            "radial-gradient(800px 220px at 80% 0%, rgba(53,157,243,0.06), transparent 70%), radial-gradient(600px 200px at 0% 100%, rgba(16,185,129,0.05), transparent 70%)",
+            "radial-gradient(800px 220px at 80% 0%, rgba(37,99,235,0.06), transparent 70%), radial-gradient(600px 200px at 0% 100%, rgba(16,185,129,0.05), transparent 70%)",
         }}
       />
       <span
@@ -645,7 +645,7 @@ function HeroAction({
   label: string;
   tone: "primary" | "ghost";
 }) {
-  const primaryCls = "inline-flex h-9 items-center gap-1.5 rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover px-3 text-[12.5px] font-semibold text-white shadow-[0_6px_16px_rgba(53,157,243,0.35)] transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:shadow-[0_10px_24px_rgba(53,157,243,0.45)]";
+  const primaryCls = "inline-flex h-9 items-center gap-1.5 rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover px-3 text-[12.5px] font-semibold text-white shadow-[0_6px_16px_rgba(37,99,235,0.35)] transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:shadow-[0_10px_24px_rgba(37,99,235,0.45)]";
   const ghostCls = "inline-flex h-9 items-center gap-1.5 rounded-lg border border-border bg-surface px-3 text-[12.5px] font-medium text-ink-muted shadow-soft transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:bg-surface-inset hover:text-ink hover:shadow-md";
   const cls = tone === "primary" ? primaryCls : ghostCls;
   const iconStroke = tone === "primary" ? 2 : 1.75;
@@ -685,7 +685,7 @@ function WorkforceSignalStrip({ text, loading }: { text: string; loading: boolea
           className="zm-light-sweep pointer-events-none absolute inset-y-0 -left-1/4 w-1/3 bg-gradient-to-r from-transparent via-white/35 to-transparent"
         />
         <div className="relative flex items-center gap-3 px-4 py-3 sm:px-5">
-          <div className="zm-pulse-glow relative inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-brand-accent to-brand-hover text-white shadow-[0_4px_12px_rgba(53,157,243,0.35)]">
+          <div className="zm-pulse-glow relative inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-brand-accent to-brand-hover text-white shadow-[0_4px_12px_rgba(37,99,235,0.35)]">
             <Workflow className="h-4 w-4" strokeWidth={2} />
             <span aria-hidden className="absolute -right-0.5 -top-0.5 inline-flex h-2.5 w-2.5 items-center justify-center">
               <span className="absolute inset-0 animate-ping rounded-full bg-emerald-400/55" />
@@ -968,7 +968,7 @@ function StaffOpRow({
     >
       {/* Selected rail */}
       {selected && (
-        <span aria-hidden className="absolute inset-y-0 left-0 w-0.5 rounded-l-2xl bg-brand-accent shadow-[0_0_10px_rgba(53,157,243,0.40)]" />
+        <span aria-hidden className="absolute inset-y-0 left-0 w-0.5 rounded-l-2xl bg-brand-accent shadow-[0_0_10px_rgba(37,99,235,0.40)]" />
       )}
       <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/55 to-transparent" />
 
@@ -1185,7 +1185,7 @@ function PremiumEmptyState({
         className="pointer-events-none absolute inset-0 opacity-[0.40]"
         style={{
           backgroundImage:
-            "radial-gradient(700px 200px at 70% 10%, rgba(53,157,243,0.06), transparent 70%), radial-gradient(500px 180px at 10% 90%, rgba(16,185,129,0.05), transparent 70%)",
+            "radial-gradient(700px 200px at 70% 10%, rgba(37,99,235,0.06), transparent 70%), radial-gradient(500px 180px at 10% 90%, rgba(16,185,129,0.05), transparent 70%)",
         }}
       />
       {/* Topology dot-mesh — very subtle */}
@@ -1194,7 +1194,7 @@ function PremiumEmptyState({
         className="pointer-events-none absolute inset-0 opacity-[0.45]"
         style={{
           backgroundImage:
-            "radial-gradient(circle at 1px 1px, rgba(53,157,243,0.18) 1px, transparent 0)",
+            "radial-gradient(circle at 1px 1px, rgba(37,99,235,0.18) 1px, transparent 0)",
           backgroundSize: "22px 22px",
           maskImage:
             "radial-gradient(ellipse 80% 70% at 50% 40%, black 30%, transparent 75%)",
@@ -1227,7 +1227,7 @@ function PremiumEmptyState({
           <button
             type="button"
             onClick={onAddStaff}
-            className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover px-3 text-[12.5px] font-semibold text-white shadow-[0_6px_16px_rgba(53,157,243,0.35)] transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:shadow-[0_10px_24px_rgba(53,157,243,0.45)]"
+            className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover px-3 text-[12.5px] font-semibold text-white shadow-[0_6px_16px_rgba(37,99,235,0.35)] transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:shadow-[0_10px_24px_rgba(37,99,235,0.45)]"
           >
             <UserPlus className="h-3.5 w-3.5" strokeWidth={2} />
             Add staff
@@ -1267,8 +1267,8 @@ function Constellation() {
     >
       <defs>
         <radialGradient id="zm-node-glow" cx="50%" cy="50%" r="50%">
-          <stop offset="0%" stopColor="rgba(53,157,243,0.55)" />
-          <stop offset="100%" stopColor="rgba(53,157,243,0)" />
+          <stop offset="0%" stopColor="rgba(37,99,235,0.55)" />
+          <stop offset="100%" stopColor="rgba(37,99,235,0)" />
         </radialGradient>
         <radialGradient id="zm-node-emerald" cx="50%" cy="50%" r="50%">
           <stop offset="0%" stopColor="rgba(16,185,129,0.55)" />
@@ -1276,17 +1276,17 @@ function Constellation() {
         </radialGradient>
       </defs>
       {/* Connecting lines */}
-      <line x1="55" y1="38" x2="320" y2="56"  stroke="rgba(53,157,243,0.18)" strokeWidth="0.6" strokeDasharray="3 5" />
+      <line x1="55" y1="38" x2="320" y2="56"  stroke="rgba(37,99,235,0.18)" strokeWidth="0.6" strokeDasharray="3 5" />
       <line x1="320" y1="56" x2="86" y2="202" stroke="rgba(16,185,129,0.16)" strokeWidth="0.6" strokeDasharray="3 5" />
-      <line x1="86" y1="202" x2="55" y2="38"  stroke="rgba(53,157,243,0.14)" strokeWidth="0.6" strokeDasharray="3 5" />
+      <line x1="86" y1="202" x2="55" y2="38"  stroke="rgba(37,99,235,0.14)" strokeWidth="0.6" strokeDasharray="3 5" />
       {/* Halo nodes */}
       <circle cx="55"  cy="38"  r="18" fill="url(#zm-node-glow)" />
       <circle cx="320" cy="56"  r="22" fill="url(#zm-node-emerald)" />
       <circle cx="86"  cy="202" r="20" fill="url(#zm-node-glow)" />
       {/* Cores */}
-      <circle cx="55"  cy="38"  r="1.8" fill="rgba(53,157,243,0.85)" />
+      <circle cx="55"  cy="38"  r="1.8" fill="rgba(37,99,235,0.85)" />
       <circle cx="320" cy="56"  r="2.0" fill="rgba(16,185,129,0.85)" />
-      <circle cx="86"  cy="202" r="1.8" fill="rgba(53,157,243,0.85)" />
+      <circle cx="86"  cy="202" r="1.8" fill="rgba(37,99,235,0.85)" />
     </svg>
   );
 }
@@ -1381,7 +1381,7 @@ function ActivationChecklist({
       {/* Progress rail */}
       <span aria-hidden className="relative mt-2 inline-block h-1 w-full overflow-hidden rounded-full bg-surface-inset/60">
         <span
-          className="absolute inset-y-0 left-0 rounded-full bg-brand-accent shadow-[0_0_8px_rgba(53,157,243,0.35)] transition-all duration-500 ease-[cubic-bezier(0.16,1,0.3,1)]"
+          className="absolute inset-y-0 left-0 rounded-full bg-brand-accent shadow-[0_0_8px_rgba(37,99,235,0.35)] transition-all duration-500 ease-[cubic-bezier(0.16,1,0.3,1)]"
           style={{ width: `${(completedCount / steps.length) * 100}%` }}
         />
       </span>
@@ -5291,7 +5291,7 @@ function CapacityReachedModal({
           <Link
             href="/dashboard/billing"
             onClick={onClose}
-            className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover px-3 text-[12.5px] font-semibold text-white shadow-[0_6px_16px_rgba(53,157,243,0.35)] transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:shadow-[0_10px_24px_rgba(53,157,243,0.45)]"
+            className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover px-3 text-[12.5px] font-semibold text-white shadow-[0_6px_16px_rgba(37,99,235,0.35)] transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:shadow-[0_10px_24px_rgba(37,99,235,0.45)]"
           >
             <ArrowUpRight className="h-3.5 w-3.5" strokeWidth={2} />
             Upgrade plan
@@ -5511,7 +5511,7 @@ function WorkforceCapacityOverviewModal({
             <Link
               href="/dashboard/billing"
               onClick={onClose}
-              className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover px-3 text-[12.5px] font-semibold text-white shadow-[0_6px_16px_rgba(53,157,243,0.35)] transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:shadow-[0_10px_24px_rgba(53,157,243,0.45)]"
+              className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover px-3 text-[12.5px] font-semibold text-white shadow-[0_6px_16px_rgba(37,99,235,0.35)] transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:shadow-[0_10px_24px_rgba(37,99,235,0.45)]"
             >
               <ArrowUpRight className="h-3.5 w-3.5" strokeWidth={2} />
               Upgrade plan
@@ -5520,7 +5520,7 @@ function WorkforceCapacityOverviewModal({
             <button
               type="button"
               onClick={onAddStaff}
-              className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover px-3 text-[12.5px] font-semibold text-white shadow-[0_6px_16px_rgba(53,157,243,0.35)] transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:shadow-[0_10px_24px_rgba(53,157,243,0.45)]"
+              className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover px-3 text-[12.5px] font-semibold text-white shadow-[0_6px_16px_rgba(37,99,235,0.35)] transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:shadow-[0_10px_24px_rgba(37,99,235,0.45)]"
             >
               <UserPlus className="h-3.5 w-3.5" strokeWidth={2} />
               Add staff
@@ -5738,7 +5738,7 @@ function AddStaffModal({
       <div className="space-y-4">
         {/* Eyebrow — operational provisioning */}
         <div className="flex items-center gap-2">
-          <div className="zm-pulse-glow inline-flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover text-white shadow-[0_4px_10px_rgba(53,157,243,0.30)]">
+          <div className="zm-pulse-glow inline-flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover text-white shadow-[0_4px_10px_rgba(37,99,235,0.30)]">
             <UserPlus className="h-3.5 w-3.5" strokeWidth={2} />
           </div>
           <div>
@@ -5756,7 +5756,7 @@ function AddStaffModal({
           <div className="flex items-start gap-3.5">
             <div className="relative shrink-0">
               <div
-                className="flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-brand-accent to-brand-hover text-[14px] font-semibold text-white shadow-[0_4px_12px_rgba(53,157,243,0.25)]"
+                className="flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-brand-accent to-brand-hover text-[14px] font-semibold text-white shadow-[0_4px_12px_rgba(37,99,235,0.25)]"
                 aria-hidden
               >
                 {name.trim() ? initialsFromName(name) : "•"}
@@ -5851,7 +5851,7 @@ function AddStaffModal({
                     key={svc.id}
                     className={cn(
                       "flex cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[12.5px] transition-all duration-[140ms]",
-                      on ? "bg-surface ring-1 ring-brand-accent/25 shadow-[0_1px_2px_rgba(53,157,243,0.10)]" : "hover:bg-surface/60",
+                      on ? "bg-surface ring-1 ring-brand-accent/25 shadow-[0_1px_2px_rgba(37,99,235,0.10)]" : "hover:bg-surface/60",
                     )}
                   >
                     <input
@@ -5909,8 +5909,8 @@ function AddStaffModal({
             }}
             aria-disabled={!canSubmit}
             className={cn(
-              "inline-flex h-9 items-center gap-1.5 rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover px-3 text-[12.5px] font-semibold text-white shadow-[0_6px_16px_rgba(53,157,243,0.35)] transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)]",
-              canSubmit ? "hover:-translate-y-0.5 hover:shadow-[0_10px_24px_rgba(53,157,243,0.45)]" : "cursor-not-allowed opacity-50"
+              "inline-flex h-9 items-center gap-1.5 rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover px-3 text-[12.5px] font-semibold text-white shadow-[0_6px_16px_rgba(37,99,235,0.35)] transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)]",
+              canSubmit ? "hover:-translate-y-0.5 hover:shadow-[0_10px_24px_rgba(37,99,235,0.45)]" : "cursor-not-allowed opacity-50"
             )}
           >
             <UserPlus className="h-3.5 w-3.5" strokeWidth={2} />
@@ -6009,7 +6009,7 @@ function InviteTeammateModal({
           <span aria-hidden className="pointer-events-none absolute -right-12 -top-12 h-32 w-32 rounded-full bg-brand-accent/12 blur-3xl" />
           <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/60 to-transparent" />
           <div className="relative flex items-center gap-3">
-            <div className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-brand-accent to-brand-hover text-white shadow-[0_4px_12px_rgba(53,157,243,0.25)]">
+            <div className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-brand-accent to-brand-hover text-white shadow-[0_4px_12px_rgba(37,99,235,0.25)]">
               <Mail className="h-4 w-4" strokeWidth={1.75} />
             </div>
             <div className="min-w-0">
@@ -6118,8 +6118,8 @@ function InviteTeammateModal({
             }}
             aria-disabled={!canSend}
             className={cn(
-              "inline-flex h-9 items-center gap-1.5 rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover px-3 text-[12.5px] font-semibold text-white shadow-[0_6px_16px_rgba(53,157,243,0.35)] transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)]",
-              canSend ? "hover:-translate-y-0.5 hover:shadow-[0_10px_24px_rgba(53,157,243,0.45)]" : "cursor-not-allowed opacity-50",
+              "inline-flex h-9 items-center gap-1.5 rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover px-3 text-[12.5px] font-semibold text-white shadow-[0_6px_16px_rgba(37,99,235,0.35)] transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)]",
+              canSend ? "hover:-translate-y-0.5 hover:shadow-[0_10px_24px_rgba(37,99,235,0.45)]" : "cursor-not-allowed opacity-50",
             )}
           >
             <Mail className="h-3.5 w-3.5" strokeWidth={2} />

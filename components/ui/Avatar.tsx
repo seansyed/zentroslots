@@ -31,10 +31,10 @@ const SIZE: Record<AvatarSize, { box: string; text: string; ring: string }> = {
 // Deterministic gradient per name so the same person always shows
 // the same disc color. Picks from a curated brand-friendly palette.
 const GRADIENTS: { from: string; to: string }[] = [
-  { from: "#359df3", to: "#7c3aed" },
+  { from: "#2563EB", to: "#7c3aed" },
   { from: "#7c3aed", to: "#db2777" },
   { from: "#0d9488", to: "#0891b2" },
-  { from: "#0891b2", to: "#359df3" },
+  { from: "#0891b2", to: "#2563EB" },
   { from: "#ea580c", to: "#db2777" },
   { from: "#65a30d", to: "#0d9488" },
   { from: "#c026d3", to: "#7c3aed" },

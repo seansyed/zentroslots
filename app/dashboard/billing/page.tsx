@@ -778,7 +778,7 @@ function PricingHeader({ interval }: { interval: BillingInterval }) {
             className={cn(
               "rounded-full px-3 py-1.5 text-[11px] font-semibold transition-all",
               interval === "month"
-                ? "bg-brand-accent text-white shadow-[0_2px_8px_rgba(53,157,243,0.32)]"
+                ? "bg-brand-accent text-white shadow-[0_2px_8px_rgba(37,99,235,0.32)]"
                 : "text-ink-muted hover:text-ink",
             )}
           >
@@ -789,7 +789,7 @@ function PricingHeader({ interval }: { interval: BillingInterval }) {
             className={cn(
               "inline-flex items-center gap-1 rounded-full px-3 py-1.5 text-[11px] font-semibold transition-all",
               interval === "year"
-                ? "bg-brand-accent text-white shadow-[0_2px_8px_rgba(53,157,243,0.32)]"
+                ? "bg-brand-accent text-white shadow-[0_2px_8px_rgba(37,99,235,0.32)]"
                 : "text-ink-muted hover:text-ink",
             )}
           >
@@ -838,9 +838,9 @@ function PricingCard({
   // Frame tone — Pro gets the brand-popular ring; current plan gets
   // a stronger ring; everything else stays neutral.
   const frame = isCurrent
-    ? "border-brand-accent/40 ring-2 ring-brand-accent/30 shadow-[0_8px_24px_rgba(53,157,243,0.16)]"
+    ? "border-brand-accent/40 ring-2 ring-brand-accent/30 shadow-[0_8px_24px_rgba(37,99,235,0.16)]"
     : isMostPopular
-      ? "border-brand-accent/30 ring-1 ring-brand-accent/20 shadow-[0_8px_24px_rgba(53,157,243,0.10)]"
+      ? "border-brand-accent/30 ring-1 ring-brand-accent/20 shadow-[0_8px_24px_rgba(37,99,235,0.10)]"
       : "border-border/60";
 
   return (
@@ -855,7 +855,7 @@ function PricingCard({
       {/* Top-right badges */}
       <div className="absolute right-3 top-3 flex flex-col items-end gap-1">
         {isCurrent && (
-          <span className="inline-flex items-center gap-1 rounded-full bg-brand-accent px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.08em] text-white shadow-[0_4px_12px_rgba(53,157,243,0.32)]">
+          <span className="inline-flex items-center gap-1 rounded-full bg-brand-accent px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.08em] text-white shadow-[0_4px_12px_rgba(37,99,235,0.32)]">
             Current plan
           </span>
         )}
@@ -1022,7 +1022,7 @@ function BillingHistoryCard({
             <form action="/api/billing/portal" method="post">
               <button
                 type="submit"
-                className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-brand-accent px-3 py-1.5 text-[11.5px] font-semibold text-white shadow-[0_4px_14px_rgba(53,157,243,0.32)] transition-all hover:-translate-y-0.5 hover:shadow-[0_8px_20px_rgba(53,157,243,0.40)]"
+                className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-brand-accent px-3 py-1.5 text-[11.5px] font-semibold text-white shadow-[0_4px_14px_rgba(37,99,235,0.32)] transition-all hover:-translate-y-0.5 hover:shadow-[0_8px_20px_rgba(37,99,235,0.40)]"
               >
                 <ExternalLink className="h-3.5 w-3.5" strokeWidth={2} />
                 Open invoice portal

@@ -389,7 +389,7 @@ function HeroKpi({
         : tone === "red"
           ? "from-red-50 to-red-100/40 text-red-700 ring-red-200/50 shadow-[0_1px_3px_-1px_rgba(239,68,68,0.18)]"
           : tone === "brand"
-            ? "from-brand-subtle to-surface text-brand-accent ring-brand-accent/20 shadow-[0_1px_3px_-1px_rgba(53,157,243,0.18)]"
+            ? "from-brand-subtle to-surface text-brand-accent ring-brand-accent/20 shadow-[0_1px_3px_-1px_rgba(37,99,235,0.18)]"
             : "from-surface-inset to-surface text-ink-subtle ring-border/50";
   return (
     <div className="group/kpi relative overflow-hidden rounded-xl border border-border/65 bg-surface/85 p-2.5 shadow-[0_1px_2px_rgba(15,23,42,0.04),inset_0_1px_0_rgba(255,255,255,0.55)] backdrop-blur-sm transition-all duration-[220ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-px hover:border-border hover:shadow-[0_6px_14px_-8px_rgba(15,23,42,0.18),inset_0_1px_0_rgba(255,255,255,0.55)]">
@@ -475,7 +475,7 @@ function SecurityTrustStrip() {
               key={t.label}
               className="group/trust flex items-start gap-2 rounded-lg p-1.5 transition-all duration-[220ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:bg-surface-inset/40"
             >
-              <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-brand-subtle to-surface text-brand-accent ring-1 ring-brand-accent/20 shadow-[0_1px_3px_-1px_rgba(53,157,243,0.22),inset_0_1px_0_rgba(255,255,255,0.55)] transition-all duration-[220ms] ease-[cubic-bezier(0.16,1,0.3,1)] group-hover/trust:shadow-[0_2px_8px_-1px_rgba(53,157,243,0.30),inset_0_1px_0_rgba(255,255,255,0.55)] group-hover/trust:ring-brand-accent/35 group-hover/trust:scale-[1.03]">
+              <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-brand-subtle to-surface text-brand-accent ring-1 ring-brand-accent/20 shadow-[0_1px_3px_-1px_rgba(37,99,235,0.22),inset_0_1px_0_rgba(255,255,255,0.55)] transition-all duration-[220ms] ease-[cubic-bezier(0.16,1,0.3,1)] group-hover/trust:shadow-[0_2px_8px_-1px_rgba(37,99,235,0.30),inset_0_1px_0_rgba(255,255,255,0.55)] group-hover/trust:ring-brand-accent/35 group-hover/trust:scale-[1.03]">
                 <Icon className="h-3.5 w-3.5" strokeWidth={2.25} />
               </span>
               <div className="min-w-0">
@@ -518,7 +518,7 @@ function AddDomainCard({
       <header className="relative flex flex-wrap items-end justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-1.5">
-            <span className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-brand-accent text-white shadow-[0_2px_6px_-2px_rgba(53,157,243,0.35),inset_0_1px_0_rgba(255,255,255,0.22)]">
+            <span className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-brand-accent text-white shadow-[0_2px_6px_-2px_rgba(37,99,235,0.35),inset_0_1px_0_rgba(255,255,255,0.22)]">
               <Globe className="h-3.5 w-3.5" strokeWidth={2} />
             </span>
             <div className="text-[10.5px] font-bold uppercase tracking-[0.12em] text-brand-accent">Hostname onboarding</div>
@@ -546,14 +546,14 @@ function AddDomainCard({
             inputMode="url"
             autoComplete="off"
             spellCheck={false}
-            className="w-full rounded-lg border border-border bg-surface py-2.5 pl-9 pr-3 font-mono text-[12.5px] text-ink shadow-[inset_0_1px_2px_rgba(15,23,42,0.04)] outline-none transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] placeholder:font-sans placeholder:text-ink-subtle focus:border-brand-accent focus:shadow-[inset_0_1px_2px_rgba(15,23,42,0.04),0_0_0_3px_rgba(53,157,243,0.15)]"
+            className="w-full rounded-lg border border-border bg-surface py-2.5 pl-9 pr-3 font-mono text-[12.5px] text-ink shadow-[inset_0_1px_2px_rgba(15,23,42,0.04)] outline-none transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] placeholder:font-sans placeholder:text-ink-subtle focus:border-brand-accent focus:shadow-[inset_0_1px_2px_rgba(15,23,42,0.04),0_0_0_3px_rgba(37,99,235,0.15)]"
           />
         </div>
         <button
           type="button"
           onClick={onAdd}
           disabled={adding || !hostname.trim()}
-          className="group/cta relative inline-flex h-10 min-w-[140px] items-center justify-center gap-1.5 overflow-hidden rounded-lg bg-gradient-to-b from-brand-accent to-brand-hover px-4 text-[12.5px] font-semibold tracking-tight text-white shadow-[0_2px_8px_-2px_rgba(53,157,243,0.30),inset_0_1px_0_rgba(255,255,255,0.18)] transition-all duration-[220ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-px hover:shadow-[0_6px_18px_-4px_rgba(53,157,243,0.42),inset_0_1px_0_rgba(255,255,255,0.18)] active:translate-y-0 active:shadow-[0_1px_4px_-1px_rgba(53,157,243,0.30)] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0"
+          className="group/cta relative inline-flex h-10 min-w-[140px] items-center justify-center gap-1.5 overflow-hidden rounded-lg bg-gradient-to-b from-brand-accent to-brand-hover px-4 text-[12.5px] font-semibold tracking-tight text-white shadow-[0_2px_8px_-2px_rgba(37,99,235,0.30),inset_0_1px_0_rgba(255,255,255,0.18)] transition-all duration-[220ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-px hover:shadow-[0_6px_18px_-4px_rgba(37,99,235,0.42),inset_0_1px_0_rgba(255,255,255,0.18)] active:translate-y-0 active:shadow-[0_1px_4px_-1px_rgba(37,99,235,0.30)] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0"
         >
           <span aria-hidden className="pointer-events-none absolute inset-0 bg-gradient-to-b from-white/[0.08] to-transparent opacity-60 transition-opacity duration-300 group-hover/cta:opacity-100" />
           {adding ? (
@@ -984,7 +984,7 @@ function PaidPlanUpsellCard() {
         <div className="flex flex-col items-start gap-2 sm:items-end">
           <Link
             href="/dashboard/billing"
-            className="group/cta inline-flex h-10 items-center gap-1.5 rounded-lg bg-gradient-to-b from-brand-accent to-brand-hover px-4 text-[12.5px] font-semibold text-white shadow-[0_2px_8px_-2px_rgba(53,157,243,0.30),inset_0_1px_0_rgba(255,255,255,0.18)] transition-all duration-[220ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-px hover:shadow-[0_6px_18px_-4px_rgba(53,157,243,0.42)]"
+            className="group/cta inline-flex h-10 items-center gap-1.5 rounded-lg bg-gradient-to-b from-brand-accent to-brand-hover px-4 text-[12.5px] font-semibold text-white shadow-[0_2px_8px_-2px_rgba(37,99,235,0.30),inset_0_1px_0_rgba(255,255,255,0.18)] transition-all duration-[220ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-px hover:shadow-[0_6px_18px_-4px_rgba(37,99,235,0.42)]"
           >
             Upgrade to Solo
             <ArrowRight className="h-3.5 w-3.5 transition-transform duration-[220ms] group-hover/cta:translate-x-0.5" strokeWidth={2.25} />
@@ -1008,7 +1008,7 @@ function EmptyDomains() {
       <div className="relative flex flex-col items-center text-center">
         <div className="relative mb-3 inline-flex">
           <span aria-hidden className="absolute inset-0 rounded-2xl bg-brand-accent/10 blur-xl" />
-          <span className="relative inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-brand-subtle to-surface text-brand-accent ring-1 ring-brand-accent/20 shadow-[0_4px_14px_-4px_rgba(53,157,243,0.30),inset_0_1px_0_rgba(255,255,255,0.55)]">
+          <span className="relative inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-brand-subtle to-surface text-brand-accent ring-1 ring-brand-accent/20 shadow-[0_4px_14px_-4px_rgba(37,99,235,0.30),inset_0_1px_0_rgba(255,255,255,0.55)]">
             <Globe className="h-5 w-5" strokeWidth={1.75} />
           </span>
         </div>
@@ -1045,7 +1045,7 @@ function EmptyDomains() {
             el?.focus();
             el?.scrollIntoView({ behavior: "smooth", block: "center" });
           }}
-          className="group/cta mt-5 inline-flex h-9 items-center gap-1.5 rounded-lg bg-gradient-to-b from-brand-accent to-brand-hover px-3.5 text-[12px] font-semibold text-white shadow-[0_2px_8px_-2px_rgba(53,157,243,0.30),inset_0_1px_0_rgba(255,255,255,0.18)] transition-all duration-[220ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-px hover:shadow-[0_6px_18px_-4px_rgba(53,157,243,0.42),inset_0_1px_0_rgba(255,255,255,0.18)]"
+          className="group/cta mt-5 inline-flex h-9 items-center gap-1.5 rounded-lg bg-gradient-to-b from-brand-accent to-brand-hover px-3.5 text-[12px] font-semibold text-white shadow-[0_2px_8px_-2px_rgba(37,99,235,0.30),inset_0_1px_0_rgba(255,255,255,0.18)] transition-all duration-[220ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-px hover:shadow-[0_6px_18px_-4px_rgba(37,99,235,0.42),inset_0_1px_0_rgba(255,255,255,0.18)]"
         >
           Connect your first domain
           <ArrowRight className="h-3.5 w-3.5 transition-transform duration-[220ms] ease-[cubic-bezier(0.16,1,0.3,1)] group-hover/cta:translate-x-0.5" strokeWidth={2.25} />

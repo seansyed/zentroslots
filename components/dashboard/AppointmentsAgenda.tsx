@@ -441,7 +441,7 @@ function DateSection({
             className={cn(
               "rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider",
               relativeLabel === "Today"
-                ? "zm-pulse-glow bg-gradient-to-r from-brand-accent to-brand-hover text-white shadow-[0_3px_10px_rgba(53,157,243,0.32)]"
+                ? "zm-pulse-glow bg-gradient-to-r from-brand-accent to-brand-hover text-white shadow-[0_3px_10px_rgba(37,99,235,0.32)]"
                 : "bg-surface-inset text-ink-subtle"
             )}
           >
@@ -646,11 +646,11 @@ function NowMarker({ timezone }: { timezone: string }) {
     <li className="relative flex items-center gap-2.5 px-1" aria-label="Current time" role="separator">
       {/* Pulsing dot */}
       <div className="relative">
-        <div className="h-2.5 w-2.5 rounded-full bg-brand-accent shadow-[0_0_8px_rgba(53,157,243,0.55)]" />
+        <div className="h-2.5 w-2.5 rounded-full bg-brand-accent shadow-[0_0_8px_rgba(37,99,235,0.55)]" />
         <div className="absolute inset-0 h-2.5 w-2.5 animate-ping rounded-full bg-brand-accent/40" />
       </div>
       {/* Now pill */}
-      <span className="zm-pulse-glow inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-brand-accent to-brand-hover px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-white shadow-[0_4px_10px_rgba(53,157,243,0.3)]">
+      <span className="zm-pulse-glow inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-brand-accent to-brand-hover px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-white shadow-[0_4px_10px_rgba(37,99,235,0.3)]">
         <span className="h-1 w-1 rounded-full bg-white/90" />
         Now · {label}
       </span>
@@ -659,7 +659,7 @@ function NowMarker({ timezone }: { timezone: string }) {
         className="h-px flex-1 rounded-full"
         style={{
           background:
-            "linear-gradient(to right, var(--color-accent, #359df3) 0%, rgba(53,157,243,0.45) 35%, rgba(53,157,243,0) 100%)",
+            "linear-gradient(to right, var(--color-accent, #2563EB) 0%, rgba(37,99,235,0.45) 35%, rgba(37,99,235,0) 100%)",
         }}
       />
     </li>
@@ -717,7 +717,7 @@ function AppointmentCard({
         className="pointer-events-none absolute -inset-px rounded-2xl opacity-0 transition-opacity duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] group-hover:opacity-100"
         style={{
           boxShadow:
-            "0 0 0 1px rgba(53,157,243,0.18), 0 10px 28px rgba(53,157,243,0.10)",
+            "0 0 0 1px rgba(37,99,235,0.18), 0 10px 28px rgba(37,99,235,0.10)",
         }}
       />
       {/* Subtle inner top highlight — 1px white hairline that lifts the

@@ -344,8 +344,8 @@ function RevenueCharts({
             <LineChart data={data.mrrTrend} margin={{ top: 8, right: 18, bottom: 0, left: 0 }}>
               <defs>
                 <linearGradient id="mrrGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#359df3" stopOpacity={0.2} />
-                  <stop offset="100%" stopColor="#359df3" stopOpacity={0} />
+                  <stop offset="0%" stopColor="#2563EB" stopOpacity={0.2} />
+                  <stop offset="100%" stopColor="#2563EB" stopOpacity={0} />
                 </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="2 4" stroke="#f1f5f9" vertical={false} />
@@ -365,12 +365,12 @@ function RevenueCharts({
               <Tooltip
                 formatter={(v) => fmtCents(Number(v))}
                 contentStyle={CHART_TOOLTIP_STYLE}
-                cursor={{ stroke: "#359df3", strokeWidth: 1, strokeOpacity: 0.4 }}
+                cursor={{ stroke: "#2563EB", strokeWidth: 1, strokeOpacity: 0.4 }}
               />
               <Line
                 type="monotone"
                 dataKey="value"
-                stroke="#359df3"
+                stroke="#2563EB"
                 strokeWidth={2}
                 fill="url(#mrrGrad)"
                 dot={false}

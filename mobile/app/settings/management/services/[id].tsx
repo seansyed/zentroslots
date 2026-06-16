@@ -71,7 +71,7 @@ import { colors, layout, radius, spacing } from "@/theme";
 
 /** Brand-aligned palette for the color chip (no native color picker). */
 const COLOR_CHIPS = [
-  colors.brand, // #359df3
+  colors.brand, // #2563EB
   colors.violet, // #8b5cf6
   colors.emerald, // #10b981
   colors.amber, // #f59e0b

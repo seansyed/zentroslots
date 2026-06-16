@@ -917,10 +917,10 @@ function PoweredByFooter() {
         </span>
         <svg
           viewBox="0 0 160 160"
-          className="h-[16px] w-[16px] rounded-full opacity-80 shadow-[0_0_0_rgba(53,157,243,0)] transition-all duration-[220ms] ease-[cubic-bezier(0.16,1,0.3,1)] group-hover:opacity-100 group-hover:shadow-[0_2px_8px_rgba(53,157,243,0.30)]"
+          className="h-[16px] w-[16px] rounded-full opacity-80 shadow-[0_0_0_rgba(37,99,235,0)] transition-all duration-[220ms] ease-[cubic-bezier(0.16,1,0.3,1)] group-hover:opacity-100 group-hover:shadow-[0_2px_8px_rgba(37,99,235,0.30)]"
           aria-hidden
         >
-          <circle cx="80" cy="80" r="80" fill="#359df3" />
+          <circle cx="80" cy="80" r="80" fill="#2563EB" />
           <g fill="#0f172a">
             <rect x="40" y="40" width="80" height="15" />
             <rect x="40" y="105" width="80" height="15" />

@@ -660,7 +660,7 @@ function ExecutiveHero({
         className="pointer-events-none absolute inset-0 opacity-[0.35]"
         style={{
           backgroundImage:
-            "radial-gradient(800px 220px at 80% 0%, rgba(53,157,243,0.06), transparent 70%), radial-gradient(600px 200px at 0% 100%, rgba(16,185,129,0.05), transparent 70%)",
+            "radial-gradient(800px 220px at 80% 0%, rgba(37,99,235,0.06), transparent 70%), radial-gradient(600px 200px at 0% 100%, rgba(16,185,129,0.05), transparent 70%)",
         }}
       />
       <span
@@ -687,7 +687,7 @@ function ExecutiveHero({
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
           {confidence > 0 && (
-            <span className="zm-pulse-glow inline-flex items-center gap-1.5 rounded-full bg-gradient-to-r from-brand-accent to-brand-hover px-3 py-1 text-[11px] font-semibold uppercase tracking-wider text-white shadow-[0_4px_12px_rgba(53,157,243,0.35)]">
+            <span className="zm-pulse-glow inline-flex items-center gap-1.5 rounded-full bg-gradient-to-r from-brand-accent to-brand-hover px-3 py-1 text-[11px] font-semibold uppercase tracking-wider text-white shadow-[0_4px_12px_rgba(37,99,235,0.35)]">
               <span className="h-1.5 w-1.5 rounded-full bg-white/90" />
               {humanConfidence(numericToConfidence(confidence))}
             </span>
@@ -756,7 +756,7 @@ function DailyOperationalBrief({
           className="pointer-events-none absolute inset-0 opacity-[0.40]"
           style={{
             backgroundImage:
-              "radial-gradient(700px 200px at 70% 10%, rgba(53,157,243,0.06), transparent 70%), radial-gradient(500px 180px at 10% 90%, rgba(16,185,129,0.05), transparent 70%)",
+              "radial-gradient(700px 200px at 70% 10%, rgba(37,99,235,0.06), transparent 70%), radial-gradient(500px 180px at 10% 90%, rgba(16,185,129,0.05), transparent 70%)",
           }}
         />
         <span
@@ -772,7 +772,7 @@ function DailyOperationalBrief({
           {/* Left — narrative */}
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <div className="zm-pulse-glow relative inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-brand-accent to-brand-hover text-white shadow-[0_4px_14px_rgba(53,157,243,0.40)]">
+              <div className="zm-pulse-glow relative inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-brand-accent to-brand-hover text-white shadow-[0_4px_14px_rgba(37,99,235,0.40)]">
                 <Sparkles className="h-4 w-4" strokeWidth={2} />
                 <span aria-hidden className="absolute -right-0.5 -top-0.5 inline-flex h-2.5 w-2.5 items-center justify-center">
                   <span className="absolute inset-0 animate-ping rounded-full bg-emerald-400/55" />
@@ -1032,7 +1032,7 @@ const PRIORITY_META: Record<Priority, {
   opportunity: {
     label: "Opportunity",
     icon: Target,
-    rail: "bg-brand-accent shadow-[0_0_8px_rgba(53,157,243,0.40)]",
+    rail: "bg-brand-accent shadow-[0_0_8px_rgba(37,99,235,0.40)]",
     ring: "ring-brand-accent/20",
     tint: "bg-brand-subtle/25",
     iconBg: "bg-brand-subtle text-brand-accent",
@@ -1077,7 +1077,7 @@ function ConfidenceChip({
     moderate: {
       label: "Moderate confidence",
       cls: "bg-brand-subtle/70 text-brand-accent ring-1 ring-brand-accent/15",
-      solid: "bg-brand-accent/95 text-white ring-1 ring-brand-accent/40 shadow-[0_3px_10px_rgba(53,157,243,0.35)]",
+      solid: "bg-brand-accent/95 text-white ring-1 ring-brand-accent/40 shadow-[0_3px_10px_rgba(37,99,235,0.35)]",
       dot: "bg-brand-accent",
     },
     early: {
@@ -1224,7 +1224,7 @@ function LuxRecommendation({
   const rail =
     sev === "critical" ? "bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.45)]"
     : sev === "high"     ? "bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.35)]"
-    : sev === "medium"   ? "bg-brand-accent shadow-[0_0_8px_rgba(53,157,243,0.35)]"
+    : sev === "medium"   ? "bg-brand-accent shadow-[0_0_8px_rgba(37,99,235,0.35)]"
     :                       "bg-slate-300";
   const sevChip =
     sev === "critical" ? "bg-red-50/80 text-red-700 ring-1 ring-red-200/40"
@@ -1247,7 +1247,7 @@ function LuxRecommendation({
       <span
         aria-hidden
         className="pointer-events-none absolute -inset-px rounded-2xl opacity-0 transition-opacity duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] group-hover:opacity-100"
-        style={{ boxShadow: "0 0 0 1px rgba(53,157,243,0.18), 0 10px 28px rgba(53,157,243,0.10)" }}
+        style={{ boxShadow: "0 0 0 1px rgba(37,99,235,0.18), 0 10px 28px rgba(37,99,235,0.10)" }}
       />
       <div className="relative flex items-start gap-3 pl-2">
         <div className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-surface-inset text-ink-muted ring-1 ring-border/40">
@@ -2054,7 +2054,7 @@ function LockedExecutivePreview({ currentPlanName }: { currentPlanName: string }
           </div>
           <Link
             href="/dashboard/billing"
-            className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-brand-accent px-4 py-2.5 text-[12.5px] font-semibold text-white shadow-[0_4px_18px_rgba(53,157,243,0.30)] transition-all duration-[260ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:shadow-[0_8px_24px_rgba(53,157,243,0.40)]"
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-brand-accent px-4 py-2.5 text-[12.5px] font-semibold text-white shadow-[0_4px_18px_rgba(37,99,235,0.30)] transition-all duration-[260ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:shadow-[0_8px_24px_rgba(37,99,235,0.40)]"
           >
             <span aria-hidden className="relative inline-flex h-2 w-2">
               <span className="absolute inset-0 inline-flex h-full w-full animate-ping rounded-full bg-white/60" />
@@ -2291,8 +2291,8 @@ function LockedExecutivePreview({ currentPlanName }: { currentPlanName: string }
           </div>
 
           {/* Pro plan */}
-          <div className="relative rounded-xl border-2 border-brand-accent/40 bg-gradient-to-br from-brand-subtle/40 via-surface to-surface p-4 shadow-[0_8px_24px_rgba(53,157,243,0.12)]">
-            <div className="absolute -top-2 right-3 inline-flex items-center gap-1 rounded-full bg-brand-accent px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.08em] text-white shadow-[0_4px_12px_rgba(53,157,243,0.32)]">
+          <div className="relative rounded-xl border-2 border-brand-accent/40 bg-gradient-to-br from-brand-subtle/40 via-surface to-surface p-4 shadow-[0_8px_24px_rgba(37,99,235,0.12)]">
+            <div className="absolute -top-2 right-3 inline-flex items-center gap-1 rounded-full bg-brand-accent px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.08em] text-white shadow-[0_4px_12px_rgba(37,99,235,0.32)]">
               <Sparkles className="h-2.5 w-2.5" strokeWidth={2} />
               Recommended
             </div>
@@ -2329,7 +2329,7 @@ function LockedExecutivePreview({ currentPlanName }: { currentPlanName: string }
           <div className="flex flex-col items-stretch gap-2 lg:items-end">
             <Link
               href="/dashboard/billing"
-              className="inline-flex items-center justify-center gap-1.5 rounded-md bg-brand-accent px-4 py-2.5 text-[12.5px] font-semibold text-white shadow-[0_4px_18px_rgba(53,157,243,0.30)] transition-all duration-[260ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:shadow-[0_8px_24px_rgba(53,157,243,0.40)]"
+              className="inline-flex items-center justify-center gap-1.5 rounded-md bg-brand-accent px-4 py-2.5 text-[12.5px] font-semibold text-white shadow-[0_4px_18px_rgba(37,99,235,0.30)] transition-all duration-[260ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:shadow-[0_8px_24px_rgba(37,99,235,0.40)]"
             >
               <Zap className="h-3.5 w-3.5" strokeWidth={2} />
               Unlock cockpit
@@ -2448,12 +2448,12 @@ function ForecastSilhouette() {
     >
       <defs>
         <linearGradient id="execForecastFill" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#359df3" stopOpacity="0.32" />
-          <stop offset="100%" stopColor="#359df3" stopOpacity="0" />
+          <stop offset="0%" stopColor="#2563EB" stopOpacity="0.32" />
+          <stop offset="100%" stopColor="#2563EB" stopOpacity="0" />
         </linearGradient>
         <linearGradient id="execForecastBand" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#359df3" stopOpacity="0.14" />
-          <stop offset="100%" stopColor="#359df3" stopOpacity="0" />
+          <stop offset="0%" stopColor="#2563EB" stopOpacity="0.14" />
+          <stop offset="100%" stopColor="#2563EB" stopOpacity="0" />
         </linearGradient>
       </defs>
       {/* Confidence band */}
@@ -2464,7 +2464,7 @@ function ForecastSilhouette() {
       {/* Trend line */}
       <path
         d="M0,68 Q40,58 80,52 T160,42 T240,30 T320,20"
-        stroke="#359df3"
+        stroke="#2563EB"
         strokeWidth="2"
         fill="none"
         strokeLinecap="round"
@@ -2478,7 +2478,7 @@ function ForecastSilhouette() {
       {/* Dashed projection */}
       <path
         d="M200,36 Q260,24 320,12"
-        stroke="#359df3"
+        stroke="#2563EB"
         strokeWidth="1.5"
         strokeDasharray="4 4"
         fill="none"

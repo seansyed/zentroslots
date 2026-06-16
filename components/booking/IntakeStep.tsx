@@ -145,7 +145,7 @@ export default function IntakeStep({
   form,
   onContinue,
   onBack,
-  accent = "#359df3",
+  accent = "#2563EB",
 }: {
   form: PublicForm;
   onContinue: (values: Record<string, unknown>) => void;

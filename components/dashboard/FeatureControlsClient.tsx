@@ -457,7 +457,7 @@ function PolicyCard({
       className={
         "group relative overflow-hidden p-0 transition-all duration-200 " +
         (checked
-          ? "border-brand-accent/30 shadow-[0_0_0_1px_rgba(53,157,243,0.08),0_1px_2px_rgba(15,23,42,0.04)] hover:shadow-[0_0_0_1px_rgba(53,157,243,0.18),0_8px_24px_-8px_rgba(53,157,243,0.18)]"
+          ? "border-brand-accent/30 shadow-[0_0_0_1px_rgba(37,99,235,0.08),0_1px_2px_rgba(15,23,42,0.04)] hover:shadow-[0_0_0_1px_rgba(37,99,235,0.18),0_8px_24px_-8px_rgba(37,99,235,0.18)]"
           : "hover:border-border/80 hover:shadow-md")
       }
     >

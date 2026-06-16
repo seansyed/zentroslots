@@ -110,7 +110,7 @@ function TenantAvatar({
       />
     );
   }
-  const color = primaryColor && /^#[0-9a-fA-F]{6}$/.test(primaryColor) ? primaryColor : "#359df3";
+  const color = primaryColor && /^#[0-9a-fA-F]{6}$/.test(primaryColor) ? primaryColor : "#2563EB";
   return (
     <div
       className={`${dim} shrink-0 inline-flex items-center justify-center rounded-lg font-semibold ${txt} text-white shadow-[inset_0_-2px_4px_rgba(0,0,0,0.12)]`}
@@ -219,7 +219,7 @@ function IntegrationPill({
 /** Subtle row glow on hover — uses tenant primary color as tint. */
 function rowHoverStyle(primaryColor: string | null): React.CSSProperties {
   // Use as a CSS custom property; the row CSS in className paints it.
-  const c = primaryColor && /^#[0-9a-fA-F]{6}$/.test(primaryColor) ? primaryColor : "#359df3";
+  const c = primaryColor && /^#[0-9a-fA-F]{6}$/.test(primaryColor) ? primaryColor : "#2563EB";
   return { ["--row-glow" as never]: `${c}10` } as React.CSSProperties;
 }
 

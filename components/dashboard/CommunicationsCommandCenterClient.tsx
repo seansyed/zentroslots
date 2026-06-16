@@ -653,7 +653,7 @@ function CommandHero({
           {!hasAnalytics && (
             <Link
               href="/dashboard/billing"
-              className="zm-pulse-glow inline-flex h-9 items-center gap-1.5 rounded-lg bg-gradient-to-r from-brand-accent to-brand-hover px-3 text-[12px] font-semibold text-white shadow-[0_6px_16px_rgba(53,157,243,0.35)] transition-all hover:-translate-y-0.5 hover:shadow-[0_10px_24px_rgba(53,157,243,0.45)]"
+              className="zm-pulse-glow inline-flex h-9 items-center gap-1.5 rounded-lg bg-gradient-to-r from-brand-accent to-brand-hover px-3 text-[12px] font-semibold text-white shadow-[0_6px_16px_rgba(37,99,235,0.35)] transition-all hover:-translate-y-0.5 hover:shadow-[0_10px_24px_rgba(37,99,235,0.45)]"
             >
               <Sparkles className="h-3.5 w-3.5" strokeWidth={2} />
               Unlock automations
@@ -1053,7 +1053,7 @@ function TemplateSnapshotSection({
             </div>
             <Link
               href="/dashboard/settings/communications/templates"
-              className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-brand-accent px-3 py-1.5 text-[11.5px] font-semibold text-white shadow-[0_4px_14px_rgba(53,157,243,0.32)] transition-all hover:-translate-y-0.5 hover:shadow-[0_8px_20px_rgba(53,157,243,0.40)]"
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-brand-accent px-3 py-1.5 text-[11.5px] font-semibold text-white shadow-[0_4px_14px_rgba(37,99,235,0.32)] transition-all hover:-translate-y-0.5 hover:shadow-[0_8px_20px_rgba(37,99,235,0.40)]"
             >
               <FileText className="h-3.5 w-3.5" strokeWidth={2} />
               Open templates
@@ -1205,7 +1205,7 @@ function FutureFlowsSection({
             {!hasAnalytics && (
               <Link
                 href="/dashboard/billing"
-                className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-brand-accent px-3 py-1.5 text-[11.5px] font-semibold text-white shadow-[0_4px_14px_rgba(53,157,243,0.32)] transition-all hover:-translate-y-0.5 hover:shadow-[0_8px_20px_rgba(53,157,243,0.40)]"
+                className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-brand-accent px-3 py-1.5 text-[11.5px] font-semibold text-white shadow-[0_4px_14px_rgba(37,99,235,0.32)] transition-all hover:-translate-y-0.5 hover:shadow-[0_8px_20px_rgba(37,99,235,0.40)]"
               >
                 <Sparkles className="h-3.5 w-3.5" strokeWidth={2} />
                 Unlock from {currentPlanName}
@@ -1632,7 +1632,7 @@ function DeliveryIntelligenceSection({
               </div>
               <Link
                 href="/dashboard/billing"
-                className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-brand-accent px-3 py-1.5 text-[11.5px] font-semibold text-white shadow-[0_4px_14px_rgba(53,157,243,0.32)] transition-all hover:-translate-y-0.5 hover:shadow-[0_8px_20px_rgba(53,157,243,0.40)]"
+                className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-brand-accent px-3 py-1.5 text-[11.5px] font-semibold text-white shadow-[0_4px_14px_rgba(37,99,235,0.32)] transition-all hover:-translate-y-0.5 hover:shadow-[0_8px_20px_rgba(37,99,235,0.40)]"
               >
                 <Sparkles className="h-3.5 w-3.5" strokeWidth={2} />
                 Unlock diagnostics
@@ -1701,7 +1701,7 @@ function TemplateVariablesReference() {
               className={cn(
                 "rounded-full px-2.5 py-1 text-[10.5px] font-semibold transition-all",
                 mode === "light"
-                  ? "bg-brand-accent text-white shadow-[0_2px_8px_rgba(53,157,243,0.32)]"
+                  ? "bg-brand-accent text-white shadow-[0_2px_8px_rgba(37,99,235,0.32)]"
                   : "text-ink-muted hover:text-ink",
               )}
             >
@@ -1713,7 +1713,7 @@ function TemplateVariablesReference() {
               className={cn(
                 "rounded-full px-2.5 py-1 text-[10.5px] font-semibold transition-all",
                 mode === "dark"
-                  ? "bg-brand-accent text-white shadow-[0_2px_8px_rgba(53,157,243,0.32)]"
+                  ? "bg-brand-accent text-white shadow-[0_2px_8px_rgba(37,99,235,0.32)]"
                   : "text-ink-muted hover:text-ink",
               )}
             >

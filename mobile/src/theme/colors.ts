@@ -5,7 +5,7 @@
  * consistent across platforms. Every color in the app should be sourced
  * from this file — never hardcoded hexes inside components.
  *
- * Primary brand is #359df3 (per Brand Studio).
+ * Primary brand is #2563EB (per Brand Studio).
  *
  * NOTE: this is the LIGHT palette. We keep darkMode entries here so
  * future dark-mode work has a contract to land into. Light is the
@@ -14,11 +14,11 @@
 
 export const palette = {
   // Brand
-  brand: "#359df3",
-  brandHover: "#2789e0",
-  brandPressed: "#1d7bd1",
-  brandSubtle: "#ebf5ff",
-  brandAccent: "#359df3",
+  brand: "#2563EB",
+  brandHover: "#1D4ED8",
+  brandPressed: "#1E40AF",
+  brandSubtle: "#EFF6FF",
+  brandAccent: "#2563EB",
 
   // Ink (text)
   ink: "#0f172a",
@@ -51,9 +51,9 @@ export const palette = {
   dangerSubtle: "#fef2f2",
   dangerInk: "#b91c1c",
 
-  info: "#359df3",
-  infoSubtle: "#ebf5ff",
-  infoInk: "#1d7bd1",
+  info: "#2563EB",
+  infoSubtle: "#EFF6FF",
+  infoInk: "#1E40AF",
 
   // Accents for category chips / event blocks
   violet: "#8b5cf6",

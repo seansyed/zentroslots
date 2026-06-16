@@ -64,7 +64,7 @@ export const shadows = {
   /** Modal / popover. */
   xl: shadow(16, 36, 0.14, 16),
   /** Brand-tinted glow for primary CTA. */
-  brandGlow: shadow(8, 22, 0.32, 6, "#359df3"),
+  brandGlow: shadow(8, 22, 0.32, 6, "#2563EB"),
 
   /* ─── Phase 2F additions ───────────────────────────────────────── */
   /** Ambient — softest possible lift for resting list rows that still
@@ -81,7 +81,7 @@ export const shadows = {
   /** Soft brand wash — a barely-coloured halo used behind the active
    *  state of the availability segmented control. Communicates
    *  "selected" the same way macOS uses NSVisualEffectView accents. */
-  brandHalo: shadow(10, 26, 0.18, 4, "#359df3"),
+  brandHalo: shadow(10, 26, 0.18, 4, "#2563EB"),
 };
 
 export type Shadows = typeof shadows;

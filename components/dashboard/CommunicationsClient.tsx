@@ -579,7 +579,7 @@ function Hero({ stats }: { stats: ReturnType<typeof computeStats> }) {
           </p>
         </div>
         {total24 > 0 && (
-          <span className="zm-pulse-glow inline-flex items-center gap-1.5 rounded-full bg-gradient-to-r from-brand-accent to-brand-hover px-3 py-1 text-[11px] font-semibold uppercase tracking-wider text-white shadow-[0_4px_12px_rgba(53,157,243,0.35)]">
+          <span className="zm-pulse-glow inline-flex items-center gap-1.5 rounded-full bg-gradient-to-r from-brand-accent to-brand-hover px-3 py-1 text-[11px] font-semibold uppercase tracking-wider text-white shadow-[0_4px_12px_rgba(37,99,235,0.35)]">
             <span className="h-1.5 w-1.5 rounded-full bg-white/90" />
             {total24} in 24h
           </span>
@@ -609,7 +609,7 @@ function AIStrip({ signal }: { signal: string }) {
         />
 
         <div className="relative flex items-center gap-3 px-4 py-3 sm:px-5">
-          <div className="zm-pulse-glow relative inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-brand-accent to-brand-hover text-white shadow-[0_4px_12px_rgba(53,157,243,0.35)]">
+          <div className="zm-pulse-glow relative inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-brand-accent to-brand-hover text-white shadow-[0_4px_12px_rgba(37,99,235,0.35)]">
             <Sparkles className="h-4 w-4" strokeWidth={2} />
             <span aria-hidden className="absolute -right-0.5 -top-0.5 inline-flex h-2.5 w-2.5 items-center justify-center">
               <span className="absolute inset-0 animate-ping rounded-full bg-emerald-400/55" />
@@ -682,7 +682,7 @@ function SearchAndFilters({
                 {active && (
                   <motion.span
                     layoutId="communications-filter-indicator"
-                    className="absolute inset-0 rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover shadow-[0_4px_12px_rgba(53,157,243,0.35),inset_0_1px_0_rgba(255,255,255,0.25)]"
+                    className="absolute inset-0 rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover shadow-[0_4px_12px_rgba(37,99,235,0.35),inset_0_1px_0_rgba(255,255,255,0.25)]"
                     aria-hidden
                     transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
                   />
@@ -764,7 +764,7 @@ function ThreadStream({
                 {isActive ? (
                   <span
                     aria-hidden
-                    className="absolute inset-y-0 left-0 w-0.5 bg-gradient-to-b from-brand-accent to-brand-hover shadow-[0_0_10px_rgba(53,157,243,0.45)]"
+                    className="absolute inset-y-0 left-0 w-0.5 bg-gradient-to-b from-brand-accent to-brand-hover shadow-[0_0_10px_rgba(37,99,235,0.45)]"
                   />
                 ) : (
                   priority !== "standard" && (
@@ -1111,7 +1111,7 @@ function ThreadAIAssist({ thread }: { thread: Thread }) {
           className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/55 to-transparent"
         />
         <div className="relative flex items-start gap-3 px-3.5 py-3">
-          <div className="zm-pulse-glow relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover text-white shadow-[0_4px_10px_rgba(53,157,243,0.32)]">
+          <div className="zm-pulse-glow relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover text-white shadow-[0_4px_10px_rgba(37,99,235,0.32)]">
             <Sparkles className="h-3.5 w-3.5" strokeWidth={2} />
             <span aria-hidden className="absolute -right-0.5 -top-0.5 inline-flex h-2 w-2 items-center justify-center">
               <span className={cn("absolute inset-0 animate-ping rounded-full opacity-55", dotClass)} />
@@ -1335,7 +1335,7 @@ function EmptyState({
         <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
           <Link
             href="/dashboard/settings/communications"
-            className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover px-3 text-[12px] font-medium text-white shadow-[0_6px_16px_rgba(53,157,243,0.35)] transition-all hover:-translate-y-0.5 hover:shadow-[0_10px_24px_rgba(53,157,243,0.45)]"
+            className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover px-3 text-[12px] font-medium text-white shadow-[0_6px_16px_rgba(37,99,235,0.35)] transition-all hover:-translate-y-0.5 hover:shadow-[0_10px_24px_rgba(37,99,235,0.45)]"
           >
             Configure channels
             <ArrowRight className="h-3 w-3" strokeWidth={2.25} />

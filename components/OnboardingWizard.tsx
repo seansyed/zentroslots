@@ -570,7 +570,7 @@ function ReadinessRing({
             strokeWidth="6"
             strokeLinecap="round"
             strokeDasharray={`${dash} ${c}`}
-            style={{ filter: "drop-shadow(0 0 8px rgba(53,157,243,0.45))" }}
+            style={{ filter: "drop-shadow(0 0 8px rgba(37,99,235,0.45))" }}
           />
         </svg>
         <div className="absolute inset-0 flex items-center justify-center">
@@ -650,9 +650,9 @@ function ProgressRail({
                 className={cn(
                   "relative flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold transition-all duration-300",
                   done
-                    ? "bg-brand-accent text-white shadow-[0_0_0_4px_rgba(53,157,243,0.12)]"
+                    ? "bg-brand-accent text-white shadow-[0_0_0_4px_rgba(37,99,235,0.12)]"
                     : active
-                      ? "bg-brand-accent text-white shadow-[0_0_0_6px_rgba(53,157,243,0.18)]"
+                      ? "bg-brand-accent text-white shadow-[0_0_0_6px_rgba(37,99,235,0.18)]"
                       : "border border-border bg-surface text-ink-subtle",
                 )}
                 aria-current={active ? "step" : undefined}
@@ -1445,7 +1445,7 @@ function DoneStep({
       />
 
       <div className="relative flex items-start gap-3.5">
-        <div className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-brand-accent to-brand-hover text-white shadow-[0_10px_28px_rgba(53,157,243,0.42)]">
+        <div className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-brand-accent to-brand-hover text-white shadow-[0_10px_28px_rgba(37,99,235,0.42)]">
           <PartyPopper className="h-5 w-5" strokeWidth={1.75} />
         </div>
         <div className="min-w-0">

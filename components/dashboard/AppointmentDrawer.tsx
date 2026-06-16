@@ -235,7 +235,7 @@ export default function AppointmentDrawer({
                   href={booking.meetLink}
                   target="_blank"
                   rel="noreferrer noopener"
-                  className="group inline-flex h-9 items-center gap-1.5 rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover px-3 text-[12px] font-medium text-white shadow-[0_6px_16px_rgba(53,157,243,0.35)] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_10px_24px_rgba(53,157,243,0.45)]"
+                  className="group inline-flex h-9 items-center gap-1.5 rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover px-3 text-[12px] font-medium text-white shadow-[0_6px_16px_rgba(37,99,235,0.35)] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_10px_24px_rgba(37,99,235,0.45)]"
                 >
                   <Video className="h-3.5 w-3.5" strokeWidth={2} />
                   Join meeting
@@ -304,7 +304,7 @@ function RelativeTimeChip({ startAt }: { startAt: string }) {
     return () => clearInterval(t);
   }, [startAt]);
   return (
-    <span className="zm-pulse-glow inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-brand-accent to-brand-hover px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-white shadow-[0_4px_10px_rgba(53,157,243,0.3)]">
+    <span className="zm-pulse-glow inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-brand-accent to-brand-hover px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-white shadow-[0_4px_10px_rgba(37,99,235,0.3)]">
       <span className="h-1 w-1 rounded-full bg-white/90" />
       {label}
     </span>
@@ -406,7 +406,7 @@ function ActionFooter({
           type="button"
           disabled={busy}
           onClick={onComplete}
-          className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover px-3 text-[12px] font-medium text-white shadow-[0_6px_16px_rgba(53,157,243,0.35)] transition-all hover:-translate-y-0.5 hover:shadow-[0_10px_24px_rgba(53,157,243,0.45)] disabled:opacity-50"
+          className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-gradient-to-br from-brand-accent to-brand-hover px-3 text-[12px] font-medium text-white shadow-[0_6px_16px_rgba(37,99,235,0.35)] transition-all hover:-translate-y-0.5 hover:shadow-[0_10px_24px_rgba(37,99,235,0.45)] disabled:opacity-50"
         >
           <CheckCircle2 className="h-3.5 w-3.5" strokeWidth={2} />
           Mark complete

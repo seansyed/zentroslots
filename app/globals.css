@@ -6,11 +6,11 @@
 :root,
 [data-theme="light"] {
   /* ZentroMeet brand — premium scheduling blue */
-  --color-accent:            #359df3;
-  --color-accent-hover:      #1f8de8;
-  --color-accent-subtle:     #ecf6ff;
+  --color-accent:            #2563EB;
+  --color-accent-hover:      #1D4ED8;
+  --color-accent-subtle:     #EFF6FF;
   --color-accent-foreground: #ffffff;
-  --color-accent-ring:       rgba(53, 157, 243, 0.18);
+  --color-accent-ring:       rgba(37, 99, 235, 0.18);
 
   --color-surface:           #ffffff;
   --color-surface-subtle:    #f8fafc;
@@ -28,11 +28,11 @@
 
 /* ─── Design tokens — dark ─────────────────────────────────────────── */
 [data-theme="dark"] {
-  --color-accent:            #5cb1f5;
-  --color-accent-hover:      #359df3;
-  --color-accent-subtle:     rgba(53, 157, 243, 0.14);
+  --color-accent:            #3B82F6;
+  --color-accent-hover:      #2563EB;
+  --color-accent-subtle:     rgba(37, 99, 235, 0.14);
   --color-accent-foreground: #0b1220;
-  --color-accent-ring:       rgba(92, 177, 245, 0.28);
+  --color-accent-ring:       rgba(59, 130, 246, 0.28);
 
   --color-surface:           #0b1220;
   --color-surface-subtle:    #0f172a;
@@ -71,14 +71,14 @@ body {
      emphasis (KPI icons, hero AI badge). */
   --shadow-soft:             0 1px 2px 0 rgb(15 23 42 / 0.03), 0 1px 3px 0 rgb(15 23 42 / 0.04);
   --shadow-lift:             0 8px 24px -6px rgb(15 23 42 / 0.08), 0 4px 12px -4px rgb(15 23 42 / 0.06);
-  --shadow-glow:             0 0 0 1px var(--color-accent-ring), 0 8px 24px -8px rgba(53, 157, 243, 0.18);
+  --shadow-glow:             0 0 0 1px var(--color-accent-ring), 0 8px 24px -8px rgba(37, 99, 235, 0.18);
 }
 
 [data-theme="dark"] {
   --color-app-bg:            #070b15;
   --shadow-soft:             0 1px 2px 0 rgb(0 0 0 / 0.4), 0 1px 3px 0 rgb(0 0 0 / 0.3);
   --shadow-lift:             0 8px 24px -6px rgb(0 0 0 / 0.5), 0 4px 12px -4px rgb(0 0 0 / 0.4);
-  --shadow-glow:             0 0 0 1px var(--color-accent-ring), 0 8px 24px -8px rgba(92, 177, 245, 0.28);
+  --shadow-glow:             0 0 0 1px var(--color-accent-ring), 0 8px 24px -8px rgba(59, 130, 246, 0.28);
 }
 
 /* ─── Motion utilities ────────────────────────────────────────────── */
@@ -110,8 +110,8 @@ body {
 }
 
 @keyframes zm-pulse-glow {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(53, 157, 243, 0.35); }
-  50%      { box-shadow: 0 0 0 6px rgba(53, 157, 243, 0); }
+  0%, 100% { box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.35); }
+  50%      { box-shadow: 0 0 0 6px rgba(37, 99, 235, 0); }
 }
 .zm-pulse-glow { animation: zm-pulse-glow 2.4s ease-in-out infinite; }
 
@@ -194,11 +194,11 @@ body {
   background:
     linear-gradient(
       90deg,
-      rgba(53, 157, 243, 0.0)  0%,
-      rgba(53, 157, 243, 0.0)  35%,
-      rgba(53, 157, 243, 0.45) 50%,
-      rgba(53, 157, 243, 0.0)  65%,
-      rgba(53, 157, 243, 0.0)  100%
+      rgba(37, 99, 235, 0.0)  0%,
+      rgba(37, 99, 235, 0.0)  35%,
+      rgba(37, 99, 235, 0.45) 50%,
+      rgba(37, 99, 235, 0.0)  65%,
+      rgba(37, 99, 235, 0.0)  100%
     );
   background-size: 200% 100%;
   -webkit-mask:
