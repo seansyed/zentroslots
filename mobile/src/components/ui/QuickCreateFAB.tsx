@@ -27,13 +27,16 @@ import { useRouter } from "expo-router";
 
 import { FAB } from "@/components/ui/FAB";
 
-export function QuickCreateFAB() {
+export function QuickCreateFAB({ date }: { date?: string } = {}) {
   const router = useRouter();
+  // When launched from a calendar day, pre-select that date in New Booking via
+  // a ?date=YYYY-MM-DD param (quick-create clamps it to the bookable range).
+  const href = date ? `/quick-create?date=${encodeURIComponent(date)}` : "/quick-create";
   return (
     <FAB
       icon="add"
       accessibilityLabel="New booking"
-      onPress={() => router.push("/quick-create")}
+      onPress={() => router.push(href)}
     />
   );
 }

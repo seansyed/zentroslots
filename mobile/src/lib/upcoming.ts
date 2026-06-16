@@ -4,9 +4,12 @@
  * unit-testable under node.
  *
  * Rules:
- *   • Only "confirmed" or "pending" bookings are upcoming (defense-in-depth —
- *     the Home queries already filter by these statuses, so cancelled /
- *     completed / no_show are excluded both server-side and here).
+ *   • Canonical UPCOMING status set = confirmed, pending, pending_payment.
+ *     pending_payment is a real appointment (a paid booking on a short payment
+ *     hold) and MUST appear — the reported bug was it being dropped while
+ *     Activity still showed it. Excluded: cancelled, completed, no_show,
+ *     payment_failed, refunded (terminal / dead). Defense-in-depth: the Home
+ *     queries already filter by the three upcoming statuses server-side.
  *   • startAt >= now (epoch comparison; both sides are ms-since-epoch, so it is
  *     timezone-agnostic — a UTC instant compared to Date.now()).
  *   • Sorted ASCENDING (soonest first) and limited to `count`.
@@ -14,7 +17,7 @@
 
 import type { Appointment } from "@/api/appointments";
 
-const UPCOMING_STATUSES = new Set<string>(["confirmed", "pending"]);
+const UPCOMING_STATUSES = new Set<string>(["confirmed", "pending", "pending_payment"]);
 
 export function selectUpcoming(
   rows: Appointment[],

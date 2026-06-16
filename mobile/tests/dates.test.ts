@@ -11,6 +11,8 @@ import {
   isSameMonth,
   monthLabel,
   monthMatrix,
+  parseInitialDate,
+  startOfDay,
   startOfMonth,
   weekdayLabels,
 } from "../src/lib/dates";
@@ -18,6 +20,29 @@ import {
 // Regression coverage for the New-Booking date engine. isoDateLocal is the
 // Hermes-safe replacement for the buggy Intl.DateTimeFormat({timeZone}) path
 // that sent the wrong day (previous day for operators east of UTC).
+
+// Calendar → New Booking date handoff (?date=YYYY-MM-DD), clamped + Hermes-safe.
+test("parseInitialDate: valid in-range date is selected", () => {
+  const today = startOfDay(new Date(2026, 5, 15)); // Jun 15 2026 local
+  const max = addDays(today, 60);
+  const out = parseInitialDate("2026-07-01", today, max);
+  assert.equal(isoDateLocal(out), "2026-07-01");
+});
+
+test("parseInitialDate: missing / garbage / impossible → today", () => {
+  const today = startOfDay(new Date(2026, 5, 15));
+  assert.equal(isoDateLocal(parseInitialDate(undefined, today)), "2026-06-15");
+  assert.equal(isoDateLocal(parseInitialDate("not-a-date", today)), "2026-06-15");
+  assert.equal(isoDateLocal(parseInitialDate("2026-13-40", today)), "2026-06-15"); // impossible
+  assert.equal(isoDateLocal(parseInitialDate("2026-02-31", today)), "2026-06-15"); // rolls over
+});
+
+test("parseInitialDate: past date clamps to today; beyond max clamps to max", () => {
+  const today = startOfDay(new Date(2026, 5, 15));
+  const max = addDays(today, 30);
+  assert.equal(isoDateLocal(parseInitialDate("2026-06-01", today, max)), "2026-06-15"); // past → today
+  assert.equal(isoDateLocal(parseInitialDate("2026-12-31", today, max)), isoDateLocal(max)); // > max → max
+});
 
 test("isoDateLocal formats LOCAL components (no UTC/Intl shift)", () => {
   // A date constructed from local components must round-trip exactly,

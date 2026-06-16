@@ -63,7 +63,7 @@ function CustomerRowImpl({ customer, onPress, style }: Props) {
     >
       <View style={styles.row}>
         <View style={styles.avatarSlot}>
-          <Avatar name={customer.name} size={40} />
+          <Avatar name={customer.name} uri={customer.imageUrl} size={40} />
           {customer.status === "vip" ? <View style={styles.vipDot} /> : null}
         </View>
 

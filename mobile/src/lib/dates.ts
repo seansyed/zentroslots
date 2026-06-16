@@ -18,6 +18,36 @@ export function isoDateLocal(d: Date): string {
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 }
 
+/**
+ * Parse a "YYYY-MM-DD" route param (e.g. the Calendar→New-Booking handoff) into
+ * a LOCAL-midnight Date, clamped to [today, max]. Returns `today` for missing,
+ * malformed, impossible (2026-02-31), or past dates; clamps to `max` when given
+ * and exceeded. Hermes-safe — strict format, local components only, no Intl /
+ * arbitrary Date-string parsing.
+ */
+export function parseInitialDate(
+  param: string | null | undefined,
+  today: Date,
+  max?: Date | null,
+): Date {
+  const floor = startOfDay(today);
+  if (typeof param !== "string") return floor;
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(param.trim());
+  if (!m) return floor;
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  const d = Number(m[3]);
+  const dt = new Date(y, mo - 1, d); // local midnight
+  // Reject impossible dates (JS rolls 2026-02-31 over to March).
+  if (dt.getFullYear() !== y || dt.getMonth() !== mo - 1 || dt.getDate() !== d) return floor;
+  if (dt.getTime() < floor.getTime()) return floor;
+  if (max) {
+    const ceil = startOfDay(max);
+    if (dt.getTime() > ceil.getTime()) return ceil;
+  }
+  return dt;
+}
+
 /** Local midnight copy of a date (strips time). */
 export function startOfDay(d: Date): Date {
   const x = new Date(d);

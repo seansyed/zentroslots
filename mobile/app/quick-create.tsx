@@ -5,9 +5,11 @@
  *
  *   1. Customer       — search + recent + "new customer" inline
  *   2. Service        — tile grid, recently booked first
- *   3. Date strip     — 14-day forward
- *   4. Slot grid      — pulled from /api/slots once 1-3 are picked
- *   5. Confirm button — POSTs to /api/bookings, optimistically inserts
+ *   3. Service details — dynamic intake fields (only when the service has a form)
+ *   4. Date           — full month picker (MonthCalendar), horizon-aware; accepts
+ *                       an optional ?date= handoff from the Calendar tab
+ *   5. Slot grid      — pulled from /api/slots once the above are picked
+ *   6. Confirm button — POSTs to /api/bookings, optimistically inserts
  *                       into appointments cache, haptic success + back
  *
  * Goal: <15 seconds from FAB tap to confirmed booking.
@@ -24,7 +26,7 @@ import {
   StyleSheet,
   View,
 } from "react-native";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -52,7 +54,7 @@ import { useCustomers } from "@/hooks/useCustomers";
 import { useProfile } from "@/hooks/useProfile";
 import { useServices } from "@/hooks/useServices";
 import { MonthCalendar } from "@/components/ui/MonthCalendar";
-import { addDays, dayLabel, isoDateLocal, startOfDay } from "@/lib/dates";
+import { addDays, dayLabel, isoDateLocal, parseInitialDate, startOfDay } from "@/lib/dates";
 import { queryKeys } from "@/lib/query";
 import { track } from "@/lib/telemetry";
 import { colors, layout, radius, spacing } from "@/theme";
@@ -76,6 +78,9 @@ export default function QuickCreateScreen() {
   const profileQ = useProfile();
   const timezone = profileQ.data?.timezone ?? "UTC";
 
+  // Optional ?date=YYYY-MM-DD handoff from the Calendar tab (tap a day → +).
+  const { date: dateParam } = useLocalSearchParams<{ date?: string }>();
+
   // Today (frozen for the session — calendar doesn't shift mid-flow)
   const today = React.useMemo(() => startOfDay(new Date()), []);
 
@@ -84,7 +89,12 @@ export default function QuickCreateScreen() {
   const [manualName, setManualName] = React.useState("");
   const [manualEmail, setManualEmail] = React.useState("");
   const [service, setService] = React.useState<Service | null>(null);
-  const [selectedDate, setSelectedDate] = React.useState<Date>(today);
+  // Pre-select the date passed from Calendar (clamped to >= today; per-service
+  // horizon is enforced once a service is picked). Lazy init = one-shot, so it
+  // never fights the user's subsequent date taps.
+  const [selectedDate, setSelectedDate] = React.useState<Date>(() =>
+    parseInitialDate(typeof dateParam === "string" ? dateParam : undefined, today),
+  );
   const [selectedSlot, setSelectedSlot] = React.useState<string | null>(null);
   const [search, setSearch] = React.useState("");
   const [debouncedSearch, setDebouncedSearch] = React.useState("");
@@ -427,7 +437,7 @@ export default function QuickCreateScreen() {
               }}
               style={styles.selectedRow}
             >
-              <Avatar name={customer.name} size={40} />
+              <Avatar name={customer.name} uri={customer.imageUrl} size={40} />
               <View style={{ flex: 1, minWidth: 0 }}>
                 <AppText variant="bodyStrong" numberOfLines={1}>{customer.name}</AppText>
                 <AppText variant="small" color="muted" numberOfLines={1}>{customer.email}</AppText>
@@ -484,7 +494,7 @@ export default function QuickCreateScreen() {
                       }}
                     >
                       <View style={styles.customerRow}>
-                        <Avatar name={c.name} size={32} />
+                        <Avatar name={c.name} uri={c.imageUrl} size={32} />
                         <View style={{ flex: 1, minWidth: 0 }}>
                           <AppText variant="bodyStrong" numberOfLines={1}>{c.name}</AppText>
                           <AppText variant="caption" color="muted" numberOfLines={1}>{c.email}</AppText>

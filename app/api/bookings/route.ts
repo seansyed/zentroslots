@@ -40,7 +40,20 @@ export async function GET(req: NextRequest) {
 
     const ninetyDaysAgo = new Date(Date.now() - 1000 * 60 * 60 * 24 * 90);
     const statusFilter = req.nextUrl.searchParams.get("status");
-    const validStatuses = ["pending", "confirmed", "cancelled", "completed", "no_show"] as const;
+    // Full bookingStatusEnum (db/schema.ts) — includes the payment-lifecycle
+    // statuses so ?status=pending_payment is a TRUE server-side filter (mobile
+    // Up Next relies on this to surface paid-but-unsettled holds reliably,
+    // instead of pulling an unfiltered, DESC-diluted page).
+    const validStatuses = [
+      "pending",
+      "confirmed",
+      "pending_payment",
+      "payment_failed",
+      "cancelled",
+      "completed",
+      "no_show",
+      "refunded",
+    ] as const;
 
     // Pagination: cursor = ISO timestamp of the previous page's last startAt.
     // Stable + index-aligned (bookings_staff_start_idx / bookings_tenant_idx).

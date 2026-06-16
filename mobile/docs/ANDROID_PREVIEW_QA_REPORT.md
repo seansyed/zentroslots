@@ -1,3 +1,28 @@
+# UPDATE 7 — versionCode 13 preview: pending_payment upcoming, calendar month nav, profile-image readiness, UI polish, 2026-06-15
+
+**Android versionCode:** 13 · **iOS buildNumber:** 9 · **Backend:** one additive `validStatuses` line in `/api/bookings` (deploy). Full detail in [MOBILE_HOME_CALENDAR_PROFILE_UI_FIX_REPORT.md](MOBILE_HOME_CALENDAR_PROFILE_UI_FIX_REPORT.md).
+
+1. **Home upcoming (pending_payment):** vc12's upcoming query kept only confirmed+pending, so a future **`pending_payment`** booking (a paid booking on a payment hold — a real `bookingStatusEnum` value) was dropped while Activity showed it. Fix: upcoming = {confirmed, pending, pending_payment}; 3rd status query; `BookingStatus` type now matches the DB enum; backend `validStatuses` includes the full enum (true server-side filter).
+2. **Calendar month nav:** added a clear in-grid month header (`‹ Month YYYY ›` + **Today**, Hermes-safe), free past/future browsing (no service horizon on the general Calendar); page header simplified.
+3. **New Booking:** already mounts the full `MonthCalendar` (the screenshot's 14-day strip was a **stale build** — no strip in code). Added Calendar→New-Booking date handoff (`?date=` → clamped `parseInitialDate`).
+4. **Customer profile image:** ROOT CAUSE = **no customer image exists in the product** (DB has no column; both customer APIs return none; the WEB also shows initials) — "RK" initials is correct. Mobile made forward-compatible (image-capable Avatar with absolutize + onError→initials + reset-on-switch). **NOT marked fixed** — a real photo needs a backend customer-photo feature that doesn't exist (flagged).
+5. **UI polish:** smaller empty-state cards; central FAB clearance (no overlap); "Appointments" label no longer truncated; calendar/customer spacing.
+
+**Local gates (all green):** backend `tsc`; **733/733** backend tests (incl. 9 bookings tests); web build OK; mobile `tsc`; **58/58** mobile tests (+8: pending_payment regression, parseInitialDate ×3, new-booking-picker ×3, customer-image url); expo-doctor 18/18; export android+iOS; prebuild android `--clean`.
+
+```
+ANDROID VERSION CODE:     13
+IOS BUILD NUMBER:         9
+BACKEND DEPLOYED:         PENDING — additive validStatuses (no migration); needs deploy authorization
+CODEMAGIC BUILD:          OPERATOR ACTION — start android-preview on main (versionCode 13)
+DEVICE QA:                PENDING — physical Android device
+PROFILE IMAGE:           NOT fixed (no stored customer image exists; initials correct + consistent with web)
+UPCOMING / CALENDAR / NEW BOOKING: fixed in code; device-QA gated
+READY FOR NEXT PREVIEW BUILD: YES (mobile); deploy validStatuses for server-side robustness
+```
+
+---
+
 # UPDATE 6 — versionCode 12 preview: Home upcoming, official logo, booking-link sharing, 2026-06-15
 
 **Android versionCode:** 12 · **iOS buildNumber:** 8 · **Backend: NO changes (all mobile-only).**

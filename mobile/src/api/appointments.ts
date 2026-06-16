@@ -14,13 +14,18 @@
 import { apiDelete, apiGet, apiPost } from "./client";
 import type { IntakeAnswer } from "./intake";
 
+// Mirrors the backend bookingStatusEnum (db/schema.ts) exactly. "pending_payment"
+// is a paid booking awaiting settlement; "payment_failed"/"refunded" are terminal
+// payment outcomes. (The old "rescheduled" was never a DB value — removed.)
 export type BookingStatus =
   | "pending"
   | "confirmed"
-  | "completed"
+  | "pending_payment"
+  | "payment_failed"
   | "cancelled"
+  | "completed"
   | "no_show"
-  | "rescheduled";
+  | "refunded";
 
 export type Appointment = {
   id: string;

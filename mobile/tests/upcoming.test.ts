@@ -32,6 +32,17 @@ test("includes today's future confirmed booking; excludes past, cancelled, compl
   assert.deepEqual(out.map((r) => r.id), ["soon", "pending"]);
 });
 
+test("REGRESSION: a future pending_payment booking (~15h out) IS upcoming; payment_failed/refunded are not", () => {
+  const rows: Appointment[] = [
+    // The reported case: Rashid Kazi, pending_payment, ~15h ahead — must show.
+    appt({ id: "rashid", startAt: iso(NOW + 15 * 60 * 60_000), status: "pending_payment" }),
+    appt({ id: "failed", startAt: iso(NOW + 16 * 60 * 60_000), status: "payment_failed" }), // terminal ✗
+    appt({ id: "refunded", startAt: iso(NOW + 17 * 60 * 60_000), status: "refunded" }),      // terminal ✗
+    appt({ id: "confirmed", startAt: iso(NOW + 18 * 60 * 60_000), status: "confirmed" }),    // ✓
+  ];
+  assert.deepEqual(selectUpcoming(rows, NOW, 5).map((r) => r.id), ["rashid", "confirmed"]);
+});
+
 test("sorts ascending (soonest first) and slices to count", () => {
   const rows: Appointment[] = [
     appt({ id: "d3", startAt: iso(NOW + 3 * 86_400_000), status: "confirmed" }),

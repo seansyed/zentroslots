@@ -379,7 +379,7 @@ export default function CustomerDetailScreen() {
             <SectionFade>
               <GradientHeroCard>
                 <View style={styles.heroRow}>
-                  <Avatar name={displayNameOf(customer)} size={64} />
+                  <Avatar name={displayNameOf(customer)} uri={customer.imageUrl} size={64} />
                   <View style={{ flex: 1, minWidth: 0 }}>
                     <AppText variant="h2" numberOfLines={1}>
                       {displayNameOf(customer)}
@@ -722,12 +722,12 @@ const styles = StyleSheet.create({
   statsGrid: {
     flexDirection: "row",
     alignItems: "stretch",
-    paddingVertical: spacing.xs,
+    paddingVertical: spacing.sm,
   },
   statCell: {
     flex: 1,
     alignItems: "center",
-    paddingVertical: spacing.xs,
+    paddingVertical: spacing.sm,
   },
   divider: {
     width: StyleSheet.hairlineWidth,

@@ -662,10 +662,8 @@ export default function HomeScreen() {
         </SectionFade>
       ) : null}
 
-      {/* Bottom breathing room so the tab bar doesn't hug content.
-          Extra room beyond just the tab bar so the FAB never sits on
-          top of the last scrolled element. */}
-      <View style={{ height: spacing["3xl"] + 60 }} />
+      {/* Small tail — ScreenContainer now reserves FAB clearance centrally. */}
+      <View style={{ height: spacing.md }} />
     </ScreenContainer>
   );
 }
@@ -781,7 +779,9 @@ function QuickAction({
       <View style={[styles.quickIcon, { backgroundColor: t.bg }]}>
         <Ionicons name={icon} size={20} color={t.fg} />
       </View>
-      <AppText variant="micro" style={styles.quickLabel} numberOfLines={1}>
+      {/* Allow 2 lines so longer labels like "Appointments" wrap instead of
+          truncating to "Appointme…" on narrow screens. */}
+      <AppText variant="micro" style={styles.quickLabel} numberOfLines={2}>
         {label}
       </AppText>
     </PressableCard>

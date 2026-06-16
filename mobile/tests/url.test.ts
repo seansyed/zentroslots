@@ -40,6 +40,16 @@ test("returns null for empty / nullish input (initials fallback)", () => {
   assert.equal(absolutizeUrl("   ", BASE), null);
 });
 
+// Customer profile image uses the SAME normalizer (customersApi.withImageUrl).
+// A stored customer photo (relative) absolutizes; absent → null → initials.
+test("customer image: relative path absolutizes, absent → null (initials)", () => {
+  assert.equal(
+    absolutizeUrl("/uploads/customers/rk.png", BASE),
+    "https://app.zentromeet.com/uploads/customers/rk.png",
+  );
+  assert.equal(absolutizeUrl(null, BASE), null); // no stored photo → initials fallback
+});
+
 test("tolerates a trailing slash on the base origin", () => {
   assert.equal(
     absolutizeUrl("/uploads/x.png", "https://app.zentromeet.com/"),

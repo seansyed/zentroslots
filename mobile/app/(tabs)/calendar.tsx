@@ -55,6 +55,7 @@ import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
 import { Shimmer } from "@/components/ui/Shimmer";
 import { AppText } from "@/components/ui/Text";
 import { useAppointments } from "@/hooks/useAppointments";
+import { isoDateLocal, isSameMonth, monthLabel } from "@/lib/dates";
 import { formatDateLong } from "@/lib/format";
 import { colors, radius, shadows, spacing } from "@/theme";
 
@@ -192,7 +193,11 @@ export default function CalendarScreen() {
   const eventsByDate = React.useMemo(() => {
     const map: Record<string, Appointment[]> = {};
     for (const a of data?.rows ?? []) {
-      const k = a.startAt.slice(0, 10);
+      // Bucket by the LOCAL calendar day (Hermes-safe), consistent with the
+      // grid cells, the selected-day lookup, and the FAB ?date= handoff — so
+      // the highlighted day, its listed bookings, and New Booking all agree
+      // (the old UTC .slice(0,10) was off-by-one for operators east of UTC).
+      const k = isoDateLocal(new Date(a.startAt));
       (map[k] ||= []).push(a);
     }
     return map;
@@ -206,7 +211,7 @@ export default function CalendarScreen() {
   }, [eventsByDate]);
 
   function dayKey(d: Date): string {
-    return d.toISOString().slice(0, 10);
+    return isoDateLocal(d);
   }
 
   const selectedRows = eventsByDate[dayKey(selected)] ?? [];
@@ -216,6 +221,12 @@ export default function CalendarScreen() {
     const n = new Date(anchor);
     n.setMonth(n.getMonth() + delta);
     setAnchor(n);
+  }
+
+  function goToday() {
+    void Haptics.selectionAsync().catch(() => {});
+    setAnchor(today);
+    setSelected(today);
   }
 
   function pickDay(d: Date) {
@@ -228,7 +239,7 @@ export default function CalendarScreen() {
       scrollable
       // FAB anchored to the viewport (not the scroll content) — see
       // ScreenContainer.floatingOverlay docs.
-      floatingOverlay={<QuickCreateFAB />}
+      floatingOverlay={<QuickCreateFAB date={isoDateLocal(selected)} />}
     >
       {/* ── Compact page header (non-Home tab pattern) ──────────────
           Title = "Schedule", subtitle = current month label, trailing =
@@ -244,18 +255,10 @@ export default function CalendarScreen() {
         title="Schedule"
         subtitle={
           mode === "month"
-            ? anchor.toLocaleString("default", { month: "long", year: "numeric" })
+            ? "Tap a day to view its bookings"
             : mode === "week"
               ? "Week view"
               : "Up next"
-        }
-        trailing={
-          mode === "month" ? (
-            <View style={{ flexDirection: "row", gap: spacing.xs }}>
-              <NavBtn icon="chevron-back" onPress={() => shiftMonth(-1)} />
-              <NavBtn icon="chevron-forward" onPress={() => shiftMonth(1)} />
-            </View>
-          ) : null
         }
       />
       </View>
@@ -281,6 +284,9 @@ export default function CalendarScreen() {
           eventsByDate={eventsByDate}
           selected={selected}
           onPickDay={pickDay}
+          onPrevMonth={() => shiftMonth(-1)}
+          onNextMonth={() => shiftMonth(1)}
+          onToday={goToday}
           selectedRows={selectedRows}
           isLoading={isLoading && !data}
           isError={isError}
@@ -329,6 +335,9 @@ function MonthView({
   eventsByDate,
   selected,
   onPickDay,
+  onPrevMonth,
+  onNextMonth,
+  onToday,
   selectedRows,
   isLoading,
   isError,
@@ -340,6 +349,9 @@ function MonthView({
   eventsByDate: Record<string, Appointment[]>;
   selected: Date;
   onPickDay: (d: Date) => void;
+  onPrevMonth: () => void;
+  onNextMonth: () => void;
+  onToday: () => void;
   selectedRows: Appointment[];
   isLoading: boolean;
   isError: boolean;
@@ -363,10 +375,36 @@ function MonthView({
 
   return (
     <>
+      {/* Month header — the clear, single source of month context + navigation
+          (prev/next + a Today shortcut). Browses any month freely; the general
+          Calendar is NOT clamped to the service booking horizon. */}
+      <View style={[styles.monthHeader, { marginTop: spacing.lg }]}>
+        <NavBtn icon="chevron-back" onPress={onPrevMonth} />
+        <View style={styles.monthHeaderCenter}>
+          <AppText variant="h4" numberOfLines={1} style={{ textAlign: "center" }}>
+            {monthLabel(anchor)}
+          </AppText>
+          {!isSameMonth(anchor, today) ? (
+            <Pressable
+              onPress={onToday}
+              hitSlop={8}
+              style={styles.todayPill}
+              accessibilityRole="button"
+              accessibilityLabel="Jump to today"
+            >
+              <AppText variant="micro" style={{ color: colors.brand, fontWeight: "700" }}>
+                Today
+              </AppText>
+            </Pressable>
+          ) : null}
+        </View>
+        <NavBtn icon="chevron-forward" onPress={onNextMonth} />
+      </View>
+
       {/* Weekday labels — sized to match the grid cells exactly so
           "Sat" sits squarely above the last column. */}
       <View
-        style={[styles.weekRow, { marginTop: spacing.lg }]}
+        style={[styles.weekRow, { marginTop: spacing.md }]}
         onLayout={(e) => setContainerW(e.nativeEvent.layout.width)}
       >
         {WEEKDAYS.map((d, i) => (
@@ -400,7 +438,7 @@ function MonthView({
                 const inMonth = d.getMonth() === anchor.getMonth();
                 const isToday = isSameDate(d, today);
                 const isSelected = isSameDate(d, selected);
-                const events = eventsByDate[d.toISOString().slice(0, 10)] ?? [];
+                const events = eventsByDate[isoDateLocal(d)] ?? [];
                 const eventCount = events.length;
                 const col = idx % 7;
                 const row = Math.floor(idx / 7);
@@ -625,7 +663,7 @@ function WeekView({
             {weekDays.map((d) => {
             const isSel = isSameDate(d, selected);
             const isTod = isSameDate(d, today);
-            const count = (eventsByDate[d.toISOString().slice(0, 10)] ?? []).length;
+            const count = (eventsByDate[isoDateLocal(d)] ?? []).length;
             return (
               <Pressable
                 key={d.toISOString()}
@@ -945,7 +983,7 @@ function AgendaView({
   const days = React.useMemo(() => {
     const out: { date: Date; rows: Appointment[] }[] = [];
     for (let d = new Date(today); d <= agendaEnd; d = addDays(d, 1)) {
-      const k = d.toISOString().slice(0, 10);
+      const k = isoDateLocal(d);
       const rows = eventsByDate[k] ?? [];
       if (rows.length > 0) out.push({ date: new Date(d), rows });
     }
@@ -1110,6 +1148,24 @@ const styles = StyleSheet.create({
   },
   weekLabel: {
     letterSpacing: 0.5,
+  },
+  monthHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  monthHeaderCenter: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.sm,
+  },
+  todayPill: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 3,
+    borderRadius: radius.full,
+    backgroundColor: colors.brandSubtle,
   },
   /** Wrap container — sizing is driven entirely by per-cell explicit
    *  pixel widths + marginRight/marginBottom. No `gap` here because

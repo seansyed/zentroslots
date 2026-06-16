@@ -44,16 +44,18 @@ const styles = StyleSheet.create({
   wrap: {
     alignItems: "center",
     paddingHorizontal: spacing.xl,
-    paddingVertical: spacing["4xl"],
+    // Tightened from 4xl → 2xl so empty-state cards aren't oversized on phones
+    // (screenshot feedback). Still breathes, no longer dominates the screen.
+    paddingVertical: spacing["2xl"],
   },
   iconWrap: {
-    width: 64,
-    height: 64,
+    width: 52,
+    height: 52,
     borderRadius: radius.xl,
     backgroundColor: colors.brandSubtle,
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: spacing.lg,
+    marginBottom: spacing.md,
   },
   title: {
     maxWidth: 280,

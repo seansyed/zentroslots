@@ -74,7 +74,14 @@ export function ScreenContainer({
   const inner = scrollable ? (
     <ScrollView
       style={styles.flex}
-      contentContainerStyle={[styles.scrollContent, padStyle, contentContainerStyle]}
+      contentContainerStyle={[
+        styles.scrollContent,
+        padStyle,
+        // Reserve room so a viewport-anchored FAB never overlaps the last row
+        // of content when scrolled to the bottom (screenshot feedback).
+        floatingOverlay ? styles.fabClearance : null,
+        contentContainerStyle,
+      ]}
       refreshControl={refreshControl}
       showsVerticalScrollIndicator={false}
       keyboardShouldPersistTaps="handled"
@@ -132,5 +139,9 @@ const styles = StyleSheet.create({
   scrollContent: {
     flexGrow: 1,
     paddingBottom: layout.screenPaddingY * 2,
+  },
+  // Extra bottom room when a FAB overlay is present (FAB ≈ 60dp + ~76dp offset).
+  fabClearance: {
+    paddingBottom: 120,
   },
 });

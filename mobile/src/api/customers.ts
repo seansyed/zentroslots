@@ -11,6 +11,8 @@
  */
 
 import { apiGet, apiPatch, apiPost } from "./client";
+import { absolutizeUrl } from "@/lib/url";
+import { env } from "@/lib/env";
 
 export type CustomerStatus = "active" | "vip" | "archived" | "prospect";
 
@@ -53,11 +55,29 @@ export type Customer = {
   // Optional + nullable for defensive rendering — see CustomerDetail
   // screen for the safe formatter that handles undefined / Invalid Date.
   createdAt?: string | null;
+  /** Last-modified, used as a cache-busting key for the avatar image. */
+  updatedAt?: string | null;
+  /** Customer profile image, absolutized against the API origin (RN <Image>
+   *  can't load relative /uploads paths — see lib/url.ts). The product does NOT
+   *  currently store customer photos (no DB column / upload path; web also shows
+   *  initials), so this is null today and the Avatar falls back to initials.
+   *  Wired forward-compatibly: the instant the backend returns an image field,
+   *  it renders here with no further mobile change. */
+  imageUrl?: string | null;
   totalBookings: number;
   completed: number;
   cancelled: number;
   lastAppointmentAt: string | null;
 };
+
+/** Absolutize a customer's image URL (relative /uploads → API origin). Tolerates
+ *  several possible backend field names so it lights up whatever the API ships. */
+function withImageUrl<T extends { imageUrl?: string | null; avatarUrl?: string | null; image?: string | null }>(
+  row: T,
+): T & { imageUrl: string | null } {
+  const raw = row.imageUrl ?? row.avatarUrl ?? row.image ?? null;
+  return { ...row, imageUrl: absolutizeUrl(raw, env.apiBaseUrl) };
+}
 
 export type CustomerListResponse = Customer[];
 
@@ -80,7 +100,8 @@ export const customersApi = {
   async list(params: { q?: string } = {}): Promise<CustomerListResponse> {
     const search: Record<string, string> = {};
     if (params.q) search.q = params.q;
-    return apiGet<CustomerListResponse>("/api/customers", { params: search });
+    const rows = await apiGet<CustomerListResponse>("/api/customers", { params: search });
+    return (Array.isArray(rows) ? rows : []).map(withImageUrl);
   },
 
   /** Create a customer. Backend returns the created row (201). Throws
@@ -126,7 +147,7 @@ export const customersApi = {
     // Wrapped shape: { customer, history } → flatten.
     if (raw && typeof raw === "object" && "customer" in raw && raw.customer) {
       return {
-        ...raw.customer,
+        ...withImageUrl(raw.customer),
         bookingHistory: Array.isArray(raw.history) ? raw.history : [],
       };
     }
@@ -134,7 +155,7 @@ export const customersApi = {
     // array so the screen never needs to check.
     const flat = raw as CustomerDetail;
     return {
-      ...flat,
+      ...withImageUrl(flat),
       bookingHistory: Array.isArray(flat.bookingHistory) ? flat.bookingHistory : [],
     };
   },

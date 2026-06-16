@@ -47,19 +47,23 @@ type Props = {
 const STATUS_TONE: Record<BookingStatus, PillTone> = {
   confirmed: "success",
   pending: "warning",
+  pending_payment: "warning",
+  payment_failed: "danger",
   completed: "neutral",
   cancelled: "danger",
   no_show: "danger",
-  rescheduled: "info",
+  refunded: "neutral",
 };
 
 const STATUS_ACCENT: Record<BookingStatus, string> = {
   confirmed: colors.success,
   pending: colors.warning,
+  pending_payment: colors.warning,
+  payment_failed: colors.danger,
   completed: colors.inkSubtle,
   cancelled: colors.danger,
   no_show: colors.danger,
-  rescheduled: colors.brand,
+  refunded: colors.inkSubtle,
 };
 
 const PROVIDER_ICON: Record<NonNullable<Appointment["meetingProvider"]>, React.ComponentProps<typeof Ionicons>["name"]> = {

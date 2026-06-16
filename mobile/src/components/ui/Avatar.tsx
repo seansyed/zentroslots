@@ -27,8 +27,23 @@ const TONE_BG: Record<NonNullable<Props["tone"]>, { bg: string; fg: string }> = 
 
 export function Avatar({ name, uri, size = 40, tone = "brand" }: Props) {
   const t = TONE_BG[tone];
-  if (uri) {
-    return <Image source={{ uri }} style={[styles.base, { width: size, height: size, borderRadius: size / 2 }]} />;
+  // Show the image only when a uri exists AND it hasn't failed to load. Reset
+  // the failure flag whenever the uri changes so switching customers (or a new
+  // photo at a new URL) re-attempts the image instead of showing a stale/blank
+  // avatar. Initials show when there's no uri or the image genuinely fails.
+  const [failed, setFailed] = React.useState(false);
+  React.useEffect(() => {
+    setFailed(false);
+  }, [uri]);
+
+  if (uri && !failed) {
+    return (
+      <Image
+        source={{ uri }}
+        onError={() => setFailed(true)}
+        style={[styles.base, { width: size, height: size, borderRadius: size / 2 }]}
+      />
+    );
   }
   return (
     <View
