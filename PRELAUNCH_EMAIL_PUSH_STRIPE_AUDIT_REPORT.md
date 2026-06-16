@@ -1,5 +1,11 @@
 # ZentroMeet — Pre-Launch Audit: Appointment Emails, Mobile Push, Stripe Billing
 
+> **Follow-up (2026-06-16, commit `8015789`):** the implementable items below are
+> now closed in code + deployed — subscription reconciliation, plan-catalog drift
+> detector + DB price-id mapping, push receipt processing + dead-token pruning,
+> cancellation/reschedule email dedup, paid-hold slot visibility. Remaining items
+> are operator/device-blocked. See **[PRELAUNCH_BLOCKER_CLOSEOUT_REPORT.md](PRELAUNCH_BLOCKER_CLOSEOUT_REPORT.md)**.
+
 **Date:** 2026-06-16 · **Branch:** main · **Code commit audited + remediated:** `69cacdf`
 (deployed to prod; rollback target `a8de5c2`) · **Prod:** app.zentromeet.com (PM2
 `scheduling-saas` @ 35.83.95.42) · **Method:** 10-agent evidence-based code audit +

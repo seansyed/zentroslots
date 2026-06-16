@@ -229,6 +229,18 @@ stays **NO** until they are confirmed.)
    Connect app record for `com.zentromeet.app` must already exist — **do not
    create a duplicate**.
 
+3b. **APNs Auth Key registered with EXPO (required for push to actually deliver).**
+   The backend sends pushes via the **Expo Push API** using ExponentPushTokens, so
+   APNs delivery depends on an **APNs Auth Key (.p8)** registered with **Expo** for
+   this project (`extra.eas.projectId` in app.json) — NOT just the Codemagic signing
+   capability. Apple Developer → Certificates, Identifiers & Profiles → **Keys** →
+   enable **Apple Push Notifications service** → create the `.p8`; then register it
+   with Expo for the iOS credentials (`eas credentials` → iOS → Push Notifications:
+   APNs Key, or the Expo dashboard). Codemagic's automatic signing only provisions
+   the Push Notifications *capability/entitlement* — it does **not** configure APNs
+   delivery. The same APNs key is reused across builds; rotating the signing API key
+   does not rotate it. **Never** commit or print the `.p8` in git or CI logs.
+
 4. **Reference names used in the YAML** —
    - Integration: `zentromeet_asc_api_key`
    - Signing bundle id: `com.zentromeet.app`

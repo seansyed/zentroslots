@@ -1,3 +1,14 @@
+# UPDATE 11 — push receipt pruning + device-QA runbook (vc16, no rebuild), 2026-06-16
+
+**versionCode 16 unchanged** (no mobile code changed). Backend `8015789` adds Expo
+**receipt processing + DeviceNotRegistered token pruning** (`push:receipts` cron */5m).
+Android push is still **device-UNVERIFIED** (`push_tokens`=0). The exact physical-device
+QA runbook (install vc16 → token registers → new/reschedule/cancel push → tap → tz match →
+logout single-device) + capture fields are in
+[../../PRELAUNCH_BLOCKER_CLOSEOUT_REPORT.md](../../PRELAUNCH_BLOCKER_CLOSEOUT_REPORT.md) (WS1). **BLOCKER until run.**
+
+---
+
 # UPDATE 10 — versionCode 16 preview: pre-launch push audit + fixes, 2026-06-16
 
 **Android versionCode:** 16 · **iOS buildNumber:** 12 · **Backend:** deployed (`69cacdf`). Full detail in [../../PRELAUNCH_EMAIL_PUSH_STRIPE_AUDIT_REPORT.md](../../PRELAUNCH_EMAIL_PUSH_STRIPE_AUDIT_REPORT.md).

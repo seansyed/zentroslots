@@ -2,6 +2,11 @@
 
 Status of the iOS (iPhone + iPad) build + TestFlight pipeline.
 
+> **2026-06-16:** iOS push needs an **APNs Auth Key registered with Expo** (not just
+> the Codemagic signing capability) — the backend delivers via the Expo Push API.
+> Full operator steps in [CODEMAGIC_NATIVE_IOS_BUILD.md §10](CODEMAGIC_NATIVE_IOS_BUILD.md)
+> and [../../PRELAUNCH_BLOCKER_CLOSEOUT_REPORT.md](../../PRELAUNCH_BLOCKER_CLOSEOUT_REPORT.md) (WS5). Build number 12.
+
 ---
 
 # UPDATE 2 — iOS push readiness (pre-launch audit), 2026-06-16
