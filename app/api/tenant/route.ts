@@ -6,6 +6,17 @@ import { db } from "@/db/client";
 import { tenants } from "@/db/schema";
 import { errorResponse, requireRole } from "@/lib/auth";
 import { planFeature } from "@/lib/quotas";
+import { invalidateTenantTimezone } from "@/lib/tenant-timezone";
+
+/** True when `tz` is a real IANA zone the runtime can format. */
+function isValidIanaTimezone(tz: string): boolean {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 const patchSchema = z.object({
   name: z.string().min(1).max(120).optional(),
@@ -15,6 +26,13 @@ const patchSchema = z.object({
   description: z.string().max(2000).nullable().optional(),
   bookingHeadline: z.string().max(200).nullable().optional(),
   billingEmail: z.string().email().nullable().optional(),
+  // Canonical BUSINESS timezone (IANA). Core scheduling setting — NOT gated
+  // behind the branding plan feature. Drives booking interpretation + display.
+  timezone: z
+    .string()
+    .max(64)
+    .refine(isValidIanaTimezone, "Invalid timezone")
+    .optional(),
 });
 
 export async function PATCH(req: NextRequest) {
@@ -45,6 +63,10 @@ export async function PATCH(req: NextRequest) {
       .where(eq(tenants.id, admin.tenantId))
       .returning();
 
+    // Drop the cached business tz so the new value takes effect immediately
+    // across booking interpretation + display.
+    if (body.timezone !== undefined) invalidateTenantTimezone(admin.tenantId);
+
     return NextResponse.json({
       id: updated.id,
       name: updated.name,
@@ -55,6 +77,7 @@ export async function PATCH(req: NextRequest) {
       description: updated.description,
       bookingHeadline: updated.bookingHeadline,
       billingEmail: updated.billingEmail,
+      timezone: updated.timezone,
     });
   } catch (err) {
     return errorResponse(err);

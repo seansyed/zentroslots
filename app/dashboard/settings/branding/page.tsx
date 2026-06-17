@@ -46,6 +46,7 @@ import { getSession } from "@/lib/auth";
 import { planFeature } from "@/lib/quotas";
 import { getPlan } from "@/lib/plans";
 import BrandingForm from "@/components/BrandingForm";
+import BusinessTimezoneCard from "@/components/dashboard/BusinessTimezoneCard";
 import Shell from "@/components/dashboard/Shell";
 import { PremiumCard } from "@/components/ui/Card";
 import { FadeIn } from "@/components/ui/Motion";
@@ -133,6 +134,11 @@ export default async function BrandingPage() {
         {/* ── Brand health insights ─────────────────────────────── */}
         <FadeIn delay={!allowed ? 2 : 1}>
           <BrandHealthSection health={health} />
+        </FadeIn>
+
+        {/* ── Business timezone — CORE setting, every plan ──────── */}
+        <FadeIn delay={!allowed ? 2.5 : 1.5}>
+          <BusinessTimezoneCard initialTimezone={tenant.timezone} />
         </FadeIn>
 
         {/* ── Existing BrandingForm — mounted untouched ─────────── */}
