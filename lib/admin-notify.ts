@@ -81,6 +81,7 @@ export type AdminAlertKind =
   | "oauth_provider_error"
   | "domain_verification_failed"
   | "email_provider_error"
+  | "push_provider_error"     // APNs/FCM credential fault on Expo (tokens preserved)
   // Tenant lifecycle
   | "tenant_suspended"
   | "tenant_reactivated"
@@ -172,6 +173,7 @@ const PER_KIND_COOLDOWN_MS: Partial<Record<AdminAlertKind, number>> = {
   subscription_reconcile_drift: 60 * 60_000,
   stripe_webhook_error: 30 * 60_000,
   email_provider_error: 30 * 60_000,
+  push_provider_error: 30 * 60_000,
   reminder_delivery_failure: 30 * 60_000,
   // Spikes: 1h window is enough to observe trend without re-spamming.
   booking_volume_spike: 60 * 60_000,

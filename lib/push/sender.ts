@@ -53,9 +53,13 @@ export type ExpoTicketResult =
       status: "error";
       message: string;
       errorCode: string | null;
-      /** True if the error is permanent and the token should be deleted. */
+      /** True ONLY for DeviceNotRegistered — the one error that deletes a token. */
       tokenInvalid: boolean;
-      /** True if the error is transient and a retry will likely succeed. */
+      /** True for InvalidCredentials — a server-wide config fault. Retry + alert;
+       *  NEVER delete the token (a misconfig must not wipe the table). */
+      credentialError: boolean;
+      /** True if the error is transient and a retry will likely succeed.
+       *  Credential errors are also transient (retryable once creds are fixed). */
       transient: boolean;
     };
 
@@ -66,13 +70,20 @@ type ExpoTicket = {
   details?: { error?: string };
 };
 
-const PERMANENT_TOKEN_ERRORS = new Set([
-  "DeviceNotRegistered",
-  "InvalidCredentials",
-]);
-const TRANSIENT_ERRORS = new Set([
-  "MessageRateExceeded",
-]);
+// ── Error classification (reliability-critical) ───────────────────────────
+// Only DeviceNotRegistered PROVES a specific token is dead — it is the ONLY
+// error that may delete a token. InvalidCredentials is a SERVER-WIDE config
+// fault (a bad/missing APNs or FCM key on the Expo project): it is returned
+// per-message for EVERY recipient, so treating it as a per-token failure
+// would wipe the entire token table on a single misconfig. It is therefore
+// classified as a CREDENTIAL error — retried (the same token works once the
+// fault clears) and surfaced to ops, NEVER a token-delete. MessageRateExceeded
+// + transport/5xx are transient retries. So a token is dropped ONLY on a
+// genuine per-device DeviceNotRegistered, never on a credential/outage/network
+// fault.
+const TOKEN_DEAD_ERRORS = new Set(["DeviceNotRegistered"]);
+const CREDENTIAL_ERRORS = new Set(["InvalidCredentials"]);
+const TRANSIENT_ERRORS = new Set(["MessageRateExceeded"]);
 
 /**
  * Send a batch of Expo push messages. Splits oversize input into
@@ -126,6 +137,7 @@ export async function sendExpoPushBatch(
           message: networkError ?? "No ticket returned",
           errorCode: null,
           tokenInvalid: false,
+          credentialError: false,
           transient: true,
         };
         continue;
@@ -138,6 +150,7 @@ export async function sendExpoPushBatch(
           message: "Missing ticket",
           errorCode: null,
           tokenInvalid: false,
+          credentialError: false,
           transient: true,
         };
         continue;
@@ -150,13 +163,18 @@ export async function sendExpoPushBatch(
         };
       } else {
         const code = t.details?.error ?? null;
+        const credentialError = code ? CREDENTIAL_ERRORS.has(code) : false;
         results[idx] = {
           _id: original._id,
           status: "error",
           message: t.message ?? code ?? "Expo error",
           errorCode: code,
-          tokenInvalid: code ? PERMANENT_TOKEN_ERRORS.has(code) : false,
-          transient: code ? TRANSIENT_ERRORS.has(code) : false,
+          tokenInvalid: code ? TOKEN_DEAD_ERRORS.has(code) : false,
+          credentialError,
+          // Credential faults + provider rate-limits are retryable — the same
+          // token works once the fault clears. Only DeviceNotRegistered is a
+          // delete (tokenInvalid above), so a credential error never deletes.
+          transient: credentialError || (code ? TRANSIENT_ERRORS.has(code) : false),
         };
       }
     }
@@ -170,8 +188,10 @@ export async function sendExpoPushBatch(
 export type ExpoReceiptResult =
   /** Expo confirmed delivery to the provider (FCM/APNs). */
   | { status: "ok" }
-  /** A receipt error. tokenInvalid → delete the token; transient → re-check. */
-  | { status: "error"; message: string; errorCode: string | null; tokenInvalid: boolean; transient: boolean }
+  /** A receipt error. tokenInvalid (DeviceNotRegistered) → delete the token;
+   *  credentialError (InvalidCredentials) → re-check + alert, NEVER delete;
+   *  transient → re-check. */
+  | { status: "error"; message: string; errorCode: string | null; tokenInvalid: boolean; credentialError: boolean; transient: boolean }
   /** Receipt not yet available (Expo omits it) — re-check next tick. */
   | { status: "pending" };
 
@@ -222,7 +242,7 @@ export async function fetchExpoPushReceipts(
     for (const id of chunk) {
       if (networkError || !data) {
         // Transient — re-check next tick; do NOT delete the token.
-        out[id] = { status: "error", message: networkError ?? "no data", errorCode: null, tokenInvalid: false, transient: true };
+        out[id] = { status: "error", message: networkError ?? "no data", errorCode: null, tokenInvalid: false, credentialError: false, transient: true };
         continue;
       }
       const r = data[id];
@@ -232,12 +252,15 @@ export async function fetchExpoPushReceipts(
         out[id] = { status: "ok" };
       } else {
         const code = r.details?.error ?? null;
+        const credentialError = code ? CREDENTIAL_ERRORS.has(code) : false;
         out[id] = {
           status: "error",
           message: r.message ?? code ?? "Expo receipt error",
           errorCode: code,
-          tokenInvalid: code ? PERMANENT_TOKEN_ERRORS.has(code) : false,
-          transient: code ? TRANSIENT_ERRORS.has(code) : false,
+          tokenInvalid: code ? TOKEN_DEAD_ERRORS.has(code) : false,
+          credentialError,
+          // Credential faults are retryable + alerted, never a token-delete.
+          transient: credentialError || (code ? TRANSIENT_ERRORS.has(code) : false),
         };
       }
     }

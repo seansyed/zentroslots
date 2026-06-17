@@ -33,6 +33,7 @@ import { STORAGE_KEYS, storage } from "@/lib/storage";
 import { useAuthStore } from "@/store/authStore";
 import { track } from "@/lib/telemetry";
 import { createRunOnceSafe, bootBreadcrumb } from "@/lib/safeInit";
+import { shouldProcessResponse } from "@/lib/notificationDedup";
 
 // IMPORTANT: never touch an expo-notifications API at module-import time.
 // `Notifications.setNotificationHandler(...)` previously ran here as a
@@ -74,6 +75,14 @@ const installNotificationHandler = createRunOnceSafe(
 );
 
 const PUSH_TOKEN_STORAGE_KEY = "expo_push_token";
+// Persists the OS identifier of the most recently HANDLED notification tap, so
+// a cold launch can tell "the user just tapped this" from "the OS is replaying
+// the last tap on a plain relaunch" — preventing the cold-start re-fire.
+const LAST_HANDLED_PUSH_RESPONSE_KEY = "push_last_handled_response_id";
+
+// In-memory guard for the current app session (survives effect re-runs, not a
+// cold start). Combined with the persisted id above it covers all three states.
+const handledResponseIds = new Set<string>();
 
 type PushPayload = {
   type?: "booking_reminder" | "booking_created" | "booking_cancelled" | "booking_rescheduled";
@@ -189,10 +198,37 @@ export function usePushNotifications() {
     };
   }, [isAuthed]);
 
-  // ── Cold-start: if the user tapped a notification to launch the
-  // app, getLastNotificationResponseAsync gives us the payload. We
-  // dispatch the same routing logic as the foreground listener so
-  // there's exactly one tap-handling path.
+  // Handle a notification TAP exactly once across cold-start / background /
+  // foreground. Dedup on the OS identifier: an in-memory Set guards the current
+  // session; a persisted last-handled id guards across cold starts (so
+  // getLastNotificationResponseAsync replaying the last tap on a plain relaunch
+  // no longer re-navigates). The routing logic itself is unchanged.
+  const handleResponseOnce = React.useCallback(
+    async (response: Notifications.NotificationResponse | null | undefined) => {
+      if (!response) return;
+      const id = response.notification.request.identifier ?? null;
+      let lastPersisted: string | null = null;
+      try {
+        lastPersisted = await storage.getItem(LAST_HANDLED_PUSH_RESPONSE_KEY);
+      } catch {
+        /* storage read failure → fail toward handling (a real tap matters) */
+      }
+      if (!shouldProcessResponse(id, handledResponseIds, lastPersisted)) return;
+      if (id) {
+        handledResponseIds.add(id);
+        void storage.setItem(LAST_HANDLED_PUSH_RESPONSE_KEY, id).catch(() => {});
+      }
+      const payload = parsePayload(response.notification);
+      if (payload?.bookingId) {
+        router.push(`/appointments/${payload.bookingId}`);
+      }
+    },
+    [router],
+  );
+
+  // ── Cold-start: if the user tapped a notification to launch the app,
+  // getLastNotificationResponseAsync gives us the payload. Routes through the
+  // single deduped tap-handling path (same as the foreground listener).
   React.useEffect(() => {
     bootBreadcrumb("push:coldStartTap authed=" + isAuthed);
     if (!isAuthed) return;
@@ -201,10 +237,7 @@ export function usePushNotifications() {
     async function handleColdStartTap() {
       const last = await Notifications.getLastNotificationResponseAsync();
       if (cancelled || !last) return;
-      const payload = parsePayload(last.notification);
-      if (payload?.bookingId) {
-        router.push(`/appointments/${payload.bookingId}`);
-      }
+      await handleResponseOnce(last);
     }
 
     void handleColdStartTap();
@@ -223,10 +256,9 @@ export function usePushNotifications() {
     let sub: { remove: () => void } | null = null;
     try {
       sub = Notifications.addNotificationResponseReceivedListener((response) => {
-        const payload = parsePayload(response.notification);
-        if (payload?.bookingId) {
-          router.push(`/appointments/${payload.bookingId}`);
-        }
+        // Same deduped path — a tap that also launched the app (delivered to
+        // both cold-start and this listener) is processed exactly once.
+        void handleResponseOnce(response);
       });
     } catch (e) {
       try {

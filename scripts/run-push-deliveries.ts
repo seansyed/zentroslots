@@ -31,6 +31,7 @@ import { db } from "../db/client";
 import { pushDeliveries, pushTokens } from "../db/schema";
 import { withCronRun } from "../lib/cronObservability";
 import { sendExpoPushBatch, type ExpoPushMessage } from "../lib/push/sender";
+import { adminNotify } from "../lib/admin-notify";
 
 const MAX_ROWS_PER_RUN = 500; // safety ceiling
 const MAX_ATTEMPTS = 5;
@@ -109,6 +110,20 @@ async function runOnce(): Promise<{ processed: number; sent: number; failed: num
         sent++;
       } else {
         const nextAttempt = row.attemptCount + 1;
+
+        // Server-wide credential fault (bad/missing APNs or FCM key on Expo):
+        // alert ops ONCE per cooldown (fixed dedupe key collapses the whole
+        // batch into one alert) and fall through to the RETRY path below —
+        // never delete the token. A misconfig must not wipe the table.
+        if (result.credentialError) {
+          void adminNotify({
+            kind: "push_provider_error",
+            severity: "critical",
+            summary: "Push provider credential failure (APNs/FCM) — retrying, tokens preserved",
+            details: result.message.slice(0, 300),
+            dedupeKey: "push_provider_error::credentials",
+          }).catch(() => {});
+        }
 
         if (result.tokenInvalid) {
           // Permanent — drop the row + the dead token.
