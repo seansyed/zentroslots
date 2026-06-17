@@ -266,15 +266,18 @@ export default function NewAppointmentModal({
       return;
     }
 
-    const startIso = new Date(startAt).toISOString();
-
+    // Send the NAIVE wall-clock ("2026-06-20T15:00") as `startLocal`. The
+    // server interprets it in the BUSINESS timezone — so the booking means
+    // that clock time at the business regardless of this browser's tz.
+    // (Previously we did new Date(startAt).toISOString(), which baked in the
+    // operator's BROWSER tz — wrong for a cross-tz operator.)
     const payload =
       customerMode === "select"
         ? {
             customerId,
             serviceId,
             staffUserId,
-            startAt: startIso,
+            startLocal: startAt,
             notes: notes.trim() || undefined,
             internalNotes: internalNotes.trim() || undefined,
             sendConfirmation,
@@ -289,7 +292,7 @@ export default function NewAppointmentModal({
             },
             serviceId,
             staffUserId,
-            startAt: startIso,
+            startLocal: startAt,
             notes: notes.trim() || undefined,
             internalNotes: internalNotes.trim() || undefined,
             sendConfirmation,

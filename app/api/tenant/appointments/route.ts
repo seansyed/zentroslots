@@ -30,8 +30,11 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { and, eq, sql } from "drizzle-orm";
+import { fromZonedTime } from "date-fns-tz";
 
 import { db } from "@/db/client";
+import { getTenantTimezone } from "@/lib/tenant-timezone";
+import { buildBookingLabels } from "@/lib/appointment-labels";
 import {
   bookings,
   customers,
@@ -108,9 +111,17 @@ export async function POST(req: NextRequest) {
     await assertCanCreateBooking(session.tenantId);
 
     // ── Time window ─────────────────────────────────────────────
-    const startAt = new Date(body.startAt);
+    // The operator types a wall-clock time ("3 PM"). Interpret it in the
+    // BUSINESS timezone (server-authoritative) so it means 3 PM at the
+    // business regardless of the operator's browser tz — fixing cross-tz
+    // booking (e.g. a NY operator booking a CA business). Legacy callers may
+    // still send an ISO `startAt`; that's already an absolute instant.
+    const tenantTz = await getTenantTimezone(session.tenantId);
+    const startAt = body.startLocal
+      ? fromZonedTime(body.startLocal, tenantTz)
+      : new Date(body.startAt as string);
     if (Number.isNaN(startAt.getTime())) {
-      throw new HttpError(400, "Invalid startAt");
+      throw new HttpError(400, "Invalid start time");
     }
     const endAt = new Date(startAt.getTime() + service.durationMinutes * 60_000);
 
@@ -311,7 +322,12 @@ export async function POST(req: NextRequest) {
       ipAddress: ip === "anon" ? null : ip,
     });
 
-    return NextResponse.json(row);
+    // Return business-tz display labels alongside the raw instants so the
+    // creating surface shows the time in the business zone immediately.
+    return NextResponse.json({
+      ...row,
+      ...buildBookingLabels(row.startAt, row.endAt, tenantTz),
+    });
   } catch (err) {
     return errorResponse(err);
   }

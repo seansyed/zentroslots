@@ -22,6 +22,7 @@ import { db } from "@/db/client";
 import { bookings, customers, services, users } from "@/db/schema";
 import { errorResponse, HttpError, isManagerial, requireUser } from "@/lib/auth";
 import { buildBookingLabels } from "@/lib/appointment-labels";
+import { getTenantTimezone } from "@/lib/tenant-timezone";
 
 export const dynamic = "force-dynamic";
 
@@ -114,9 +115,9 @@ export async function GET(
         name: booking.staffName ?? "Staff",
         email: booking.staffEmail ?? null,
       },
-      // Viewer-tz display labels (matches the web dashboard); mobile renders
-      // these verbatim instead of formatting an IANA zone on-device.
-      ...buildBookingLabels(booking.startAt, booking.endAt, caller.timezone),
+      // Business-tz display labels (canonical, reliable); mobile renders these
+      // verbatim instead of formatting an IANA zone on-device.
+      ...buildBookingLabels(booking.startAt, booking.endAt, await getTenantTimezone(caller.tenantId)),
     });
   } catch (err) {
     return errorResponse(err);

@@ -6,6 +6,7 @@ import { db } from "@/db/client";
 import { bookings, customers, services, users } from "@/db/schema";
 import { errorResponse, HttpError, requireUser } from "@/lib/auth";
 import { buildBookingLabels } from "@/lib/appointment-labels";
+import { getTenantTimezone } from "@/lib/tenant-timezone";
 
 const patchSchema = z.object({
   name: z.string().min(1).max(120).optional(),
@@ -77,11 +78,12 @@ export async function GET(
       .orderBy(desc(bookings.startAt))
       .limit(100);
 
-    // Viewer-tz display labels per history row (matches the dashboard + mobile
-    // appointment rule) so mobile renders correct times without IANA formatting.
+    // Business-tz display labels per history row (canonical, reliable) so
+    // mobile renders correct times without IANA formatting.
+    const historyTz = await getTenantTimezone(caller.tenantId);
     const labeledHistory = history.map((h) => ({
       ...h,
-      ...buildBookingLabels(h.startAt, h.endAt, caller.timezone),
+      ...buildBookingLabels(h.startAt, h.endAt, historyTz),
     }));
 
     return NextResponse.json({ customer, history: labeledHistory });

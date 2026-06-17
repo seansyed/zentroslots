@@ -41,7 +41,10 @@ export async function POST(req: NextRequest) {
 
       const [tenant] = await db
         .insert(tenants)
-        .values({ name: workspaceName, slug, plan: "free", active: true })
+        // Seed the canonical business timezone from the owner's browser tz so
+        // operator booking times are interpreted + displayed in the business's
+        // zone from day one (not the UTC default). See lib/tenant-timezone.ts.
+        .values({ name: workspaceName, slug, plan: "free", active: true, timezone: body.timezone })
         .returning();
       tenantId = tenant.id;
 

@@ -30,6 +30,7 @@ import {
 } from "@/lib/billing/tenantVaultBooking";
 import { persistIntakeResponses } from "@/lib/intake/persistResponses";
 import { buildBookingLabels } from "@/lib/appointment-labels";
+import { getTenantTimezone } from "@/lib/tenant-timezone";
 
 // List bookings — strictly scoped to the caller's tenant.
 // Staff see their own, admins see the whole tenant.
@@ -106,16 +107,13 @@ export async function GET(req: NextRequest) {
     const page = hasMore ? rows.slice(0, limit) : rows;
     const nextCursor = hasMore ? page[page.length - 1].startAt.toISOString() : null;
 
-    // Attach viewer-tz display labels (same rule as the web dashboard) so mobile
-    // never formats an IANA zone on-device. Additive — startAt/endAt unchanged.
-    const viewer = await db.query.users.findFirst({
-      where: eq(users.id, session.sub),
-      columns: { timezone: true },
-    });
-    const viewerTz = viewer?.timezone ?? "UTC";
+    // Attach BUSINESS-tz display labels so mobile never formats an IANA zone
+    // on-device. The business tz is the canonical, reliable source (a user's
+    // profile tz can be the UTC default). Additive — startAt/endAt unchanged.
+    const displayTz = await getTenantTimezone(session.tenantId);
     const labeledRows = page.map((r) => ({
       ...r,
-      ...buildBookingLabels(r.startAt, r.endAt, viewerTz),
+      ...buildBookingLabels(r.startAt, r.endAt, displayTz),
     }));
 
     return NextResponse.json({ rows: labeledRows, nextCursor });
@@ -826,15 +824,10 @@ export async function POST(req: NextRequest) {
       event: "booking_created",
     });
 
-    // Viewer-tz display labels for the mobile success screen (operator session).
-    // Public web callers ignore the additive fields. Falls back to staff tz/UTC.
-    const createViewer = session
-      ? await db.query.users.findFirst({
-          where: eq(users.id, session.sub),
-          columns: { timezone: true },
-        })
-      : null;
-    const createTz = createViewer?.timezone ?? staff.timezone ?? "UTC";
+    // Business-tz display labels for the mobile success screen (operator) and
+    // ignored by public web callers. Canonical business tz (not the viewer's
+    // possibly-UTC profile tz).
+    const createTz = await getTenantTimezone(row.tenantId);
     return NextResponse.json({
       ...row,
       ...buildBookingLabels(row.startAt, row.endAt, createTz),

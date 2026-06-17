@@ -46,6 +46,13 @@ export const tenants = pgTable(
     plan: varchar("plan", { length: 40 }).notNull().default("free"),
     active: boolean("active").notNull().default(true),
 
+    // Canonical BUSINESS timezone (IANA). Set at signup from the owner's
+    // browser tz. This is the source of truth for (a) interpreting operator-
+    // entered booking wall-clock times and (b) displaying booking times on
+    // operator surfaces (web + mobile). Defaults to UTC only until onboarding
+    // resolves it. See lib/tenant-timezone.ts (getTenantTimezone).
+    timezone: varchar("timezone", { length: 64 }).notNull().default("UTC"),
+
     // Billing
     stripeCustomerId: varchar("stripe_customer_id", { length: 120 }),
     stripeSubscriptionId: varchar("stripe_subscription_id", { length: 120 }),

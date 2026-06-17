@@ -95,7 +95,16 @@ export const createAppointmentSchema = z
 
     serviceId: z.string().uuid(),
     staffUserId: z.string().uuid(),     // admin/manager pick a real staff
-    startAt: z.string().datetime(),     // ISO UTC string
+    // Operator-entered booking time. Preferred: `startLocal`, a NAIVE
+    // wall-clock ("YYYY-MM-DDTHH:mm[:ss]") that the route interprets in the
+    // BUSINESS timezone server-side — so "3 PM" means 3 PM at the business,
+    // regardless of the operator's browser tz. `startAt` (ISO UTC) is kept for
+    // backward compatibility; exactly one must be provided.
+    startLocal: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/, "Invalid local datetime")
+      .optional(),
+    startAt: z.string().datetime().optional(), // ISO UTC (legacy)
 
     notes: z.string().max(2000).optional(),
     internalNotes: z.string().max(2000).optional(),
@@ -119,6 +128,10 @@ export const createAppointmentSchema = z
   .refine((v) => Boolean(v.customerId) !== Boolean(v.customer), {
     message: "Provide exactly one of customerId or customer",
     path: ["customer"],
+  })
+  .refine((v) => Boolean(v.startLocal) || Boolean(v.startAt), {
+    message: "Provide a start time",
+    path: ["startLocal"],
   });
 
 // ─── Phase 17I — calendar_events (blocked time + internal meeting) ────

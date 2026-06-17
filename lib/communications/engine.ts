@@ -38,6 +38,7 @@ import {
   users,
 } from "@/db/schema";
 import { signBookingToken } from "@/lib/tokens";
+import { preferTimezone } from "@/lib/tenant-timezone";
 import { sendEmail, type BookingForEmail } from "@/lib/email";
 // Phase ICAL-1 — swapped from buildIcs (lib/ics.ts) to the universal
 // generator. buildIcs still exists as a deprecated re-export shim
@@ -265,7 +266,10 @@ export async function triggerAutomation(args: TriggerArgs): Promise<TriggerResul
       signBookingToken({ bookingId: booking.id, tenantId: args.tenantId, kind: "cancel" }),
       signBookingToken({ bookingId: booking.id, tenantId: args.tenantId, kind: "reschedule" }),
     ]);
-    const tz = staff.timezone ?? "UTC";
+    // Customer-facing labels (email + ICS) render in the canonical BUSINESS
+    // timezone, preferring the tenant's tz and falling back to the staff's —
+    // never the silent "UTC" that made a 3 PM PDT booking read as 10 PM.
+    const tz = preferTimezone(tenant?.timezone, staff.timezone);
 
     const payload: BookingForEmail = {
       id: booking.id,
@@ -337,7 +341,9 @@ export async function triggerAutomation(args: TriggerArgs): Promise<TriggerResul
             updatedAt: booking.updatedAt,
           },
           service: { name: service.name },
-          staff: { email: staff.email, name: staff.name, timezone: staff.timezone },
+          // Event tz = the business tz (same as the email labels) so the .ics
+          // local time matches; VTIMEZONE keeps the instant unambiguous.
+          staff: { email: staff.email, name: staff.name, timezone: tz },
           tenant: { name: tenant.name },
           method: args.eventType === "appointment.cancelled" ? "CANCEL" : "REQUEST",
           alarms: [{ minutesBefore: 1440 }, { minutesBefore: 15 }],

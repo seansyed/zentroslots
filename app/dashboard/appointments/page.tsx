@@ -4,6 +4,7 @@ import { and, desc, eq, gte, inArray, lt, or, sql } from "drizzle-orm";
 import { db } from "@/db/client";
 import { bookings, calendarEvents, groupSessions, services, tenants, users } from "@/db/schema";
 import { getSession, isManagerial } from "@/lib/auth";
+import { getTenantTimezone } from "@/lib/tenant-timezone";
 import { loadTenantFeatures } from "@/lib/features";
 import { effectivePermissions } from "@/lib/security/permissions";
 import Shell from "@/components/dashboard/Shell";
@@ -22,6 +23,10 @@ export default async function AppointmentsPage(props: {
   const user = await db.query.users.findFirst({ where: eq(users.id, session.sub) });
   if (!user) redirect("/dashboard/login");
   const tenant = await db.query.tenants.findFirst({ where: eq(tenants.id, user.tenantId) });
+  // Display booking times in the canonical BUSINESS timezone (reliable even
+  // when a user's profile tz is the UTC default) — the same value the mobile
+  // booking endpoints use, so web + mobile match.
+  const displayTz = await getTenantTimezone(user.tenantId);
 
   const sp = await props.searchParams;
   const status = sp.status ?? "";
