@@ -41,6 +41,11 @@ import {
   type TelemetryEvent,
   type TelemetryKind,
 } from "@/lib/telemetry";
+import {
+  getPushDiagnostics,
+  subscribePushDiagnostics,
+  summarizePush,
+} from "@/lib/pushDiagnostics";
 import { useHealth } from "@/hooks/useHealth";
 import { useNetworkStore } from "@/store/networkStore";
 import { colors, layout, radius, shadows, spacing } from "@/theme";
@@ -236,6 +241,11 @@ export default function DiagnosticsScreen() {
               void healthQ.refetch();
             }}
           />
+        </SectionFade>
+
+        {/* ── Push status ──────────────────────────────────────── */}
+        <SectionFade delay={60} style={{ marginTop: spacing.md }}>
+          <PushStatusCard />
         </SectionFade>
 
         {/* ── Counts strip ─────────────────────────────────────── */}
@@ -534,6 +544,99 @@ function BackendHealthCard({ loading, error, data, onRefresh }: BackendHealthPro
             </AppText>
           </View>
         ))}
+      </View>
+    </Card>
+  );
+}
+
+/**
+ * PushStatusCard — at-a-glance Expo push registration health, so an
+ * operator can tell WITHOUT adb whether push can work: Firebase initialized,
+ * token generated, token uploaded, push available. Fed by the in-memory
+ * snapshot the push hook records at each stage (lib/pushDiagnostics).
+ */
+function PushStatusCard() {
+  const [, setTick] = React.useState(0);
+  React.useEffect(() => subscribePushDiagnostics(() => setTick((t) => t + 1)), []);
+  const d = getPushDiagnostics();
+
+  const rows: { label: string; value: boolean | null }[] = [
+    { label: "Firebase initialized", value: d.firebaseAvailable },
+    { label: "Token generated", value: d.tokenObtained },
+    { label: "Token uploaded", value: d.tokenUploaded },
+    { label: "Push available", value: d.pushAvailable },
+  ];
+
+  return (
+    <Card style={styles.healthCard}>
+      <View style={styles.healthHeader}>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <AppText variant="eyebrow" color="muted">Push</AppText>
+          <AppText
+            variant="micro"
+            color="subtle"
+            style={{ marginTop: 2, letterSpacing: 0.3 }}
+            numberOfLines={2}
+          >
+            {summarizePush(d)}
+          </AppText>
+        </View>
+        <Pill tone={d.pushAvailable ? "success" : d.stage === "idle" ? "neutral" : "warning"}>
+          {d.pushAvailable ? "Ready" : d.stage === "idle" ? "Idle" : "Not ready"}
+        </Pill>
+      </View>
+
+      <View style={styles.healthChecks}>
+        {rows.map((r) => (
+          <View key={r.label} style={styles.healthCheckRow}>
+            <Ionicons
+              name={
+                r.value === true
+                  ? "checkmark-circle"
+                  : r.value === false
+                    ? "alert-circle"
+                    : "ellipse-outline"
+              }
+              size={14}
+              color={
+                r.value === true
+                  ? colors.success
+                  : r.value === false
+                    ? colors.dangerInk
+                    : colors.inkSubtle
+              }
+            />
+            <AppText
+              variant="small"
+              color={r.value ? "muted" : undefined}
+              style={[styles.healthCheckLabel, r.value === false && { color: colors.dangerInk }]}
+              numberOfLines={1}
+            >
+              {r.label}
+            </AppText>
+            <AppText variant="micro" color="subtle" style={{ letterSpacing: 0.3 }}>
+              {r.value === true ? "yes" : r.value === false ? "no" : "—"}
+            </AppText>
+          </View>
+        ))}
+        {d.projectId ? (
+          <View style={styles.healthCheckRow}>
+            <Ionicons name="key-outline" size={14} color={colors.inkSubtle} />
+            <AppText variant="small" color="muted" style={styles.healthCheckLabel} numberOfLines={1}>
+              projectId
+            </AppText>
+            <AppText variant="micro" color="subtle" numberOfLines={1} style={{ maxWidth: 130 }}>
+              {d.projectId.slice(0, 8)}…
+            </AppText>
+          </View>
+        ) : null}
+        {d.lastError ? (
+          <View style={styles.detailBlock}>
+            <AppText variant="micro" style={styles.detailMono} selectable>
+              {(d.lastErrorStage ?? "error") + ": " + d.lastError}
+            </AppText>
+          </View>
+        ) : null}
       </View>
     </Card>
   );
