@@ -68,6 +68,7 @@ export type AutomationEvent =
   | "appointment.cancelled"
   | "appointment.rescheduled"
   | "appointment.reminder_24h"
+  | "appointment.reminder_2h"
   | "appointment.reminder_1h"
   | "appointment.completed"
   | "appointment.no_show"
@@ -162,6 +163,7 @@ export async function triggerAutomation(args: TriggerArgs): Promise<TriggerResul
       }
       if (
         (args.eventType === "appointment.reminder_24h" ||
+          args.eventType === "appointment.reminder_2h" ||
           args.eventType === "appointment.reminder_1h") &&
         !features.reminders
       ) {
@@ -399,6 +401,7 @@ function eventToTemplateType(e: AutomationEvent): TemplateType {
     case "appointment.cancelled":      return "booking_cancelled";
     case "appointment.rescheduled":    return "booking_rescheduled";
     case "appointment.reminder_24h":   return "reminder_24h";
+    case "appointment.reminder_2h":    return "reminder_2h";
     case "appointment.reminder_1h":    return "reminder_1h";
     case "appointment.completed":      return "appointment_completed";
     case "appointment.no_show":        return "appointment_no_show";
@@ -414,6 +417,7 @@ function eventToSchedulingEmailKind(e: AutomationEvent): SchedulingEmailKind {
     case "appointment.cancelled":      return "appointment_cancelled";
     case "appointment.rescheduled":    return "appointment_rescheduled";
     case "appointment.reminder_24h":   return "appointment_reminder_24h";
+    case "appointment.reminder_2h":    return "appointment_reminder_2h";
     case "appointment.reminder_1h":    return "appointment_reminder_1h";
     case "appointment.completed":      return "appointment_completed";
     case "appointment.no_show":        return "appointment_no_show";

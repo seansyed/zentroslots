@@ -32,11 +32,13 @@ async function processWindow(
   label: string,
   lo: Date,
   hi: Date,
-  flag: "reminder24hSentAt" | "reminder1hSentAt",
-  windowHours: 24 | 1
+  flag: "reminder24hSentAt" | "reminder2hSentAt" | "reminder1hSentAt",
+  windowHours: 24 | 2 | 1
 ) {
   const reminderField =
-    flag === "reminder24hSentAt" ? bookings.reminder24hSentAt : bookings.reminder1hSentAt;
+    flag === "reminder24hSentAt" ? bookings.reminder24hSentAt :
+    flag === "reminder2hSentAt" ? bookings.reminder2hSentAt :
+    bookings.reminder1hSentAt;
 
   const due = await db
     .select({
@@ -60,7 +62,9 @@ async function processWindow(
   console.log(`[reminders:${label}] processing ${due.length} booking(s)`);
 
   const eventType: AutomationEvent =
-    windowHours === 24 ? "appointment.reminder_24h" : "appointment.reminder_1h";
+    windowHours === 24 ? "appointment.reminder_24h" :
+    windowHours === 2 ? "appointment.reminder_2h" :
+    "appointment.reminder_1h";
 
   for (const b of due) {
     // Atomically CLAIM this reminder BEFORE sending. The flag IS the claim:
@@ -153,6 +157,10 @@ async function main() {
   const m = (mins: number) => new Date(now.getTime() + mins * 60_000);
 
   await processWindow("24 hours away", m(24 * 60 - WINDOW_MIN), m(24 * 60 + WINDOW_MIN), "reminder24hSentAt", 24);
+  // 2h window [90,150) min and 1h window [30,90) min are adjacent — no overlap
+  // (each gte(lo)/lt(hi)), and each has its own *SentAt claim flag, so a booking
+  // gets the 2h then the 1h reminder exactly once each.
+  await processWindow("2 hours away",  m(2 * 60 - WINDOW_MIN),   m(2 * 60 + WINDOW_MIN),   "reminder2hSentAt",  2);
   await processWindow("1 hour away",   m(60 - WINDOW_MIN),       m(60 + WINDOW_MIN),       "reminder1hSentAt",  1);
   console.log("[reminders] done");
 }

@@ -17,6 +17,8 @@ import { onBookingCreated } from "@/lib/calendar/sync";
 import { triggerAutomation } from "@/lib/communications/engine";
 import { upsertCustomer } from "@/lib/customers";
 import { loadTenantFeatures } from "@/lib/features";
+import { notify } from "@/lib/notify";
+import { enqueueBookingPush } from "@/lib/push/enqueue";
 
 export async function runPostConfirmationHooks(args: {
   bookingId: string;
@@ -93,6 +95,32 @@ export async function runPostConfirmationHooks(args: {
   } catch (err) {
     console.error("[post-hooks] confirmation automation failed:", err);
   }
+
+  // ── Staff awareness — parity with the free-booking path ──────
+  // A PAID booking confirmed via webhook must produce the SAME staff signals
+  // as a free booking (which fires these inline in POST /api/bookings). This
+  // hook runs ONLY on the paid/webhook path (the free path does its own inline
+  // notify+push), so there is no double-send. Both are best-effort.
+  try {
+    notify({
+      tenantId: args.tenantId,
+      userId: staff.id,
+      kind: "booking.created",
+      title: `New booking: ${row.clientName}`,
+      body: `${service.name} on ${row.startAt.toISOString()}`,
+      link: "/dashboard/appointments",
+      metadata: { bookingId: row.id, clientEmail: row.clientEmail },
+    });
+  } catch (err) {
+    console.error("[post-hooks] staff in-app notify failed:", err);
+  }
+  // enqueueBookingPush never throws (returns {enqueued}); fire-and-forget.
+  void enqueueBookingPush({
+    tenantId: args.tenantId,
+    booking: row,
+    serviceName: service.name,
+    event: "booking_created",
+  });
 
   // ── Customer upsert ──────────────────────────────────────────
   try {

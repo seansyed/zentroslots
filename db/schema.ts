@@ -434,6 +434,7 @@ export const bookings = pgTable(
     assignmentMode: varchar("assignment_mode", { length: 20 }).notNull().default("direct"),
 
     reminder24hSentAt: timestamp("reminder_24h_sent_at", { withTimezone: true }),
+    reminder2hSentAt: timestamp("reminder_2h_sent_at", { withTimezone: true }),
     reminder1hSentAt: timestamp("reminder_1h_sent_at", { withTimezone: true }),
 
     // Back-pointers when this booking was materialized from a series.

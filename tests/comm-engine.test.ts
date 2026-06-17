@@ -144,6 +144,15 @@ describe("template resolver — system fallback", () => {
     }
   });
 
+  it("reminder_2h renders a distinct 2-hour label (not the 24h/1h copy)", () => {
+    const two = systemFallbackFor("reminder_2h", samplePayload());
+    const blob = `${two.subject} ${two.text} ${two.html}`;
+    assert.ok(/2 hours away/.test(blob), "2h reminder should carry the '2 hours away' label");
+    // Guard against a copy-paste of the adjacent windows' wording.
+    assert.ok(!/24 hours away/.test(blob), "2h reminder must not say '24 hours away'");
+    assert.ok(!/1 hour away/.test(blob), "2h reminder must not say '1 hour away'");
+  });
+
   it("each system default subject mentions either the service or the business name", () => {
     // The post-completion templates (review_request, followup,
     // appointment_completed, appointment_no_show) deliberately lead

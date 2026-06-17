@@ -18,6 +18,7 @@ export type TemplateType =
   | "booking_cancelled"
   | "booking_rescheduled"
   | "reminder_24h"
+  | "reminder_2h"
   | "reminder_1h"
   | "appointment_completed"
   | "appointment_no_show"
@@ -30,6 +31,7 @@ export const TEMPLATE_TYPES: readonly TemplateType[] = [
   "booking_cancelled",
   "booking_rescheduled",
   "reminder_24h",
+  "reminder_2h",
   "reminder_1h",
   "appointment_completed",
   "appointment_no_show",
@@ -68,6 +70,9 @@ export function systemFallbackFor(
       break;
     case "reminder_24h":
       out = renderReminder(payload, "24 hours away");
+      break;
+    case "reminder_2h":
+      out = renderReminder(payload, "2 hours away");
       break;
     case "reminder_1h":
       out = renderReminder(payload, "1 hour away");

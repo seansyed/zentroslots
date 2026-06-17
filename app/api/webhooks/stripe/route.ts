@@ -15,6 +15,7 @@ import { runPostConfirmationHooks } from "@/lib/billing/postBookingHooks";
 import { tryClaimStripeEvent } from "@/lib/billing/webhookIdempotency";
 import { applyTenantBillingMutation } from "@/lib/billing/planTransitions";
 import { adminNotify } from "@/lib/admin-notify";
+import { PLAN_RANK, type PlanId } from "@/lib/plans";
 
 // Use Node runtime so we can read the raw body for signature verification.
 export const runtime = "nodejs";
@@ -288,7 +289,10 @@ export async function POST(req: NextRequest) {
         // miss and the next event will retry.
         const tenantRow = await db.query.tenants.findFirst({
           where: eq(tenants.stripeCustomerId, customerId),
-          columns: { id: true },
+          // currentPlan = the tenant's PRE-mutation plan (read before
+          // applyTenantBillingMutation), needed to classify the change as
+          // an upgrade vs downgrade below.
+          columns: { id: true, currentPlan: true },
         });
         if (!tenantRow) {
           console.warn(`[stripe-webhook] ${event.type} for customer ${customerId} — no tenant match yet; deferring`);
@@ -351,6 +355,36 @@ export async function POST(req: NextRequest) {
               tenantId: tenantRow.id,
               dedupeKey: `trial_started::${event.id}`,
               metadata: { plan: planLabel, trialEnd: trialEnd.toISOString() },
+            });
+          }
+        } else if (event.type === "customer.subscription.updated") {
+          // Owner upgrade/downgrade email. Compare the tenant's PRE-mutation
+          // plan rank (tenantRow was read above, before
+          // applyTenantBillingMutation) against the NEW plan's rank. Fire
+          // ONLY when both plans resolve to a known tier AND the rank actually
+          // changed — status-only updates (trialing→active, renewals, payment
+          // method swaps, quantity changes) keep the same plan and must NOT
+          // alert. dedupeKey is keyed by the stripe event id so a redelivered
+          // event never double-emails (the upstream idempotency claim already
+          // short-circuits; this is defense in depth).
+          const rankOf = (p: string | null | undefined): number | null =>
+            p && p in PLAN_RANK ? PLAN_RANK[p as PlanId] : null;
+          const oldRank = rankOf(tenantRow.currentPlan);
+          const newRank = rankOf(planLabel);
+          if (oldRank !== null && newRank !== null && newRank !== oldRank) {
+            const isUpgrade = newRank > oldRank;
+            void adminNotify({
+              kind: isUpgrade ? "plan_upgrade" : "plan_downgrade",
+              severity: "info",
+              summary: `Plan ${isUpgrade ? "upgrade" : "downgrade"}: ${tenantRow.currentPlan} → ${planLabel}`,
+              tenantId: tenantRow.id,
+              dedupeKey: `${isUpgrade ? "plan_upgrade" : "plan_downgrade"}::${event.id}`,
+              metadata: {
+                from: tenantRow.currentPlan,
+                to: planLabel,
+                subscriptionStatus: sub.status,
+                priceId,
+              },
             });
           }
         }

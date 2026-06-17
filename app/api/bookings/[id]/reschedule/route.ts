@@ -90,6 +90,7 @@ export async function POST(
             endAt: newEnd,
             status: "confirmed",
             reminder24hSentAt: null,
+            reminder2hSentAt: null,
             reminder1hSentAt: null,
             updatedAt: new Date(),
           })

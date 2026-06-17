@@ -136,6 +136,7 @@ export async function performReschedule(args: RescheduleArgs): Promise<Reschedul
           // Clear reminder marks so the cron resends 24h/1h reminders
           // relative to the NEW time. Prevents orphaned reminders.
           reminder24hSentAt: null,
+          reminder2hSentAt: null,
           reminder1hSentAt: null,
           updatedAt: new Date(),
         })

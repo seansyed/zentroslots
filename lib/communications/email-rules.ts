@@ -29,6 +29,7 @@ export type SchedulingEmailKind =
   | "appointment_cancelled"
   | "appointment_rescheduled"
   | "appointment_reminder_24h"
+  | "appointment_reminder_2h"
   | "appointment_reminder_1h"
   | "appointment_completed"
   | "appointment_no_show"
@@ -81,6 +82,12 @@ export function decideSchedulingEmail(
     case "appointment_reminder_24h":
       if (!prefs.reminder24hEnabled) return { allowed: false, reason: "reminder24h_disabled" };
       break;
+    case "appointment_reminder_2h":
+      // No dedicated per-window pref exists; the 2h reminder is a near-term
+      // ping, so it follows the existing 1h opt-out (a customer who silenced
+      // last-minute reminders also silences this one). No schema/UI change.
+      if (!prefs.reminder1hEnabled) return { allowed: false, reason: "reminder1h_disabled" };
+      break;
     case "appointment_reminder_1h":
       if (!prefs.reminder1hEnabled) return { allowed: false, reason: "reminder1h_disabled" };
       break;
@@ -109,8 +116,10 @@ export function decideSchedulingEmail(
  * to construct a kind string. Mirrors the previous lib/client-prefs.ts
  * helper for source compatibility.
  */
-export function isReminderAllowed(prefs: ClientCommPrefs, windowHours: 24 | 1): boolean {
+export function isReminderAllowed(prefs: ClientCommPrefs, windowHours: 24 | 2 | 1): boolean {
   const kind: SchedulingEmailKind =
-    windowHours === 24 ? "appointment_reminder_24h" : "appointment_reminder_1h";
+    windowHours === 24 ? "appointment_reminder_24h" :
+    windowHours === 2 ? "appointment_reminder_2h" :
+    "appointment_reminder_1h";
   return decideSchedulingEmail(prefs, kind).allowed;
 }

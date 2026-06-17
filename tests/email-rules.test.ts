@@ -22,6 +22,7 @@ const KINDS: SchedulingEmailKind[] = [
   "appointment_cancelled",
   "appointment_rescheduled",
   "appointment_reminder_24h",
+  "appointment_reminder_2h",
   "appointment_reminder_1h",
 ];
 
@@ -83,6 +84,20 @@ describe("decideSchedulingEmail — per-reminder toggles", () => {
     if (!d.allowed) assert.equal(d.reason, "reminder1h_disabled");
   });
 
+  it("2h reminder follows the 1h opt-out (no dedicated 2h toggle)", () => {
+    // Disabling the near-term (1h) toggle also silences the 2h reminder,
+    // by design — both are last-minute pings sharing one opt-out.
+    const d = decideSchedulingEmail(prefs({ reminder1hEnabled: false }), "appointment_reminder_2h");
+    assert.equal(d.allowed, false);
+    if (!d.allowed) assert.equal(d.reason, "reminder1h_disabled");
+  });
+
+  it("2h reminder allowed by default and unaffected by the 24h toggle", () => {
+    assert.equal(decideSchedulingEmail(prefs(), "appointment_reminder_2h").allowed, true);
+    const only24Off = prefs({ reminder24hEnabled: false });
+    assert.equal(decideSchedulingEmail(only24Off, "appointment_reminder_2h").allowed, true);
+  });
+
   it("disabling 24h does NOT affect 1h (and vice-versa)", () => {
     const only24Off = prefs({ reminder24hEnabled: false });
     assert.equal(decideSchedulingEmail(only24Off, "appointment_reminder_1h").allowed, true);
@@ -126,16 +141,25 @@ describe("decideSchedulingEmail — transactional kinds bypass per-event toggles
 });
 
 describe("isReminderAllowed (convenience wrapper)", () => {
-  it("agrees with decideSchedulingEmail for both windows", () => {
+  it("agrees with decideSchedulingEmail for all three windows", () => {
     const p1 = prefs({ reminder24hEnabled: false });
     assert.equal(isReminderAllowed(p1, 24), false);
+    assert.equal(isReminderAllowed(p1, 2), true);
     assert.equal(isReminderAllowed(p1, 1), true);
 
     const p2 = prefs({ emailEnabled: false });
     assert.equal(isReminderAllowed(p2, 24), false);
+    assert.equal(isReminderAllowed(p2, 2), false);
     assert.equal(isReminderAllowed(p2, 1), false);
 
+    // The 2h window shares the 1h opt-out (no dedicated 2h toggle).
+    const p3 = prefs({ reminder1hEnabled: false });
+    assert.equal(isReminderAllowed(p3, 2), false);
+    assert.equal(isReminderAllowed(p3, 1), false);
+    assert.equal(isReminderAllowed(p3, 24), true);
+
     assert.equal(isReminderAllowed(prefs(), 24), true);
+    assert.equal(isReminderAllowed(prefs(), 2), true);
     assert.equal(isReminderAllowed(prefs(), 1), true);
   });
 });
