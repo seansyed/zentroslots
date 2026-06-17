@@ -13,6 +13,7 @@
 import { apiGet, apiPatch, apiPost } from "./client";
 import { absolutizeUrl } from "@/lib/url";
 import { env } from "@/lib/env";
+import { deriveStatsFromHistory } from "@/lib/customerStats";
 
 export type CustomerStatus = "active" | "vip" | "archived" | "prospect";
 
@@ -148,19 +149,24 @@ export const customersApi = {
           history: CustomerHistoryItem[] | null;
         };
     const raw = await apiGet<Wire>(`/api/customers/${id}`);
-    // Wrapped shape: { customer, history } → flatten.
+    // Wrapped shape: { customer, history } → flatten. Derived stats are spread
+    // LAST so they override the raw row's missing/zero aggregates.
     if (raw && typeof raw === "object" && "customer" in raw && raw.customer) {
+      const history = Array.isArray(raw.history) ? raw.history : [];
       return {
         ...withImageUrl(raw.customer),
-        bookingHistory: Array.isArray(raw.history) ? raw.history : [],
+        bookingHistory: history,
+        ...deriveStatsFromHistory(history),
       };
     }
     // Already flat — pass through, but make sure bookingHistory is an
     // array so the screen never needs to check.
     const flat = raw as CustomerDetail;
+    const history = Array.isArray(flat.bookingHistory) ? flat.bookingHistory : [];
     return {
       ...withImageUrl(flat),
-      bookingHistory: Array.isArray(flat.bookingHistory) ? flat.bookingHistory : [],
+      bookingHistory: history,
+      ...deriveStatsFromHistory(history),
     };
   },
 };

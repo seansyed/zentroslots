@@ -34,6 +34,7 @@ import { Input } from "@/components/ui/Input";
 import { ScreenContainer } from "@/components/ui/ScreenContainer";
 import { AppText } from "@/components/ui/Text";
 import { useAuth } from "@/hooks/useAuth";
+import { authApi } from "@/api/auth";
 import { consumeSessionExpired } from "@/store/authStore";
 import { colors, layout, spacing } from "@/theme";
 
@@ -47,6 +48,7 @@ export default function LoginScreen() {
   const [email, setEmail] = React.useState("");
   const [password, setPassword] = React.useState("");
   const [error, setError] = React.useState<string | null>(null);
+  const [notice, setNotice] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [oauthLoading, setOauthLoading] = React.useState<null | "google" | "microsoft">(null);
 
@@ -84,6 +86,36 @@ export default function LoginScreen() {
     }
   }
 
+  async function onForgot() {
+    if (!email.trim()) {
+      setError("Enter your email to reset your password.");
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
+      return;
+    }
+    setError(null);
+    setNotice(null);
+    setLoading(true);
+    try {
+      await authApi.forgotPassword(email.trim());
+      // Backend always returns 200 (no email enumeration), so we always show
+      // the same generic confirmation regardless of whether the account exists.
+      setNotice("If an account exists for that email, we've sent a password-reset link. Check your inbox.");
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+    } catch {
+      // Network/rate-limit failure — keep the message generic + non-leaky.
+      setError("Couldn't send the reset email right now. Please try again in a moment.");
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function toggleMode() {
+    setError(null);
+    setNotice(null);
+    setMode((m) => (m === "login" ? "forgot" : "login"));
+  }
+
   async function onOAuth(provider: "google" | "microsoft") {
     setError(null);
     setOauthLoading(provider);
@@ -118,8 +150,9 @@ export default function LoginScreen() {
 
       {/* Auth card */}
       <Card variant="elevated" style={styles.card} padding={spacing.xl}>
-        {/* SSO buttons — native only (see OAUTH_AVAILABLE comment above) */}
-        {OAUTH_AVAILABLE ? (
+        {/* SSO buttons — native only, and only in login mode (the reset flow
+            is email-only). */}
+        {mode === "login" && OAUTH_AVAILABLE ? (
           <>
             <Button
               label={oauthLoading === "google" ? "Opening Google…" : "Continue with Google"}
@@ -156,6 +189,11 @@ export default function LoginScreen() {
         ) : null}
 
         {/* Form */}
+        {mode === "forgot" ? (
+          <AppText variant="small" color="muted" style={styles.field}>
+            Enter your email and we&apos;ll send a link to reset your password.
+          </AppText>
+        ) : null}
         <Input
           label="Email"
           placeholder="you@company.com"
@@ -168,16 +206,27 @@ export default function LoginScreen() {
           onChangeText={setEmail}
           containerStyle={styles.field}
         />
-        <Input
-          label="Password"
-          placeholder="••••••••"
-          secureTextEntry
-          autoComplete="current-password"
-          textContentType="password"
-          value={password}
-          onChangeText={setPassword}
-          containerStyle={styles.field}
-        />
+        {mode === "login" ? (
+          <Input
+            label="Password"
+            placeholder="••••••••"
+            secureTextEntry
+            autoComplete="current-password"
+            textContentType="password"
+            value={password}
+            onChangeText={setPassword}
+            containerStyle={styles.field}
+          />
+        ) : null}
+
+        {notice ? (
+          <View style={styles.errorBox}>
+            <Ionicons name="checkmark-circle" size={16} color={colors.successInk} />
+            <AppText variant="small" style={{ color: colors.successInk, flex: 1 }}>
+              {notice}
+            </AppText>
+          </View>
+        ) : null}
 
         {error ? (
           <View style={styles.errorBox}>
@@ -189,13 +238,17 @@ export default function LoginScreen() {
         ) : null}
 
         <Button
-          label={loading ? "Signing in…" : "Sign in with email"}
+          label={
+            mode === "forgot"
+              ? loading ? "Sending…" : "Send reset link"
+              : loading ? "Signing in…" : "Sign in with email"
+          }
           variant="primary"
           size="lg"
           fullWidth
           loading={loading}
           disabled={loading || Boolean(oauthLoading)}
-          onPress={onSubmit}
+          onPress={mode === "forgot" ? onForgot : onSubmit}
           style={styles.submitBtn}
         />
 
@@ -204,7 +257,7 @@ export default function LoginScreen() {
             label={mode === "login" ? "Forgot password?" : "Back to sign in"}
             variant="ghost"
             size="sm"
-            onPress={() => setMode(mode === "login" ? "forgot" : "login")}
+            onPress={toggleMode}
           />
         </View>
       </Card>

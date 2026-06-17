@@ -89,8 +89,15 @@ export async function GET(req: NextRequest) {
         serviceId: bookings.serviceId,
         staffUserId: bookings.staffUserId,
         tenantId: bookings.tenantId,
+        // Additive: real service + staff names so list surfaces (mobile Home,
+        // appointments list, customer timeline) show them instead of generic
+        // placeholders. leftJoin keeps a booking with a deleted service/staff.
+        serviceName: services.name,
+        staffName: users.name,
       })
       .from(bookings)
+      .leftJoin(services, eq(services.id, bookings.serviceId))
+      .leftJoin(users, eq(users.id, bookings.staffUserId))
       .where(and(...conds))
       .orderBy(desc(bookings.startAt))
       .limit(limit + 1);

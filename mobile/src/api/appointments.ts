@@ -86,6 +86,8 @@ type WireBooking = {
   meetLink?: string | null;
   serviceId?: string | null;
   staffUserId?: string | null;
+  serviceName?: string | null;
+  staffName?: string | null;
   startLabel?: string | null;
   endLabel?: string | null;
   startDayLabel?: string | null;
@@ -97,9 +99,12 @@ function normalize(wire: WireBooking): Appointment {
   return {
     id: wire.id,
     serviceId: wire.serviceId ?? null,
-    serviceName: "Appointment",
+    // Real names from the list API (additive serviceName/staffName). Fall back
+    // to the generic label only when the wire genuinely omits them (e.g. a
+    // booking whose service/staff was deleted, or a pre-deploy backend).
+    serviceName: wire.serviceName ?? "Appointment",
     staffId: wire.staffUserId ?? null,
-    staffName: "Staff",
+    staffName: wire.staffName ?? "Staff",
     clientId: null,
     clientName: wire.clientName,
     clientEmail: wire.clientEmail,

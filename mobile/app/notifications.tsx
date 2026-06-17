@@ -22,6 +22,7 @@
 import * as React from "react";
 import { RefreshControl, StyleSheet, View } from "react-native";
 import { useRouter } from "expo-router";
+import { useQueryClient } from "@tanstack/react-query";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 
@@ -40,7 +41,8 @@ import { useNotifications } from "@/hooks/useNotifications";
 import { colors, layout, radius, spacing } from "@/theme";
 
 import type { Appointment } from "@/api/appointments";
-import type { NotificationRow } from "@/api/notifications";
+import { notificationsApi, type NotificationRow } from "@/api/notifications";
+import { queryKeys } from "@/lib/query";
 
 // ─── Shared item shape ────────────────────────────────────────────
 
@@ -53,11 +55,33 @@ type InboxItem = {
   rawDate: Date;
   unread: boolean;
   deepLink?: string;
+  /** Set ONLY for server-notification rows — the backend notification id,
+   *  used to mark it read on tap. Booking-derived rows leave this unset. */
+  markReadId?: string;
   /** When the row is sourced from a booking, expose the linked booking
    *  id + status so the row can render quick actions (e.g. Confirm). */
   bookingId?: string;
   bookingStatus?: Appointment["status"];
 };
+
+/** Translate a backend notification actionUrl (a WEB dashboard route like
+ *  "/dashboard/appointments") into a valid mobile route. Returns undefined
+ *  rather than ever navigating to a non-existent route. */
+function toMobileDeepLink(
+  actionUrl: string | null | undefined,
+  category: NotificationRow["category"],
+): string | undefined {
+  if (actionUrl) {
+    // Already a mobile route — trust it.
+    if (actionUrl.startsWith("/appointments/") || actionUrl.startsWith("/(tabs)")) return actionUrl;
+    if (actionUrl.includes("/appointments") || actionUrl.includes("/bookings")) return "/(tabs)/appointments";
+    if (actionUrl.includes("/customers")) return "/(tabs)/customers";
+    if (actionUrl.includes("/calendar")) return "/(tabs)/calendar";
+  }
+  // No usable url — route booking notifications to the appointments tab;
+  // otherwise don't navigate (better than a dead web route).
+  return category === "booking" ? "/(tabs)/appointments" : undefined;
+}
 
 function relativeTime(date: Date, now: Date): string {
   const ms = now.getTime() - date.getTime();
@@ -104,7 +128,8 @@ function fromNotification(n: NotificationRow): InboxItem {
     subtitle: n.body,
     rawDate: new Date(n.createdAt),
     unread: !n.readAt,
-    deepLink: n.actionUrl ?? undefined,
+    deepLink: toMobileDeepLink(n.actionUrl, n.category),
+    markReadId: n.id,
   };
 }
 
@@ -167,6 +192,7 @@ function group(items: InboxItem[], now: Date): {
 
 export default function NotificationsScreen() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const now = React.useMemo(() => new Date(), []);
   const notif = useNotifications();
   const appts = useAppointments({
@@ -198,6 +224,16 @@ export default function NotificationsScreen() {
 
   function onItemPress(item: InboxItem) {
     void Haptics.selectionAsync().catch(() => {});
+    // Mark a server notification read on tap (booking-derived rows have no
+    // markReadId). Best-effort + optimistic: invalidating ["notifications"]
+    // refetches the list AND the bell badge (["notifications","unread-count"]
+    // matches by prefix), so both update. Failure never blocks navigation.
+    if (item.markReadId && item.unread) {
+      void notificationsApi
+        .markRead(item.markReadId)
+        .then(() => queryClient.invalidateQueries({ queryKey: queryKeys.notifications }))
+        .catch(() => {});
+    }
     if (item.deepLink) {
       router.push(item.deepLink);
     }
