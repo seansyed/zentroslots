@@ -60,6 +60,25 @@ describe("preferTimezone / isRealTimezone — no silent UTC when a real zone exi
   });
 });
 
+describe("slot generation must use the BUSINESS tz, not UTC (the 4:30 PM regression)", () => {
+  // The bug: a UTC-profile operator booked via slots generated in UTC, so the
+  // "4:30 PM" they tapped stored as 16:30 UTC = 9:30 AM in the business (LA).
+  it("4:30 PM mistakenly generated in UTC stores 16:30 UTC → 9:30 AM in LA (the bug)", () => {
+    const wrong = fromZonedTime("2026-06-18T16:30", "UTC");
+    assert.equal(wrong.toISOString(), "2026-06-18T16:30:00.000Z");
+    assert.equal(buildBookingLabels(wrong, wrong, LA).startLabel, "9:30 AM");
+  });
+  it("4:30 PM generated in the business tz (LA) stores 23:30 UTC → 4:30 PM in LA (the fix)", () => {
+    const right = fromZonedTime("2026-06-18T16:30", LA);
+    assert.equal(right.toISOString(), "2026-06-18T23:30:00.000Z");
+    assert.equal(buildBookingLabels(right, right, LA).startLabel, "4:30 PM");
+  });
+  it("preferTimezone falls a UTC staff back to the business tz (slot working window)", () => {
+    assert.equal(preferTimezone("UTC", LA), LA); // staff UTC → business LA
+    assert.equal(preferTimezone(NY, LA), NY); // real staff tz wins (remote staff)
+  });
+});
+
 describe("display — stored instant renders back to the original wall-clock", () => {
   it("reproduces the bug: 22:00 UTC shown in UTC = 10:00 PM", () => {
     assert.equal(buildBookingLabels("2026-06-20T22:00:00Z", "2026-06-20T22:30:00Z", "UTC").startLabel, "10:00 PM");

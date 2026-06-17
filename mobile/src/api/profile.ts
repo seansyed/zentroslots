@@ -39,6 +39,10 @@ export type Profile = {
     slug: string;
     plan: string;
     active: boolean;
+    /** Canonical BUSINESS timezone (IANA). The tz an operator books in —
+     *  used for /api/slots requests + booking interpretation, NOT the user's
+     *  personal profile tz (which can be the UTC default). */
+    timezone: string;
     /** Tenant-configured brand logo (absolutized). Null = use platform logo. */
     logoUrl: string | null;
     /** Tenant brand color (hex). Null = platform default. */
@@ -63,6 +67,7 @@ type AuthMeResponse = {
     slug: string;
     plan: string;
     active?: boolean;
+    timezone?: string | null;
     logoUrl?: string | null;
     primaryColor?: string | null;
   } | null;
@@ -90,6 +95,7 @@ function normalize(raw: AuthMeResponse): Profile {
           slug: raw.tenant.slug,
           plan: raw.tenant.plan,
           active: raw.tenant.active ?? true,
+          timezone: raw.tenant.timezone || "UTC",
           logoUrl: toAbsoluteImageUrl(raw.tenant.logoUrl),
           primaryColor: raw.tenant.primaryColor ?? null,
         }

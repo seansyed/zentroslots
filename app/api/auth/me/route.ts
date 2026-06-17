@@ -42,6 +42,11 @@ export async function GET() {
             slug: tenant.slug,
             plan: tenant.plan,
             active: tenant.active,
+            // Canonical BUSINESS timezone — mobile uses this (NOT the user's
+            // personal profile tz) to request slots + interpret booking times,
+            // so an operator books in the business's zone regardless of their
+            // own profile/device tz. See lib/tenant-timezone.ts.
+            timezone: tenant.timezone,
             // Additive (mobile branding): tenant-configured logo + brand
             // color. Relative logoUrl is absolutized client-side. Web
             // ignores unknown fields, so this is backward-compatible.
@@ -140,6 +145,11 @@ export async function PATCH(req: NextRequest) {
             slug: tenant.slug,
             plan: tenant.plan,
             active: tenant.active,
+            // Canonical BUSINESS timezone — mobile uses this (NOT the user's
+            // personal profile tz) to request slots + interpret booking times,
+            // so an operator books in the business's zone regardless of their
+            // own profile/device tz. See lib/tenant-timezone.ts.
+            timezone: tenant.timezone,
             // Additive (mobile branding): tenant-configured logo + brand
             // color. Relative logoUrl is absolutized client-side. Web
             // ignores unknown fields, so this is backward-compatible.

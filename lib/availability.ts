@@ -20,6 +20,7 @@ import { getExternalBusyForUser } from "@/lib/calendar/sync";
 // added a feed.
 import { getExternalFeedBusyForUser } from "@/lib/calendar/externalFeeds/availabilityBridge";
 import { loadTenantFeatures } from "@/lib/features";
+import { getTenantTimezone, preferTimezone } from "@/lib/tenant-timezone";
 import {
   readDefaultWorkspaceHours,
   getDefaultForDay,
@@ -56,10 +57,17 @@ export async function getAvailableSlots(params: {
   // tenant-level default workspace hours fallback (migration 0034).
   // Engine layer above this point doesn't know which layer produced
   // the windows — it only consumes resolved intervals.
+  //
+  // Interpret the staff's working hours in the staff's tz, FALLING BACK to the
+  // canonical business tz when the staff profile is still the UTC default —
+  // otherwise a UTC-profile operator gets slots generated in UTC (a "4:30 PM"
+  // tap stored as 16:30 UTC = 9:30 AM in the business zone). preferTimezone is
+  // a no-op for staff who already have a real zone.
+  const workingTz = preferTimezone(staff.timezone, await getTenantTimezone(staff.tenantId));
   const workingWindows = await getStaffWorkingWindows(
     staffUserId,
     date,
-    staff.timezone,
+    workingTz,
     staff.tenantId,
   );
   if (workingWindows.length === 0) return [];

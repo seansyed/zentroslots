@@ -76,7 +76,12 @@ export default function QuickCreateScreen() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const profileQ = useProfile();
-  const timezone = profileQ.data?.timezone ?? "UTC";
+  // Book in the BUSINESS timezone, not the operator's personal profile tz
+  // (which can be the UTC default). This drives the /api/slots request + the
+  // slot the operator taps, so "4:30 PM" means 4:30 PM at the business — not
+  // 4:30 PM UTC (which stored as 16:30 UTC = 9:30 AM in the business zone).
+  const timezone =
+    profileQ.data?.tenant?.timezone || profileQ.data?.timezone || "UTC";
 
   // Optional ?date=YYYY-MM-DD handoff from the Calendar tab (tap a day → +).
   const { date: dateParam } = useLocalSearchParams<{ date?: string }>();

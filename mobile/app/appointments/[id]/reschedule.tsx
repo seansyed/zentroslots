@@ -92,11 +92,11 @@ export default function RescheduleScreen() {
   const appt = apptQuery.data;
   const profile = profileQuery.data;
 
-  // The staff's timezone is what the engine uses to compute slots, but
-  // we don't have it on the appointment row — fall back to the signed-in
-  // user's timezone (close enough; staff = signed-in user for the
-  // common case of self-management).
-  const timezone = profile?.timezone ?? "UTC";
+  // Reschedule slots must be offered in the BUSINESS timezone (the same tz the
+  // booking was made + is displayed in), not the operator's personal profile
+  // tz which can be the UTC default. Falls back to the user tz, then UTC.
+  const timezone =
+    profile?.tenant?.timezone || profile?.timezone || "UTC";
 
   // Date strip — keep "today" stable for the lifetime of the modal so
   // the strip doesn't jump if the user lingers across midnight.
