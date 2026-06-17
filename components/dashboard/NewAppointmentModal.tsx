@@ -20,6 +20,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
+import { friendlyMessage, friendlyThrown } from "@/lib/clientErrors";
 import {
   AlertCircle,
   Calendar,
@@ -303,17 +304,26 @@ export default function NewAppointmentModal({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => null);
       if (!res.ok) {
-        setError(data?.error ?? "Could not create appointment");
+        // Never echo a raw server error. 4xx carry safe, operator-authored
+        // messages (e.g. "Staff does not deliver this service"); unexpected
+        // 5xx get friendly create-specific copy. See lib/clientErrors.ts.
+        setError(
+          friendlyMessage(res.status, data, {
+            genericMessage:
+              "Something went wrong while creating the appointment. Please try again.",
+          }),
+        );
         setSubmitting(false);
         return;
       }
       // Surface success + close. Parent decides whether to refresh.
       onCreated?.(data);
       onClose();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Network error");
+    } catch {
+      // A thrown fetch = no structured response (almost always connectivity).
+      setError(friendlyThrown().message);
       setSubmitting(false);
     }
   }

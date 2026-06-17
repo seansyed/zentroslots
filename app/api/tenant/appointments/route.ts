@@ -186,7 +186,13 @@ export async function POST(req: NextRequest) {
             eq(bookings.tenantId, session.tenantId),
             eq(bookings.staffUserId, staff.id),
             eq(bookings.status, "confirmed"),
-            sql`tstzrange(${bookings.startAt}, ${bookings.endAt}) && tstzrange(${startAt}, ${endAt})`,
+            // Pass the bounds as ISO strings with an explicit timestamptz
+            // cast. Handing a raw JS Date to a raw-sql fragment param made
+            // postgres.js serialize it via Buffer.byteLength(Date), which
+            // threw a Node TypeError ("Received an instance of Date") on the
+            // request path (P0 — leaked to the UI). Typed drizzle ops
+            // (.values()/gte()) already stringify timestamps; raw sql does not.
+            sql`tstzrange(${bookings.startAt}, ${bookings.endAt}) && tstzrange(${startAt.toISOString()}::timestamptz, ${endAt.toISOString()}::timestamptz)`,
           ),
         )
         .limit(1);

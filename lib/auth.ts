@@ -357,10 +357,13 @@ export class HttpError extends Error {
 
 export function errorResponse(err: unknown): NextResponse {
   if (err instanceof HttpError) {
+    // Intentional, operator-authored status + message — safe to surface
+    // to the UI as-is (e.g. "Slot just taken — pick another").
     return NextResponse.json({ error: err.message }, { status: err.status });
   }
   // Map ZodError → 400 with field-level details. Duck-typed so we don't
-  // need to import zod in this file.
+  // need to import zod in this file. These messages are schema-authored
+  // (field names + constraints), not raw runtime exceptions.
   if (
     err &&
     typeof err === "object" &&
@@ -372,7 +375,24 @@ export function errorResponse(err: unknown): NextResponse {
       { status: 400 }
     );
   }
-  console.error("API error:", err);
-  const message = err instanceof Error ? err.message : "Internal error";
-  return NextResponse.json({ error: message }, { status: 500 });
+  // Unexpected error. We MUST NOT surface err.message to the client — it
+  // can contain Node/TypeScript/SQL/driver internals, stack fragments, or
+  // sensitive values. This is the P0 that leaked a raw Node TypeError
+  // ("...Received an instance of Date") into the New Appointment UI.
+  //
+  // Contract: the RAW error stays in the server logs (stdout → PM2),
+  // tagged with a short correlation id so support can find it; the CLIENT
+  // only ever gets a fixed, friendly message + a stable `code` it can map
+  // to screen-specific copy, plus the incidentId for support reference.
+  const incidentId = crypto.randomUUID().slice(0, 8);
+  console.error(`API error [${incidentId}]:`, err);
+  return NextResponse.json(
+    {
+      error:
+        "Something went wrong. Please try again, or contact support if the problem continues.",
+      code: "internal_error",
+      incidentId,
+    },
+    { status: 500 }
+  );
 }

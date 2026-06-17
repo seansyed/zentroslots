@@ -126,7 +126,10 @@ export async function POST(req: NextRequest) {
           eq(bookings.tenantId, session.tenantId),
           eq(bookings.staffUserId, organizer.id),
           eq(bookings.status, "confirmed"),
-          sql`tstzrange(${bookings.startAt}, ${bookings.endAt}) && tstzrange(${startAt}, ${endAt})`,
+          // ISO + ::timestamptz cast — never hand a raw JS Date to a raw-sql
+          // param (postgres.js Buffer.byteLength(Date) throws). See the
+          // matching fix in app/api/tenant/appointments/route.ts.
+          sql`tstzrange(${bookings.startAt}, ${bookings.endAt}) && tstzrange(${startAt.toISOString()}::timestamptz, ${endAt.toISOString()}::timestamptz)`,
         ),
       )
       .limit(1);
