@@ -292,6 +292,36 @@ export default function WorkspaceHoursClient({
         timezone={tenantTimezone}
       />
 
+      {/* ── Quick guide: Working hours vs Overrides vs Show Fewer Open Slots ── */}
+      <PremiumCard className="p-4">
+        <div className="text-[10px] font-semibold uppercase tracking-[0.10em] text-brand-accent">
+          Quick guide
+        </div>
+        <h2 className="mt-0.5 text-[15px] font-semibold tracking-tight text-ink">
+          How availability works
+        </h2>
+        <ul className="mt-3 space-y-2.5">
+          <li className="flex items-start gap-2.5">
+            <Clock className="mt-0.5 h-4 w-4 shrink-0 text-brand-accent" strokeWidth={2} />
+            <p className="text-[12.5px] leading-relaxed text-ink-muted">
+              Use <span className="font-medium text-ink">Working hours</span> to set real weekly availability.
+            </p>
+          </li>
+          <li className="flex items-start gap-2.5">
+            <CalendarOff className="mt-0.5 h-4 w-4 shrink-0 text-brand-accent" strokeWidth={2} />
+            <p className="text-[12.5px] leading-relaxed text-ink-muted">
+              Use <span className="font-medium text-ink">Overrides</span> for one-time changes like time off, blocked time, vacations, or special hours.
+            </p>
+          </li>
+          <li className="flex items-start gap-2.5">
+            <Layers className="mt-0.5 h-4 w-4 shrink-0 text-brand-accent" strokeWidth={2} />
+            <p className="text-[12.5px] leading-relaxed text-ink-muted">
+              Use <span className="font-medium text-ink">Show Fewer Open Slots</span> from a staff profile only when you want clients to see fewer public booking options without changing real internal availability.
+            </p>
+          </li>
+        </ul>
+      </PremiumCard>
+
       {/* ── Hierarchy diagram ────────────────────────────────── */}
       <HierarchyDiagram />
 

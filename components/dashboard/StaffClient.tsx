@@ -3123,6 +3123,9 @@ function ProfileTab({
         <p className="mt-0.5 text-[11.5px] text-ink-muted">
           When enabled, ZentroMeet will display fewer available booking times to clients while keeping your real schedule unchanged.
         </p>
+        <p className="mt-1 text-[11.5px] text-ink-muted">
+          Clients will only be able to book the slots shown on your public booking page. Admins and staff can still book your full real availability internally.
+        </p>
 
         <label className="mt-3 flex items-center justify-between gap-3 rounded-md border border-border bg-surface px-3 py-2.5">
           <span className="text-[12.5px] font-medium text-ink">Show Fewer Open Slots</span>
