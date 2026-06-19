@@ -9,6 +9,7 @@ import { assertResourcesShareTenant } from "@/lib/tenant";
 import { slotsQuerySchema } from "@/lib/validation";
 import { recommendSlots } from "@/lib/scheduling/intelligence/recommendationEngine";
 import { buildSlotDisplay } from "@/lib/slots-display";
+import { throttleSlots, isAvailabilityDisplayMode } from "@/lib/availability-throttle";
 
 /**
  * Build the slots response. ADDITIVE, web-compatible:
@@ -54,6 +55,11 @@ export async function GET(req: NextRequest) {
       throw new HttpError(404, "Service not found");
     }
 
+    // Caller context (authenticated session, if any). Drives both the
+    // "any"-mode operator guard below AND the public-vs-internal decision for
+    // the "Show Fewer Open Slots" throttle at the end.
+    const session = await getSession();
+
     // ── Mode A: staffUserId="any" — operator-only fan-out ──────
     // Used by the mobile Quick Create sheet. Looks up every eligible
     // staff for this service and unions their availability via the
@@ -71,7 +77,6 @@ export async function GET(req: NextRequest) {
       // belong to the same tenant as the service. Anonymous "any"
       // requests are rejected — public booking flows always go through
       // the staff-specific path (/book/[serviceId]/[staffId]).
-      const session = await getSession();
       if (!session) {
         throw new HttpError(401, "Sign in to view service-wide availability");
       }
@@ -169,6 +174,36 @@ export async function GET(req: NextRequest) {
       return true;
     });
 
+    // ─── "Show Fewer Open Slots" — PUBLIC-ONLY display throttle ──────────
+    // Applied AFTER the full availability engine + booking rules, purely as a
+    // display filter. Internal/operator callers (an admin/manager/staff session
+    // in this tenant) ALWAYS see the full list — they book against real
+    // availability. Only public/client-facing callers (no session, or a
+    // `client` session) get the staff's throttled view. Union ("any") mode is
+    // operator-only and never throttled (staff is null there).
+    const isInternalOperator =
+      !!session &&
+      session.tenantId === service.tenantId &&
+      (session.role === "admin" || session.role === "manager" || session.role === "staff");
+
+    let visible = filtered;
+    if (
+      !unionMode &&
+      !isInternalOperator &&
+      staff?.showFewerOpenSlots &&
+      isAvailabilityDisplayMode(staff.availabilityDisplayMode) &&
+      staff.availabilityDisplayMode !== "normal"
+    ) {
+      visible = throttleSlots(
+        filtered,
+        staff.availabilityDisplayMode,
+        staff.minimumVisibleSlotsPerDay ?? 3,
+      );
+      console.log(
+        `[slots-GET] throttle staff=${staff.id.slice(0, 8)} mode=${staff.availabilityDisplayMode} min=${staff.minimumVisibleSlotsPerDay} ${filtered.length}→${visible.length}`,
+      );
+    }
+
     // Phase SMART-1 — opt-in scored slots. Backward compatible:
     // the `slots: string[]` field stays in place. Callers that pass
     // ?include=intelligence (or =scoring) get an ADDITIONAL
@@ -188,10 +223,10 @@ export async function GET(req: NextRequest) {
       // unioned slots without the scored layer — callers see no
       // intelligence field rather than an error.
       if (unionMode || !staff) {
-        return slotsResponse(filtered, params.timezone);
+        return slotsResponse(visible, params.timezone);
       }
       const scored = await recommendSlots({
-        slots: filtered,
+        slots: visible,
         tenantId: service.tenantId,
         serviceId: service.id,
         staffUserId: staff.id,
@@ -200,10 +235,10 @@ export async function GET(req: NextRequest) {
         customerEmail,
         customerTimezone,
       });
-      return slotsResponse(filtered, params.timezone, { intelligence: { scored } });
+      return slotsResponse(visible, params.timezone, { intelligence: { scored } });
     }
 
-    return slotsResponse(filtered, params.timezone);
+    return slotsResponse(visible, params.timezone);
   } catch (err) {
     console.error("[slots-GET] error:", err instanceof Error ? err.message : err);
     return errorResponse(err);

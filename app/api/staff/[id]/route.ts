@@ -53,6 +53,15 @@ const patchSchema = z.object({
   // "virtual" without any virtual assignment is fine; the pivot
   // PUT will lazy-spawn the Virtual Hub on next save.
   deliveryMode: deliveryModeSchema.optional(),
+  // "Show Fewer Open Slots" — per-staff PUBLIC availability throttling
+  // (migration 0075). Display-only; never affects real availability or
+  // internal/admin slot views. Column names match the users schema, so they
+  // flow through the `...userFields` update below unchanged.
+  showFewerOpenSlots: z.boolean().optional(),
+  availabilityDisplayMode: z
+    .enum(["normal", "balanced", "limited", "very_limited"])
+    .optional(),
+  minimumVisibleSlotsPerDay: z.number().int().min(1).max(20).optional(),
 });
 
 export async function GET(
@@ -184,6 +193,11 @@ export async function GET(
         // 'hybrid' for any staff predating the migration — most
         // permissive setting, no observable booking change.
         deliveryMode: (staff.deliveryMode ?? "hybrid") as DeliveryMode,
+        // "Show Fewer Open Slots" settings (migration 0075). Defaults are
+        // safe for any staff predating the migration (off / normal / 3).
+        showFewerOpenSlots: staff.showFewerOpenSlots ?? false,
+        availabilityDisplayMode: staff.availabilityDisplayMode ?? "normal",
+        minimumVisibleSlotsPerDay: staff.minimumVisibleSlotsPerDay ?? 3,
       },
       assignedServices,
       weeklyAvailability: weeklyRules,

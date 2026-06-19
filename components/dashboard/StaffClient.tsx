@@ -128,6 +128,10 @@ type StaffDetail = {
     // Workforce delivery mode (migration 0037). Defaults to
     // 'hybrid' for any pre-migration staff.
     deliveryMode?: "in_person" | "virtual" | "hybrid";
+    // "Show Fewer Open Slots" — public-availability throttling (migration 0075).
+    showFewerOpenSlots?: boolean;
+    availabilityDisplayMode?: "normal" | "balanced" | "limited" | "very_limited";
+    minimumVisibleSlotsPerDay?: number;
   };
   assignedServices: { id: string; name: string }[];
   weeklyAvailability: { dayOfWeek: number; startTime: string; endTime: string }[];
@@ -2823,6 +2827,14 @@ function ProfileTab({
   const [bio, setBio] = React.useState(staff.bio ?? "");
   const [specialties, setSpecialties] = React.useState(staff.specialties ?? "");
   const [avatarUrl, setAvatarUrl] = React.useState<string | null>(staff.avatarUrl);
+  // "Show Fewer Open Slots" — public-availability throttling settings.
+  const [showFewer, setShowFewer] = React.useState<boolean>(staff.showFewerOpenSlots ?? false);
+  const [displayMode, setDisplayMode] = React.useState<
+    NonNullable<StaffDetail["staff"]["availabilityDisplayMode"]>
+  >(staff.availabilityDisplayMode ?? "normal");
+  const [minVisible, setMinVisible] = React.useState<number>(
+    staff.minimumVisibleSlotsPerDay ?? 3,
+  );
   const [uploading, setUploading] = React.useState(false);
   const router = useRouter();
   const [saving, setSaving] = React.useState(false);
@@ -2838,16 +2850,22 @@ function ProfileTab({
     setBio(staff.bio ?? "");
     setSpecialties(staff.specialties ?? "");
     setAvatarUrl(staff.avatarUrl);
+    setShowFewer(staff.showFewerOpenSlots ?? false);
+    setDisplayMode(staff.availabilityDisplayMode ?? "normal");
+    setMinVisible(staff.minimumVisibleSlotsPerDay ?? 3);
     // We intentionally omit dependencies on the local form state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [staff.id, staff.name, staff.publicDisplayName, staff.publicTitle, staff.bio, staff.specialties, staff.avatarUrl]);
+  }, [staff.id, staff.name, staff.publicDisplayName, staff.publicTitle, staff.bio, staff.specialties, staff.avatarUrl, staff.showFewerOpenSlots, staff.availabilityDisplayMode, staff.minimumVisibleSlotsPerDay]);
 
   const dirty =
     name !== staff.name ||
     (displayName || null) !== (staff.publicDisplayName ?? null) ||
     (title || null) !== (staff.publicTitle ?? null) ||
     (bio || null) !== (staff.bio ?? null) ||
-    (specialties || null) !== (staff.specialties ?? null);
+    (specialties || null) !== (staff.specialties ?? null) ||
+    showFewer !== (staff.showFewerOpenSlots ?? false) ||
+    displayMode !== (staff.availabilityDisplayMode ?? "normal") ||
+    minVisible !== (staff.minimumVisibleSlotsPerDay ?? 3);
 
   // Resolved preview profile — same shape booking pages see.
   const preview = resolvePublicProfile({
@@ -2914,12 +2932,15 @@ function ProfileTab({
     if (!canEdit || !dirty) return;
     setSaving(true);
     try {
-      const payload: Record<string, string | null> = {};
+      const payload: Record<string, string | null | boolean | number> = {};
       if (name !== staff.name) payload.name = name;
       if ((displayName || null) !== (staff.publicDisplayName ?? null)) payload.publicDisplayName = displayName || null;
       if ((title || null) !== (staff.publicTitle ?? null)) payload.publicTitle = title || null;
       if ((bio || null) !== (staff.bio ?? null)) payload.bio = bio || null;
       if ((specialties || null) !== (staff.specialties ?? null)) payload.specialties = specialties || null;
+      if (showFewer !== (staff.showFewerOpenSlots ?? false)) payload.showFewerOpenSlots = showFewer;
+      if (displayMode !== (staff.availabilityDisplayMode ?? "normal")) payload.availabilityDisplayMode = displayMode;
+      if (minVisible !== (staff.minimumVisibleSlotsPerDay ?? 3)) payload.minimumVisibleSlotsPerDay = minVisible;
       const res = await fetch(`/api/staff/${staff.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -3093,6 +3114,62 @@ function ProfileTab({
             <span className="mt-1 block text-[10.5px] text-ink-subtle">Comma-separated — surfaces as chips on the booking page.</span>
           </label>
         </div>
+      </PremiumCard>
+
+      {/* Show Fewer Open Slots — public availability throttling (migration 0075) */}
+      <PremiumCard className="p-4">
+        <div className="text-[10px] font-semibold uppercase tracking-[0.10em] text-brand-accent">Availability display</div>
+        <h3 className="mt-0.5 text-[14px] font-semibold tracking-tight text-ink">Show Fewer Open Slots</h3>
+        <p className="mt-0.5 text-[11.5px] text-ink-muted">
+          When enabled, ZentroMeet will display fewer available booking times to clients while keeping your real schedule unchanged.
+        </p>
+
+        <label className="mt-3 flex items-center justify-between gap-3 rounded-md border border-border bg-surface px-3 py-2.5">
+          <span className="text-[12.5px] font-medium text-ink">Show Fewer Open Slots</span>
+          <input
+            type="checkbox"
+            checked={showFewer}
+            onChange={(e) => setShowFewer(e.target.checked)}
+            disabled={!canEdit}
+            className="h-4 w-4 accent-brand-accent disabled:opacity-50"
+          />
+        </label>
+
+        <div className={cn("mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2", !showFewer && "opacity-50")}>
+          <label className="block">
+            <span className="text-[11px] font-semibold text-ink-muted">Availability display</span>
+            <select
+              value={displayMode}
+              onChange={(e) => setDisplayMode(e.target.value as typeof displayMode)}
+              disabled={!canEdit || !showFewer}
+              className="mt-1 w-full rounded-md border border-border bg-surface px-3 py-2 text-[13px] disabled:bg-surface-inset"
+            >
+              <option value="normal">Normal — Show all available slots</option>
+              <option value="balanced">Balanced — Show fewer slots</option>
+              <option value="limited">Limited — Show limited slots</option>
+              <option value="very_limited">Very Limited — Show very few slots</option>
+            </select>
+          </label>
+          <label className="block">
+            <span className="text-[11px] font-semibold text-ink-muted">Minimum visible slots per day</span>
+            <input
+              type="number"
+              min={1}
+              max={20}
+              value={minVisible}
+              onChange={(e) => {
+                const n = Number(e.target.value);
+                setMinVisible(Number.isFinite(n) ? Math.min(20, Math.max(1, Math.floor(n))) : 3);
+              }}
+              disabled={!canEdit || !showFewer}
+              className="mt-1 w-full rounded-md border border-border bg-surface px-3 py-2 text-[13px] disabled:bg-surface-inset"
+            />
+          </label>
+        </div>
+
+        <p className="mt-2 text-[10.5px] text-ink-subtle">
+          This only affects what clients see on your booking page. Your real availability remains unchanged for internal scheduling.
+        </p>
       </PremiumCard>
 
       {/* Booking identity preview */}

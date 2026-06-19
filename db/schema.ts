@@ -195,6 +195,20 @@ export const users = pgTable(
     bio: text("bio"),
     specialties: text("specialties"),
 
+    // ── "Show Fewer Open Slots" — per-staff PUBLIC availability throttling ──
+    // Affects ONLY the public/client-facing slot list (applied in
+    // app/api/slots Mode B for non-internal callers). Real availability,
+    // working hours, buffers, conflicts, etc. are unchanged. See
+    // lib/availability/throttleSlots.ts.
+    showFewerOpenSlots: boolean("show_fewer_open_slots").notNull().default(false),
+    // normal=100% | balanced≈60% | limited≈35% | very_limited≈20%
+    availabilityDisplayMode: varchar("availability_display_mode", { length: 20 })
+      .notNull()
+      .default("normal"),
+    minimumVisibleSlotsPerDay: integer("minimum_visible_slots_per_day")
+      .notNull()
+      .default(3),
+
     // ── Public-facing workforce identity (migration 0033) ──
     // Curated identity used by booking pages + service pages. Both
     // nullable; render paths fall back to `name` (and omit the
