@@ -13,6 +13,7 @@
 
 import * as React from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   Sparkles,
   UserPlus,
@@ -2823,6 +2824,7 @@ function ProfileTab({
   const [specialties, setSpecialties] = React.useState(staff.specialties ?? "");
   const [avatarUrl, setAvatarUrl] = React.useState<string | null>(staff.avatarUrl);
   const [uploading, setUploading] = React.useState(false);
+  const router = useRouter();
   const [saving, setSaving] = React.useState(false);
   const fileRef = React.useRef<HTMLInputElement | null>(null);
   const [dragOver, setDragOver] = React.useState(false);
@@ -2877,6 +2879,10 @@ function ProfileTab({
       if (!res.ok) throw new Error(d?.error ?? "Upload failed");
       setAvatarUrl(d.avatarUrl);
       onChange({ avatarUrl: d.avatarUrl });
+      // Propagate to server-rendered surfaces (staff list/directory) so the
+      // new photo shows everywhere without a manual page refresh. The card +
+      // drawer already updated via local state + onChange above.
+      router.refresh();
       toast("Photo updated", "success");
     } catch (e) {
       toast(e instanceof Error ? e.message : "Upload failed", "error");
@@ -2895,6 +2901,7 @@ function ProfileTab({
       if (!res.ok) throw new Error(d?.error ?? "Failed");
       setAvatarUrl(null);
       onChange({ avatarUrl: null });
+      router.refresh();
       toast("Photo removed", "success");
     } catch (e) {
       toast(e instanceof Error ? e.message : "Failed", "error");
