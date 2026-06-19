@@ -89,6 +89,44 @@ describe("throttleSlots — deterministic, spread, safe", () => {
   });
 });
 
+describe("public booking POST enforcement (app/api/bookings)", () => {
+  // The booking endpoint rejects a public/client booking when the requested
+  // slot is NOT in the SAME throttled list /api/slots showed. It reuses
+  // throttleSlots() with the same inputs, so "bookable publicly" must equal
+  // "visible". These tests lock that membership contract — the gap closed is
+  // a hidden-but-real slot being bookable via a direct POST.
+  const filtered = daySlots(31); // a real day's available+rule-filtered slots
+  const isPubliclyBookable = (
+    slot: string,
+    mode: Parameters<typeof throttleSlots>[1],
+    min: number,
+  ) => throttleSlots(filtered, mode, min).includes(slot);
+
+  it("rejects a real-but-hidden slot for a throttled public booking", () => {
+    const visible = throttleSlots(filtered, "very_limited", 3);
+    const hidden = filtered.filter((s) => !visible.includes(s));
+    assert.ok(hidden.length > 0, "throttle must hide at least one real slot");
+    for (const s of hidden) {
+      assert.equal(isPubliclyBookable(s, "very_limited", 3), false);
+    }
+  });
+
+  it("allows every visible slot for a throttled public booking", () => {
+    const visible = throttleSlots(filtered, "balanced", 3);
+    for (const s of visible) {
+      assert.equal(isPubliclyBookable(s, "balanced", 3), true);
+    }
+  });
+
+  it("min ≥ total shows all → no slot is hidden (booking unaffected)", () => {
+    const visible = throttleSlots(filtered, "very_limited", 40);
+    assert.deepEqual(visible, filtered);
+    for (const s of filtered) {
+      assert.equal(isPubliclyBookable(s, "very_limited", 40), true);
+    }
+  });
+});
+
 describe("isAvailabilityDisplayMode", () => {
   it("accepts the four modes, rejects others", () => {
     for (const m of AVAILABILITY_DISPLAY_MODES) assert.ok(isAvailabilityDisplayMode(m));

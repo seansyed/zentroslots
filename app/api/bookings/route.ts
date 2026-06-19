@@ -31,6 +31,7 @@ import {
 import { persistIntakeResponses } from "@/lib/intake/persistResponses";
 import { buildBookingLabels } from "@/lib/appointment-labels";
 import { getTenantTimezone } from "@/lib/tenant-timezone";
+import { throttleSlots, isAvailabilityDisplayMode } from "@/lib/availability-throttle";
 
 // List bookings — strictly scoped to the caller's tenant.
 // Staff see their own, admins see the whole tenant.
@@ -265,6 +266,62 @@ export async function POST(req: NextRequest) {
     });
     if (!slots.includes(startAt.toISOString())) {
       throw new HttpError(409, "Slot no longer available");
+    }
+
+    // ─── "Show Fewer Open Slots" — PUBLIC-only booking enforcement ──────
+    // The slot above is confirmed REAL-available. But a per-staff PUBLIC
+    // throttle ("Show Fewer Open Slots", migration 0075) intentionally hides
+    // some real slots from CLIENTS in /api/slots. Without this check a hidden-
+    // but-real slot would still be bookable via a direct POST. Reject public
+    // bookings for any slot OUTSIDE the same throttled list the client saw.
+    //
+    // Scope — public/client-facing ONLY:
+    //   • internal operators (admin/manager/staff session in this tenant) book
+    //     against real availability — never throttled (exact parity with the
+    //     /api/slots `isInternalOperator` exemption).
+    //   • "auto" assignment is exempt: the client never viewed THIS resolved
+    //     staff's single-staff throttled list, so there is nothing to match.
+    //     The throttle only applies to /api/slots Mode B (a concrete staff),
+    //     which is the path that produces body.staffUserId !== "auto".
+    //   • feature OFF, mode "normal", or total ≤ minimum → no-op (all shown).
+    //
+    // Inputs are byte-identical to /api/slots Mode B: the SAME `slots` array
+    // computed for `date`/`staff.timezone` above, the SAME min-notice/max-
+    // advance filter, then the SAME throttleSlots() helper — so the bookable
+    // set exactly equals the visible set. No availability-engine change.
+    if (
+      !internalOperator &&
+      body.staffUserId !== "auto" &&
+      staff.showFewerOpenSlots &&
+      isAvailabilityDisplayMode(staff.availabilityDisplayMode) &&
+      staff.availabilityDisplayMode !== "normal"
+    ) {
+      const nowMs = Date.now();
+      const minNoticeMs = (service.minNoticeMinutes ?? 0) * 60_000;
+      const maxAdvanceMs = service.maxAdvanceDays
+        ? service.maxAdvanceDays * 24 * 60 * 60_000
+        : null;
+      const filtered = slots.filter((iso) => {
+        const t = new Date(iso).getTime();
+        if (t - nowMs < minNoticeMs) return false;
+        if (maxAdvanceMs !== null && t - nowMs > maxAdvanceMs) return false;
+        return true;
+      });
+      const visible = throttleSlots(
+        filtered,
+        staff.availabilityDisplayMode,
+        staff.minimumVisibleSlotsPerDay ?? 3,
+      );
+      if (!visible.includes(startAt.toISOString())) {
+        return NextResponse.json(
+          {
+            error: "SLOT_NOT_AVAILABLE",
+            message:
+              "This time is no longer available. Please choose another available time.",
+          },
+          { status: 409 },
+        );
+      }
     }
 
     const endAt = new Date(startAt.getTime() + service.durationMinutes * 60_000);
