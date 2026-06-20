@@ -181,7 +181,15 @@ export async function GET(req: NextRequest) {
     // availability. Only public/client-facing callers (no session, or a
     // `client` session) get the staff's throttled view. Union ("any") mode is
     // operator-only and never throttled (staff is null there).
+    // The public booking page sends `audience=public` to explicitly request the
+    // CLIENT view, so an operator previewing/sharing their OWN public link still
+    // gets the throttled "Show Fewer Open Slots" list rather than the
+    // full-availability operator bypass. Internal slot pickers omit the param
+    // and keep full availability. (audience=public can only REDUCE what's shown,
+    // so there's no access concern.)
+    const publicAudience = req.nextUrl.searchParams.get("audience") === "public";
     const isInternalOperator =
+      !publicAudience &&
       !!session &&
       session.tenantId === service.tenantId &&
       (session.role === "admin" || session.role === "manager" || session.role === "staff");

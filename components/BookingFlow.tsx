@@ -214,6 +214,11 @@ export default function BookingFlow({
     // param (older deployments / a downgrade) the slots array
     // returns unchanged and we just get no labels.
     url.searchParams.set("include", "intelligence");
+    // This is the PUBLIC booking page → always request the client view, so an
+    // operator previewing/sharing their OWN public link still sees the throttled
+    // "Show Fewer Open Slots" list (without this, a logged-in operator's session
+    // cookie triggers the full-availability bypass and shows ALL slots).
+    url.searchParams.set("audience", "public");
 
     fetch(url)
       .then((r) => r.json())
@@ -283,6 +288,7 @@ export default function BookingFlow({
           u.searchParams.set("staffUserId", staffId);
           u.searchParams.set("date", iso);
           u.searchParams.set("timezone", tz);
+          u.searchParams.set("audience", "public"); // client view (see main fetch)
           const res = await fetch(u);
           if (!res.ok) continue;
           const data = await res.json();
