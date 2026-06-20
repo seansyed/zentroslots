@@ -200,6 +200,10 @@ export async function GET(req: NextRequest) {
         // Legacy column name `minimumVisibleSlotsPerDay`; the VALUE is the
         // MAXIMUM visible slots per day (hard cap). See lib/availability-throttle.
         staff.minimumVisibleSlotsPerDay ?? 3,
+        // Context = the getAvailableSlots inputs → deterministic per-day
+        // variation (different dates show different times; refresh-stable).
+        // The booking POST passes the SAME fields, so its enforcement matches.
+        { staffId: staff.id, serviceId: service.id, date: params.date, timezone: params.timezone },
       );
       console.log(
         `[slots-GET] throttle staff=${staff.id.slice(0, 8)} mode=${staff.availabilityDisplayMode} min=${staff.minimumVisibleSlotsPerDay} ${filtered.length}→${visible.length}`,

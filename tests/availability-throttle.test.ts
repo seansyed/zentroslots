@@ -158,6 +158,82 @@ describe("public booking POST enforcement (app/api/bookings)", () => {
   });
 });
 
+describe("throttleSlots — deterministic per-day variation (seeded context)", () => {
+  const day = daySlots(31);
+  const ctx = (over: Record<string, string> = {}) => ({
+    staffId: "staff-1",
+    serviceId: "svc-1",
+    date: "2026-06-22",
+    timezone: "America/Los_Angeles",
+    ...over,
+  });
+
+  it("1. same context → identical across repeated calls (refresh-stable)", () => {
+    assert.deepEqual(
+      throttleSlots(day, "very_limited", 4, ctx()),
+      throttleSlots(day, "very_limited", 4, ctx()),
+    );
+  });
+
+  it("2. different dates surface different patterns", () => {
+    const dates = ["2026-06-22", "2026-06-23", "2026-06-24", "2026-06-25", "2026-06-26", "2026-06-27", "2026-06-28"];
+    const patterns = new Set(dates.map((d) => throttleSlots(day, "very_limited", 4, ctx({ date: d })).join(",")));
+    assert.ok(patterns.size >= 2, `expected varied patterns across dates, got ${patterns.size}`);
+  });
+
+  it("3. different staffId may produce a different pattern", () => {
+    const ids = ["s1", "s2", "s3", "s4", "s5"];
+    const patterns = new Set(ids.map((id) => throttleSlots(day, "very_limited", 4, ctx({ staffId: id })).join(",")));
+    assert.ok(patterns.size >= 2);
+  });
+
+  it("4. different serviceId may produce a different pattern", () => {
+    const ids = ["v1", "v2", "v3", "v4", "v5"];
+    const patterns = new Set(ids.map((id) => throttleSlots(day, "very_limited", 4, ctx({ serviceId: id })).join(",")));
+    assert.ok(patterns.size >= 2);
+  });
+
+  it("5-8. respects max, subset, sorted, no duplicates", () => {
+    const out = throttleSlots(day, "very_limited", 4, ctx());
+    assert.equal(out.length, 4);                      // 5. count == cap
+    for (const s of out) assert.ok(day.includes(s));  // 6. subset of real slots
+    assert.deepEqual(out, [...out].sort());           // 7. chronological
+    assert.equal(new Set(out).size, out.length);      // 8. no duplicates
+  });
+
+  it("9. OFF/normal still returns all (context ignored)", () => {
+    assert.deepEqual(throttleSlots(day, "normal", 4, ctx()), day);
+  });
+
+  it("10. very_limited 31 slots max 4 returns exactly 4 (with context)", () => {
+    assert.equal(throttleSlots(day, "very_limited", 4, ctx()).length, 4);
+  });
+
+  it("11-12. enforcement: hidden rejected / visible accepted under the SAME context", () => {
+    const c = ctx();
+    const visible = throttleSlots(day, "very_limited", 4, c);
+    const hidden = day.filter((s) => !visible.includes(s));
+    assert.ok(hidden.length > 0, "throttle must hide some real slots");
+    // What the booking POST does: re-run with the same context → identical set.
+    const recomputed = throttleSlots(day, "very_limited", 4, c);
+    for (const s of hidden) assert.ok(!recomputed.includes(s));  // 11. hidden unbookable
+    for (const s of visible) assert.ok(recomputed.includes(s));  // 12. visible bookable
+  });
+
+  it("spread preserved — varied pick still spans morning and afternoon", () => {
+    const out = throttleSlots(day, "very_limited", 4, ctx());
+    assert.ok(out.some((s) => day.slice(0, 10).includes(s)), "a morning slot");
+    assert.ok(out.some((s) => day.slice(21).includes(s)), "an afternoon slot");
+  });
+
+  it("no-context path is unchanged (legacy even-spread bucket centers)", () => {
+    const withoutCtx = throttleSlots(day, "very_limited", 4);
+    const step = 31 / 4;
+    const expected = [0, 1, 2, 3].map((i) => day[Math.floor(i * step + step / 2)]);
+    assert.deepEqual(withoutCtx, expected);
+  });
+});
+
 describe("isAvailabilityDisplayMode", () => {
   it("accepts the four modes, rejects others", () => {
     for (const m of AVAILABILITY_DISPLAY_MODES) assert.ok(isAvailabilityDisplayMode(m));

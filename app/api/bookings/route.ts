@@ -314,6 +314,9 @@ export async function POST(req: NextRequest) {
         // MAXIMUM visible slots per day (hard cap) — same as /api/slots, so the
         // bookable set still equals the public visible set.
         staff.minimumVisibleSlotsPerDay ?? 3,
+        // SAME context fields as /api/slots (the getAvailableSlots inputs): the
+        // seeded per-day selection matches, so hidden slots stay unbookable.
+        { staffId: staff.id, serviceId: service.id, date, timezone: staff.timezone },
       );
       if (!visible.includes(startAt.toISOString())) {
         return NextResponse.json(
