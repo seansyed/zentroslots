@@ -310,6 +310,9 @@ export async function POST(req: NextRequest) {
       const visible = throttleSlots(
         filtered,
         staff.availabilityDisplayMode,
+        // Legacy column name `minimumVisibleSlotsPerDay`; the VALUE is the
+        // MAXIMUM visible slots per day (hard cap) — same as /api/slots, so the
+        // bookable set still equals the public visible set.
         staff.minimumVisibleSlotsPerDay ?? 3,
       );
       if (!visible.includes(startAt.toISOString())) {

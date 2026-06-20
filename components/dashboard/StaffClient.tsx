@@ -3154,7 +3154,7 @@ function ProfileTab({
             </select>
           </label>
           <label className="block">
-            <span className="text-[11px] font-semibold text-ink-muted">Minimum visible slots per day</span>
+            <span className="text-[11px] font-semibold text-ink-muted">Maximum visible slots per day</span>
             <input
               type="number"
               min={1}

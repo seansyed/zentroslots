@@ -10,6 +10,7 @@ import {
   users,
 } from "@/db/schema";
 import { getSession } from "@/lib/auth";
+import { getTenantTimezone } from "@/lib/tenant-timezone";
 import Shell from "@/components/dashboard/Shell";
 import WorkspaceHoursClient, {
   type WorkforceMember,
@@ -54,6 +55,12 @@ export default async function AvailabilityPage() {
 
   const initialHours = readDefaultWorkspaceHours(tenant.defaultWorkspaceHours);
   const isAdmin = user.role === "admin" || user.role === "manager";
+
+  // Resolved BUSINESS timezone (tenant tz → earliest-admin tz → "UTC"). Drives
+  // the "timezone is UTC" warning: when this is UTC, no real tz is configured
+  // anywhere, so working hours are interpreted as UTC and clients in other
+  // zones see shifted times. Surfaced, never silently changed.
+  const businessTimezone = await getTenantTimezone(user.tenantId);
 
   // Workforce roster — admin + manager + staff. Clients are NEVER
   // considered workforce for scheduling purposes.
@@ -224,6 +231,7 @@ export default async function AvailabilityPage() {
         }}
         workforce={workforce}
         tenantTimezone={user.timezone ?? "UTC"}
+        businessTimezone={businessTimezone}
       />
     </Shell>
   );

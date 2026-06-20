@@ -197,6 +197,8 @@ export async function GET(req: NextRequest) {
       visible = throttleSlots(
         filtered,
         staff.availabilityDisplayMode,
+        // Legacy column name `minimumVisibleSlotsPerDay`; the VALUE is the
+        // MAXIMUM visible slots per day (hard cap). See lib/availability-throttle.
         staff.minimumVisibleSlotsPerDay ?? 3,
       );
       console.log(

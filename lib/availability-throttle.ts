@@ -13,7 +13,10 @@
  *   • Spread, not "first N": the day is split into N buckets and the center of
  *     each is kept, so morning/midday/afternoon stay represented.
  *   • Never invents a slot (output ⊆ input) and never reorders.
- *   • Respects a per-day minimum; if total ≤ minimum, returns all slots.
+ *   • Caps at a per-day MAXIMUM; if total ≤ maximum, returns all slots. The
+ *     mode fraction sets the natural count and the maximum is a hard ceiling —
+ *     the result is min(modeCount, maximum), never above the configured max,
+ *     and always ≥ 1 when the mode is on and real availability exists.
  *
  * Pure module (no deps) — unit-tested in tests/availability-throttle.test.ts.
  */
@@ -44,25 +47,33 @@ export function isAvailabilityDisplayMode(v: unknown): v is AvailabilityDisplayM
  *
  * @param slots  ISO instants for a single day, ascending (the /api/slots contract).
  * @param mode   display mode; "normal" returns the slots unchanged.
- * @param minimumVisibleSlotsPerDay  floor on visible slots (default 3).
+ * @param maximumVisibleSlotsPerDay  HARD CAP on visible slots (default 3, min 1).
+ *   The result is min(modeCount, maximum): clients never see more than this many
+ *   slots per day. (The persisted column is still named `minimum_visible_slots_
+ *   per_day` for back-compat — migration 0075 — but its VALUE is a maximum.)
  */
 export function throttleSlots(
   slots: string[],
   mode: AvailabilityDisplayMode,
-  minimumVisibleSlotsPerDay = 3,
+  maximumVisibleSlotsPerDay = 3,
 ): string[] {
   if (mode === "normal") return slots;
 
   const total = slots.length;
   if (total === 0) return slots;
 
-  const minVisible = Math.max(1, Math.floor(minimumVisibleSlotsPerDay));
-  // At or below the floor → show everything (e.g. only 2 slots, min 3 → both).
-  if (total <= minVisible) return slots;
+  // Hard ceiling on visible slots. Always ≥ 1 (0 is not a valid cap — when the
+  // mode is on and real availability exists, show at least one slot).
+  const maxVisible = Math.max(1, Math.floor(maximumVisibleSlotsPerDay));
+  // Fewer real slots than the cap → show them all (e.g. 2 slots, max 4 → both).
+  if (total <= maxVisible) return slots;
 
-  // Target count: apply the mode fraction, lift to the minimum, cap at total.
+  // The mode fraction gives the natural count; the maximum is a hard ceiling.
+  // target = min(modeCount, maxVisible), floored at 1, never above total — so
+  // very_limited on 31 slots with max=4 yields 4, not 7.
   let target = Math.ceil(total * FACTOR[mode]);
-  target = Math.max(target, minVisible);
+  target = Math.min(target, maxVisible);
+  target = Math.max(target, 1);
   target = Math.min(target, total);
   if (target >= total) return slots;
 

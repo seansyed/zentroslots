@@ -21,6 +21,7 @@ import {
   X,
   ChevronRight,
   Search,
+  AlertTriangle,
   type LucideIcon,
 } from "lucide-react";
 
@@ -145,18 +146,27 @@ function hoursEqual(a: Draft, b: Draft): boolean {
 
 // ─── Top-level component ──────────────────────────────────────────
 
+/** Treat empty / "UTC" as "no real timezone configured" — mirrors
+ *  isRealTimezone() in lib/tenant-timezone.ts without importing it (that module
+ *  pulls server-only db code; this is a client component). */
+function isUtcLike(tz: string | null | undefined): boolean {
+  return !tz || tz.trim() === "" || tz.trim().toUpperCase() === "UTC";
+}
+
 export default function WorkspaceHoursClient({
   initial,
   canEdit,
   kpis,
   workforce,
   tenantTimezone,
+  businessTimezone,
 }: {
   initial: DefaultWorkspaceHours;
   canEdit: boolean;
   kpis: KpiBundle;
   workforce: WorkforceMember[];
   tenantTimezone: string;
+  businessTimezone: string;
 }) {
   // Workspace hours draft / baseline.
   const [draft, setDraft] = React.useState<Draft>(() => makeDraft(initial));
@@ -321,6 +331,27 @@ export default function WorkspaceHoursClient({
           </li>
         </ul>
       </PremiumCard>
+
+      {/* ── Timezone misconfiguration warning ──────────────────
+          When NO real business timezone is set (tenant + earliest-admin both
+          UTC), working hours are interpreted as UTC, so clients in other zones
+          see shifted times (e.g. a 9 AM start can appear as 8 AM / 5 AM). We
+          surface it — never silently shift the hours. */}
+      {isUtcLike(businessTimezone) && (
+        <div className="flex items-start gap-3 rounded-xl border border-amber-300/60 bg-amber-50/70 px-4 py-3">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" strokeWidth={2} aria-hidden />
+          <div className="text-[12px] leading-relaxed text-amber-900">
+            <span className="font-semibold">Your workspace timezone is UTC.</span>{" "}
+            Working hours are interpreted in UTC, so clients booking from other
+            timezones will see them shifted (a 9:00 AM start can appear as a
+            different hour). Set your real business timezone in{" "}
+            <a href="/dashboard/settings/workspace-hours" className="font-semibold underline underline-offset-2">
+              workspace settings
+            </a>{" "}
+            (or a specific staff member&rsquo;s timezone on their Profile tab) so booking times display correctly.
+          </div>
+        </div>
+      )}
 
       {/* ── Hierarchy diagram ────────────────────────────────── */}
       <HierarchyDiagram />
@@ -501,6 +532,7 @@ export default function WorkspaceHoursClient({
         staff={editingStaff}
         canEdit={canEdit}
         workspaceHours={initial}
+        businessTimezone={businessTimezone}
         onClose={() => setEditingStaffId(null)}
         onChange={(patch) => {
           if (!editingStaffId) return;
@@ -879,12 +911,14 @@ function StaffScheduleDrawer({
   staff,
   canEdit,
   workspaceHours,
+  businessTimezone,
   onClose,
   onChange,
 }: {
   staff: WorkforceMember | null;
   canEdit: boolean;
   workspaceHours: DefaultWorkspaceHours;
+  businessTimezone: string;
   onClose: () => void;
   onChange: (patch: Partial<Pick<WorkforceMember, "deliveryMode" | "hasCustomSchedule" | "assignments">>) => void;
 }) {
@@ -1170,6 +1204,14 @@ function StaffScheduleDrawer({
                       ? "Read-only — these are the workspace defaults this staff currently inherits."
                       : "Per-day intervals. Single window per day for now; multi-interval support is scaffolded for a future release."}
                   </p>
+                  {isUtcLike(staff.timezone) && isUtcLike(businessTimezone) && (
+                    <div className="mt-2 flex items-start gap-2 rounded-md border border-amber-300/60 bg-amber-50/70 px-3 py-2">
+                      <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600" strokeWidth={2} aria-hidden />
+                      <p className="text-[11px] leading-relaxed text-amber-900">
+                        These hours are interpreted in <span className="font-semibold">UTC</span> — no real timezone is set for this staff member or your workspace, so clients in other timezones will see them shifted. Set this staff member&rsquo;s timezone on the Profile tab (or the workspace timezone in settings).
+                      </p>
+                    </div>
+                  )}
                   <div className="mt-3 space-y-2">
                     {DAYS_ORDER.map(({ key, label }) => {
                       const previewDay = useWorkspace ? makeDraft(workspaceHours)[key] : draft[key];
@@ -1316,7 +1358,7 @@ function StaffScheduleDrawer({
                       </select>
                     </label>
                     <label className="block">
-                      <span className="text-[11px] font-semibold text-ink-muted">Minimum visible slots per day</span>
+                      <span className="text-[11px] font-semibold text-ink-muted">Maximum visible slots per day</span>
                       <input
                         type="number"
                         min={1}
