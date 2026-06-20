@@ -2237,6 +2237,16 @@ function WorkforceLocationSection({
 
   const activeMode = DELIVERY_OPTIONS.find((o) => o.value === deliveryMode);
 
+  // Location-awareness: in-person + hybrid need a place to meet (an active
+  // physical/hybrid location in this workspace). Virtual needs none. When none
+  // exist, those two modes are disabled here and rejected by the API.
+  const hasPhysicalLocation = locations.some(
+    (l) => l.isActive && (l.locationType === "physical" || l.locationType === "hybrid"),
+  );
+  const blockPhysicalModes = !loadingLocations && !hasPhysicalLocation;
+  const currentModeNeedsLocation =
+    blockPhysicalModes && (deliveryMode === "in_person" || deliveryMode === "hybrid");
+
   // Phase 10 violation hints — surfaced inline so admins know why
   // a save will fail before clicking. Mirror of
   // assertValidLocationAssignments().
@@ -2278,11 +2288,17 @@ function WorkforceLocationSection({
           {DELIVERY_OPTIONS.map((opt) => {
             const Icon = opt.icon;
             const on = deliveryMode === opt.value;
+            // In-person / hybrid can't be enabled without a physical/hybrid
+            // location. Disabled even if currently selected (legacy bad state),
+            // so the only valid action is switching to Virtual.
+            const blocked = (opt.value === "in_person" || opt.value === "hybrid") && blockPhysicalModes;
+            const cardDisabled = !canEdit || modeSaving || blocked;
             return (
               <button
                 key={opt.value}
                 type="button"
-                disabled={!canEdit || modeSaving}
+                disabled={cardDisabled}
+                title={blocked ? "Add a location first to enable in-person or hybrid appointments." : undefined}
                 onClick={() => saveDeliveryMode(opt.value)}
                 className={cn(
                   "group relative overflow-hidden rounded-xl border px-3 py-3 text-left transition-all duration-[260ms] ease-[cubic-bezier(0.16,1,0.3,1)]",
@@ -2293,7 +2309,7 @@ function WorkforceLocationSection({
                   on
                     ? cn("ring-2", opt.selectedTone, opt.halo, "-translate-y-0.5")
                     : "border-border bg-surface hover:-translate-y-0.5 hover:shadow-soft hover:border-ink/15",
-                  (!canEdit || modeSaving) && "cursor-not-allowed opacity-70",
+                  cardDisabled && "cursor-not-allowed opacity-70",
                 )}
               >
                 {/* Top edge sheen — premium light catch */}
@@ -2331,7 +2347,25 @@ function WorkforceLocationSection({
             );
           })}
         </div>
-        {activeMode && (
+        {blockPhysicalModes && (
+          <div className="mt-3 rounded-md border border-amber-300/60 bg-amber-50/70 px-3 py-2">
+            <p className="text-[11.5px] leading-relaxed text-amber-900">
+              {currentModeNeedsLocation ? (
+                <>
+                  This person is set to <span className="font-semibold">{activeMode?.label}</span>, but no
+                  locations exist in this workspace — switch to <span className="font-semibold">Virtual</span>, or{" "}
+                </>
+              ) : (
+                <>Add a location first to enable in-person or hybrid appointments — </>
+              )}
+              <a href="/dashboard/locations" className="font-semibold underline underline-offset-2">
+                create one in Settings → Locations
+              </a>
+              .
+            </p>
+          </div>
+        )}
+        {activeMode && !blockPhysicalModes && (
           <p className="mt-3 text-[11.5px] text-ink-subtle">
             <span className="font-medium text-ink-muted">Current:</span> {activeMode.operationalNote}
           </p>

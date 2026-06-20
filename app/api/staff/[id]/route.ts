@@ -20,6 +20,7 @@ import {
   type LocationType,
 } from "@/lib/workforce-location";
 import { isGoogleConnected, isMicrosoftConnected } from "@/lib/calendar/connections";
+import { tenantHasInPersonLocation } from "@/lib/service-locations";
 
 // Accept either a full http(s) URL OR a local upload path served by
 // Next out of /public — see /api/users/[id]/avatar (multipart upload
@@ -237,6 +238,24 @@ export async function PATCH(
       where: and(eq(users.id, id), eq(users.tenantId, admin.tenantId), inArray(users.role, ["admin", "manager", "staff"])),
     });
     if (!staff) throw new HttpError(404, "Staff not found");
+
+    // In-person / hybrid delivery requires a place to meet. Reject these modes
+    // when the workspace has no active physical/hybrid location — even via API
+    // bypass. Tenant-scoped. Virtual is always allowed. (Only fires when the
+    // delivery mode is explicitly being set to in_person/hybrid; the staff UI
+    // saves deliveryMode on its own, so this never blocks other profile edits.)
+    if (
+      (body.deliveryMode === "in_person" || body.deliveryMode === "hybrid") &&
+      !(await tenantHasInPersonLocation(admin.tenantId))
+    ) {
+      return NextResponse.json(
+        {
+          error: "LOCATION_REQUIRED",
+          message: "A location is required before enabling in-person or hybrid appointments.",
+        },
+        { status: 400 },
+      );
+    }
 
     const { serviceIds, ...userFields } = body;
 
