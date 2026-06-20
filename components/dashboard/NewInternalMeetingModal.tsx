@@ -92,6 +92,7 @@ export default function NewInternalMeetingModal({
   // UI state
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [staffLoaded, setStaffLoaded] = useState(false);
 
   // ── Derived ─────────────────────────────────────────────────
   const organizer = useMemo(
@@ -129,6 +130,14 @@ export default function NewInternalMeetingModal({
       .slice(0, 8);
   }, [staff, organizerId, attendeeIds, attendeeQuery]);
 
+  // ── One-person / no-staff awareness ─────────────────────────
+  // soloOrganizer  → exactly one eligible organizer (auto-selected; lock the picker).
+  // noOtherStaff   → an organizer is chosen but there's nobody else to invite.
+  // noEligibleOrganizer → can't organize at all (rare; viewer is usually eligible).
+  const soloOrganizer = visibleOrganizers.length === 1;
+  const noOtherStaff = !!organizerId && !staff.some((s) => s.id !== organizerId);
+  const noEligibleOrganizer = staffLoaded && visibleOrganizers.length === 0;
+
   // ── Reset on open ───────────────────────────────────────────
   useEffect(() => {
     if (!open) return;
@@ -151,6 +160,7 @@ export default function NewInternalMeetingModal({
   // ── Lazy staff lookup ───────────────────────────────────────
   useEffect(() => {
     if (!open) return;
+    setStaffLoaded(false);
     void (async () => {
       try {
         const res = await fetch("/api/staff", { cache: "no-store" });
@@ -169,11 +179,21 @@ export default function NewInternalMeetingModal({
             role: u.role,
           })),
         );
+        setStaffLoaded(true);
       } catch (e) {
         console.warn("[NewInternalMeetingModal] staff load failed:", e);
       }
     })();
   }, [open]);
+
+  // One-person workspace: auto-select the only eligible organizer so a solo
+  // admin/staff isn't stuck on "Choose organizer…". Only fires when exactly
+  // one organizer is eligible and none is chosen yet — multi-staff keeps the
+  // manual dropdown.
+  useEffect(() => {
+    if (!open || organizerId) return;
+    if (visibleOrganizers.length === 1) setOrganizerId(visibleOrganizers[0]!.id);
+  }, [open, organizerId, visibleOrganizers]);
 
   // If the organizer changes and was previously also in attendees,
   // drop them — backend strips them too, but the UI should match.
@@ -222,7 +242,9 @@ export default function NewInternalMeetingModal({
       internalNotes: internalNotes.trim() || undefined,
       location: location.trim() || undefined,
       videoProvider: videoProvider === "none" ? undefined : videoProvider,
-      sendNotifications,
+      // No attendees → nothing to notify. Never force a notification on a
+      // solo/zero-attendee meeting (and the organizer is never an attendee).
+      sendNotifications: attendeeIds.length > 0 ? sendNotifications : false,
       syncExternal,
     };
 
@@ -307,7 +329,7 @@ export default function NewInternalMeetingModal({
               <select
                 value={organizerId}
                 onChange={(e) => setOrganizerId(e.target.value)}
-                disabled={viewerRole === "staff"}
+                disabled={viewerRole === "staff" || soloOrganizer}
                 className="w-full appearance-none rounded-lg border border-slate-300 pl-3 pr-9 py-2 text-sm bg-white disabled:bg-slate-50"
               >
                 <option value="">Choose organizer…</option>
@@ -319,11 +341,22 @@ export default function NewInternalMeetingModal({
               </select>
               <User className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
             </div>
-            <p className="mt-1 text-[11px] text-slate-500">
-              The meeting lands on the organizer&apos;s connected calendar; video links use their
-              account.
-              {viewerRole === "staff" && " Staff can only organize their own meetings."}
-            </p>
+            {noEligibleOrganizer ? (
+              <p className="mt-1 text-[11px] text-amber-700">
+                Add a staff member before creating internal meetings.
+              </p>
+            ) : soloOrganizer ? (
+              <p className="mt-1 text-[11px] text-slate-500">
+                Auto-selected — you&apos;re the only staff member. The meeting lands on this
+                calendar; video links use this account.
+              </p>
+            ) : (
+              <p className="mt-1 text-[11px] text-slate-500">
+                The meeting lands on the organizer&apos;s connected calendar; video links use their
+                account.
+                {viewerRole === "staff" && " Staff can only organize their own meetings."}
+              </p>
+            )}
           </div>
 
           {/* Attendees — chips + searchable add */}
@@ -351,6 +384,11 @@ export default function NewInternalMeetingModal({
                 ))}
               </div>
             )}
+            {noOtherStaff ? (
+              <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50/60 px-3 py-2.5 text-xs text-slate-500">
+                No other staff available. This meeting will be created just for you.
+              </div>
+            ) : (
             <div className="relative">
               <Users className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
               <input
@@ -366,7 +404,8 @@ export default function NewInternalMeetingModal({
                 className="w-full rounded-lg border border-slate-300 pl-9 pr-3 py-2 text-sm disabled:bg-slate-50"
               />
             </div>
-            {organizerId && (attendeeQuery.length > 0 || attendeeCandidates.length > 0) && (
+            )}
+            {!noOtherStaff && organizerId && (attendeeQuery.length > 0 || attendeeCandidates.length > 0) && (
               <ul className="mt-2 rounded-lg border border-slate-200 bg-white max-h-40 overflow-y-auto divide-y divide-slate-100">
                 {attendeeCandidates.length === 0 ? (
                   <li className="px-3 py-2 text-xs text-slate-500">No matches.</li>
@@ -504,12 +543,14 @@ export default function NewInternalMeetingModal({
 
           {/* Toggles */}
           <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-3 space-y-2">
-            <ToggleRow
-              label="Send attendee notifications"
-              hint="Google → email + .ics. Outlook → calendar invite. Off = quietly added to calendars."
-              value={sendNotifications}
-              onChange={setSendNotifications}
-            />
+            {attendees.length > 0 && (
+              <ToggleRow
+                label="Send attendee notifications"
+                hint="Google → email + .ics. Outlook → calendar invite. Off = quietly added to calendars."
+                value={sendNotifications}
+                onChange={setSendNotifications}
+              />
+            )}
             <ToggleRow
               label="Push to organizer's connected calendar"
               hint="Required for Teams / Meet / Zoom links to work. Off = ZentroMeet calendar only."
@@ -542,8 +583,8 @@ export default function NewInternalMeetingModal({
           <button
             type="button"
             onClick={handleSubmit}
-            disabled={submitting}
-            className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+            disabled={submitting || noEligibleOrganizer}
+            className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {submitting && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
             <Check className="h-3.5 w-3.5" />
