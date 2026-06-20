@@ -6,7 +6,8 @@ import { db } from "@/db/client";
 import { bookings, departments, intakeForms, serviceStaff, services, tenants, users } from "@/db/schema";
 import { errorResponse, HttpError, requireRole } from "@/lib/auth";
 import { canActivateService, getPlan } from "@/lib/plans";
-import { serviceDeliveryModesSchema } from "@/lib/workforce-location";
+import { serviceDeliveryModesSchema, readServiceDeliveryModes } from "@/lib/workforce-location";
+import { tenantHasInPersonLocation, LOCATION_REQUIRED_BODY } from "@/lib/service-locations";
 
 const patchSchema = z.object({
   name: z.string().min(1).max(120).optional(),
@@ -54,6 +55,18 @@ export async function PATCH(
       where: and(eq(services.id, id), eq(services.tenantId, admin.tenantId)),
     });
     if (!existing) throw new HttpError(404, "Service not found");
+
+    // ── In-person requires a place to meet ──────────────────────
+    // Block ENABLING in-person (off → on) when the tenant has no active
+    // physical/hybrid location. Tenant-scoped. Services that ALREADY allow
+    // in-person stay editable (not auto-disabled) even with no location — the
+    // editor surfaces a warning instead; this only stops new enablement.
+    if (body.deliveryModes?.includes("in_person")) {
+      const wasInPerson = readServiceDeliveryModes(existing.deliveryModes).includes("in_person");
+      if (!wasInPerson && !(await tenantHasInPersonLocation(admin.tenantId))) {
+        return NextResponse.json(LOCATION_REQUIRED_BODY, { status: 400 });
+      }
+    }
 
     // Validate department assignment (if changing) belongs to this
     // tenant. `null` clears ownership; `undefined` leaves it alone.

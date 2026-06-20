@@ -7,6 +7,7 @@ import { getSession } from "@/lib/auth";
 import Shell from "@/components/dashboard/Shell";
 import ServicesClient from "@/components/dashboard/ServicesClient";
 import { canCreateService, getPlan } from "@/lib/plans";
+import { tenantHasInPersonLocation } from "@/lib/service-locations";
 
 export default async function ServicesPage() {
   const session = await getSession();
@@ -75,6 +76,11 @@ export default async function ServicesPage() {
   void ne;
   const healthyStaffIds = healthyConnRows.map((r) => r.userId);
 
+  // In-person eligibility: does this tenant have an active physical/hybrid
+  // location? Drives the In-person checkbox (disabled + helper / warning) in
+  // the service editor. The API enforces the same rule server-side.
+  const hasPhysicalLocation = await tenantHasInPersonLocation(user.tenantId);
+
   return (
     <Shell
       user={{ name: user.name, email: user.email, role: user.role }}
@@ -102,6 +108,7 @@ export default async function ServicesPage() {
           initialAtCap: initialCapability.cap.atCap,
         }}
         healthyStaffIds={healthyStaffIds}
+        hasPhysicalLocation={hasPhysicalLocation}
       />
     </Shell>
   );

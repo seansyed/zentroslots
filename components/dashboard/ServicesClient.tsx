@@ -331,6 +331,7 @@ export default function ServicesClient({
   tenantName,
   planInfo,
   healthyStaffIds,
+  hasPhysicalLocation,
 }: {
   isAdmin: boolean;
   allStaff: StaffOption[];
@@ -357,6 +358,10 @@ export default function ServicesClient({
    *  deriveServiceHealth to compute the "Calendar coverage" signal
    *  per service without a per-card round-trip. */
   healthyStaffIds: string[];
+  /** True when the tenant has an active physical/hybrid location. Gates the
+   *  In-person delivery-mode checkbox in the service editor (the API enforces
+   *  the same rule server-side). */
+  hasPhysicalLocation: boolean;
 }) {
   const healthyStaffIdSet = React.useMemo(
     () => new Set(healthyStaffIds),
@@ -589,6 +594,7 @@ export default function ServicesClient({
         isAdmin={isAdmin}
         existing={rows ?? []}
         tenantSlug={tenantSlug ?? null}
+        hasPhysicalLocation={hasPhysicalLocation}
       />
 
       {/* Dedicated Assign Staff panel — workforce-only workflow.
@@ -2136,7 +2142,7 @@ function ActivationStepCard({
 // ─── ServiceDrawer — logic preserved 100%, chrome refreshed ───────
 
 function ServiceDrawer({
-  openId, onClose, onSaved, allStaff, allDepartments, allIntakeForms, isAdmin, existing, tenantSlug,
+  openId, onClose, onSaved, allStaff, allDepartments, allIntakeForms, isAdmin, existing, tenantSlug, hasPhysicalLocation,
 }: {
   openId: string | "new" | null;
   onClose: () => void;
@@ -2151,6 +2157,8 @@ function ServiceDrawer({
   existing: Svc[];
   /** Threaded for the Booking & sharing field inside the drawer. */
   tenantSlug: string | null;
+  /** Tenant has an active physical/hybrid location → in-person is allowed. */
+  hasPhysicalLocation: boolean;
 }) {
   const isNew = openId === "new";
   const svc = openId && openId !== "new" ? existing.find((s) => s.id === openId) : null;
@@ -2218,7 +2226,10 @@ function ServiceDrawer({
       setBufferBefore(0); setBufferAfter(0);
       setColor(DEFAULT_COLORS[0]); setIsActive(true);
       setVideoProvider("google_meet");
-      setDeliveryModes(["virtual", "in_person"]);
+      // New service: default to both, but drop in-person when the tenant has
+      // no physical/hybrid location (it can't be offered, and the API blocks
+      // it) — start virtual-only instead of a checkbox the admin can't keep.
+      setDeliveryModes(hasPhysicalLocation ? ["virtual", "in_person"] : ["virtual"]);
       setSelectedStaff(new Set());
       setDepartmentId(null);
       setDeptQuery("");
@@ -2482,36 +2493,59 @@ function ServiceDrawer({
             <div className="space-y-1.5">
               {DELIVERY_MODE_OPTIONS.map((opt) => {
                 const on = deliveryModes.includes(opt.value);
+                // In-person needs a place to meet. Can't ENABLE it without an
+                // active physical/hybrid location; if it's already on
+                // (grandfathered), keep it toggleable so the admin can turn it
+                // off. The API enforces the same rule server-side.
+                const blockedNoLocation = opt.value === "in_person" && !hasPhysicalLocation;
+                const disabled = !isAdmin || (blockedNoLocation && !on);
                 return (
-                  <label
-                    key={opt.value}
-                    className={
-                      "flex cursor-pointer items-start gap-2 rounded-md border border-border bg-surface px-3 py-2 text-sm " +
-                      (on ? "ring-1 ring-brand-accent/30" : "")
-                    }
-                  >
-                    <input
-                      type="checkbox"
-                      checked={on}
-                      disabled={!isAdmin}
-                      onChange={() => {
-                        setDeliveryModes((cur) => {
-                          if (cur.includes(opt.value)) {
-                            // Block deselect of the last remaining mode — server
-                            // would reject anyway; cleaner to no-op here.
-                            if (cur.length <= 1) return cur;
-                            return cur.filter((v) => v !== opt.value);
-                          }
-                          return [...cur, opt.value];
-                        });
-                      }}
-                      className="mt-0.5 h-4 w-4 accent-brand-accent"
-                    />
-                    <span className="flex-1">
-                      <span className="block text-ink">{opt.label}</span>
-                      <span className="block text-[11px] text-ink-subtle">{opt.caption}</span>
-                    </span>
-                  </label>
+                  <React.Fragment key={opt.value}>
+                    <label
+                      className={
+                        "flex items-start gap-2 rounded-md border border-border bg-surface px-3 py-2 text-sm " +
+                        (disabled ? "cursor-not-allowed opacity-60 " : "cursor-pointer ") +
+                        (on ? "ring-1 ring-brand-accent/30" : "")
+                      }
+                    >
+                      <input
+                        type="checkbox"
+                        checked={on}
+                        disabled={disabled}
+                        onChange={() => {
+                          setDeliveryModes((cur) => {
+                            if (cur.includes(opt.value)) {
+                              // Block deselect of the last remaining mode — server
+                              // would reject anyway; cleaner to no-op here.
+                              if (cur.length <= 1) return cur;
+                              return cur.filter((v) => v !== opt.value);
+                            }
+                            return [...cur, opt.value];
+                          });
+                        }}
+                        className="mt-0.5 h-4 w-4 accent-brand-accent"
+                      />
+                      <span className="flex-1">
+                        <span className="block text-ink">{opt.label}</span>
+                        <span className="block text-[11px] text-ink-subtle">{opt.caption}</span>
+                      </span>
+                    </label>
+                    {blockedNoLocation && !on && (
+                      <p className="px-1 text-[11px] text-ink-subtle">
+                        Add a{" "}
+                        <a href="/dashboard/locations" className="font-medium text-brand-accent underline underline-offset-2">
+                          physical or hybrid location
+                        </a>{" "}
+                        before enabling in-person bookings.
+                      </p>
+                    )}
+                    {blockedNoLocation && on && (
+                      <p className="rounded-md border border-amber-300/60 bg-amber-50/70 px-2.5 py-1.5 text-[11px] text-amber-900">
+                        In-person is currently unavailable because no physical or hybrid location is configured.{" "}
+                        <a href="/dashboard/locations" className="font-semibold underline underline-offset-2">Add one</a>.
+                      </p>
+                    )}
+                  </React.Fragment>
                 );
               })}
             </div>

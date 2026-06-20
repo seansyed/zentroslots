@@ -6,6 +6,7 @@ import { bookings, departments, serviceStaff, services, tenants, users } from "@
 import { errorResponse, getTenantId, requireRole, HttpError } from "@/lib/auth";
 import { canCreateService, getPlan } from "@/lib/plans";
 import { serviceSchema } from "@/lib/validation";
+import { tenantHasInPersonLocation, LOCATION_REQUIRED_BODY } from "@/lib/service-locations";
 
 // GET: by default tenant-scoped to the caller and limited to active
 // services (existing contract preserved). Pass `?include=all` to also
@@ -57,6 +58,11 @@ export async function GET(req: NextRequest) {
         isActive: services.isActive,
         videoProvider: services.videoProvider,
         color: services.color,
+        // Per-service delivery compatibility (migration 0037). MUST be
+        // returned so the editor reflects the saved value — omitting it made
+        // the client fall back to the "both" default, so unchecking In-person
+        // never appeared to persist (the bug). jsonb array of allowed modes.
+        deliveryModes: services.deliveryModes,
         // Direct department ownership (migration 0032). The primary
         // signal for "this service belongs to this department."
         departmentId: services.departmentId,
@@ -183,6 +189,15 @@ export async function POST(req: NextRequest) {
     const admin = await requireRole(["admin", "manager"]);
     const body = serviceSchema.parse(await req.json());
 
+    // ── In-person requires a place to meet ──────────────────────
+    // Block creating an in-person service when the tenant has no active
+    // physical/hybrid location. Tenant-scoped. Only fires when in_person is
+    // explicitly requested — virtual-only creates (and omitted-modes creates,
+    // which take the DB default) are unaffected.
+    if (body.deliveryModes?.includes("in_person") && !(await tenantHasInPersonLocation(admin.tenantId))) {
+      return NextResponse.json(LOCATION_REQUIRED_BODY, { status: 400 });
+    }
+
     // ── Plan cap enforcement (Phase 18) ─────────────────────────
     // Block creates when the tenant has hit its active-services
     // cap. New services default to is_active=1 so every create
@@ -249,6 +264,9 @@ export async function POST(req: NextRequest) {
         bufferBefore: body.bufferBefore,
         bufferAfter: body.bufferAfter,
         videoProvider: body.videoProvider,
+        // Persist the chosen modes (previously dropped → create ignored them).
+        // Omitted → undefined → DB default ["virtual","in_person"] applies.
+        deliveryModes: body.deliveryModes,
         departmentId: body.departmentId ?? null,
       })
       .returning();

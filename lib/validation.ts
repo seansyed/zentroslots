@@ -38,6 +38,11 @@ export const serviceSchema = z.object({
   bufferAfter: z.number().int().min(0).max(240).default(0),
   videoProvider: videoProviderSchema.default("google_meet"),
   staffUserIds: z.array(z.string().uuid()).default([]),
+  // Per-service delivery compatibility (migration 0037). jsonb array of
+  // allowed modes. Optional — when omitted the DB default (both) applies.
+  // When provided it is persisted (previously dropped, so create ignored the
+  // chosen modes). The route blocks enabling "in_person" without a location.
+  deliveryModes: z.array(z.enum(["in_person", "virtual"])).min(1).max(2).optional(),
   // Direct department ownership (migration 0032). Optional — services
   // can be created unassigned; nullable so the operator can later
   // clear the assignment. The route validates the department belongs
