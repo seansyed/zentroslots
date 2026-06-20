@@ -898,6 +898,21 @@ function StaffScheduleDrawer({
   const [deliveryMode, setDeliveryMode] = React.useState<"in_person" | "virtual" | "hybrid">("hybrid");
   const [modeSaving, setModeSaving] = React.useState(false);
 
+  // "Show Fewer Open Slots" — client-facing PUBLIC slot display throttle
+  // (migration 0075). Read/written via the SAME GET/PATCH /api/staff/[id]
+  // this drawer already uses for delivery mode. Display-only — NEVER touches
+  // real availability (sections A/B above) or the booking engine.
+  type DisplayMode = "normal" | "balanced" | "limited" | "very_limited";
+  const [showFewer, setShowFewer] = React.useState(false);
+  const [displayMode, setDisplayMode] = React.useState<DisplayMode>("normal");
+  const [minVisible, setMinVisible] = React.useState(3);
+  const [displayBaseline, setDisplayBaseline] = React.useState<{
+    showFewer: boolean;
+    displayMode: DisplayMode;
+    minVisible: number;
+  }>({ showFewer: false, displayMode: "normal", minVisible: 3 });
+  const [displaySaving, setDisplaySaving] = React.useState(false);
+
   const open = staff !== null;
 
   // When a new staff is selected, fetch their schedule + reset
@@ -924,6 +939,15 @@ function StaffScheduleDrawer({
         const inheriting = fetchedRules.length === 0;
         setUseWorkspace(inheriting);
         setSavedUseWorkspace(inheriting);
+        // Seed client-facing display settings from the same payload
+        // (staff.* fields returned by GET /api/staff/[id]).
+        const sf = d?.staff?.showFewerOpenSlots ?? false;
+        const dm = (d?.staff?.availabilityDisplayMode ?? "normal") as DisplayMode;
+        const mv = d?.staff?.minimumVisibleSlotsPerDay ?? 3;
+        setShowFewer(sf);
+        setDisplayMode(dm);
+        setMinVisible(mv);
+        setDisplayBaseline({ showFewer: sf, displayMode: dm, minVisible: mv });
       })
       .catch(() => {
         toast("Failed to load schedule", "error");
@@ -1031,6 +1055,37 @@ function StaffScheduleDrawer({
       toast(e instanceof Error ? e.message : "Failed", "error");
     } finally {
       setModeSaving(false);
+    }
+  }
+
+  const displayDirty =
+    showFewer !== displayBaseline.showFewer ||
+    displayMode !== displayBaseline.displayMode ||
+    minVisible !== displayBaseline.minVisible;
+
+  async function saveDisplaySettings() {
+    if (!staff || !canEdit || !displayDirty) return;
+    setDisplaySaving(true);
+    try {
+      // SAME endpoint as delivery mode. Server enforces admin/manager
+      // (requireRole) + the field schema — this UI cannot widen access.
+      const res = await fetch(`/api/staff/${staff.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          showFewerOpenSlots: showFewer,
+          availabilityDisplayMode: displayMode,
+          minimumVisibleSlotsPerDay: minVisible,
+        }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d?.error ?? "Failed");
+      setDisplayBaseline({ showFewer, displayMode, minVisible });
+      toast("Client-facing display updated", "success");
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed", "error");
+    } finally {
+      setDisplaySaving(false);
     }
   }
 
@@ -1213,6 +1268,88 @@ function StaffScheduleDrawer({
                       disabled={!canEdit || modeSaving}
                     />
                   </div>
+                </PremiumCard>
+
+                {/* E. Client-facing availability display — PUBLIC slot throttle.
+                    Display layer ONLY; visually separated from the real-schedule
+                    cards (A/B) above. Saved via PATCH /api/staff/[id]. */}
+                <PremiumCard className="p-4 ring-1 ring-border/40">
+                  <div className="flex items-center gap-2">
+                    <div className="text-[10px] font-semibold uppercase tracking-[0.10em] text-brand-accent">
+                      E · Client-facing display
+                    </div>
+                    <span className="inline-flex items-center gap-1 rounded-full bg-surface-inset px-1.5 py-0.5 text-[9.5px] font-semibold uppercase tracking-[0.06em] text-ink-muted ring-1 ring-border/40">
+                      <Layers className="h-2.5 w-2.5" strokeWidth={2} aria-hidden /> Display only
+                    </span>
+                  </div>
+                  <h3 className="mt-0.5 text-[14px] font-semibold tracking-tight text-ink">
+                    Client-facing availability display
+                  </h3>
+                  <p className="mt-0.5 text-[11.5px] text-ink-muted">
+                    These settings control what clients see on the public booking page. They do not change this staff member&rsquo;s real internal availability.
+                  </p>
+
+                  <label className="mt-3 flex items-center justify-between gap-3 rounded-md border border-border bg-surface px-3 py-2.5">
+                    <span className="text-[12.5px] font-medium text-ink">Show Fewer Open Slots</span>
+                    <input
+                      type="checkbox"
+                      checked={showFewer}
+                      onChange={(e) => setShowFewer(e.target.checked)}
+                      disabled={!canEdit || displaySaving}
+                      className="h-4 w-4 accent-brand-accent disabled:opacity-50"
+                    />
+                  </label>
+
+                  <div className={cn("mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2", !showFewer && "opacity-50")}>
+                    <label className="block">
+                      <span className="text-[11px] font-semibold text-ink-muted">Availability display</span>
+                      <select
+                        value={displayMode}
+                        onChange={(e) => setDisplayMode(e.target.value as DisplayMode)}
+                        disabled={!canEdit || !showFewer || displaySaving}
+                        className="mt-1 w-full rounded-md border border-border bg-surface px-3 py-2 text-[13px] disabled:bg-surface-inset"
+                      >
+                        <option value="normal">Normal — Show all available slots</option>
+                        <option value="balanced">Balanced — Show fewer slots</option>
+                        <option value="limited">Limited — Show limited slots</option>
+                        <option value="very_limited">Very Limited — Show very few slots</option>
+                      </select>
+                    </label>
+                    <label className="block">
+                      <span className="text-[11px] font-semibold text-ink-muted">Minimum visible slots per day</span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={20}
+                        value={minVisible}
+                        onChange={(e) => {
+                          const n = Number(e.target.value);
+                          setMinVisible(Number.isFinite(n) ? Math.min(20, Math.max(1, Math.floor(n))) : 3);
+                        }}
+                        disabled={!canEdit || !showFewer || displaySaving}
+                        className="mt-1 w-full rounded-md border border-border bg-surface px-3 py-2 text-[13px] disabled:bg-surface-inset"
+                      />
+                    </label>
+                  </div>
+
+                  <p className="mt-2 text-[10.5px] text-ink-subtle">
+                    Clients can only book the slots shown on the public booking page. Admins and staff can still book the full real availability internally.
+                  </p>
+
+                  {canEdit ? (
+                    <div className="mt-3 flex items-center justify-end gap-2">
+                      {displayDirty && (
+                        <span className="text-[10.5px] text-ink-subtle">Unsaved display changes</span>
+                      )}
+                      <Button onClick={saveDisplaySettings} size="sm" disabled={!displayDirty || displaySaving}>
+                        {displaySaving ? "Saving…" : "Save display settings"}
+                      </Button>
+                    </div>
+                  ) : (
+                    <p className="mt-3 text-[10.5px] text-ink-subtle">
+                      Read-only. Admins and managers manage the client-facing display.
+                    </p>
+                  )}
                 </PremiumCard>
 
                 <p className="px-1 text-center text-[10.5px] text-ink-subtle">
