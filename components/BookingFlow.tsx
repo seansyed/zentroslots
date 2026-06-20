@@ -1219,7 +1219,7 @@ function SlotsGrouped({
                   //   - New ultra-soft inner glow overlay (radial
                   //     gradient at very low opacity) gives the slot
                   //     a calm premium hover feel without flash
-                  className="group relative overflow-hidden rounded-xl border border-slate-200 bg-white px-3 py-2 text-[13px] font-medium text-slate-700 shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-all duration-[160ms] hover:-translate-y-0.5 hover:shadow-[0_4px_10px_rgba(15,23,42,0.06)] focus:outline-none focus:ring-2 focus:ring-offset-1 active:scale-[0.98] active:translate-y-0"
+                  className="group relative flex flex-col items-center justify-center overflow-hidden rounded-xl border border-slate-200 bg-white px-3 py-2 text-[13px] font-medium text-slate-700 shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-all duration-[160ms] hover:-translate-y-0.5 hover:shadow-[0_4px_10px_rgba(15,23,42,0.06)] focus:outline-none focus:ring-2 focus:ring-offset-1 active:scale-[0.98] active:translate-y-0"
                   style={{
                     transitionTimingFunction: MOTION_CURVE,
                     /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
@@ -1256,16 +1256,15 @@ function SlotsGrouped({
                     className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-[160ms] group-hover:opacity-100"
                     style={{ boxShadow: `0 8px 20px ${accent}33`, transitionTimingFunction: MOTION_CURVE }}
                   />
-                  <span className="relative tabular-nums transition-colors duration-[160ms] group-hover:text-white" style={{ transitionTimingFunction: MOTION_CURVE }}>
-                    {formatInTimeZone(iso, tz, "h:mm a")}
-                  </span>
                   {/* Phase SMART-1 — recommendation chip. Pure
                       annotation: never changes which slot is rendered
-                      OR its bookability. The chip is absolute-
-                      positioned at the top-right of the existing
-                      button so the slot grid layout is unchanged.
-                      Only the highest-priority label renders to keep
-                      the chip from cluttering the UI. */}
+                      OR its bookability. Rendered IN-FLOW above the time
+                      (was absolute -top/-right, which the button's
+                      overflow-hidden clipped and which overlapped the
+                      time text). Stacked layout: badge on top, time
+                      below — never clips, never covers the label.
+                      `relative z-[1]` lifts it above the hover overlays;
+                      `max-w-full truncate` caps a long label safely. */}
                   {(() => {
                     const labels = slotLabels?.get(iso);
                     if (!labels || labels.length === 0) return null;
@@ -1282,12 +1281,15 @@ function SlotsGrouped({
                     return (
                       <span
                         aria-label={top}
-                        className="pointer-events-none absolute -top-1.5 -right-1.5 inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-1.5 py-px text-[9px] font-semibold uppercase tracking-wide text-emerald-700 shadow-sm"
+                        className="pointer-events-none relative z-[1] mb-0.5 inline-flex max-w-full items-center truncate whitespace-nowrap rounded-full border border-emerald-200 bg-emerald-50 px-1.5 py-px text-[9px] font-semibold uppercase tracking-wide text-emerald-700"
                       >
                         {top}
                       </span>
                     );
                   })()}
+                  <span className="relative z-[1] tabular-nums transition-colors duration-[160ms] group-hover:text-white" style={{ transitionTimingFunction: MOTION_CURVE }}>
+                    {formatInTimeZone(iso, tz, "h:mm a")}
+                  </span>
                 </button>
               ))}
             </div>
