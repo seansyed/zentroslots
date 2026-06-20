@@ -28,7 +28,10 @@ export default function DashboardHero(props: {
   todayCount: number;
   weekCount: number;
   utilizationPct: number;
-  showGoogleConnect: boolean;
+  /** Show the neutral "Connect calendar" CTA only when NO provider (Google or
+   *  Microsoft) is connected. Provider-agnostic — the target page lets the user
+   *  choose Google or Microsoft. */
+  showConnectCalendar: boolean;
   /** Optional slot — typically MiniSchedule rendered by the page. */
   miniSchedule?: React.ReactNode;
 }) {
@@ -106,8 +109,8 @@ export default function DashboardHero(props: {
             />
             <QuickAction href="/dashboard/customers" icon={UserPlus} label="Add customer" />
             <QuickAction href="/dashboard/availability/overrides" icon={Clock4} label="Block time" />
-            {props.showGoogleConnect && (
-              <QuickAction href="/api/google/connect" icon={Plug} label="Connect Google" />
+            {props.showConnectCalendar && (
+              <QuickAction href="/dashboard/settings/calendar" icon={Plug} label="Connect calendar" />
             )}
           </div>
         </div>

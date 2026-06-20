@@ -4,7 +4,7 @@ import { and, count, desc, eq, gte, inArray, lt, or, sql } from "drizzle-orm";
 import { db } from "@/db/client";
 import { announcements, availability, bookings, services, tasks, tenants, users } from "@/db/schema";
 import { getSession, isManagerial } from "@/lib/auth";
-import { getGoogleHealth } from "@/lib/calendar/connections";
+import { getGoogleHealth, isMicrosoftConnected } from "@/lib/calendar/connections";
 import DashboardBookings from "@/components/DashboardBookings";
 import Shell from "@/components/dashboard/Shell";
 import OnboardingChecklist, { type ChecklistItem } from "@/components/dashboard/OnboardingChecklist";
@@ -261,8 +261,13 @@ export default async function DashboardPage(props: {
   // — one query, used by both the checklist tile and the reconnect
   // banner below so we don't double-fetch.
   const googleHealth = await getGoogleHealth(user.id);
+  // Provider-aware calendar state: Google OR Microsoft counts as "connected"
+  // for the dashboard CTA and the setup checklist. (Avoids the hard-coded
+  // Google-only assumption that mislabeled Microsoft users.)
+  const microsoftConnected = await isMicrosoftConnected(user.id);
+  const anyCalendarConnected = googleHealth.connected || microsoftConnected;
   const checklistItems: ChecklistItem[] = [
-    { id: "google",   label: "Connect Google Calendar",          href: "/dashboard/settings/integrations", done: googleHealth.connected },
+    { id: "google",   label: "Connect a calendar",               href: "/dashboard/settings/calendar", done: anyCalendarConnected },
     { id: "service",  label: "Add at least one service",         href: "/dashboard/services",              done: checklistSummary.hasServices },
     { id: "hours",    label: "Set your weekly working hours",    href: "/dashboard/availability",          done: checklistSummary.hasAvailability },
     { id: "booking",  label: "Receive your first booking",       href: "/dashboard/calendar",              done: bookingCount > 0 },
@@ -369,7 +374,7 @@ export default async function DashboardPage(props: {
           todayCount={Number(todayCount?.n ?? 0)}
           weekCount={Number(weekCount?.n ?? 0)}
           utilizationPct={utilizationPct}
-          showGoogleConnect={!googleHealth.connected && (user.role === "admin" || user.role === "staff")}
+          showConnectCalendar={!anyCalendarConnected && (user.role === "admin" || user.role === "staff")}
           miniSchedule={
             <MiniSchedule rows={todayRows} timezone={user.timezone} />
           }
