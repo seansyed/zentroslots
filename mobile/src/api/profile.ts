@@ -48,9 +48,14 @@ export type Profile = {
     /** Tenant brand color (hex). Null = platform default. */
     primaryColor: string | null;
   } | null;
-  /** Surfaced from /api/auth/me so the Settings screen can show a
-   *  "Connect Google Calendar" CTA without an extra round-trip. */
+  /** Per-provider calendar connection state from /api/auth/me. Use
+   *  `calendarConnected` (aggregate) for provider-neutral "Connect calendar" /
+   *  hide-CTA decisions; the per-provider flags drive provider-specific copy.
+   *  `googleConnected` kept for back-compat. */
   googleConnected: boolean;
+  microsoftConnected: boolean;
+  /** True when EITHER Google or Microsoft is connected. */
+  calendarConnected: boolean;
 };
 
 type AuthMeResponse = {
@@ -61,6 +66,8 @@ type AuthMeResponse = {
   timezone: string;
   avatarUrl?: string | null;
   googleConnected?: boolean;
+  microsoftConnected?: boolean;
+  calendarConnected?: boolean;
   tenant?: {
     id: string;
     name: string;
@@ -88,6 +95,12 @@ function normalize(raw: AuthMeResponse): Profile {
     avatarUrl: toAbsoluteImageUrl(raw.avatarUrl),
     timezone: raw.timezone ?? "UTC",
     googleConnected: Boolean(raw.googleConnected),
+    microsoftConnected: Boolean(raw.microsoftConnected),
+    // Prefer the backend aggregate; fall back to OR of the per-provider flags
+    // for older backends that don't return it yet.
+    calendarConnected: Boolean(
+      raw.calendarConnected ?? (raw.googleConnected || raw.microsoftConnected),
+    ),
     tenant: raw.tenant
       ? {
           id: raw.tenant.id,

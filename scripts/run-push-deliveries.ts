@@ -10,9 +10,11 @@
  *
  * Reliability behavior:
  *   • Per-batch try/catch so one bad batch can't stall the run.
- *   • Permanent errors (DeviceNotRegistered, InvalidCredentials)
- *     mark the delivery 'failed' AND delete the dead token so we
- *     never retry against it.
+ *   • DeviceNotRegistered (the ONLY token-dead error) marks the delivery
+ *     'failed' AND deletes the dead token so we never retry against it.
+ *   • InvalidCredentials is a CREDENTIAL error (bad/missing APNs/FCM key),
+ *     NOT a dead token: we retry + adminNotify('push_provider_error') and
+ *     NEVER delete the token — one config fix re-enables every device.
  *   • Transient errors (HTTP 5xx, network, MessageRateExceeded)
  *     schedule a retry with exponential backoff (60s → 5m → 30m).
  *   • Hard giveup after 5 attempts → status='expired'.

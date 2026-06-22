@@ -376,9 +376,17 @@ export default function ProfileScreen() {
                     value={profile?.tenant?.plan ?? "—"}
                   />
                   <DetailRow
-                    icon={profile?.googleConnected ? "checkmark-circle" : "close-circle-outline"}
-                    label="Google Calendar"
-                    value={profile?.googleConnected ? "Connected" : "Not connected"}
+                    icon={profile?.calendarConnected ? "checkmark-circle" : "close-circle-outline"}
+                    label="Calendar"
+                    value={
+                      profile?.googleConnected && profile?.microsoftConnected
+                        ? "Google & Microsoft"
+                        : profile?.googleConnected
+                          ? "Google connected"
+                          : profile?.microsoftConnected
+                            ? "Microsoft connected"
+                            : "Not connected"
+                    }
                   />
                 </View>
               )}

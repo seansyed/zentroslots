@@ -24,7 +24,10 @@
  * Privacy:
  *   We deliberately do NOT capture request bodies, tokens, or PII. Only
  *   structural metadata (URL pattern, status, error name + message,
- *   route segments). The buffer lives on-device — there is no upload.
+ *   route segments, app version, platform, a random non-PII device id).
+ *   The buffer is flushed to the backend by telemetrySink.ts (POST
+ *   /api/mobile/telemetry, ~every 60s + on background) — metadata only,
+ *   never tokens/PII.
  */
 
 import AsyncStorage from "@react-native-async-storage/async-storage";

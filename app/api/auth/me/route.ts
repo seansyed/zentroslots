@@ -4,7 +4,7 @@ import { z } from "zod";
 
 import { errorResponse, requireUser } from "@/lib/auth";
 import { getTenantById } from "@/lib/tenant";
-import { isGoogleConnected } from "@/lib/calendar/connections";
+import { isGoogleConnected, isMicrosoftConnected } from "@/lib/calendar/connections";
 import { db } from "@/db/client";
 import { users } from "@/db/schema";
 
@@ -21,7 +21,16 @@ export async function GET() {
     // migration 0044 has run, every active user has a connection row,
     // and falling back would just re-introduce the plaintext dependency
     // we're removing.
-    const googleConnected = await isGoogleConnected(user.id);
+    // Provider-aware calendar state. `googleConnected` is kept for
+    // back-compat; `microsoftConnected` + the aggregate `calendarConnected`
+    // are additive so the mobile app can show provider-neutral copy
+    // ("Connect calendar" / hide the CTA when ANY provider is connected)
+    // instead of a Google-only assumption.
+    const [googleConnected, microsoftConnected] = await Promise.all([
+      isGoogleConnected(user.id),
+      isMicrosoftConnected(user.id),
+    ]);
+    const calendarConnected = googleConnected || microsoftConnected;
 
     return NextResponse.json({
       id: user.id,
@@ -35,6 +44,8 @@ export async function GET() {
       // Null when no avatar has been uploaded (initials path).
       avatarUrl: user.avatarUrl ?? null,
       googleConnected,
+      microsoftConnected,
+      calendarConnected,
       tenant: tenant
         ? {
             id: tenant.id,
@@ -128,7 +139,11 @@ export async function PATCH(req: NextRequest) {
     }
 
     const tenant = await getTenantById(user.tenantId);
-    const googleConnected = await isGoogleConnected(user.id);
+    const [googleConnected, microsoftConnected] = await Promise.all([
+      isGoogleConnected(user.id),
+      isMicrosoftConnected(user.id),
+    ]);
+    const calendarConnected = googleConnected || microsoftConnected;
 
     return NextResponse.json({
       id: updated.id,
@@ -138,6 +153,8 @@ export async function PATCH(req: NextRequest) {
       timezone: updated.timezone,
       avatarUrl: updated.avatarUrl ?? null,
       googleConnected,
+      microsoftConnected,
+      calendarConnected,
       tenant: tenant
         ? {
             id: tenant.id,

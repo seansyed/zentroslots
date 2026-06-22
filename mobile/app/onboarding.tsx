@@ -28,7 +28,7 @@
  */
 
 import * as React from "react";
-import { Linking, Platform, StyleSheet, View } from "react-native";
+import { Platform, StyleSheet, View } from "react-native";
 import * as Notifications from "expo-notifications";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
@@ -44,7 +44,6 @@ import { Button } from "@/components/ui/Button";
 import { ScreenContainer } from "@/components/ui/ScreenContainer";
 import { AppText } from "@/components/ui/Text";
 import { useFirstRun } from "@/hooks/useFirstRun";
-import { calendarConnectionsApi } from "@/api/calendarConnections";
 import { track } from "@/lib/telemetry";
 import { colors, radius, shadows, spacing } from "@/theme";
 
@@ -102,16 +101,14 @@ export default function OnboardingScreen() {
     goNext();
   }
 
-  function connectCalendar() {
+  async function connectCalendar() {
     void Haptics.selectionAsync().catch(() => {});
-    const url = calendarConnectionsApi.connectUrl("google");
-    track("info", "Onboarding calendar connect tapped", "info", { url });
-    Linking.openURL(url).catch(() => {
-      // If the browser can't open, just complete onboarding. The user
-      // can connect later from /settings/calendar.
-    });
-    // Whether or not the OAuth completes, the user is past onboarding.
-    void finish();
+    track("info", "Onboarding connect-calendar tapped", "info");
+    // Finish onboarding, then land on the provider-NEUTRAL calendar screen
+    // where the user picks Google OR Microsoft. (Was hard-coded to open
+    // Google OAuth directly, which ignored Microsoft users.)
+    await markSeen();
+    router.replace("/settings/calendar");
   }
 
   // ── Step content ─────────────────────────────────────────────────
@@ -163,7 +160,7 @@ export default function OnboardingScreen() {
               "in Settings → Calendar."
             }
             primary={{
-              label: "Connect Google Calendar",
+              label: "Connect a calendar",
               onPress: connectCalendar,
             }}
             secondary={{ label: "I'll do this later", onPress: finish }}

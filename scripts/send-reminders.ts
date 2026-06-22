@@ -2,9 +2,10 @@
 /**
  * send-reminders.ts
  *
- * Scans confirmed bookings whose start_at falls into the 24h or 1h
- * window and fires a reminder automation each, marking the booking so
- * it doesn't fire again.
+ * Scans confirmed bookings whose start_at falls into the 24h, 2h, or 1h
+ * window and, for each, fires the reminder EMAIL automation AND enqueues a
+ * reminder PUSH to the assigned staff member, marking the booking so it
+ * doesn't fire again.
  *
  * Run every 10–15 minutes via a host-level scheduler:
  *   - Windows: Task Scheduler → "npm run reminders:send" in scheduling-saas
@@ -19,12 +20,13 @@ import "dotenv/config";
 import { and, eq, gte, isNull, lt } from "drizzle-orm";
 
 import { db } from "../db/client";
-import { bookings } from "../db/schema";
+import { bookings, services } from "../db/schema";
 import {
   triggerAutomation,
   type AutomationEvent,
 } from "../lib/communications/engine";
 import { adminNotify } from "../lib/admin-notify";
+import { enqueueBookingPush } from "../lib/push/enqueue";
 
 const WINDOW_MIN = 30;
 
@@ -46,8 +48,17 @@ async function processWindow(
       tenantId: bookings.tenantId,
       startAt: bookings.startAt,
       clientEmail: bookings.clientEmail,
+      // Additive — needed to fan out the reminder PUSH to the assigned
+      // staff member (enqueueBookingPush). leftJoin keeps email reminders
+      // firing even if the service row was deleted (serviceName → null →
+      // copyFor falls back to "Appointment").
+      staffUserId: bookings.staffUserId,
+      clientName: bookings.clientName,
+      serviceId: bookings.serviceId,
+      serviceName: services.name,
     })
     .from(bookings)
+    .leftJoin(services, eq(services.id, bookings.serviceId))
     .where(
       and(
         eq(bookings.status, "confirmed"),
@@ -91,6 +102,29 @@ async function processWindow(
         tenantId: b.tenantId,
         bookingId: b.id,
         eventType,
+      });
+
+      // Reminder PUSH to the assigned staff member. Enqueued AFTER
+      // triggerAutomation returns (and only on this run, which already won the
+      // atomic claim above) so it fires EXACTLY ONCE per reminder window — the
+      // same `reminder*SentAt` claim that dedups the email also dedups this
+      // push. Placed after triggerAutomation so that if the engine THROWS (the
+      // catch below RELEASES the claim for a retry) we never reach here twice.
+      // enqueueBookingPush never throws and is a no-op when the staff member
+      // has no push tokens / the tenant is a demo tenant. We AWAIT it because
+      // the worker process.exit(0)s on completion — a fire-and-forget insert
+      // could be dropped before it lands.
+      await enqueueBookingPush({
+        tenantId: b.tenantId,
+        booking: {
+          id: b.id,
+          staffUserId: b.staffUserId,
+          clientName: b.clientName,
+          startAt: b.startAt,
+          serviceId: b.serviceId,
+        },
+        serviceName: b.serviceName ?? "",
+        event: "booking_reminder",
       });
 
       // The claim above already set the flag. On a provider 'failed' we

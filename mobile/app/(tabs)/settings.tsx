@@ -121,9 +121,13 @@ export default function SettingsScreen() {
     {
       icon: "calendar-outline",
       label: "Calendar",
-      description: profile?.googleConnected
-        ? "Google Calendar connected · tap to manage"
-        : "Connect Google or Microsoft calendar",
+      description: !profile?.calendarConnected
+        ? "Connect Google or Microsoft calendar"
+        : profile.googleConnected && profile.microsoftConnected
+          ? "Google & Microsoft connected · tap to manage"
+          : profile.googleConnected
+            ? "Google Calendar connected · tap to manage"
+            : "Microsoft Calendar connected · tap to manage",
       tone: "brand",
       onPress: () => router.push("/settings/calendar"),
     },

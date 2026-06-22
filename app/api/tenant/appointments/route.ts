@@ -46,6 +46,7 @@ import { audit, ipFromHeaders } from "@/lib/audit";
 import { errorResponse, HttpError, requireUser } from "@/lib/auth";
 import { onBookingCreated } from "@/lib/calendar/sync";
 import { triggerAutomation } from "@/lib/communications/engine";
+import { enqueueBookingPush } from "@/lib/push/enqueue";
 import { loadTenantFeatures } from "@/lib/features";
 import { assertCanCreateBooking } from "@/lib/quotas";
 import { createAppointmentSchema } from "@/lib/validation";
@@ -301,6 +302,27 @@ export async function POST(req: NextRequest) {
           bgErr,
         );
       });
+
+    // ── Staff-assignment push ───────────────────────────────────
+    // Notify the ASSIGNED staff member on their mobile that they have a new
+    // appointment. The public POST /api/bookings path already pushes the
+    // assigned staff via booking_created; this operator-create path did NOT,
+    // so an operator assigning a colleague never reached their device. Reuses
+    // the existing booking_created event (no new "staff_assigned" event is
+    // invented — there is none). Fire-and-forget; never throws; a no-op when
+    // the staff member has no push token or the tenant is a demo tenant.
+    void enqueueBookingPush({
+      tenantId: session.tenantId,
+      booking: {
+        id: row.id,
+        staffUserId: staff.id,
+        clientName: row.clientName,
+        startAt: row.startAt,
+        serviceId: service.id,
+      },
+      serviceName: service.name,
+      event: "booking_created",
+    });
 
     // ── Audit ───────────────────────────────────────────────────
     audit({

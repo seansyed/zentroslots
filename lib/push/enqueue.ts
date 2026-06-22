@@ -1,10 +1,16 @@
 /**
  * Push delivery enqueue.
  *
- * Called from booking lifecycle endpoints (POST /api/bookings,
- * /api/bookings/[id]/cancel, /api/bookings/[id]/reschedule) as
- * fire-and-forget. NEVER throws — push is enhancement, not core
- * flow. Failure to enqueue is logged but doesn't fail the booking.
+ * Called from the booking lifecycle as fire-and-forget:
+ *   • POST /api/bookings (free path) + the paid Stripe/vault webhook
+ *     (lib/billing/postBookingHooks) — booking_created
+ *   • POST /api/tenant/appointments (operator create) — booking_created
+ *     (notifies the ASSIGNED staff member)
+ *   • /api/bookings/[id]/cancel — booking_cancelled
+ *   • /api/bookings/[id]/reschedule — booking_rescheduled
+ *   • scripts/send-reminders.ts (24h/2h/1h) — booking_reminder
+ * NEVER throws — push is enhancement, not core flow. Failure to enqueue
+ * is logged but doesn't fail the booking.
  *
  * For each event we fan out: one push_deliveries row per active
  * push_token owned by the booking's staff user. (For now, only the
@@ -41,7 +47,7 @@ type EnqueueArgs = {
   event: PushEventType;
 };
 
-function copyFor(event: PushEventType, args: EnqueueArgs, staffTz: string): { title: string; body: string } {
+export function copyFor(event: PushEventType, args: EnqueueArgs, staffTz: string): { title: string; body: string } {
   const when = formatRelativeBrief(new Date(args.booking.startAt), staffTz);
   const who = args.booking.clientName || "A customer";
   const what = args.serviceName || "Appointment";
