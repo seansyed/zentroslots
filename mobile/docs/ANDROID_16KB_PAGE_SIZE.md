@@ -78,8 +78,11 @@ npm run build:android:production   # eas build --profile production --platform a
 
 ## 16 KB validation (proof for upload)
 
-`scripts/check-16kb-alignment.sh` unpacks an `.aab`/`.apk`, reads every
-native `.so`'s ELF `LOAD`-segment alignment, and **fails if any is < 16 KB**.
+`scripts/check-16kb-alignment.sh` unpacks an `.aab`/`.apk`, reads each native
+`.so`'s ELF `LOAD`-segment alignment, and **fails if any 64-bit library is
+< 16 KB**. The requirement is **64-bit-only** (`arm64-v8a`, `x86_64`) — 16 KB
+pages are a 64-bit feature, so 32-bit libraries (`armeabi-v7a`, `x86`) are
+exempt and correctly stay 4 KB-aligned (reported as `SKIP`, never failed).
 
 - **In CI:** the Codemagic `android-production` workflow runs it as a hard
   gate after the build — a non-compliant bundle can never be published. The

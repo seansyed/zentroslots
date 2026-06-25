@@ -2,12 +2,16 @@
 # =============================================================================
 # check-16kb-alignment.sh
 # -----------------------------------------------------------------------------
-# Verifies that EVERY native shared library (.so) packaged inside an Android
-# App Bundle (.aab) or APK has its ELF LOAD segments aligned to at least
-# 16 KB (16384 bytes). This is exactly what Google Play's
+# Verifies that every 64-bit native shared library (.so) packaged inside an
+# Android App Bundle (.aab) or APK has its ELF LOAD segments aligned to at
+# least 16 KB (16384 bytes). This is exactly what Google Play's
 #   "Your app does not support 16 KB memory page sizes"
 # check enforces: on a 16 KB-page device the dynamic loader can only map a
 # library whose loadable segments are 16 KB-aligned.
+#
+# Scope: the requirement is 64-bit-only (arm64-v8a, x86_64), because 16 KB
+# pages are a 64-bit feature. 32-bit libraries (armeabi-v7a, x86) are EXEMPT
+# and correctly remain 4 KB-aligned, so they are reported but never fail.
 #
 # Usage:
 #   scripts/check-16kb-alignment.sh path/to/app-release.aab
@@ -92,34 +96,45 @@ min_load_align() {
   echo "$min"
 }
 
-fail=0
+# Google Play's 16 KB requirement applies ONLY to 64-bit ABIs (arm64-v8a,
+# x86_64). 16 KB memory pages are a 64-bit-only feature, so the 32-bit ABIs
+# (armeabi-v7a, x86) are EXEMPT and legitimately remain 4 KB-aligned — failing
+# on them would be a false positive. We enforce alignment on 64-bit only.
+is_64bit_abi() { case "$1" in arm64-v8a|x86_64) return 0 ;; *) return 1 ;; esac; }
+
+fail=0; n64=0; n32=0
 printf "%-46s %12s  %s\n" "LIBRARY (abi/name)" "MIN ALIGN" "RESULT"
 printf '%s\n' "---------------------------------------------------------------------------"
 for so in "${SOS[@]}"; do
-  # show abi/name, e.g. arm64-v8a/libhermes.so
-  rel="$(echo "$so" | sed -E 's#^.*/lib/##')"
+  rel="$(echo "$so" | sed -E 's#^.*/lib/##')"   # e.g. arm64-v8a/libhermes.so
+  abi="${rel%%/*}"
   m="$(min_load_align "$so")"
-  if [ "$m" -eq 0 ]; then
-    printf "%-46s %12s  %s\n" "$rel" "?" "UNKNOWN (could not read)"
-    fail=1
-    continue
-  fi
-  if [ $(( m % PAGE )) -eq 0 ] && [ "$m" -ge "$PAGE" ]; then
-    printf "%-46s %12s  %s\n" "$rel" "$m" "OK (>=16K)"
+  if is_64bit_abi "$abi"; then
+    n64=$((n64 + 1))
+    if [ "$m" -eq 0 ]; then
+      printf "%-46s %12s  %s\n" "$rel" "?" "UNKNOWN (could not read)"
+      fail=1
+    elif [ $(( m % PAGE )) -eq 0 ] && [ "$m" -ge "$PAGE" ]; then
+      printf "%-46s %12s  %s\n" "$rel" "$m" "OK (>=16K)"
+    else
+      printf "%-46s %12s  %s\n" "$rel" "$m" "FAIL (<16K)"
+      fail=1
+    fi
   else
-    printf "%-46s %12s  %s\n" "$rel" "$m" "FAIL (<16K)"
-    fail=1
+    n32=$((n32 + 1))
+    printf "%-46s %12s  %s\n" "$rel" "${m:-?}" "SKIP (32-bit, exempt)"
   fi
 done
 printf '%s\n' "---------------------------------------------------------------------------"
+echo "64-bit libs enforced: $n64   |   32-bit libs skipped (exempt): $n32"
 
 if [ "$fail" -ne 0 ]; then
   echo ""
-  echo "RESULT: ✗ One or more native libraries are NOT 16 KB aligned."
+  echo "RESULT: ✗ One or more 64-bit native libraries are NOT 16 KB aligned."
   echo "Google Play would reject this build with the 16 KB page-size error."
   exit 1
 fi
 
 echo ""
-echo "RESULT: ✓ All ${#SOS[@]} native libraries are 16 KB aligned. Play-compliant."
+echo "RESULT: ✓ All $n64 64-bit native libraries (arm64-v8a, x86_64) are 16 KB aligned. Play-compliant."
 exit 0
