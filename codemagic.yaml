@@ -59,15 +59,15 @@
 #     integration is for automatic signing; this group is what the publish
 #     CLI reads.)
 #
-#   expo_credentials:     (VESTIGIAL — android-production only)
+#   expo_credentials:     (REMOVED — no longer referenced by any workflow)
 #     EXPO_TOKEN        — Historically used by EAS. After the iOS workflow was
 #                         converted to a native Codemagic build, NO workflow
-#                         requires EXPO_TOKEN. android-production still
-#                         references this group in a NON-FATAL "Verify EAS
-#                         authentication" step (the Gradle build works without
-#                         it). It is NOT required and can be removed in a
-#                         future cleanup. android-preview and ios-production do
-#                         NOT reference it. eas.json is retained ONLY for the
+#                         requires EXPO_TOKEN, so the expo_credentials group
+#                         reference was removed from android-production (Gradle
+#                         builds work without it). The non-fatal "Verify EAS
+#                         authentication" step remains and simply warns when
+#                         EXPO_TOKEN is unset. android-preview and ios-production
+#                         never referenced it. eas.json is retained ONLY for the
 #                         optional local `npm run build:*` / `submit:*` scripts
 #                         (manual EAS fallback) — no Codemagic workflow uses it.
 #
@@ -354,7 +354,9 @@ workflows:
       android_signing:
         - ZentroMeet
       groups:
-        - expo_credentials
+        # expo_credentials removed — it was a vestigial EAS group (EXPO_TOKEN)
+        # that no Codemagic workflow requires; referencing a non-existent group
+        # fast-fails the build under Codemagic's strict group validation.
         - zentromeet_api
       vars:
         # Same constraints as android-preview: EXPO_PUBLIC_API_BASE_URL
