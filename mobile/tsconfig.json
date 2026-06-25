@@ -2,6 +2,10 @@
   "extends": "expo/tsconfig.base",
   "compilerOptions": {
     "strict": true,
+    // Node built-in type defs for the tsx-run test files (node:test,
+    // node:assert/strict, node:fs, node:path). App + RN/React types still
+    // resolve via module imports, so this does not affect runtime code.
+    "types": ["node"],
     "paths": {
       "@/*": ["./src/*"],
       "@app/*": ["./app/*"]
