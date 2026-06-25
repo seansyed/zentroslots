@@ -2,7 +2,7 @@
 
 How the `ios-production` workflow builds, signs, and (optionally) ships the
 ZentroMeet iOS app **natively on a Codemagic macOS machine** — no EAS Build,
-no `EXPO_TOKEN`. The app stays a normal Expo / React Native (SDK 52) project;
+no `EXPO_TOKEN`. The app stays a normal Expo / React Native (SDK 56) project;
 Codemagic just runs the native toolchain (`expo prebuild` → CocoaPods → Xcode
 archive → App Store export → TestFlight) the same way EAS used to.
 
@@ -45,9 +45,9 @@ workflow preserved).
 | Setting | Value | Why |
 |---|---|---|
 | `instance_type` | `mac_mini_m2` | Native iOS compilation requires macOS + Xcode. Linux cannot build iOS. |
-| `xcode` | `16.2` | Known-good for Expo SDK 52 / RN 0.76.9. Xcode 16.3 hits a C++ compile regression with RN 0.76 ([expo/expo#35807](https://github.com/expo/expo/issues/35807)); 16.0–16.2 are safe. |
-| `node` | `20.17.0` | Matches the Android workflows; Node 20 LTS is fine for SDK 52. |
-| `cocoapods` | `default` | Codemagic's bundled CocoaPods works with RN 0.76 / SDK 52 — no manual `gem install`. |
+| `xcode` | `26.4` | Minimum for Expo SDK 56 / RN 0.85 (min iOS 16.4); also Codemagic's default image. Avoid the Xcode 27 beta — SDK 56 build-from-source fails on it ([expo/expo#46876](https://github.com/expo/expo/issues/46876)). |
+| `node` | `22.13.0` | Matches the Android workflows; Expo SDK 56 / RN 0.85 requires Node ≥ 20.19.4. |
+| `cocoapods` | `default` | Codemagic's bundled CocoaPods works with RN 0.85 / SDK 56 — no manual `gem install`. |
 | `working_directory` | `mobile` | The app lives at `mobile/` in the monorepo; all scripts + artifact globs resolve from there. |
 
 ---
