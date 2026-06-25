@@ -2,19 +2,13 @@
   "expo": {
     "name": "ZentroMeet",
     "slug": "zentromeet-mobile",
-    "version": "0.3.0",
+    "version": "0.3.1",
     "description": "Mobile command center for ZentroMeet — manage bookings, confirm appointments, message customers, and run your schedule from anywhere.",
     "primaryColor": "#2563EB",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "zentromeet",
     "userInterfaceStyle": "light",
-    "newArchEnabled": false,
-    "splash": {
-      "image": "./assets/splash.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#f5faff"
-    },
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.zentromeet.app",
@@ -41,7 +35,7 @@
         "backgroundColor": "#2563EB"
       },
       "package": "com.zentromeet.app",
-      "versionCode": 19,
+      "versionCode": 20,
       "permissions": [
         "INTERNET",
         "POST_NOTIFICATIONS",
@@ -96,6 +90,14 @@
       "expo-font",
       "expo-secure-store",
       [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash.png",
+          "resizeMode": "contain",
+          "backgroundColor": "#f5faff"
+        }
+      ],
+      [
         "expo-notifications",
         {
           "icon": "./assets/notification-icon.png",
@@ -107,9 +109,9 @@
         "expo-build-properties",
         {
           "android": {
-            "kotlinVersion": "1.9.25",
-            "compileSdkVersion": 35,
-            "targetSdkVersion": 35
+            "compileSdkVersion": 36,
+            "targetSdkVersion": 35,
+            "ndkVersion": "27.1.12297006"
           }
         }
       ]

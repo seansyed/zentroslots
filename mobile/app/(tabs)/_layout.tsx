@@ -15,7 +15,7 @@
  */
 
 import * as React from "react";
-import { Platform, StyleSheet, View } from "react-native";
+import { Platform, StyleSheet, View, type ColorValue } from "react-native";
 import { Tabs } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
@@ -32,7 +32,7 @@ type IoniconName = React.ComponentProps<typeof Ionicons>["name"];
  * the plain outline icon at the same size.
  */
 function tabIcon(name: IoniconName, focusedName: IoniconName) {
-  return ({ focused, color, size }: { focused: boolean; color: string; size: number }) => {
+  return ({ focused, color, size }: { focused: boolean; color: ColorValue; size: number }) => {
     if (focused) {
       return (
         <View style={styles.activeIconWrap}>

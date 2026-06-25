@@ -117,7 +117,10 @@ workflows:
     working_directory: mobile
 
     environment:
-      node: 20.17.0
+      # Expo SDK 56 / React Native 0.85 requires Node
+      # ^20.19.4 || ^22.13.0 || ^24.3.0 || >=25 — the old 20.17.0 pin fails the
+      # engine check and aborts `npm ci`.
+      node: 22.13.0
       java: 17
       # Optional for preview — script falls back to assembleDebug if absent.
       android_signing:
@@ -321,19 +324,16 @@ workflows:
   #
   # versionCode NOTE
   # ----------------
-  # eas.json declares  appVersionSource: "remote"  with  autoIncrement: true
-  # on the production profile, which means EAS's *remote* build pipeline
-  # owns the canonical versionCode bump for store submissions. This Codemagic
-  # workflow runs Gradle LOCALLY on Codemagic infrastructure, so versionCode
-  # is read from app.json (currently android.versionCode = 3).
+  # eas.json declares  appVersionSource: "local"  with  autoIncrement: false,
+  # so versionCode is owned by app.json (NOT auto-bumped) for BOTH the EAS
+  # fallback and this Codemagic workflow — which runs Gradle LOCALLY and reads
+  # versionCode straight from app.json (currently android.versionCode = 20).
   #
-  # Before tagging a production release on this workflow, the operator MUST
-  # either:
+  # Before tagging a production release on this workflow, the operator MUST:
   #   (a) bump android.versionCode in app.json by hand, commit, then push to
-  #       main, or
-  #   (b) skip this workflow entirely and run
-  #         eas build --profile production --platform android
-  #       which lets EAS auto-bump versionCode server-side.
+  #       main. (The EAS fallback `eas build --profile production --platform
+  #       android` also reads versionCode from app.json under
+  #       appVersionSource: local, so it must be bumped by hand there too.)
   #
   # If you forget (a) and reuse a versionCode that's already on Play Console,
   # the upload will be rejected with "Version code N has already been used".
@@ -345,7 +345,10 @@ workflows:
     working_directory: mobile
 
     environment:
-      node: 20.17.0
+      # Expo SDK 56 / React Native 0.85 requires Node
+      # ^20.19.4 || ^22.13.0 || ^24.3.0 || >=25 — the old 20.17.0 pin fails the
+      # engine check and aborts `npm ci`.
+      node: 22.13.0
       java: 17
       # REQUIRED for production. Build aborts in step 2 if missing.
       android_signing:
@@ -472,6 +475,22 @@ workflows:
           fi
           echo "AAB:  $AAB"
           echo "Size: $(du -h "$AAB" | cut -f1)"
+
+      # ----- 9. Verify 16 KB native library alignment (Google Play gate) ---
+      # FAILS the build if ANY native .so inside the AAB is not aligned to
+      # 16 KB — i.e. exactly the condition behind Play's
+      # "Your app does not support 16 KB memory page sizes" rejection.
+      # Expo SDK 56 / RN 0.85 builds with NDK 27.1.12297006 + AGP 8.12 are
+      # 16 KB-aligned by default; this gate proves it for every build, so a
+      # non-compliant bundle can never be uploaded. The checker prints a
+      # per-library MIN-ALIGN table to the log for the upload audit trail.
+      - name: Verify 16 KB native library alignment
+        script: |
+          set -euo pipefail
+          AAB=$(find android/app/build/outputs/bundle/release -name "*.aab" 2>/dev/null | head -1)
+          if [ -z "$AAB" ]; then echo "ERROR: AAB not found for 16 KB check"; exit 1; fi
+          chmod +x scripts/check-16kb-alignment.sh
+          bash scripts/check-16kb-alignment.sh "$AAB"
 
     artifacts:
       # Relative to working_directory (mobile) — no `mobile/` prefix (see
