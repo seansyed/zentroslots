@@ -2,7 +2,7 @@
   "$schema": "https://raw.githubusercontent.com/expo/eas-cli/main/packages/eas-cli/schema/eas.schema.json",
   "cli": {
     "version": ">= 12.0.0",
-    "appVersionSource": "remote"
+    "appVersionSource": "local"
   },
   "build": {
     "development": {
@@ -39,7 +39,7 @@
     "production": {
       "distribution": "store",
       "channel": "production",
-      "autoIncrement": true,
+      "autoIncrement": false,
       "env": {
         "EXPO_PUBLIC_API_BASE_URL": "https://app.zentromeet.com"
       },
