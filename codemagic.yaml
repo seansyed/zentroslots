@@ -580,11 +580,12 @@ workflows:
         EXPO_NO_TELEMETRY: "1"
         # Asserted against the built IPA's CFBundleIdentifier.
         BUNDLE_ID: "com.zentromeet.app"
-        # HELD by default. Flip to "true" in the Codemagic UI for this workflow
-        # ONLY AFTER the App Store Connect integration + app_store_credentials
-        # group are configured and verified. "false" → build + validate the IPA
-        # but DO NOT upload anywhere (see "Upload to TestFlight" step).
-        PUBLISH_TO_TESTFLIGHT: "false"
+        # PUBLISH_TO_TESTFLIGHT is intentionally NOT defined here: a value in
+        # this YAML would OVERRIDE the Codemagic UI, so the toggle is left to
+        # the UI. The upload step defaults it to "false" when unset, so pushes
+        # NEVER auto-publish. To ship a build to TestFlight, set
+        # PUBLISH_TO_TESTFLIGHT="true" in the Codemagic UI for THIS workflow
+        # (after the app_store_credentials group is configured) and re-run.
         # Minimum believable IPA size (bytes). A real Expo/RN IPA is tens of MB;
         # this guards against shipping an empty/tiny zip as the artifact.
         MIN_IPA_BYTES: "3000000"
@@ -614,7 +615,7 @@ workflows:
           echo "Commit:    $CM_COMMIT"
           echo "Build:     $CM_BUILD_ID"
           echo "Workdir:   $(pwd)"
-          echo "Publish to TestFlight: $PUBLISH_TO_TESTFLIGHT"
+          echo "Publish to TestFlight: ${PUBLISH_TO_TESTFLIGHT:-false}"
 
       # ----- 2. Install dependencies (reproducible) ------------------------
       # package-lock.json IS committed, so use `npm ci` for a clean,
@@ -854,8 +855,8 @@ workflows:
       - name: Upload to TestFlight (flag-gated)
         script: |
           set -euo pipefail
-          if [ "$PUBLISH_TO_TESTFLIGHT" != "true" ]; then
-            echo "PUBLISH_TO_TESTFLIGHT='$PUBLISH_TO_TESTFLIGHT' — skipping TestFlight upload."
+          if [ "${PUBLISH_TO_TESTFLIGHT:-false}" != "true" ]; then
+            echo "PUBLISH_TO_TESTFLIGHT='${PUBLISH_TO_TESTFLIGHT:-false}' — skipping TestFlight upload."
             echo "The signed IPA is available as a Codemagic artifact (build/ios/ipa/*.ipa)."
             echo "To enable: set PUBLISH_TO_TESTFLIGHT=\"true\" in the Codemagic UI for this"
             echo "workflow AFTER the App Store Connect API key integration + the"
