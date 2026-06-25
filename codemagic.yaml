@@ -558,11 +558,16 @@ workflows:
       ios_signing:
         distribution_type: app_store
         bundle_identifier: com.zentromeet.app
-      node: 20.17.0
-      # Pin Xcode 16.2 — known-good for Expo SDK 52 / RN 0.76.9. Xcode 16.3 has
-      # a C++ compile regression with RN 0.76 (expo/expo#35807). 16.0–16.2 OK.
-      # Quoted so YAML keeps it a string (e.g. a future "16.0" won't coerce to 16).
-      xcode: "16.2"
+      # Expo SDK 56 / React Native 0.85 requires Node
+      # ^20.19.4 || ^22.13.0 || ^24.3.0 || >=25 — the old 20.17.0 pin fails the
+      # engine check and aborts `npm ci`.
+      node: 22.13.0
+      # Expo SDK 56 sets a MINIMUM Xcode of 26.4 (min iOS 16.4); 26.4 is also
+      # Codemagic's current default image. The old 16.2 pin (for SDK 52 /
+      # RN 0.76.9) is too old to build RN 0.85. Avoid the Xcode 27 beta —
+      # SDK 56 build-from-source fails on it (expo/expo#46876).
+      # Quoted so YAML keeps it a string (e.g. "26.4" won't coerce to a number).
+      xcode: "26.4"
       cocoapods: default
       groups:
         # EXPO_PUBLIC_API_BASE_URL — inlined into the JS bundle at build time.
