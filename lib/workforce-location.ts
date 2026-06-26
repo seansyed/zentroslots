@@ -262,16 +262,23 @@ export async function getStaffPresenceForDay(
 
 // ─── Service delivery modes ───────────────────────────────────────────
 
+// Widened to the four first-class SERVICE delivery modes (phone-appointment
+// work). NB: per-SERVICE modes are distinct from the per-STAFF
+// `deliveryModeSchema` above (which uses "hybrid"); the enum is inlined here to
+// avoid colliding with that local name. Backward compatible — existing
+// ["in_person","virtual"] payloads stay valid.
 export const serviceDeliveryModesSchema = z
-  .array(z.enum(["in_person", "virtual"]))
+  .array(z.enum(["in_person", "virtual", "phone", "custom"]))
   .min(1, "At least one delivery mode required")
-  .max(2);
+  .max(4);
 
-export function readServiceDeliveryModes(raw: unknown): Array<"in_person" | "virtual"> {
+export function readServiceDeliveryModes(
+  raw: unknown,
+): Array<"in_person" | "virtual" | "phone" | "custom"> {
   if (!Array.isArray(raw)) return ["virtual", "in_person"];
-  const out = new Set<"in_person" | "virtual">();
+  const out = new Set<"in_person" | "virtual" | "phone" | "custom">();
   for (const v of raw) {
-    if (v === "in_person" || v === "virtual") out.add(v);
+    if (v === "in_person" || v === "virtual" || v === "phone" || v === "custom") out.add(v);
   }
   if (out.size === 0) return ["virtual", "in_person"];
   return Array.from(out);

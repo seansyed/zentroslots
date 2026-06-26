@@ -87,7 +87,7 @@ type Svc = {
   // future routing filter intersects with each staff's per-day
   // location-type to determine eligibility — never gates slot
   // generation directly.
-  deliveryModes?: Array<"in_person" | "virtual"> | null;
+  deliveryModes?: Array<"in_person" | "virtual" | "phone" | "custom"> | null;
   staff: { userId: string; name: string }[];
   // Wave I follow-up — intake form attachment. `null` = no form
   // (intake step skipped on booking page). uuid = form attached.
@@ -191,16 +191,32 @@ const PROVIDERS = [
   { id: "none",        label: "No video",        note: "In-person or phone",                                                                          disabled: false },
 ] as const;
 
-const DELIVERY_MODE_OPTIONS = [
+// Supported per-service delivery modes. "virtual" is this codebase's term for
+// a VIDEO meeting (paired with videoProvider). "phone" + "custom" were added in
+// the phone-appointment work — additive; existing services keep their stored
+// delivery_modes array untouched (see normalizeDeliveryModes fallback).
+type DeliveryMode = "in_person" | "virtual" | "phone" | "custom";
+
+const DELIVERY_MODE_OPTIONS: Array<{ value: DeliveryMode; label: string; caption: string }> = [
   {
-    value: "in_person" as const,
+    value: "in_person",
     label: "In-person",
     caption: "Bookable by staff with a physical or hybrid location.",
   },
   {
-    value: "virtual" as const,
-    label: "Virtual",
+    value: "virtual",
+    label: "Video / Virtual",
     caption: "Bookable by staff who deliver virtually (Virtual Hub or hybrid).",
+  },
+  {
+    value: "phone",
+    label: "Phone",
+    caption: "Delivered as a phone call — the client's number is collected at booking.",
+  },
+  {
+    value: "custom",
+    label: "Custom",
+    caption: "Any other arrangement (e.g. on-site visit) — handled outside the standard flow.",
   },
 ];
 
@@ -208,12 +224,12 @@ const DELIVERY_MODE_OPTIONS = [
 // de-duplicated array. Falls back to BOTH when missing — matches the
 // migration default so old services never appear "no-mode" in the UI.
 function normalizeDeliveryModes(
-  raw: Array<"in_person" | "virtual"> | null | undefined,
-): Array<"in_person" | "virtual"> {
+  raw: Array<DeliveryMode> | null | undefined,
+): Array<DeliveryMode> {
   if (!Array.isArray(raw) || raw.length === 0) return ["virtual", "in_person"];
-  const set = new Set<"in_person" | "virtual">();
+  const set = new Set<DeliveryMode>();
   for (const v of raw) {
-    if (v === "in_person" || v === "virtual") set.add(v);
+    if (v === "in_person" || v === "virtual" || v === "phone" || v === "custom") set.add(v);
   }
   if (set.size === 0) return ["virtual", "in_person"];
   return Array.from(set);
@@ -296,7 +312,7 @@ function deriveServiceHealth(
 
 // Per-mode meta for the delivery-mode chip strip on each catalog
 // card (Phase 18B refinement #4). Iconography + tone per mode.
-const DELIVERY_MODE_META: Record<"in_person" | "virtual", {
+const DELIVERY_MODE_META: Record<DeliveryMode, {
   label: string;
   short: string;
   tone: string;
@@ -310,6 +326,16 @@ const DELIVERY_MODE_META: Record<"in_person" | "virtual", {
     label: "Virtual",
     short: "Virtual",
     tone: "bg-violet-50/80 text-violet-800 ring-violet-200/40",
+  },
+  phone: {
+    label: "Phone",
+    short: "Phone",
+    tone: "bg-emerald-50/80 text-emerald-800 ring-emerald-200/40",
+  },
+  custom: {
+    label: "Custom",
+    short: "Custom",
+    tone: "bg-slate-50/80 text-slate-700 ring-slate-200/40",
   },
 };
 
@@ -1403,11 +1429,13 @@ function ServiceHealthBadge({ health }: { health: ServiceHealth }) {
 // #4). Skips render when there's nothing to surface so single-mode
 // services don't add visual noise.
 
-function DeliveryModeChips({ modes }: { modes: Array<"in_person" | "virtual"> }) {
+function DeliveryModeChips({ modes }: { modes: Array<DeliveryMode> }) {
   if (modes.length === 0) return null;
-  // Hybrid = both modes selected. Surface as a single elegant chip
-  // instead of two side-by-side ones — cleaner operational signal.
-  if (modes.includes("in_person") && modes.includes("virtual")) {
+  // Hybrid = EXACTLY in-person + virtual. Surface as a single elegant chip
+  // instead of two side-by-side ones — cleaner operational signal. When phone
+  // or custom are also present we fall through to per-mode chips so nothing is
+  // hidden.
+  if (modes.length === 2 && modes.includes("in_person") && modes.includes("virtual")) {
     return (
       <span
         className="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium ring-1 bg-sky-50/80 text-sky-800 ring-sky-200/40"
@@ -2186,7 +2214,7 @@ function ServiceDrawer({
   // Phase 16 — per-service delivery compatibility (migration 0037).
   // Service must accept at least one mode; default to BOTH so every
   // existing service stays bookable in either delivery model.
-  const [deliveryModes, setDeliveryModes] = React.useState<Array<"in_person" | "virtual">>([
+  const [deliveryModes, setDeliveryModes] = React.useState<Array<DeliveryMode>>([
     "virtual",
     "in_person",
   ]);
