@@ -2745,3 +2745,161 @@ export type TenantPaymentProvider = typeof tenantPaymentProviders.$inferSelect;
 export type NewTenantPaymentProvider = typeof tenantPaymentProviders.$inferInsert;
 export type TenantPaymentWebhookEvent = typeof tenantPaymentWebhookEvents.$inferSelect;
 export type NewTenantPaymentWebhookEvent = typeof tenantPaymentWebhookEvents.$inferInsert;
+
+// ─── Business Line (telephony MVP) — data foundation (migration 0077) ────
+// Additive only. No application code reads/writes these tables yet (the
+// feature is dark until later increments). Platform-provisioned business DIDs
+// (under ZentroMeet's own Telnyx account) that forward inbound calls to a
+// per-tenant forwarding number. NOTE: the partial unique indexes
+// (one active number per tenant; the per-session call upsert key) live in
+// 0077_business_line_foundation.sql — Drizzle carries the plain indexes only,
+// exactly as comm_logs does for its partial success-dedup index.
+
+export const tenantPhoneNumbers = pgTable(
+  "tenant_phone_numbers",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    telnyxNumberId: varchar("telnyx_number_id", { length: 120 }),
+    telnyxConnectionId: varchar("telnyx_connection_id", { length: 120 }),
+    phoneNumber: varchar("phone_number", { length: 40 }).notNull(),
+    // 'provisioning' | 'active' | 'suspended' | 'released'
+    status: varchar("status", { length: 20 }).notNull().default("provisioning"),
+    capabilities: jsonb("capabilities"),
+    metadata: jsonb("metadata"),
+    provisionedAt: timestamp("provisioned_at", { withTimezone: true }),
+    releasedAt: timestamp("released_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    phoneUnique: uniqueIndex("tenant_phone_numbers_phone_unique").on(t.phoneNumber),
+    tenantIdx: index("tenant_phone_numbers_tenant_idx").on(t.tenantId),
+    statusIdx: index("tenant_phone_numbers_status_idx").on(t.status),
+    // Partial unique (one active number per tenant) is in migration 0077.
+  })
+);
+
+export const tenantPhoneSettings = pgTable(
+  "tenant_phone_settings",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    enabled: boolean("enabled").notNull().default(true),
+    forwardingNumber: varchar("forwarding_number", { length: 40 }),
+    // Future use — forward to a specific staff phone (users has no phone column
+    // yet, so MVP forwards via forwardingNumber). SET NULL on staff delete.
+    forwardingStaffId: uuid("forwarding_staff_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    includedMinutes: integer("included_minutes").notNull().default(200),
+    monthlyMinuteCap: integer("monthly_minute_cap").notNull().default(200),
+    metadata: jsonb("metadata"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    tenantUnique: uniqueIndex("tenant_phone_settings_tenant_unique").on(t.tenantId),
+  })
+);
+
+export const phoneCallLogs = pgTable(
+  "phone_call_logs",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    phoneNumberId: uuid("phone_number_id").references(() => tenantPhoneNumbers.id, {
+      onDelete: "set null",
+    }),
+    direction: varchar("direction", { length: 10 }).notNull().default("inbound"),
+    fromNumber: varchar("from_number", { length: 40 }),
+    toNumber: varchar("to_number", { length: 40 }),
+    forwardedToNumber: varchar("forwarded_to_number", { length: 40 }),
+    // 'ringing'|'answered'|'completed'|'missed'|'failed'|'rejected'|'no_forwarding'
+    status: varchar("status", { length: 20 }).notNull().default("ringing"),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    answeredAt: timestamp("answered_at", { withTimezone: true }),
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+    durationSeconds: integer("duration_seconds"),
+    billableSeconds: integer("billable_seconds"),
+    costEstimateCents: integer("cost_estimate_cents"),
+    hangupCause: varchar("hangup_cause", { length: 60 }),
+    telnyxCallSessionId: varchar("telnyx_call_session_id", { length: 255 }),
+    telnyxCallControlId: varchar("telnyx_call_control_id", { length: 255 }),
+    telnyxCallLegId: varchar("telnyx_call_leg_id", { length: 255 }),
+    metadata: jsonb("metadata"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    tenantStartedIdx: index("phone_call_logs_tenant_started_idx").on(t.tenantId, t.startedAt),
+    statusIdx: index("phone_call_logs_status_idx").on(t.status),
+    // Partial unique (session upsert key WHERE NOT NULL) is in migration 0077.
+  })
+);
+
+export const phoneCallEvents = pgTable(
+  "phone_call_events",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    // Nullable: a malformed/unknown event may not resolve to a tenant.
+    tenantId: uuid("tenant_id").references(() => tenants.id, { onDelete: "cascade" }),
+    callLogId: uuid("call_log_id").references(() => phoneCallLogs.id, {
+      onDelete: "set null",
+    }),
+    telnyxEventId: varchar("telnyx_event_id", { length: 255 }).notNull(),
+    eventType: varchar("event_type", { length: 60 }).notNull(),
+    signatureVerified: boolean("signature_verified").notNull().default(false),
+    payload: jsonb("payload"),
+    signatureHeaders: jsonb("signature_headers"),
+    processingDurationMs: integer("processing_duration_ms"),
+    receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    eventUnique: uniqueIndex("phone_call_events_event_unique").on(t.telnyxEventId),
+    tenantReceivedIdx: index("phone_call_events_tenant_received_idx").on(t.tenantId, t.receivedAt),
+    callIdx: index("phone_call_events_call_idx").on(t.callLogId),
+  })
+);
+
+export const phoneUsageMonthly = pgTable(
+  "phone_usage_monthly",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    period: varchar("period", { length: 7 }).notNull(), // 'YYYY-MM'
+    inboundCalls: integer("inbound_calls").notNull().default(0),
+    answeredCalls: integer("answered_calls").notNull().default(0),
+    missedCalls: integer("missed_calls").notNull().default(0),
+    billableSeconds: integer("billable_seconds").notNull().default(0),
+    includedMinutes: integer("included_minutes"),
+    estimatedCostCents: integer("estimated_cost_cents").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    tenantPeriodUnique: uniqueIndex("phone_usage_monthly_tenant_period_unique").on(
+      t.tenantId,
+      t.period,
+    ),
+  })
+);
+
+export type TenantPhoneNumber = typeof tenantPhoneNumbers.$inferSelect;
+export type NewTenantPhoneNumber = typeof tenantPhoneNumbers.$inferInsert;
+export type TenantPhoneSettings = typeof tenantPhoneSettings.$inferSelect;
+export type NewTenantPhoneSettings = typeof tenantPhoneSettings.$inferInsert;
+export type PhoneCallLog = typeof phoneCallLogs.$inferSelect;
+export type NewPhoneCallLog = typeof phoneCallLogs.$inferInsert;
+export type PhoneCallEvent = typeof phoneCallEvents.$inferSelect;
+export type NewPhoneCallEvent = typeof phoneCallEvents.$inferInsert;
+export type PhoneUsageMonthly = typeof phoneUsageMonthly.$inferSelect;
+export type NewPhoneUsageMonthly = typeof phoneUsageMonthly.$inferInsert;
