@@ -409,6 +409,15 @@ export const bookings = pgTable(
 
     clientName: varchar("client_name", { length: 120 }).notNull(),
     clientEmail: varchar("client_email", { length: 255 }).notNull(),
+    // Per-booking client phone (migration 0076). Required by the app ONLY when
+    // deliveryMode === 'phone' (the booking API/flow enforces it); NULL on every
+    // pre-existing booking and on callers that don't send it.
+    clientPhone: varchar("client_phone", { length: 40 }),
+    // Per-booking delivery mode recorded at booking time (migration 0076):
+    // 'in_person' | 'virtual' | 'phone' | 'custom'. NULL = unspecified (pre-0076
+    // bookings + callers that don't send it) → display falls back to the
+    // service's deliveryModes. App-validated; no DB enum/CHECK.
+    deliveryMode: varchar("delivery_mode", { length: 20 }),
 
     startAt: timestamp("start_at", { withTimezone: true }).notNull(),
     endAt: timestamp("end_at", { withTimezone: true }).notNull(),

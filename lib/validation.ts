@@ -28,6 +28,12 @@ export const loginSchema = z.object({
 // or rewrite the column); only NEW writes are constrained.
 const videoProviderSchema = z.enum(["google_meet", "teams", "zoom", "none"]);
 
+// Per-appointment delivery mode (migration 0076). "virtual" is this codebase's
+// existing term for a VIDEO meeting (paired with videoProvider); "phone" and
+// "custom" are added as first-class modes here. Read paths tolerate legacy /
+// NULL values — only NEW writes are constrained.
+export const deliveryModeSchema = z.enum(["in_person", "virtual", "phone", "custom"]);
+
 export const serviceSchema = z.object({
   name: z.string().min(1).max(120),
   slug: z.string().regex(/^[a-z0-9-]+$/, "lowercase letters, numbers, hyphens").min(1).max(80).optional(),
@@ -38,11 +44,11 @@ export const serviceSchema = z.object({
   bufferAfter: z.number().int().min(0).max(240).default(0),
   videoProvider: videoProviderSchema.default("google_meet"),
   staffUserIds: z.array(z.string().uuid()).default([]),
-  // Per-service delivery compatibility (migration 0037). jsonb array of
-  // allowed modes. Optional — when omitted the DB default (both) applies.
-  // When provided it is persisted (previously dropped, so create ignored the
-  // chosen modes). The route blocks enabling "in_person" without a location.
-  deliveryModes: z.array(z.enum(["in_person", "virtual"])).min(1).max(2).optional(),
+  // Per-service delivery compatibility (migration 0037; widened in 0076 to
+  // include "phone" / "custom"). jsonb array of allowed modes. Optional — when
+  // omitted the DB default (both) applies. When provided it is persisted. The
+  // route blocks enabling "in_person" without a location.
+  deliveryModes: z.array(deliveryModeSchema).min(1).max(4).optional(),
   // Direct department ownership (migration 0032). Optional — services
   // can be created unassigned; nullable so the operator can later
   // clear the assignment. The route validates the department belongs
@@ -60,15 +66,32 @@ export const availabilityPutSchema = z.object({
   rules: z.array(availabilityRuleSchema),
 });
 
-export const createBookingSchema = z.object({
-  serviceId: z.string().uuid(),
-  staffUserId: z.union([z.string().uuid(), z.literal("auto")]),
-  startAt: z.string().datetime(),       // ISO UTC string
-  clientName: z.string().min(1).max(120),
-  clientEmail: z.string().email(),
-  notes: z.string().max(2000).optional(),
-  intakeResponses: z.record(z.unknown()).optional(),
-});
+export const createBookingSchema = z
+  .object({
+    serviceId: z.string().uuid(),
+    staffUserId: z.union([z.string().uuid(), z.literal("auto")]),
+    startAt: z.string().datetime(),       // ISO UTC string
+    clientName: z.string().min(1).max(120),
+    clientEmail: z.string().email(),
+    // Per-booking delivery mode + client phone (migration 0076). Both OPTIONAL
+    // so every existing caller keeps working unchanged (deliveryMode omitted →
+    // unspecified). When deliveryMode === "phone", clientPhone is required (the
+    // refinement below) — the public flow collects it and shows the
+    // "we'll call you" instruction.
+    deliveryMode: deliveryModeSchema.optional(),
+    clientPhone: z.string().min(3).max(40).optional(),
+    notes: z.string().max(2000).optional(),
+    intakeResponses: z.record(z.unknown()).optional(),
+  })
+  .superRefine((v, ctx) => {
+    if (v.deliveryMode === "phone" && !v.clientPhone) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["clientPhone"],
+        message: "A phone number is required for phone appointments.",
+      });
+    }
+  });
 
 // ─── Phase 17H — admin/staff-driven appointment creation ──────────────
 //
@@ -100,6 +123,10 @@ export const createAppointmentSchema = z
 
     serviceId: z.string().uuid(),
     staffUserId: z.string().uuid(),     // admin/manager pick a real staff
+    // Per-booking delivery mode (migration 0076). Optional — admin appointments
+    // are "unspecified" when omitted. When "phone", the booking phone comes from
+    // the selected / quick-created customer (customer.phone).
+    deliveryMode: deliveryModeSchema.optional(),
     // Operator-entered booking time. Preferred: `startLocal`, a NAIVE
     // wall-clock ("YYYY-MM-DDTHH:mm[:ss]") that the route interprets in the
     // BUSINESS timezone server-side — so "3 PM" means 3 PM at the business,
