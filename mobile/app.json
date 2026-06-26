@@ -12,7 +12,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.zentromeet.app",
-      "buildNumber": "14",
+      "buildNumber": "15",
       "config": {
         "usesNonExemptEncryption": false
       },
@@ -25,8 +25,7 @@
         "NSMicrophoneUsageDescription": "ZentroMeet does not access your microphone. This permission string is required by the system but the feature is not used.",
         "NSPhotoLibraryUsageDescription": "ZentroMeet does not access your photo library.",
         "NSContactsUsageDescription": "ZentroMeet does not access your contacts.",
-        "NSLocationWhenInUseUsageDescription": "ZentroMeet does not use your location.",
-        "NSUserTrackingUsageDescription": "ZentroMeet does not track you across other apps or websites."
+        "NSLocationWhenInUseUsageDescription": "ZentroMeet does not use your location."
       }
     },
     "android": {
