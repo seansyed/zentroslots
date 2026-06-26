@@ -23,7 +23,7 @@ import {
 
 import { Card, CardHeader, Button, Badge, Skeleton, toast } from "@/components/ui/primitives";
 import { cn } from "@/lib/cn";
-import type { BusinessLineView } from "@/lib/business-line-view";
+import { businessLineAddonCopy, type BusinessLineView } from "@/lib/business-line-view";
 import {
   callStatusLabel,
   callStatusTone,
@@ -156,19 +156,32 @@ export default function BusinessLineClient() {
   }
 
   const { number, settings, usage } = view;
+  const addonCopy = businessLineAddonCopy(view.entitlement);
 
   return (
     <div className="max-w-2xl space-y-5">
       {/* Locked / upgrade banner */}
       {locked && (
-        <div className="flex items-start gap-3 rounded-xl border border-amber-200/70 bg-amber-50 p-4 text-amber-800">
-          <Lock className="mt-0.5 h-5 w-5 shrink-0" strokeWidth={1.75} />
-          <div className="text-sm">
-            <div className="font-medium">Business Line is a paid add-on</div>
-            <p className="mt-0.5 text-amber-700">
-              Add a ZentroMeet business number that rings your phone. Forwarding is disabled
-              until the add-on is active on your plan.
-            </p>
+        <div className="rounded-xl border border-amber-200/70 bg-amber-50 p-4 text-amber-800">
+          <div className="flex items-start gap-3">
+            <Lock className="mt-0.5 h-5 w-5 shrink-0" strokeWidth={1.75} />
+            <div className="flex-1 text-sm">
+              <div className="font-medium">
+                {addonCopy.title} — {addonCopy.price}
+              </div>
+              <p className="mt-0.5 text-amber-700">
+                Add a ZentroMeet business number that rings your phone. Includes {addonCopy.minutes}{" "}
+                with a hard cap (no surprise overage). {addonCopy.reasonText}
+              </p>
+              <button
+                type="button"
+                disabled
+                title="Coming soon — contact support to enable the Business Line add-on"
+                className="mt-3 inline-flex h-8 cursor-not-allowed items-center rounded-lg bg-amber-200/70 px-3 text-xs font-semibold text-amber-800 opacity-80"
+              >
+                Coming soon
+              </button>
+            </div>
           </div>
         </div>
       )}

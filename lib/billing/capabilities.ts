@@ -43,7 +43,8 @@ export type Capability =
   | "scheduled_reports"    // POST /api/tenant/scheduled-reports
   | "custom_domains"       // POST /api/tenant/domains          (already gated via plan.limits.maxCustomDomains)
   | "hide_powered_by"      // PATCH /api/tenant/integrations   (already gated via plan.limits.customBranding)
-  | "analytics_export";    // POST /api/tenant/analytics/export
+  | "analytics_export"     // POST /api/tenant/analytics/export
+  | "business_line";       // Business Line add-on (plan gate; add-on activation is a separate flag)
 
 /**
  * Minimum plan tier per capability. Single source of truth — the UI
@@ -62,6 +63,9 @@ const REQUIRED_PLAN: Record<Capability, PlanId> = {
   custom_domains: "pro",
   hide_powered_by: "pro",
   analytics_export: "pro",
+  // Business Line add-on requires a Pro+ plan AND an active add-on flag (the
+  // add-on activation is gated separately in lib/business-line-view.ts).
+  business_line: "pro",
 };
 
 /**
@@ -78,6 +82,7 @@ const LABEL: Record<Capability, string> = {
   custom_domains: "Custom domains",
   hide_powered_by: "Branding removal",
   analytics_export: "Analytics export",
+  business_line: "Business phone line",
 };
 
 // ─── Public API ──────────────────────────────────────────────────────
@@ -154,6 +159,11 @@ export const assertCanCreateScheduledReport = (plan: Plan) => assertCanUse(plan,
 
 export const canExportAnalytics = (plan: Plan) => canUse(plan, "analytics_export");
 export const assertCanExportAnalytics = (plan: Plan) => assertCanUse(plan, "analytics_export");
+
+// Business Line add-on — PLAN gate only. The add-on activation flag is a
+// separate gate (resolveBusinessLineEntitlement); both must pass to unlock.
+export const canUseBusinessLine = (plan: Plan) => canUse(plan, "business_line");
+export const assertCanUseBusinessLine = (plan: Plan) => assertCanUse(plan, "business_line");
 
 // ─── Snapshot for API responses ──────────────────────────────────────
 

@@ -11,7 +11,6 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  resolveBusinessLineEntitlement,
   validateForwardingUpdate,
   forwardingErrorMessage,
   summarizeMonthlyUsage,
@@ -19,29 +18,8 @@ import {
   shapeBusinessLineView,
 } from "../lib/business-line-view";
 
-// ── entitlement (placeholder defaults LOCKED) ──────────────────────
-test("entitlement is LOCKED by default; active only with explicit flag", () => {
-  assert.deepEqual(resolveBusinessLineEntitlement(null), {
-    active: false,
-    locked: true,
-    reason: "no_entitlement",
-  });
-  assert.deepEqual(resolveBusinessLineEntitlement({}), {
-    active: false,
-    locked: true,
-    reason: "no_entitlement",
-  });
-  assert.deepEqual(resolveBusinessLineEntitlement({ entitlementActive: false }), {
-    active: false,
-    locked: true,
-    reason: "no_entitlement",
-  });
-  assert.deepEqual(resolveBusinessLineEntitlement({ entitlementActive: true }), {
-    active: true,
-    locked: false,
-    reason: "active",
-  });
-});
+// Entitlement tests now live in tests/business-line-entitlement.test.ts (the
+// real two-gate add-on model). This file covers validation/usage/shaping.
 
 // ── forwarding-update validation ───────────────────────────────────
 test("PATCH validation accepts a valid US/Canada forwarding number (normalized)", () => {
@@ -132,9 +110,10 @@ test("periodForDate formats YYYY-MM in UTC", () => {
 
 // ── full view shaping ──────────────────────────────────────────────
 test("shapeBusinessLineView: defaults are safe + locked when no rows exist", () => {
-  const v = shapeBusinessLineView({ period: "2026-06" });
+  const v = shapeBusinessLineView({ period: "2026-06", planEligible: false });
   assert.equal(v.number, null);
   assert.equal(v.entitlement.locked, true);
+  assert.equal(v.entitlement.reason, "plan_not_eligible");
   assert.equal(v.settings.enabled, false);
   assert.equal(v.settings.forwardingNumber, null);
   assert.equal(v.settings.includedMinutes, 200); // package default
@@ -145,6 +124,7 @@ test("shapeBusinessLineView: defaults are safe + locked when no rows exist", () 
 test("shapeBusinessLineView: surfaces number, settings, entitlement, and missed flag", () => {
   const v = shapeBusinessLineView({
     period: "2026-06",
+    planEligible: true,
     number: { phoneNumber: "+14155550100", status: "active", provisionedAt: new Date("2026-06-01T00:00:00Z") },
     settings: {
       enabled: true,

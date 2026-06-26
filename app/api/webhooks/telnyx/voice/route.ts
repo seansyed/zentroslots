@@ -2,10 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { and, eq, sql } from "drizzle-orm";
 
 import { db } from "@/db/client";
-import { tenantPhoneNumbers, tenantPhoneSettings, phoneUsageMonthly, phoneCallLogs, phoneCallEvents } from "@/db/schema";
+import { tenants, tenantPhoneNumbers, tenantPhoneSettings, phoneUsageMonthly, phoneCallLogs, phoneCallEvents } from "@/db/schema";
 import { secondsToBillableMinutes } from "@/lib/business-line";
+import { getPlan } from "@/lib/plans";
+import { canUseBusinessLine } from "@/lib/billing/capabilities";
 import { readBusinessLineConfig, buildStatusCallbackUrl } from "@/lib/telnyx-business-line";
-import { resolveBusinessLineEntitlement, periodForDate } from "@/lib/business-line-view";
+import { readAddonActiveFlag, periodForDate } from "@/lib/business-line-view";
 import {
   verifyAndParseInbound,
   decideForwarding,
@@ -78,7 +80,7 @@ export async function POST(req: NextRequest) {
     if (numberRow) {
       const tenantId = numberRow.tenantId;
       const period = periodForDate(new Date());
-      const [settings, owned, usage] = await Promise.all([
+      const [settings, owned, usage, tenantRow] = await Promise.all([
         db.query.tenantPhoneSettings.findFirst({ where: eq(tenantPhoneSettings.tenantId, tenantId) }),
         db.query.tenantPhoneNumbers.findMany({
           where: eq(tenantPhoneNumbers.tenantId, tenantId),
@@ -87,13 +89,16 @@ export async function POST(req: NextRequest) {
         db.query.phoneUsageMonthly.findFirst({
           where: and(eq(phoneUsageMonthly.tenantId, tenantId), eq(phoneUsageMonthly.period, period)),
         }),
+        db.query.tenants.findFirst({ where: eq(tenants.id, tenantId), columns: { currentPlan: true } }),
       ]);
+      // Real entitlement: plan gate (Pro+) AND the add-on activation flag.
+      const planEligible = canUseBusinessLine(getPlan(tenantRow?.currentPlan)).allowed;
       ctx = {
         tenantMatched: true,
         businessNumber: numberRow.phoneNumber,
         ownedNumbers: owned.map((o) => o.phoneNumber),
         settingsEnabled: settings?.enabled ?? false,
-        entitlementActive: resolveBusinessLineEntitlement(settings?.metadata).active,
+        entitlementActive: planEligible && readAddonActiveFlag(settings?.metadata),
         forwardingNumber: settings?.forwardingNumber ?? null,
         minutesUsed: secondsToBillableMinutes(usage?.billableSeconds ?? 0),
         monthlyMinuteCap: settings?.monthlyMinuteCap ?? 0,

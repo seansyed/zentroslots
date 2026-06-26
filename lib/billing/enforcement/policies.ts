@@ -46,6 +46,11 @@ export const DEFAULT_ENFORCEMENT_POLICY: Record<Capability, EnforcementMode> = {
   // "Grandfathered" makes no sense for a one-shot action — hard-enforce
   // is the only sensible mode. (Phase 1 already 402s the route on Free.)
   analytics_export: "hard",
+  // Business Line is a live, billable telecom action (every forwarded call
+  // costs per-minute). Grandfathering a paid line on downgrade would leak
+  // cost — hard-enforce. The webhook also rejects calls when the entitlement
+  // (plan + add-on) is inactive.
+  business_line: "hard",
 };
 
 // ─── Override resolver ────────────────────────────────────────────────

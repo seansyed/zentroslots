@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import { db } from "@/db/client";
 import {
+  tenants,
   tenantPhoneNumbers,
   tenantPhoneSettings,
   phoneUsageMonthly,
@@ -11,11 +12,15 @@ import {
 } from "@/db/schema";
 import { errorResponse, requireRole, HttpError } from "@/lib/auth";
 import { audit, ipFromHeaders } from "@/lib/audit";
+import { getPlan } from "@/lib/plans";
+import { canUseBusinessLine } from "@/lib/billing/capabilities";
 import {
   shapeBusinessLineView,
   validateForwardingUpdate,
   forwardingErrorMessage,
   periodForDate,
+  readAddonActiveFlag,
+  evaluateBusinessLinePatchGate,
 } from "@/lib/business-line-view";
 
 export const runtime = "nodejs";
@@ -34,7 +39,7 @@ export async function GET() {
     const admin = await requireRole(["admin"]);
     const tenantId = admin.tenantId;
 
-    const [numberRow, settingsRow] = await Promise.all([
+    const [numberRow, settingsRow, tenantRow] = await Promise.all([
       db.query.tenantPhoneNumbers.findFirst({
         where: and(
           eq(tenantPhoneNumbers.tenantId, tenantId),
@@ -44,7 +49,15 @@ export async function GET() {
       db.query.tenantPhoneSettings.findFirst({
         where: eq(tenantPhoneSettings.tenantId, tenantId),
       }),
+      db.query.tenants.findFirst({
+        where: eq(tenants.id, tenantId),
+        columns: { currentPlan: true },
+      }),
     ]);
+
+    // PLAN gate (Pro+). The add-on activation gate is read from settings
+    // metadata inside shapeBusinessLineView.
+    const planEligible = canUseBusinessLine(getPlan(tenantRow?.currentPlan)).allowed;
 
     const period = periodForDate(new Date());
     const [usageRow, calls] = await Promise.all([
@@ -62,6 +75,7 @@ export async function GET() {
     ]);
 
     const view = shapeBusinessLineView({
+      planEligible,
       number: numberRow
         ? {
             phoneNumber: numberRow.phoneNumber,
@@ -121,6 +135,23 @@ export async function PATCH(req: NextRequest) {
       throw new HttpError(400, "Nothing to update.");
     }
 
+    // Resolve entitlement (plan gate + add-on flag) and gate the write. When
+    // locked, only DISABLING / CLEARING is allowed — never enabling forwarding
+    // or setting a forwarding number.
+    const [tenantRow, existing] = await Promise.all([
+      db.query.tenants.findFirst({ where: eq(tenants.id, tenantId), columns: { currentPlan: true } }),
+      db.query.tenantPhoneSettings.findFirst({ where: eq(tenantPhoneSettings.tenantId, tenantId) }),
+    ]);
+    const planEligible = canUseBusinessLine(getPlan(tenantRow?.currentPlan)).allowed;
+    const entitlementActive = planEligible && readAddonActiveFlag(existing?.metadata);
+    const gate = evaluateBusinessLinePatchGate({
+      entitlementActive,
+      setsEnabledTrue: body.enabled === true,
+      setsNonEmptyForwarding:
+        typeof body.forwardingNumber === "string" && body.forwardingNumber.trim() !== "",
+    });
+    if (!gate.allowed) throw new HttpError(402, gate.reason);
+
     const patch: Record<string, unknown> = { tenantId, updatedAt: new Date() };
 
     if (body.forwardingNumber !== undefined) {
@@ -145,10 +176,8 @@ export async function PATCH(req: NextRequest) {
 
     if (body.enabled !== undefined) patch.enabled = body.enabled;
 
-    // Upsert the single per-tenant settings row.
-    const existing = await db.query.tenantPhoneSettings.findFirst({
-      where: eq(tenantPhoneSettings.tenantId, tenantId),
-    });
+    // Upsert the single per-tenant settings row (reuse the `existing` fetched
+    // above for the entitlement gate).
     let row;
     if (existing) {
       [row] = await db

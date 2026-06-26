@@ -13,29 +13,91 @@ import {
   BUSINESS_LINE_DEFAULT_PACKAGE,
   type PhoneValidationReason,
 } from "./business-line";
+import type { PlanId } from "./plans";
 
-// ─── Entitlement (placeholder) ──────────────────────────────────────────────
+// ─── Entitlement (real add-on model; NO live Stripe) ────────────────────────
+//
+// Two gates, BOTH required to unlock:
+//   1. PLAN gate   — the tenant's plan meets the Business Line capability tier
+//                    (Pro+, via canUse(plan, "business_line")). Callers pass the
+//                    result in as `planEligible`.
+//   2. ADD-ON gate — the paid add-on is explicitly active for the tenant. Stored
+//                    as `entitlementActive: true` in the settings-row metadata; a
+//                    future Stripe add-on webhook flips it. No Stripe call here.
+// Default LOCKED unless BOTH pass. The included minutes + $/mo come from the
+// data-model package default (no metered overage in MVP — hard cap instead).
+
+export type BusinessLineEntitlementReason = "active" | "addon_inactive" | "plan_not_eligible";
 
 export type BusinessLineEntitlement = {
   active: boolean;
   locked: boolean;
-  reason: "active" | "no_entitlement";
+  reason: BusinessLineEntitlementReason;
+  requiredPlan: PlanId;
+  includedMinutes: number;
+  monthlyPriceCents: number;
+  hardCapMinutes: number;
 };
 
+/** The add-on activation flag — what a future Stripe add-on webhook would set. */
+export function readAddonActiveFlag(settingsMetadata: unknown): boolean {
+  return isRecord(settingsMetadata) && settingsMetadata.entitlementActive === true;
+}
+
+export function resolveBusinessLineEntitlement(args: {
+  /** canUse(plan, "business_line").allowed — the Pro+ plan gate. */
+  planEligible: boolean;
+  /** readAddonActiveFlag(settings.metadata) — the add-on activation gate. */
+  addonActive: boolean;
+  /** Display-only; defaults to the capability's required tier. */
+  requiredPlan?: PlanId;
+}): BusinessLineEntitlement {
+  const base = {
+    requiredPlan: args.requiredPlan ?? ("pro" as PlanId),
+    includedMinutes: BUSINESS_LINE_DEFAULT_PACKAGE.includedMinutes,
+    monthlyPriceCents: BUSINESS_LINE_DEFAULT_PACKAGE.monthlyPriceCents,
+    hardCapMinutes: BUSINESS_LINE_DEFAULT_PACKAGE.hardCapMinutes,
+  };
+  if (!args.planEligible) return { active: false, locked: true, reason: "plan_not_eligible", ...base };
+  if (!args.addonActive) return { active: false, locked: true, reason: "addon_inactive", ...base };
+  return { active: true, locked: false, reason: "active", ...base };
+}
+
+/** Single source for the locked/upgrade UI copy ("$19/month · 200 minutes"). */
+export function businessLineAddonCopy(e: BusinessLineEntitlement): {
+  title: string;
+  price: string;
+  minutes: string;
+  reasonText: string;
+} {
+  return {
+    title: "Business Line add-on",
+    price: `$${Math.round(e.monthlyPriceCents / 100)}/month`,
+    minutes: `${e.includedMinutes} US/Canada minutes`,
+    reasonText:
+      e.reason === "plan_not_eligible"
+        ? `Available on ${capitalize(e.requiredPlan)} and above.`
+        : e.reason === "addon_inactive"
+          ? "Add this paid add-on to activate."
+          : "Active.",
+  };
+}
+
 /**
- * Placeholder entitlement check. Until billing is wired, the Business Line is
- * "active" ONLY when an explicit flag is present in the settings row's metadata
- * (`metadata.entitlementActive === true`). Anything else → locked. This is
- * deliberately fail-closed and is replaced by the real Stripe add-on check in a
- * later increment.
+ * PATCH gate. When the entitlement is inactive (locked), only DISABLING
+ * (enabled=false) or CLEARING the forwarding number is permitted — never
+ * enabling forwarding or setting a forwarding number. Active → anything.
  */
-export function resolveBusinessLineEntitlement(
-  settingsMetadata: unknown,
-): BusinessLineEntitlement {
-  const active = isRecord(settingsMetadata) && settingsMetadata.entitlementActive === true;
-  return active
-    ? { active: true, locked: false, reason: "active" }
-    : { active: false, locked: true, reason: "no_entitlement" };
+export function evaluateBusinessLinePatchGate(args: {
+  entitlementActive: boolean;
+  setsEnabledTrue: boolean;
+  setsNonEmptyForwarding: boolean;
+}): { allowed: true } | { allowed: false; reason: string } {
+  if (args.entitlementActive) return { allowed: true };
+  if (args.setsEnabledTrue || args.setsNonEmptyForwarding) {
+    return { allowed: false, reason: "The Business Line add-on isn't active on your plan." };
+  }
+  return { allowed: true };
 }
 
 // ─── Forwarding-number update validation ────────────────────────────────────
@@ -176,6 +238,9 @@ export type BusinessLineView = {
 };
 
 export function shapeBusinessLineView(input: {
+  /** canUse(plan, "business_line").allowed — resolved by the route from the
+   *  tenant's plan. The add-on activation gate is read from settings.metadata. */
+  planEligible: boolean;
   number?: { phoneNumber: string; status: string; provisionedAt: Date | string | null } | null;
   settings?: {
     enabled: boolean;
@@ -205,7 +270,10 @@ export function shapeBusinessLineView(input: {
   const includedMinutes = settings?.includedMinutes ?? BUSINESS_LINE_DEFAULT_PACKAGE.includedMinutes;
   const cap = settings?.monthlyMinuteCap ?? BUSINESS_LINE_DEFAULT_PACKAGE.hardCapMinutes;
   return {
-    entitlement: resolveBusinessLineEntitlement(settings?.metadata),
+    entitlement: resolveBusinessLineEntitlement({
+      planEligible: input.planEligible,
+      addonActive: readAddonActiveFlag(settings?.metadata),
+    }),
     number: input.number
       ? {
           phoneNumber: input.number.phoneNumber,
@@ -233,4 +301,7 @@ function toIso(v: Date | string | null | undefined): string | null {
   if (!v) return null;
   if (v instanceof Date) return v.toISOString();
   return typeof v === "string" ? v : null;
+}
+function capitalize(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1);
 }
