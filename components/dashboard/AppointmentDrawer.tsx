@@ -29,6 +29,7 @@ import {
   Clock4,
   CalendarDays,
   Video,
+  Phone,
   Mail,
   User,
   Copy,
@@ -44,6 +45,7 @@ import { Drawer, toast, confirmAction } from "@/components/ui/primitives";
 import { InsightCard } from "@/components/ui/Card";
 import { STATUS_LABEL, STATUS_DOT, type Status } from "@/lib/status-colors";
 import { cn } from "@/lib/cn";
+import { appointmentDeliveryDisplay } from "@/lib/appointment-delivery-display";
 
 export type DrawerBooking = {
   id: string;
@@ -78,6 +80,43 @@ export default function AppointmentDrawer({
 }) {
   const [busy, setBusy] = React.useState(false);
   const [emailCopied, setEmailCopied] = React.useState(false);
+  // Phone-appointment work — deliveryMode + clientPhone aren't in the
+  // server-rendered list rows, so fetch them from the detail read route
+  // (GET /api/bookings/[id]) when the drawer opens. Non-fatal: any failure
+  // leaves `delivery` null, so the badge/Call simply don't render (the rest of
+  // the drawer is unchanged — old deliveryMode=null bookings look identical).
+  const [delivery, setDelivery] = React.useState<{
+    deliveryMode: string | null;
+    clientPhone: string | null;
+  } | null>(null);
+
+  const bookingId = booking?.id ?? null;
+  React.useEffect(() => {
+    if (!bookingId) {
+      setDelivery(null);
+      return;
+    }
+    let cancelled = false;
+    setDelivery(null);
+    fetch(`/api/bookings/${bookingId}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (cancelled || !d) return;
+        setDelivery({
+          deliveryMode: d.deliveryMode ?? null,
+          clientPhone: d.clientPhone ?? null,
+        });
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [bookingId]);
+
+  const deliveryDisplay = appointmentDeliveryDisplay(
+    delivery?.deliveryMode,
+    delivery?.clientPhone,
+  );
 
   async function setStatus(status: Status) {
     if (!booking) return;
@@ -172,6 +211,21 @@ export default function AppointmentDrawer({
             <div className="relative mt-3 flex flex-wrap items-center gap-1.5">
               <RelativeTimeChip startAt={booking.startAt} />
               <DurationChip startAt={booking.startAt} endAt={booking.endAt} />
+              {deliveryDisplay.badgeLabel && (
+                <span
+                  className={cn(
+                    "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ring-1",
+                    delivery?.deliveryMode === "phone"
+                      ? "bg-emerald-50 text-emerald-700 ring-emerald-200/60"
+                      : "bg-surface/80 text-ink-muted ring-border/70",
+                  )}
+                >
+                  {delivery?.deliveryMode === "phone" && (
+                    <Phone className="h-2.5 w-2.5" strokeWidth={2} />
+                  )}
+                  {deliveryDisplay.badgeLabel}
+                </span>
+              )}
             </div>
           </div>
 
@@ -213,6 +267,19 @@ export default function AppointmentDrawer({
                     <Mail className="h-3 w-3" strokeWidth={1.75} />
                     {booking.clientEmail}
                   </a>
+                  {/* Phone-appointment work — Call Client action (tel: link).
+                      Only shown when the booking is a phone appointment with a
+                      dialable number. */}
+                  {deliveryDisplay.callHref && (
+                    <a
+                      className="mt-0.5 flex items-center gap-1 text-[12px] font-medium text-emerald-700 transition-colors hover:text-emerald-800"
+                      href={deliveryDisplay.callHref}
+                      aria-label={`Call client at ${deliveryDisplay.phone}`}
+                    >
+                      <Phone className="h-3 w-3" strokeWidth={1.75} />
+                      Call {deliveryDisplay.phone}
+                    </a>
+                  )}
                 </div>
                 <button
                   type="button"
