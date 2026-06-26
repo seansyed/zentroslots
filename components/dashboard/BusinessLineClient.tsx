@@ -1,12 +1,14 @@
 "use client";
 
 /**
- * Business Line settings (increment 3 — settings surface only).
+ * Business Line settings + call logs (increments 3 & 5).
  *
- * Loads /api/tenant/business-line and lets an admin view the assigned number,
- * set a forwarding number, and enable/disable forwarding. When there is no
- * entitlement the controls render in a locked/upgrade state. NO calls are
- * placed, NO numbers are provisioned, and Telnyx is never contacted from here.
+ * Loads /api/tenant/business-line (number / forwarding / usage) and
+ * /api/tenant/business-line/calls (paginated, filterable call log). Lets an
+ * admin set a forwarding number and enable/disable forwarding; shows usage and
+ * a recent-calls table with missed highlighting. When there is no entitlement
+ * the controls render locked. NO calls are placed, NO numbers are provisioned,
+ * and Telnyx is never contacted from here.
  */
 
 import * as React from "react";
@@ -22,6 +24,14 @@ import {
 import { Card, CardHeader, Button, Badge, Skeleton, toast } from "@/components/ui/primitives";
 import { cn } from "@/lib/cn";
 import type { BusinessLineView } from "@/lib/business-line-view";
+import {
+  callStatusLabel,
+  callStatusTone,
+  formatCallDuration,
+  type CallLogRowView,
+} from "@/lib/business-line-calls";
+
+const CALL_FILTERS = ["all", "completed", "missed", "answered", "failed", "rejected"] as const;
 
 export default function BusinessLineClient() {
   const [view, setView] = React.useState<BusinessLineView | null>(null);
@@ -30,6 +40,12 @@ export default function BusinessLineClient() {
   const [forwarding, setForwarding] = React.useState("");
   const [saving, setSaving] = React.useState(false);
   const [toggling, setToggling] = React.useState(false);
+
+  // Call-log table state.
+  const [calls, setCalls] = React.useState<CallLogRowView[]>([]);
+  const [callsLoading, setCallsLoading] = React.useState(true);
+  const [statusFilter, setStatusFilter] = React.useState<string>("all");
+  const [hasMore, setHasMore] = React.useState(false);
 
   const load = React.useCallback(async () => {
     setLoading(true);
@@ -47,9 +63,32 @@ export default function BusinessLineClient() {
     }
   }, []);
 
+  const fetchCalls = React.useCallback(async (status: string, offset: number, append: boolean) => {
+    setCallsLoading(true);
+    try {
+      const params = new URLSearchParams({ limit: "25", offset: String(offset) });
+      if (status !== "all") params.set("status", status);
+      const res = await fetch(`/api/tenant/business-line/calls?${params.toString()}`, { cache: "no-store" });
+      if (!res.ok) throw new Error("calls load failed");
+      const data = (await res.json()) as { calls: CallLogRowView[]; hasMore: boolean };
+      setCalls((cur) => (append ? [...cur, ...data.calls] : data.calls));
+      setHasMore(data.hasMore);
+    } catch {
+      // Soft-fail: the settings card still works even if the log can't load.
+      if (!append) setCalls([]);
+      setHasMore(false);
+    } finally {
+      setCallsLoading(false);
+    }
+  }, []);
+
   React.useEffect(() => {
     void load();
   }, [load]);
+
+  React.useEffect(() => {
+    void fetchCalls(statusFilter, 0, false);
+  }, [statusFilter, fetchCalls]);
 
   const locked = view?.entitlement.locked ?? true;
 
@@ -60,9 +99,7 @@ export default function BusinessLineClient() {
       body: JSON.stringify(body),
     });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      throw new Error((data as { error?: string })?.error ?? "Update failed");
-    }
+    if (!res.ok) throw new Error((data as { error?: string })?.error ?? "Update failed");
     return true;
   }
 
@@ -107,10 +144,7 @@ export default function BusinessLineClient() {
     return (
       <div className="max-w-2xl">
         <Card>
-          <CardHeader
-            title="Business Line isn't available yet"
-            subtitle="This feature is being set up. Check back soon."
-          />
+          <CardHeader title="Business Line isn't available yet" subtitle="This feature is being set up. Check back soon." />
           <div className="mt-4">
             <Button variant="secondary" onClick={() => void load()}>
               Retry
@@ -121,7 +155,7 @@ export default function BusinessLineClient() {
     );
   }
 
-  const { number, settings, usage, recentCalls } = view;
+  const { number, settings, usage } = view;
 
   return (
     <div className="max-w-2xl space-y-5">
@@ -132,8 +166,8 @@ export default function BusinessLineClient() {
           <div className="text-sm">
             <div className="font-medium">Business Line is a paid add-on</div>
             <p className="mt-0.5 text-amber-700">
-              Add a ZentroMeet business number that rings your phone. Forwarding is
-              disabled until the add-on is active on your plan.
+              Add a ZentroMeet business number that rings your phone. Forwarding is disabled
+              until the add-on is active on your plan.
             </p>
           </div>
         </div>
@@ -148,11 +182,8 @@ export default function BusinessLineClient() {
           </span>
         </div>
 
-        {/* Assigned number */}
         <div className="mt-4 rounded-lg border border-border bg-surface-inset/40 p-4">
-          <div className="text-[11px] font-semibold uppercase tracking-wide text-ink-subtle">
-            Assigned number
-          </div>
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-ink-subtle">Assigned number</div>
           {number ? (
             <div className="mt-1 flex items-center gap-2">
               <span className="text-lg font-semibold text-ink">{number.phoneNumber}</span>
@@ -165,14 +196,11 @@ export default function BusinessLineClient() {
           )}
         </div>
 
-        {/* Forwarding number */}
         <div className="mt-4">
           <label htmlFor="bl-forwarding" className="block text-sm font-medium text-ink">
             Forwarding number
           </label>
-          <p className="mt-0.5 text-xs text-ink-muted">
-            Incoming calls ring this phone. US &amp; Canada numbers only.
-          </p>
+          <p className="mt-0.5 text-xs text-ink-muted">Incoming calls ring this phone. US &amp; Canada numbers only.</p>
           <div className="mt-2 flex gap-2">
             <input
               id="bl-forwarding"
@@ -197,7 +225,6 @@ export default function BusinessLineClient() {
           </div>
         </div>
 
-        {/* Enable toggle */}
         <div className="mt-4 flex items-center justify-between rounded-lg border border-border p-3">
           <div className="flex items-center gap-2">
             <PhoneForwarded className="h-4 w-4 text-ink-subtle" strokeWidth={1.75} />
@@ -238,7 +265,9 @@ export default function BusinessLineClient() {
             <span className="text-ink">
               <span className="font-semibold">{usage.minutesUsed}</span> / {usage.cap} minutes
             </span>
-            <span className="text-ink-muted">{usage.percentUsed}%</span>
+            <span className={cn("text-ink-muted", usage.overCap && "font-medium text-red-600")}>
+              {usage.percentUsed}%{usage.overCap ? " · cap reached" : ""}
+            </span>
           </div>
           <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-surface-inset">
             <div
@@ -256,31 +285,87 @@ export default function BusinessLineClient() {
         </div>
       </Card>
 
-      {/* Recent calls */}
+      {/* Call log */}
       <Card>
-        <CardHeader title="Recent calls" subtitle="Most recent inbound calls to your business line." />
-        {recentCalls.length === 0 ? (
-          <div className="mt-3 text-sm text-ink-muted">No calls yet.</div>
+        <CardHeader title="Recent calls" subtitle="Inbound calls to your business line." />
+
+        {/* Status filter chips */}
+        <div className="mt-3 flex flex-wrap gap-1.5">
+          {CALL_FILTERS.map((f) => {
+            const active = statusFilter === f;
+            return (
+              <button
+                key={f}
+                type="button"
+                onClick={() => setStatusFilter(f)}
+                className={cn(
+                  "rounded-full px-2.5 py-1 text-xs font-medium transition-colors",
+                  active ? "bg-brand-accent text-white" : "bg-surface-inset text-ink-muted hover:text-ink",
+                )}
+              >
+                {f === "all" ? "All" : callStatusLabel(f)}
+              </button>
+            );
+          })}
+        </div>
+
+        {callsLoading && calls.length === 0 ? (
+          <div className="mt-4 space-y-2">
+            <Skeleton className="h-8 w-full" />
+            <Skeleton className="h-8 w-full" />
+            <Skeleton className="h-8 w-full" />
+          </div>
+        ) : calls.length === 0 ? (
+          <div className="mt-4 rounded-lg border border-dashed border-border p-8 text-center text-sm text-ink-muted">
+            {statusFilter === "all" ? "No calls yet." : `No ${callStatusLabel(statusFilter).toLowerCase()} calls.`}
+          </div>
         ) : (
-          <ul className="mt-3 divide-y divide-border">
-            {recentCalls.map((c) => (
-              <li key={c.id} className="flex items-center justify-between py-2.5 text-sm">
-                <div className="flex items-center gap-2">
-                  {c.missed ? (
-                    <PhoneMissed className="h-4 w-4 text-red-500" strokeWidth={1.75} />
-                  ) : (
-                    <Phone className="h-4 w-4 text-ink-subtle" strokeWidth={1.75} />
-                  )}
-                  <span className="font-medium text-ink">{c.fromNumber ?? "Unknown"}</span>
-                </div>
-                <div className="flex items-center gap-3 text-xs text-ink-muted">
-                  <span className="capitalize">{c.status.replace(/_/g, " ")}</span>
-                  <span>{formatDuration(c.durationSeconds)}</span>
-                  <span>{formatTime(c.startedAt)}</span>
-                </div>
-              </li>
-            ))}
-          </ul>
+          <>
+            <div className="mt-3 overflow-hidden rounded-lg border border-border">
+              <table className="w-full text-sm">
+                <thead className="bg-surface-inset/50 text-left text-[11px] uppercase tracking-wide text-ink-subtle">
+                  <tr>
+                    <th className="px-3 py-2 font-semibold">From</th>
+                    <th className="px-3 py-2 font-semibold">Status</th>
+                    <th className="px-3 py-2 font-semibold">Duration</th>
+                    <th className="px-3 py-2 text-right font-semibold">Time</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {calls.map((c) => (
+                    <tr key={c.id} className={cn(c.missed && "bg-red-50/60")}>
+                      <td className="px-3 py-2">
+                        <div className="flex items-center gap-2">
+                          {c.missed ? (
+                            <PhoneMissed className="h-4 w-4 text-red-500" strokeWidth={1.75} />
+                          ) : (
+                            <Phone className="h-4 w-4 text-ink-subtle" strokeWidth={1.75} />
+                          )}
+                          <span className="font-medium text-ink">{c.fromNumber ?? "Unknown"}</span>
+                        </div>
+                      </td>
+                      <td className="px-3 py-2">
+                        <Badge tone={callStatusTone(c.status)}>{callStatusLabel(c.status)}</Badge>
+                      </td>
+                      <td className="px-3 py-2 text-ink-muted">{formatCallDuration(c.durationSeconds)}</td>
+                      <td className="px-3 py-2 text-right text-xs text-ink-muted">{formatTime(c.startedAt)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {hasMore && (
+              <div className="mt-3 text-center">
+                <Button
+                  variant="secondary"
+                  onClick={() => void fetchCalls(statusFilter, calls.length, true)}
+                  disabled={callsLoading}
+                >
+                  {callsLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Load more"}
+                </Button>
+              </div>
+            )}
+          </>
         )}
       </Card>
 
@@ -288,20 +373,13 @@ export default function BusinessLineClient() {
       <div className="flex items-start gap-2.5 rounded-xl border border-border bg-surface-inset/40 p-4 text-xs text-ink-muted">
         <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-ink-subtle" strokeWidth={1.75} />
         <p>
-          <span className="font-semibold text-ink">This is not an emergency calling service.</span>{" "}
-          Do not use it to call 911 or any emergency number. The Business Line forwards
-          inbound calls only and does not provide emergency (E911) location services.
+          <span className="font-semibold text-ink">This is not an emergency calling service.</span> Do not use it to
+          call 911 or any emergency number. The Business Line forwards inbound calls only and does not provide
+          emergency (E911) location services.
         </p>
       </div>
     </div>
   );
-}
-
-function formatDuration(seconds: number | null): string {
-  if (!seconds || seconds <= 0) return "—";
-  const m = Math.floor(seconds / 60);
-  const s = seconds % 60;
-  return `${m}:${String(s).padStart(2, "0")}`;
 }
 
 function formatTime(iso: string | null): string {
