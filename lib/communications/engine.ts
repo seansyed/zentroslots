@@ -291,6 +291,12 @@ export async function triggerAutomation(args: TriggerArgs): Promise<TriggerResul
       // the link" fallback for video-services that didn't get a link,
       // and (c) omitting the row entirely for non-video services.
       videoProvider: service.videoProvider ?? null,
+      // Phone-appointment work — the booking's delivery mode + the client's
+      // callback number. booking.clientPhone is the CLIENT's number (set on a
+      // phone booking), never a staff/private one. Null for legacy bookings →
+      // the renderers emit no delivery wording (unchanged emails).
+      deliveryMode: booking.deliveryMode ?? null,
+      clientPhone: booking.clientPhone ?? null,
     };
 
     const baseContext: TemplateContext = buildContext({

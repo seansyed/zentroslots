@@ -24,6 +24,7 @@
 import { formatInTimeZone } from "date-fns-tz";
 import { buildBookingActionUrl } from "@/lib/tokens";
 import { audit } from "@/lib/audit";
+import { appointmentDeliveryWording } from "@/lib/appointment-delivery-wording";
 
 type Attachment = {
   filename: string;
@@ -474,6 +475,14 @@ type BookingForEmail = {
    * behavior so we don't regress non-video appointments.
    */
   videoProvider?: string | null;
+  /**
+   * Phone-appointment work — the booking's delivery mode + the CLIENT's
+   * callback number. Optional + nullable: older callers omit them and no
+   * delivery wording is rendered (in-person / virtual / legacy unchanged).
+   * clientPhone must be the client's number only — never a staff/private one.
+   */
+  deliveryMode?: string | null;
+  clientPhone?: string | null;
 };
 
 function fmt(d: Date, tz: string): string {
@@ -547,6 +556,7 @@ function rows(b: BookingForEmail, tz: string): string {
     <div class="row"><span class="label">Service:</span> ${escape(b.serviceName)} (${escape(b.staffName)})</div>
     <div class="row"><span class="label">Workspace:</span> ${escape(b.tenantName)}</div>
     ${videoLinkRow(b)}
+    ${deliveryRow(b)}
   `;
 }
 
@@ -586,6 +596,24 @@ function videoLineText(b: BookingForEmail): string {
   return "Your host will share the meeting link with you before the appointment. If you don't receive it, please reply to this confirmation.\n";
 }
 
+// Phone-appointment work — delivery-mode wording shared by all four notification
+// builders: deliveryRow() via rows() (HTML), deliveryLineText() in each text
+// body. Both return "" for in-person / virtual / legacy bookings, so those
+// emails stay byte-identical. (deliveryLineText carries a LEADING newline so
+// appending it to an existing body never adds a trailing blank line for legacy.)
+function deliveryRow(b: BookingForEmail): string {
+  const w = appointmentDeliveryWording(b.deliveryMode, b.clientPhone);
+  if (!w.label) return "";
+  const detail = w.detail ? ` ${escape(w.detail)}` : "";
+  return `<div class="row"><span class="label">Delivery:</span> ${escape(w.label)}.${detail}</div>`;
+}
+
+function deliveryLineText(b: BookingForEmail): string {
+  const w = appointmentDeliveryWording(b.deliveryMode, b.clientPhone);
+  if (!w.label) return "";
+  return `\n${w.label}.${w.detail ? ` ${w.detail}` : ""}`;
+}
+
 export function renderConfirmation(b: BookingForEmail): { html: string; text: string; subject: string } {
   const tz = b.clientTimezone ?? "UTC";
   const subject = `Confirmed: ${b.serviceName} on ${formatInTimeZone(b.startAt, tz, "MMM d 'at' h:mm a")}`;
@@ -595,7 +623,7 @@ export function renderConfirmation(b: BookingForEmail): { html: string; text: st
     ${rows(b, tz)}
     ${actionButtons(b)}
   `);
-  const text = `You're confirmed.\n\n${b.serviceName} with ${b.staffName}\n${fmt(b.startAt, tz)}\n${videoLineText(b)}`;
+  const text = `You're confirmed.\n\n${b.serviceName} with ${b.staffName}\n${fmt(b.startAt, tz)}\n${videoLineText(b)}${deliveryLineText(b)}`;
   return { html, text, subject };
 }
 
@@ -607,7 +635,7 @@ export function renderCancellation(b: BookingForEmail): { html: string; text: st
     <p class="meta">Your appointment has been cancelled.</p>
     ${rows(b, tz)}
   `);
-  const text = `Cancelled.\n${b.serviceName}\n${fmt(b.startAt, tz)}`;
+  const text = `Cancelled.\n${b.serviceName}\n${fmt(b.startAt, tz)}${deliveryLineText(b)}`;
   return { html, text, subject };
 }
 
@@ -620,7 +648,7 @@ export function renderReschedule(b: BookingForEmail): { html: string; text: stri
     ${rows(b, tz)}
     ${actionButtons(b)}
   `);
-  const text = `Rescheduled.\n${b.serviceName}\n${fmt(b.startAt, tz)}`;
+  const text = `Rescheduled.\n${b.serviceName}\n${fmt(b.startAt, tz)}${deliveryLineText(b)}`;
   return { html, text, subject };
 }
 
@@ -633,7 +661,7 @@ export function renderReminder(b: BookingForEmail, leadLabel: string): { html: s
     ${rows(b, tz)}
     ${actionButtons(b)}
   `);
-  const text = `Reminder ${leadLabel}.\n${b.serviceName}\n${fmt(b.startAt, tz)}`;
+  const text = `Reminder ${leadLabel}.\n${b.serviceName}\n${fmt(b.startAt, tz)}${deliveryLineText(b)}`;
   return { html, text, subject };
 }
 
