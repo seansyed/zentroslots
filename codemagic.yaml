@@ -744,7 +744,14 @@ workflows:
       - name: Set up code signing (use-profiles)
         script: |
           set -euo pipefail
-          xcode-project use-profiles --project "ios/*.xcodeproj" --warn-only
+          # Export as TestFlight INTERNAL-testing-only so the upload is NOT
+          # submitted for external beta review (which requires Beta App Review
+          # Information / Feedback Email that isn't filled in). This is the
+          # documented fix for the "Complete test information is required ...
+          # for external testing" publish failure — the build still uploads to
+          # TestFlight and is available to internal testers.
+          xcode-project use-profiles --project "ios/*.xcodeproj" --warn-only \
+            --custom-export-options '{"testFlightInternalTestingOnly": true}'
           # Make the use-profiles → build-ipa export-options contract explicit
           # and fail-closed: if signing setup didn't produce the plist, stop
           # here (instead of burning a 20-min archive that exports the wrong way).
@@ -755,6 +762,7 @@ workflows:
             exit 1
           fi
           echo "Export options method: $(/usr/libexec/PlistBuddy -c 'Print :method' "$EXPORT_PLIST" 2>/dev/null || echo '(unreadable)')"
+          echo "TestFlight internal-only: $(/usr/libexec/PlistBuddy -c 'Print :testFlightInternalTestingOnly' "$EXPORT_PLIST" 2>/dev/null || echo '(not set)')"
 
       # ----- 9. Build + archive + export the signed App Store IPA ----------
       # Must use --workspace (CocoaPods produces it), NOT --project. Paths are
@@ -847,7 +855,10 @@ workflows:
 
       # ----- 12. Upload to TestFlight (HELD behind PUBLISH_TO_TESTFLIGHT) ---
       # Uses Codemagic's own `app-store-connect publish` CLI (NOT EAS submit).
-      # --testflight  = upload + submit to TestFlight BETA review ONLY.
+      # --testflight  = upload + add to TestFlight. Because the IPA is exported
+      # with testFlightInternalTestingOnly=true (see use-profiles step), this
+      # distributes to INTERNAL testing only and does NOT trigger external beta
+      # review (so no Beta App Review Information / Feedback Email is required).
       # (We deliberately omit --app-store, so it NEVER submits for App Store
       # review.) Auth reads APP_STORE_CONNECT_ISSUER_ID / _KEY_IDENTIFIER /
       # _PRIVATE_KEY from the app_store_credentials group. These MUST be the
