@@ -34,6 +34,22 @@ const videoProviderSchema = z.enum(["google_meet", "teams", "zoom", "none"]);
 // NULL values — only NEW writes are constrained.
 export const deliveryModeSchema = z.enum(["in_person", "virtual", "phone", "custom"]);
 
+// Builds the per-booking delivery columns persisted by the public + admin
+// create endpoints (migration 0076). Pure + null-safe so the persistence
+// mapping is unit-testable without a DB. `clientPhone` falls back to
+// `fallbackPhone` (e.g. the selected customer's phone) when not provided —
+// undefined/null collapse to NULL so existing callers keep writing nothing.
+export function bookingDeliveryFields(input: {
+  deliveryMode?: z.infer<typeof deliveryModeSchema> | null;
+  clientPhone?: string | null;
+  fallbackPhone?: string | null;
+}): { deliveryMode: string | null; clientPhone: string | null } {
+  return {
+    deliveryMode: input.deliveryMode ?? null,
+    clientPhone: input.clientPhone ?? input.fallbackPhone ?? null,
+  };
+}
+
 export const serviceSchema = z.object({
   name: z.string().min(1).max(120),
   slug: z.string().regex(/^[a-z0-9-]+$/, "lowercase letters, numbers, hyphens").min(1).max(80).optional(),
@@ -123,10 +139,12 @@ export const createAppointmentSchema = z
 
     serviceId: z.string().uuid(),
     staffUserId: z.string().uuid(),     // admin/manager pick a real staff
-    // Per-booking delivery mode (migration 0076). Optional — admin appointments
-    // are "unspecified" when omitted. When "phone", the booking phone comes from
-    // the selected / quick-created customer (customer.phone).
+    // Per-booking delivery mode + phone (migration 0076). Optional — admin
+    // appointments are "unspecified" when omitted. When clientPhone is omitted
+    // it falls back to the selected / quick-created customer's phone at persist
+    // time (see bookingDeliveryFields).
     deliveryMode: deliveryModeSchema.optional(),
+    clientPhone: z.string().min(3).max(40).optional(),
     // Operator-entered booking time. Preferred: `startLocal`, a NAIVE
     // wall-clock ("YYYY-MM-DDTHH:mm[:ss]") that the route interprets in the
     // BUSINESS timezone server-side — so "3 PM" means 3 PM at the business,

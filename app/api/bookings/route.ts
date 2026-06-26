@@ -8,7 +8,7 @@ import { validateResponses, type IntakeField } from "@/lib/intake";
 import { errorResponse, getSession, HttpError, isInternalOperatorBooking, isManagerial } from "@/lib/auth";
 import { loadTenantFeatures } from "@/lib/features";
 import { assertResourcesShareTenant } from "@/lib/tenant";
-import { createBookingSchema } from "@/lib/validation";
+import { createBookingSchema, bookingDeliveryFields } from "@/lib/validation";
 import { getAvailableSlots } from "@/lib/availability";
 import { onBookingCreated, revalidateBeforeBooking } from "@/lib/calendar/sync";
 import { triggerAutomation } from "@/lib/communications/engine";
@@ -644,6 +644,13 @@ export async function POST(req: NextRequest) {
           startAt,
           endAt,
           notes: body.notes,
+          // Phone-appointment support (migration 0076). Both NULL unless the
+          // caller opted in — backward compatible. The schema already required
+          // clientPhone when deliveryMode === "phone".
+          ...bookingDeliveryFields({
+            deliveryMode: body.deliveryMode,
+            clientPhone: body.clientPhone,
+          }),
           status: "confirmed",
           intakeResponses: normalisedResponses,
           assignmentMode: body.staffUserId === "auto" ? "auto" : "direct",

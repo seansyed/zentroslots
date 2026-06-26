@@ -45,6 +45,9 @@ export async function GET(
         status: bookings.status,
         clientName: bookings.clientName,
         clientEmail: bookings.clientEmail,
+        // Phone-appointment support (migration 0076).
+        deliveryMode: bookings.deliveryMode,
+        bookingClientPhone: bookings.clientPhone,
         notes: bookings.notes,
         internalNotes: bookings.internalNotes,
         meetLink: bookings.meetLink,
@@ -90,7 +93,10 @@ export async function GET(
       status: booking.status,
       clientName: booking.clientName,
       clientEmail: booking.clientEmail,
-      clientPhone: booking.customerPhone ?? null,
+      // Prefer the booking's own phone (phone appointments, migration 0076);
+      // fall back to the linked customer's phone for older/in-person bookings.
+      clientPhone: booking.bookingClientPhone ?? booking.customerPhone ?? null,
+      deliveryMode: booking.deliveryMode ?? null,
       customerId: booking.customerId ?? null,
       notes: booking.notes ?? null,
       // Internal notes are visible to admins/managers only; staff see null.

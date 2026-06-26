@@ -49,7 +49,7 @@ import { triggerAutomation } from "@/lib/communications/engine";
 import { enqueueBookingPush } from "@/lib/push/enqueue";
 import { loadTenantFeatures } from "@/lib/features";
 import { assertCanCreateBooking } from "@/lib/quotas";
-import { createAppointmentSchema } from "@/lib/validation";
+import { createAppointmentSchema, bookingDeliveryFields } from "@/lib/validation";
 
 export const dynamic = "force-dynamic";
 
@@ -232,6 +232,14 @@ export async function POST(req: NextRequest) {
           endAt,
           notes: body.notes ?? null,
           internalNotes: body.internalNotes ?? null,
+          // Phone-appointment support (migration 0076). Both NULL unless the
+          // operator opted in; clientPhone falls back to the quick-created
+          // customer's phone when not passed explicitly. Backward compatible.
+          ...bookingDeliveryFields({
+            deliveryMode: body.deliveryMode,
+            clientPhone: body.clientPhone,
+            fallbackPhone: body.customer?.phone,
+          }),
           status: "confirmed",
           // Operational provenance — Phase 17H surfaces this so the
           // dashboard can show "Created by admin" in the future.
