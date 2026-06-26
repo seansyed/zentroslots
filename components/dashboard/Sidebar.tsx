@@ -34,6 +34,7 @@ import {
   Megaphone,
   Settings2,
   GitBranch,
+  Phone,
 } from "lucide-react";
 
 import { Avatar, Badge } from "@/components/ui/primitives";
@@ -201,6 +202,7 @@ function buildNav(
           // tenant's own Stripe/PayPal credentials for charging
           // their customers directly.
           { label: "Payments",       href: "/dashboard/settings/payments",       icon: CreditCard },
+          { label: "Business Line",  href: "/dashboard/settings/business-line",   icon: Phone },
           { label: "Branding",       href: "/dashboard/settings/branding",       icon: Palette },
           { label: "Integrations",   href: "/dashboard/settings/integrations",   icon: Plug },
           { label: "Custom domain",  href: "/dashboard/settings/domain",         icon: Plug },
