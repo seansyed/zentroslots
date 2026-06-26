@@ -52,6 +52,7 @@ import { StalenessHint } from "@/components/ui/StalenessHint";
 import { useAppointment } from "@/hooks/useAppointments";
 import { apptDay, apptTimeRange } from "@/lib/appointmentTime";
 import { queryKeys } from "@/lib/query";
+import { appointmentDeliveryDisplay } from "@/lib/deliveryDisplay";
 import { colors, layout, radius, shadows, spacing, typography } from "@/theme";
 
 function statusTone(status: BookingStatus): PillTone {
@@ -384,6 +385,9 @@ function DetailBody({
   onJoin: () => void;
 }) {
   const duration = durationMinutes(appt.startAt, appt.endAt);
+  // Phone-appointment work — drives the "Phone Appointment" / "Custom" badge.
+  // null/virtual/in_person → badgeLabel null → nothing new rendered.
+  const delivery = appointmentDeliveryDisplay(appt.deliveryMode, appt.clientPhone);
 
   return (
     <View style={{ gap: spacing.lg }}>
@@ -418,6 +422,17 @@ function DetailBody({
             {duration}m
           </AppText>
         </View>
+        {/* Phone-appointment work — clear delivery-mode badge. Only renders for
+            phone/custom; in-person/virtual/legacy show nothing new. The client
+            phone + Call button live in the customer card below (already gated
+            on appt.clientPhone, so they hide when there's no number). */}
+        {delivery.badgeLabel ? (
+          <View style={{ marginTop: spacing.md, flexDirection: "row" }}>
+            <Pill tone={appt.deliveryMode === "phone" ? "emerald" : "neutral"}>
+              {delivery.badgeLabel}
+            </Pill>
+          </View>
+        ) : null}
       </Card>
 
       {/* ── Customer card ──────────────────────────────────────── */}

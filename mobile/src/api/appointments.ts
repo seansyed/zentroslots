@@ -41,6 +41,9 @@ export type Appointment = {
   endAt: string;
   status: BookingStatus;
   meetingProvider?: "google_meet" | "microsoft_teams" | "zoom" | "in_person" | "phone" | null;
+  /** Per-booking delivery mode from GET /api/bookings/[id] (phone-appointment
+   *  work). Null on the list shape + legacy bookings → no new UI. */
+  deliveryMode?: "in_person" | "virtual" | "phone" | "custom" | null;
   meetLink?: string | null;
   location?: string | null;
   amountCents?: number | null;
@@ -113,6 +116,7 @@ function normalize(wire: WireBooking): Appointment {
     endAt: wire.endAt,
     status: wire.status,
     meetingProvider: null,
+    deliveryMode: null,
     meetLink: wire.meetLink ?? null,
     location: null,
     amountCents: null,
@@ -176,6 +180,7 @@ export const appointmentsApi = {
       internalNotes?: string | null;
       clientPhone?: string | null;
       meetingProvider?: Appointment["meetingProvider"];
+      deliveryMode?: Appointment["deliveryMode"];
       location?: string | null;
       amountCents?: number | null;
       service?: { id: string | null; name: string; description?: string | null };
@@ -190,6 +195,7 @@ export const appointmentsApi = {
       staffName: w.staff?.name ?? "Staff",
       clientPhone: w.clientPhone ?? null,
       meetingProvider: w.meetingProvider ?? null,
+      deliveryMode: w.deliveryMode ?? null,
       location: w.location ?? null,
       amountCents: w.amountCents ?? null,
       notes: w.notes ?? null,
