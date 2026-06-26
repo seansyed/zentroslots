@@ -398,6 +398,12 @@ export default async function PublicServicePage(props: {
           // resolution above for the tenant-isolation guard.
           defaultClientName={signedInCustomer?.name}
           defaultClientEmail={signedInCustomer?.email}
+          // Phone-appointment work — per-service delivery modes drive the
+          // optional "How would you like to meet?" selector in the confirm step.
+          // Legacy in_person/virtual-only services render unchanged.
+          deliveryModes={
+            service.deliveryModes as Array<"in_person" | "virtual" | "phone" | "custom"> | null
+          }
         />
 
         {showPoweredBy && (

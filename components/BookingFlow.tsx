@@ -24,6 +24,12 @@ import {
 } from "@/components/booking/IntakeStep";
 import { Avatar } from "@/components/ui/Avatar";
 import { trackEvent } from "@/lib/analytics/ga4/client";
+import {
+  buildBookingDeliveryPayload,
+  DELIVERY_MODE_LABEL,
+  resolveDeliveryModeUI,
+  type DeliveryMode,
+} from "@/lib/booking-delivery-modes";
 
 type Props = {
   serviceId: string;
@@ -58,6 +64,11 @@ type Props = {
    *  matches session.tenantId === tenant.id before passing values in. */
   defaultClientName?: string;
   defaultClientEmail?: string;
+  /** Phone-appointment work — the service's per-service delivery modes. When the
+   *  service offers a new client-facing mode (phone/custom) AND more than one
+   *  mode, the confirm step shows a "How would you like to meet?" selector.
+   *  Legacy in_person/virtual-only services render exactly as before. */
+  deliveryModes?: Array<DeliveryMode> | null;
 };
 
 type Step = "pick-time" | "confirm" | "done";
@@ -77,8 +88,16 @@ export default function BookingFlow({
   googleConnected = false,
   defaultClientName,
   defaultClientEmail,
+  deliveryModes,
 }: Props) {
   const accent = accentColor || DEFAULT_ACCENT;
+
+  // ── Delivery-mode selection (phone-appointment work) ───────────────
+  // Pure resolver (lib/booking-delivery-modes): the selector is only surfaced
+  // once the service opts into a NEW client-facing mode (phone/custom) AND
+  // offers more than one — so legacy in_person/virtual-only services behave
+  // EXACTLY as before (no selector, no deliveryMode in the booking payload).
+  const { offeredModes, showModeSelector, defaultMode } = resolveDeliveryModeUI(deliveryModes);
 
   const tz = useMemo(
     () => Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
@@ -118,6 +137,11 @@ export default function BookingFlow({
   // customer can override (e.g. booking on behalf of a family member).
   const [clientName, setClientName] = useState(defaultClientName ?? "");
   const [clientEmail, setClientEmail] = useState(defaultClientEmail ?? "");
+  // Phone-appointment work — selected delivery mode + phone. deliveryMode is
+  // null for legacy services (omitted from the payload); otherwise defaults to
+  // the first offered mode (priority order) via resolveDeliveryModeUI.
+  const [deliveryMode, setDeliveryMode] = useState<DeliveryMode | null>(defaultMode);
+  const [clientPhone, setClientPhone] = useState("");
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -339,6 +363,13 @@ export default function BookingFlow({
       }
     }
 
+    // Phone appointments require a number to call (mirrors the server gate in
+    // createBookingSchema). Only enforced when the client picked "phone".
+    if (deliveryMode === "phone" && !clientPhone.trim()) {
+      setError("Please enter a phone number for your phone appointment.");
+      return;
+    }
+
     setSubmitting(true);
     setError(null);
     setSlotConflict(false);
@@ -355,6 +386,9 @@ export default function BookingFlow({
           startAt: selectedSlot,
           clientName,
           clientEmail,
+          // Phone-appointment work — empty for legacy services (byte-identical
+          // payload); includes clientPhone only for a phone booking.
+          ...buildBookingDeliveryPayload(deliveryMode, clientPhone),
           notes: notes || undefined,
           // Wave I — only send when the intake step was rendered (a
           // form is linked + customer filled it out). Empty object
@@ -892,6 +926,61 @@ export default function BookingFlow({
               </div>
             </div>
 
+            {(showModeSelector || deliveryMode === "phone") && (
+              <div className="mt-6">
+                {showModeSelector && (
+                  <>
+                    <h4 className="text-[13px] font-semibold tracking-tight text-slate-900">
+                      How would you like to meet?
+                    </h4>
+                    <div className="mt-3 grid grid-cols-2 gap-2">
+                      {offeredModes.map((m) => {
+                        const on = deliveryMode === m;
+                        return (
+                          <button
+                            type="button"
+                            key={m}
+                            onClick={() => setDeliveryMode(m)}
+                            aria-pressed={on}
+                            className={
+                              "rounded-xl border px-3 py-2.5 text-left text-[13px] font-medium transition-all duration-[180ms] " +
+                              (on
+                                ? "border-transparent text-white shadow-sm"
+                                : "border-slate-300 bg-white text-slate-800 hover:border-slate-400")
+                            }
+                            style={{
+                              transitionTimingFunction: MOTION_CURVE,
+                              ...(on ? { backgroundColor: accent } : {}),
+                            }}
+                          >
+                            {DELIVERY_MODE_LABEL[m]}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
+                {deliveryMode === "phone" && (
+                  <div className={showModeSelector ? "mt-3" : ""}>
+                    <FloatingInput
+                      id="bk-phone"
+                      label="Phone number"
+                      type="tel"
+                      value={clientPhone}
+                      onChange={setClientPhone}
+                      required
+                      inputMode="tel"
+                      autoComplete="tel"
+                      accent={accent}
+                    />
+                    <p className="mt-1.5 text-[12px] text-slate-600">
+                      We&rsquo;ll call you at this number for your appointment.
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+
             <h4 className="mt-6 text-[13px] font-semibold tracking-tight text-slate-900">Your details</h4>
 
             <div className="mt-3 space-y-3">
@@ -1001,7 +1090,12 @@ export default function BookingFlow({
 
             <button
               onClick={submit}
-              disabled={submitting || !clientName || !clientEmail}
+              disabled={
+                submitting ||
+                !clientName ||
+                !clientEmail ||
+                (deliveryMode === "phone" && !clientPhone.trim())
+              }
               className="mt-5 inline-flex w-full items-center justify-center gap-1.5 rounded-xl px-4 py-3 text-[14px] font-semibold text-white shadow-[0_8px_22px_rgba(15,23,42,0.18)] transition-all duration-[180ms] hover:-translate-y-0.5 hover:shadow-[0_12px_28px_rgba(15,23,42,0.22)] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0"
               style={{ backgroundColor: accent, transitionTimingFunction: MOTION_CURVE }}
             >
