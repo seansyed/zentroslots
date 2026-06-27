@@ -245,6 +245,67 @@ export function parseTelnyxCallEvent(body: unknown): TelnyxCallEvent {
   };
 }
 
+/**
+ * Format-agnostic extractor from a RAW webhook body. A Telnyx **TeXML**
+ * application delivers webhooks as TwiML-compatible **form-encoded** params
+ * (`From`/`To`/`CallSid`/`CallStatus`/`CallDuration`, and `DialCallStatus`/
+ * `DialCallDuration` on the <Dial> action callback). This handles that form
+ * format AND falls back to the Call-Control JSON shape (kept for back-compat /
+ * tests). NEVER throws. Signature verification is done separately on the raw
+ * body (same Ed25519 scheme for both formats), so this only normalizes fields.
+ */
+export function extractTelnyxCallEvent(rawBody: string): TelnyxCallEvent {
+  const trimmed = (rawBody ?? "").trim();
+  // Call-Control JSON shape (back-compat): { data: { event_type, payload } }
+  if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+    try {
+      return parseTelnyxCallEvent(JSON.parse(trimmed));
+    } catch {
+      /* fall through to form parsing */
+    }
+  }
+  return parseTexmlForm(trimmed);
+}
+
+/** Parse a form-encoded TeXML (TwiML-compatible) request body. Looks up params
+ *  case-insensitively across known aliases so minor naming differences don't
+ *  break extraction. */
+function parseTexmlForm(rawBody: string): TelnyxCallEvent {
+  const map = new Map<string, string>();
+  try {
+    for (const [k, v] of new URLSearchParams(rawBody).entries()) {
+      if (v !== "") map.set(k.toLowerCase(), v);
+    }
+  } catch {
+    /* malformed → empty map → all-null event */
+  }
+  const get = (...keys: string[]): string | null => {
+    for (const k of keys) {
+      const v = map.get(k.toLowerCase());
+      if (v != null && v !== "") return v;
+    }
+    return null;
+  };
+  // On the <Dial> action callback the FORWARDED leg's outcome is in
+  // DialCallStatus/DialCallDuration; prefer those, else the parent call's.
+  const callSid = get("CallSid", "CallSidLegId", "call_sid");
+  const status = get("DialCallStatus", "CallStatus", "call_status");
+  const duration = get("DialCallDuration", "CallDuration", "RecordingDuration");
+  return {
+    // TeXML has no native event id; synthesize a stable per-(call,status) key so
+    // retries of the same status dedupe while distinct statuses are recorded.
+    eventId: callSid && status ? `${callSid}:${status}` : callSid,
+    eventType: status,
+    callSessionId: callSid,
+    callControlId: get("CallControlId", "CallSidLegId"),
+    callLegId: get("CallSidLegId"),
+    from: get("From", "from", "Caller"),
+    to: get("To", "to", "Called"),
+    hangupCause: get("HangupCause", "SipResponseCode"),
+    durationSeconds: num(duration),
+  };
+}
+
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null;
 }

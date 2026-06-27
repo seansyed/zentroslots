@@ -117,6 +117,7 @@ export async function POST(req: NextRequest) {
         controlId: event.callControlId,
         legId: event.callLegId,
         eventId: event.eventId,
+        eventType: event.eventType,
         from: caller,
         to: called,
         forwardedTo: decision.action === "dial" ? decision.forwardingNumber : null,
@@ -144,6 +145,7 @@ async function persistInboundCall(args: {
   controlId: string | null;
   legId: string | null;
   eventId: string | null;
+  eventType: string | null;
   from: string | null;
   to: string | null;
   forwardedTo: string | null;
@@ -197,7 +199,7 @@ async function persistInboundCall(args: {
       .values({
         tenantId: args.tenantId,
         telnyxEventId: args.eventId,
-        eventType: "call.initiated",
+        eventType: args.eventType ?? "inbound",
         signatureVerified: true,
       } as typeof phoneCallEvents.$inferInsert)
       .onConflictDoNothing({ target: phoneCallEvents.telnyxEventId });

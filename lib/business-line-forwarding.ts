@@ -21,7 +21,7 @@ import {
 } from "./business-line";
 import {
   verifyTelnyxSignature,
-  parseTelnyxCallEvent,
+  extractTelnyxCallEvent,
   texmlDial,
   texmlReject,
   texmlNoForwarding,
@@ -143,13 +143,9 @@ export function verifyAndParseInbound(args: {
     nowSeconds: args.nowSeconds,
   });
   if (!sig.ok) return { ok: false, reason: "bad_signature" };
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(args.rawBody);
-  } catch {
-    return { ok: false, reason: "bad_signature" };
-  }
-  return { ok: true, event: parseTelnyxCallEvent(parsed) };
+  // Telnyx TeXML delivers form-encoded TwiML params; extractTelnyxCallEvent
+  // handles that (and the legacy JSON shape) without throwing.
+  return { ok: true, event: extractTelnyxCallEvent(args.rawBody) };
 }
 
 // ─── Monotonic call-status transitions ──────────────────────────────────────

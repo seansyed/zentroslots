@@ -165,18 +165,21 @@ export function normalizeCallStatus(raw: string | null | undefined): CallStatus 
   switch (s) {
     case "ringing":
     case "initiated":
+    case "queued": // TwiML/TeXML
       return "ringing";
     case "answered":
     case "bridged":
-    case "in-progress":
+    case "in-progress": // TwiML/TeXML
       return "answered";
     case "completed":
     case "hangup":
       return "completed";
     case "missed":
-    case "no-answer":
+    case "no-answer": // TwiML/TeXML
     case "noanswer":
     case "timeout":
+    case "canceled": // TwiML/TeXML (caller abandoned before answer)
+    case "cancelled":
       return "missed";
     case "failed":
     case "error":
