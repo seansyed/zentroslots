@@ -1,12 +1,15 @@
 /**
  * Dashboard → Phone (server entry). The first real Business Phone app surface.
  *
- * Visible ONLY to subscribed Business Phone tenants: this server guard resolves
- * the signed-in operator + tenant and redirects away when the workspace is not
- * entitled (Pro+ plan AND active add-on) — so an unentitled tenant can never
- * reach the page even by URL. The client APIs additionally return 402 on direct
- * hits. Restricted to operator roles (admin/manager) that can place calls + read
- * the call log; the sidebar item is gated to match.
+ * Visible ONLY to subscribed Business Phone tenants AND users with phone access:
+ * this server guard resolves the signed-in user + tenant and redirects away
+ * unless `hasPhoneAccess` (entitled tenant + operator role, or a staff member an
+ * admin has granted Business Phone access). So an unentitled tenant — or a staff
+ * member without access — can never reach the page even by URL. The client APIs
+ * additionally return 402/403 on direct hits.
+ *
+ * The broader call log is operator-only (admin/manager); staff see their own
+ * dialer + number setup but not the workspace call log.
  *
  * No Telnyx contact here — all data + actions go through the entitlement-gated
  * /api/tenant/phone/* routes client-side.
@@ -18,7 +21,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db/client";
 import { tenants, users } from "@/db/schema";
 import { getSession } from "@/lib/auth";
-import { isBusinessPhoneEntitled } from "@/lib/business-phone-access";
+import { getUserBusinessPhoneVisibility } from "@/lib/business-phone-access";
 import Shell from "@/components/dashboard/Shell";
 import PhoneClient from "@/components/dashboard/PhoneClient";
 
@@ -30,15 +33,16 @@ export default async function PhonePage() {
 
   const user = await db.query.users.findFirst({ where: eq(users.id, session.sub) });
   if (!user) redirect("/dashboard/login");
-  // Operator roles only (they can place calls + read the log).
-  if (user.role !== "admin" && user.role !== "manager") redirect("/dashboard");
 
   const tenant = await db.query.tenants.findFirst({ where: eq(tenants.id, user.tenantId) });
   if (!tenant) redirect("/dashboard");
 
-  // Hard gate: hidden completely for unentitled tenants (no exception).
-  const entitled = await isBusinessPhoneEntitled(tenant.id, tenant.currentPlan);
-  if (!entitled) redirect("/dashboard");
+  // Hard gate: hidden completely for unentitled tenants / unpermitted staff.
+  const vis = await getUserBusinessPhoneVisibility(tenant.id, user.id, user.role, tenant.currentPlan);
+  if (!vis.hasPhoneAccess) redirect("/dashboard");
+
+  // The workspace call log is operator-only; staff see their own setup + dialer.
+  const canViewCallLog = user.role === "admin" || user.role === "manager";
 
   return (
     <Shell
@@ -52,7 +56,7 @@ export default async function PhonePage() {
       title="Phone"
       crumbs={[{ label: "Dashboard", href: "/dashboard" }, { label: "Phone" }]}
     >
-      <PhoneClient />
+      <PhoneClient canViewCallLog={canViewCallLog} />
     </Shell>
   );
 }

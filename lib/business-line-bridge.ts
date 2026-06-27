@@ -230,9 +230,13 @@ export function bridgeRejectToHttp(reason: OutboundBridgeRejectReason): {
     case "staff_loop":
       return { status: 400, message: "That number is your own forwarding line." };
     case "staff_disabled":
-      return { status: 403, message: "Your account isn't allowed to place calls." };
+      return { status: 403, message: "You do not have permission to place Business Phone calls." };
     case "setup_required":
-      return { status: 409, message: "Set up your calling number before placing calls." };
+      return {
+        status: 409,
+        message:
+          "Set your calling phone number first. ZentroMeet will call you there, then connect the customer.",
+      };
     case "invalid_staff_number":
       return { status: 409, message: "Your calling number isn't a valid US or Canada number." };
     case "no_business_number":

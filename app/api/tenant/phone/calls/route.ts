@@ -36,7 +36,8 @@ export const dynamic = "force-dynamic";
  * caller ID. The staff's personal number is NEVER presented to the customer.
  *
  * Fully fail-closed + entitlement-gated:
- *   - admin/manager only;
+ *   - admin/manager/staff (staff are gated by their own can_place_calls in the
+ *     decision below — an unpermitted staff member is rejected staff_disabled);
  *   - requires the business_line capability (Pro+) AND the active add-on (402);
  *   - resolves the staff leg (staff → tenant fallback → setup_required) and
  *     refuses a disabled staff member;
@@ -60,7 +61,7 @@ const bodySchema = z
 
 export async function POST(req: NextRequest) {
   try {
-    const user = await requireRole(["admin", "manager"]);
+    const user = await requireRole(["admin", "manager", "staff"]);
     const tenantId = user.tenantId;
     const body = bodySchema.parse(await req.json());
     const callPurpose = normalizeCallPurpose(body.callPurpose) ?? "new_call";
@@ -133,11 +134,11 @@ export async function POST(req: NextRequest) {
     // (This is the hard guarantee that no real call happens with the flag OFF.)
     const config = readBusinessLineConfig();
     if (!canOriginate(config)) {
-      throw new HttpError(503, "Business Phone calling isn't enabled for your workspace yet.");
+      throw new HttpError(503, "Business Phone calling is temporarily unavailable.");
     }
     const appBaseUrl = (process.env.APP_BASE_URL ?? "").replace(/\/+$/, "");
     if (!appBaseUrl) {
-      throw new HttpError(503, "Business Phone isn't fully configured.");
+      throw new HttpError(503, "Business Phone calling is temporarily unavailable.");
     }
 
     // The customer + caller ID travel in the bridge URL, integrity-bound by an

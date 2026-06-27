@@ -16,23 +16,50 @@ import {
   buildCallBackPayload,
   phoneCallErrorMessage,
   OUTBOUND_CALL_SUCCESS_MESSAGE,
+  isSupportedKeypadKey,
+  dialPreview,
+  formatNanpForDisplay,
 } from "../lib/business-phone-ui";
 
 // ── sidebar / page visibility ──────────────────────────────────────
-test("Phone nav hidden unless entitled AND an operator role", () => {
+test("Phone nav: operators when entitled; staff only with access; hidden otherwise", () => {
   assert.equal(shouldShowPhoneNav({ entitled: true, role: "admin" }), true);
   assert.equal(shouldShowPhoneNav({ entitled: true, role: "manager" }), true);
-  assert.equal(shouldShowPhoneNav({ entitled: true, role: "staff" }), false);
-  assert.equal(shouldShowPhoneNav({ entitled: true, role: "client" }), false);
-  assert.equal(shouldShowPhoneNav({ entitled: false, role: "admin" }), false); // not subscribed
+  // staff need granted Business Phone access
+  assert.equal(shouldShowPhoneNav({ entitled: true, role: "staff", hasPhoneAccess: true }), true);
+  assert.equal(shouldShowPhoneNav({ entitled: true, role: "staff", hasPhoneAccess: false }), false);
+  assert.equal(shouldShowPhoneNav({ entitled: true, role: "staff" }), false); // missing flag → hidden
+  assert.equal(shouldShowPhoneNav({ entitled: true, role: "client", hasPhoneAccess: true }), false);
+  // not subscribed → hidden for everyone
+  assert.equal(shouldShowPhoneNav({ entitled: false, role: "admin" }), false);
+  assert.equal(shouldShowPhoneNav({ entitled: false, role: "staff", hasPhoneAccess: true }), false);
 });
 
 // ── customer call button ───────────────────────────────────────────
-test("customer call button shown only when entitled AND a phone exists", () => {
-  assert.equal(canShowCustomerCallButton({ entitled: true, phone: "+14155550182" }), true);
-  assert.equal(canShowCustomerCallButton({ entitled: true, phone: null }), false);
-  assert.equal(canShowCustomerCallButton({ entitled: true, phone: "   " }), false);
-  assert.equal(canShowCustomerCallButton({ entitled: false, phone: "+14155550182" }), false);
+test("customer call button: entitled AND canPlaceCalls AND a phone", () => {
+  assert.equal(canShowCustomerCallButton({ entitled: true, canPlaceCalls: true, phone: "+14155550182" }), true);
+  // staff without permission to place calls → hidden
+  assert.equal(canShowCustomerCallButton({ entitled: true, canPlaceCalls: false, phone: "+14155550182" }), false);
+  assert.equal(canShowCustomerCallButton({ entitled: true, canPlaceCalls: true, phone: null }), false);
+  assert.equal(canShowCustomerCallButton({ entitled: true, canPlaceCalls: true, phone: "   " }), false);
+  assert.equal(canShowCustomerCallButton({ entitled: false, canPlaceCalls: true, phone: "+14155550182" }), false);
+});
+
+// ── dial pad ───────────────────────────────────────────────────────
+test("keypad does not insert unsupported * or # (US/CA only)", () => {
+  assert.equal(isSupportedKeypadKey("1"), true);
+  assert.equal(isSupportedKeypadKey("0"), true);
+  assert.equal(isSupportedKeypadKey("*"), false);
+  assert.equal(isSupportedKeypadKey("#"), false);
+});
+
+test("dial preview formats a valid NANP number, else null", () => {
+  assert.equal(dialPreview("4155550182"), "+1 (415) 555-0182");
+  assert.equal(dialPreview("+14155550182"), "+1 (415) 555-0182");
+  assert.equal(dialPreview("+1555"), null);
+  assert.equal(dialPreview(""), null);
+  assert.equal(dialPreview("911"), null);
+  assert.equal(formatNanpForDisplay("+14155550182"), "+1 (415) 555-0182");
 });
 
 // ── New Call form validation ───────────────────────────────────────
@@ -76,9 +103,9 @@ test("phoneCallErrorMessage prefers the server message, else falls back per stat
   );
   // status fallbacks when no server message
   assert.match(phoneCallErrorMessage(402, null), /add-on isn't active/i); // no_entitlement
-  assert.match(phoneCallErrorMessage(403, ""), /allowed to place calls/i); // staff_disabled
+  assert.match(phoneCallErrorMessage(403, ""), /permission to place Business Phone calls/i); // staff_disabled
   assert.match(phoneCallErrorMessage(429), /Too many calls/i); // concurrency
-  assert.match(phoneCallErrorMessage(503), /isn't available/i); // service_unavailable / flag off
+  assert.match(phoneCallErrorMessage(503), /temporarily unavailable/i); // service_unavailable / flag off
   assert.match(phoneCallErrorMessage(409), /Check the number/i); // over_cap / setup_required
   assert.match(phoneCallErrorMessage(400), /Check the number/i); // invalid / emergency
   assert.match(phoneCallErrorMessage(500), /try again/i); // generic

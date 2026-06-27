@@ -54,7 +54,7 @@ import { FadeIn } from "@/components/ui/Motion";
 import ActivityTimeline from "@/components/dashboard/ActivityTimeline";
 import { STATUS_BADGE, STATUS_LABEL, type Status } from "@/lib/status-colors";
 import { cn } from "@/lib/cn";
-import { useBusinessPhoneEntitled } from "@/components/dashboard/useBusinessPhone";
+import { useBusinessPhone } from "@/components/dashboard/useBusinessPhone";
 import {
   canShowCustomerCallButton,
   phoneCallErrorMessage,
@@ -1311,7 +1311,7 @@ function CustomerDrawer({
   const [savingNotes, setSavingNotes] = React.useState(false);
   const [notes, setNotes] = React.useState("");
   // P1.2 — Business Phone "Call via Business Phone" entry point.
-  const { entitled: phoneEntitled } = useBusinessPhoneEntitled();
+  const { entitled: phoneEntitled, canPlaceCalls: phoneCanPlace } = useBusinessPhone();
   const [callingCustomer, setCallingCustomer] = React.useState(false);
 
   async function callCustomer() {
@@ -1431,7 +1431,7 @@ function CustomerDrawer({
                   {data.customer.phone && (
                     <div className="mt-0.5 text-[11px] text-ink-muted">{data.customer.phone}</div>
                   )}
-                  {canShowCustomerCallButton({ entitled: phoneEntitled, phone: data.customer.phone }) && (
+                  {canShowCustomerCallButton({ entitled: phoneEntitled, canPlaceCalls: phoneCanPlace, phone: data.customer.phone }) && (
                     <button
                       type="button"
                       onClick={() => void callCustomer()}

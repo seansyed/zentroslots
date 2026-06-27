@@ -103,9 +103,10 @@ function buildNav(
    *  purpose of the comparison — fail-safe (badge shown). */
   plan?: string,
   /** P1.2 — Business Phone module visibility (server-truth from /api/auth/me).
-   *  When true (and role is an operator), a "Phone" item is shown. Defaults to
-   *  hidden (fail-safe) until the client fetch resolves. */
-  businessPhoneEntitled?: boolean,
+   *  Operators see it when the tenant is entitled; staff see it only with
+   *  granted access (hasPhoneAccess). Defaults to hidden (fail-safe) until the
+   *  client fetch resolves. */
+  businessPhone?: { entitled?: boolean; hasPhoneAccess?: boolean },
 ): Group[] {
   const planAsId = (plan ?? "free") as PlanId;
   // True when the tenant's plan does NOT meet Pro — used to mark
@@ -169,9 +170,13 @@ function buildNav(
     { label: "Dashboard",     href: "/dashboard",                icon: LayoutDashboard },
     { label: "Calendar",      href: "/dashboard/calendar",       icon: Calendar },
     { label: "Appointments",  href: "/dashboard/appointments",   icon: ListChecks },
-    // P1.2 — Business Phone module: shown only when the tenant is subscribed
-    // (entitled) AND the user is an operator (admin/manager). Hidden otherwise.
-    ...(shouldShowPhoneNav({ entitled: businessPhoneEntitled === true, role })
+    // P1.2 — Business Phone module: shown when the tenant is subscribed and the
+    // user may use it (operators always; staff only with granted access).
+    ...(shouldShowPhoneNav({
+      entitled: businessPhone?.entitled === true,
+      role,
+      hasPhoneAccess: businessPhone?.hasPhoneAccess === true,
+    })
       ? [{ label: "Phone", href: "/dashboard/phone", icon: Phone }]
       : []),
     { label: "Tasks",         href: "/dashboard/tasks",          icon: Flag },
@@ -349,8 +354,11 @@ export default function Sidebar({
   const pathname = usePathname();
   // P1.2 — Business Phone visibility comes from /api/auth/me (server truth),
   // fetched in the same effect as the avatar below. Hidden until it resolves.
-  const [phoneEntitled, setPhoneEntitled] = React.useState(false);
-  const groups = buildNav(variant, user.role, user.permissions, tenant?.plan, phoneEntitled);
+  const [phoneVis, setPhoneVis] = React.useState<{ entitled: boolean; hasPhoneAccess: boolean }>({
+    entitled: false,
+    hasPhoneAccess: false,
+  });
+  const groups = buildNav(variant, user.role, user.permissions, tenant?.plan, phoneVis);
 
   // Phase 17I-5 — lazy-load the signed-in user's avatar URL from
   // /api/auth/me. The Shell's SidebarUser prop is server-rendered
@@ -368,10 +376,15 @@ export default function Sidebar({
         if (!res.ok) return;
         const data = (await res.json()) as {
           avatarUrl?: string | null;
-          businessPhone?: { entitled?: boolean };
+          businessPhone?: { entitled?: boolean; hasPhoneAccess?: boolean };
         };
         if (!cancelled && data.avatarUrl) setAvatarUrl(data.avatarUrl);
-        if (!cancelled) setPhoneEntitled(data.businessPhone?.entitled === true);
+        if (!cancelled) {
+          setPhoneVis({
+            entitled: data.businessPhone?.entitled === true,
+            hasPhoneAccess: data.businessPhone?.hasPhoneAccess === true,
+          });
+        }
       } catch {
         /* swallow — initials fallback already in place */
       }

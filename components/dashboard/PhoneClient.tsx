@@ -42,6 +42,8 @@ import {
   buildCallBackPayload,
   phoneCallErrorMessage,
   OUTBOUND_CALL_SUCCESS_MESSAGE,
+  dialPreview,
+  isSupportedKeypadKey,
 } from "@/lib/business-phone-ui";
 
 type MeView = {
@@ -57,7 +59,7 @@ type MeView = {
 const CALL_FILTERS = ["all", "completed", "missed", "answered", "failed", "rejected"] as const;
 const KEYPAD = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "*", "0", "#"] as const;
 
-export default function PhoneClient() {
+export default function PhoneClient({ canViewCallLog = true }: { canViewCallLog?: boolean }) {
   const [me, setMe] = React.useState<MeView | null>(null);
   const [meLoading, setMeLoading] = React.useState(true);
   const [meError, setMeError] = React.useState(false);
@@ -124,12 +126,12 @@ export default function PhoneClient() {
 
   React.useEffect(() => {
     void loadMe();
-    void loadMissed();
-  }, [loadMe, loadMissed]);
+    if (canViewCallLog) void loadMissed();
+  }, [loadMe, loadMissed, canViewCallLog]);
 
   React.useEffect(() => {
-    void fetchCalls(statusFilter, 0, false);
-  }, [statusFilter, fetchCalls]);
+    if (canViewCallLog) void fetchCalls(statusFilter, 0, false);
+  }, [statusFilter, fetchCalls, canViewCallLog]);
 
   // ── actions ──────────────────────────────────────────────────────
   async function placeCall(payload: Record<string, unknown>, opts?: { rowId?: string }) {
@@ -235,6 +237,7 @@ export default function PhoneClient() {
   const usage = me.usage;
   const percentUsed = usage && usage.cap > 0 ? Math.min(100, Math.round((usage.minutesUsed / usage.cap) * 100)) : 0;
   const overCap = Boolean(usage && usage.cap > 0 && usage.minutesUsed >= usage.cap);
+  const preview = dialPreview(dial);
 
   return (
     <div className="mx-auto max-w-5xl space-y-5">
@@ -268,18 +271,39 @@ export default function PhoneClient() {
                   aria-label="Phone number to call"
                 />
 
-                {/* Keypad */}
+                {/* "Will dial" preview — read-only, never mutates the field. */}
+                {preview && (
+                  <p className="mt-1.5 text-center text-xs text-ink-muted">
+                    Will dial <span className="font-medium text-ink">{preview}</span>
+                  </p>
+                )}
+
+                {/* Keypad. ✱ and # are disabled — US/Canada dialing only in MVP. */}
                 <div className="mx-auto mt-4 grid max-w-[260px] grid-cols-3 gap-2">
-                  {KEYPAD.map((k) => (
-                    <button
-                      key={k}
-                      type="button"
-                      onClick={() => setDial((d) => d + k)}
-                      className="flex h-12 items-center justify-center rounded-xl border border-border bg-surface text-lg font-semibold text-ink transition-colors hover:bg-surface-inset active:scale-[0.98]"
-                    >
-                      {k}
-                    </button>
-                  ))}
+                  {KEYPAD.map((k) => {
+                    const supported = isSupportedKeypadKey(k);
+                    return (
+                      <button
+                        key={k}
+                        type="button"
+                        disabled={!supported}
+                        onClick={() => {
+                          if (!supported) return;
+                          setDial((d) => d + k);
+                          if (callResult) setCallResult(null);
+                        }}
+                        title={supported ? undefined : "Not supported for US & Canada dialing"}
+                        className={cn(
+                          "flex h-12 items-center justify-center rounded-xl border border-border bg-surface text-lg font-semibold text-ink transition-colors",
+                          supported
+                            ? "hover:bg-surface-inset active:scale-[0.98]"
+                            : "cursor-not-allowed text-ink-subtle opacity-30",
+                        )}
+                      >
+                        {k}
+                      </button>
+                    );
+                  })}
                 </div>
                 <div className="mx-auto mt-2 flex max-w-[260px] items-center justify-between">
                   <button
@@ -346,8 +370,8 @@ export default function PhoneClient() {
             )}
           </Card>
 
-          {/* Missed calls */}
-          {missed.length > 0 && (
+          {/* Missed calls (operator-only call log) */}
+          {canViewCallLog && missed.length > 0 && (
             <Card>
               <CardHeader title="Missed calls" subtitle="Recent inbound calls you missed." />
               <ul className="mt-3 divide-y divide-border">
@@ -382,7 +406,8 @@ export default function PhoneClient() {
             </Card>
           )}
 
-          {/* Recent calls */}
+          {/* Recent calls (operator-only call log) */}
+          {canViewCallLog && (
           <Card>
             <CardHeader title="Recent calls" subtitle="Inbound and outbound calls on your business line." />
             <div className="mt-3 flex flex-wrap gap-1.5">
@@ -491,6 +516,7 @@ export default function PhoneClient() {
               </>
             )}
           </Card>
+          )}
         </div>
 
         {/* ── Right: identity + usage ── */}

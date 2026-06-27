@@ -19,6 +19,7 @@ import {
 import { getPlan } from "@/lib/plans";
 import { canUseBusinessLine } from "@/lib/billing/capabilities";
 import { readAddonActiveFlag } from "@/lib/business-line-view";
+import { resolveStaffBridge } from "@/lib/business-line-bridge";
 
 export type TenantBusinessPhone = {
   /** Pro+ plan gate. */
@@ -94,4 +95,51 @@ export async function isBusinessPhoneEntitled(tenantId: string, plan: string | n
     columns: { metadata: true },
   });
   return readAddonActiveFlag(settings?.metadata);
+}
+
+export type UserBusinessPhoneVisibility = {
+  /** Tenant entitled (Pro+ plan AND active add-on). */
+  entitled: boolean;
+  /** May this user open the Phone module? Operators always (when entitled);
+   *  staff only with an enabled, can-place identity granted by an admin. */
+  hasPhoneAccess: boolean;
+  /** Can this user place a call RIGHT NOW (entitled + line on + a usable leg-1
+   *  number resolves)? Gates the call buttons. */
+  canPlaceCalls: boolean;
+};
+
+/**
+ * Per-user Business Phone visibility for nav + page gating (P1.2.1). Lean: only
+ * reads beyond the plan check run for plan-eligible tenants (≈ Pro+). Plumbs the
+ * same staff resolution the calls route uses, so the client and server agree.
+ */
+export async function getUserBusinessPhoneVisibility(
+  tenantId: string,
+  userId: string,
+  role: string,
+  plan: string | null | undefined,
+): Promise<UserBusinessPhoneVisibility> {
+  const denied = { entitled: false, hasPhoneAccess: false, canPlaceCalls: false };
+  if (!canUseBusinessLine(getPlan(plan)).allowed) return denied;
+
+  const [settings, staff] = await Promise.all([
+    db.query.tenantPhoneSettings.findFirst({
+      where: eq(tenantPhoneSettings.tenantId, tenantId),
+      columns: { metadata: true, enabled: true, forwardingNumber: true },
+    }),
+    getStaffPhone(tenantId, userId),
+  ]);
+  if (!readAddonActiveFlag(settings?.metadata)) return denied;
+
+  const resolved = resolveStaffBridge({
+    staffRowExists: Boolean(staff),
+    staffEnabled: staff?.enabled ?? false,
+    staffCanPlaceCalls: staff?.canPlaceCalls ?? false,
+    staffBridgeNumber: staff?.bridgePhoneNumber ?? null,
+    tenantFallbackNumber: settings?.forwardingNumber ?? null,
+  });
+  const canPlaceCalls = (settings?.enabled ?? false) && resolved.kind === "ok";
+  const isOperator = role === "admin" || role === "manager";
+  const staffPermitted = Boolean(staff?.enabled && staff?.canPlaceCalls);
+  return { entitled: true, hasPhoneAccess: isOperator || staffPermitted, canPlaceCalls };
 }

@@ -232,6 +232,14 @@ test("disabled staff cannot place calls → reject staff_disabled (HTTP 403)", (
   assert.equal(bridgeRejectToHttp("staff_disabled").status, 403);
 });
 
+test("reject copy: setup_required + staff_disabled (P1.2.1 polish)", () => {
+  const setup = bridgeRejectToHttp("setup_required");
+  assert.equal(setup.status, 409);
+  assert.match(setup.message, /Set your calling phone number first\. ZentroMeet will call you there/);
+  const disabled = bridgeRejectToHttp("staff_disabled");
+  assert.match(disabled.message, /do not have permission to place Business Phone calls/i);
+});
+
 test("staff with can_place_calls=false → reject staff_disabled", () => {
   assert.deepEqual(decideOutboundBridge(ctx({ staffCanPlaceCalls: false })), {
     action: "reject",
