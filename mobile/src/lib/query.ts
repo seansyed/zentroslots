@@ -72,6 +72,11 @@ export const queryClient = new QueryClient({
 /** Canonical query-key prefixes. Keep top-level keys discoverable. */
 export const queryKeys = {
   me: ["me"] as const,
+  /** Business Phone per-user capability (P1.3). */
+  phoneMe: ["phoneMe"] as const,
+  /** Business Phone recent/missed calls (operators). */
+  phoneCalls: (status?: string) =>
+    status ? (["phoneCalls", status] as const) : (["phoneCalls"] as const),
   appointments: (params?: Record<string, unknown>) =>
     params ? (["appointments", params] as const) : (["appointments"] as const),
   appointment: (id: string) => ["appointment", id] as const,

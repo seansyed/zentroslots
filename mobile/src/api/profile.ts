@@ -56,6 +56,13 @@ export type Profile = {
   microsoftConnected: boolean;
   /** True when EITHER Google or Microsoft is connected. */
   calendarConnected: boolean;
+  /** Business Phone visibility (server-truth). Drives the Phone tab + calling.
+   *  All default false (fail-closed) on older backends that don't return it. */
+  businessPhone: {
+    entitled: boolean;
+    hasPhoneAccess: boolean;
+    canPlaceCalls: boolean;
+  };
 };
 
 type AuthMeResponse = {
@@ -68,6 +75,11 @@ type AuthMeResponse = {
   googleConnected?: boolean;
   microsoftConnected?: boolean;
   calendarConnected?: boolean;
+  businessPhone?: {
+    entitled?: boolean;
+    hasPhoneAccess?: boolean;
+    canPlaceCalls?: boolean;
+  } | null;
   tenant?: {
     id: string;
     name: string;
@@ -101,6 +113,11 @@ function normalize(raw: AuthMeResponse): Profile {
     calendarConnected: Boolean(
       raw.calendarConnected ?? (raw.googleConnected || raw.microsoftConnected),
     ),
+    businessPhone: {
+      entitled: Boolean(raw.businessPhone?.entitled),
+      hasPhoneAccess: Boolean(raw.businessPhone?.hasPhoneAccess),
+      canPlaceCalls: Boolean(raw.businessPhone?.canPlaceCalls),
+    },
     tenant: raw.tenant
       ? {
           id: raw.tenant.id,

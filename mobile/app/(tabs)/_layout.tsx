@@ -22,6 +22,8 @@ import * as Haptics from "expo-haptics";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useAppointments } from "@/hooks/useAppointments";
+import { useProfile } from "@/hooks/useProfile";
+import { shouldShowPhoneTab } from "@/lib/businessPhone";
 import { colors, radius, shadows, typography } from "@/theme";
 
 type IoniconName = React.ComponentProps<typeof Ionicons>["name"];
@@ -52,6 +54,13 @@ export default function TabsLayout() {
   // dashboard, so this is a free read — no extra request.
   const pendingQ = useAppointments({ status: "pending", limit: 50 });
   const pendingCount = pendingQ.data?.rows?.length ?? 0;
+
+  // Business Phone tab visibility (server-truth from /api/auth/me). Hidden
+  // (href:null) unless the tenant is subscribed AND the user has phone access —
+  // fail-closed while the profile is still loading. The route file always
+  // exists; href:null keeps it out of the bar and unreachable as a tab.
+  const { data: profile } = useProfile();
+  const showPhone = shouldShowPhoneTab(profile?.businessPhone);
 
   // Safe-area aware bottom padding so the bar always clears the home
   // indicator with the same visual breathing room across devices.
@@ -111,6 +120,14 @@ export default function TabsLayout() {
           tabBarBadge: pendingCount > 0 ? pendingCount : undefined,
           tabBarBadgeStyle: styles.badge,
         }}
+      />
+      <Tabs.Screen
+        name="phone"
+        options={
+          showPhone
+            ? { title: "Phone", tabBarIcon: tabIcon("call-outline", "call") }
+            : { href: null } // hidden + unreachable as a tab when not allowed
+        }
       />
       <Tabs.Screen
         name="customers"
