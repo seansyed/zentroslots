@@ -6,7 +6,7 @@ import { phoneCallLogs, phoneCallEvents, phoneUsageMonthly } from "@/db/schema";
 import { type CallStatus } from "@/lib/business-line";
 import { readBusinessLineConfig } from "@/lib/telnyx-business-line";
 import { periodForDate } from "@/lib/business-line-view";
-import { verifyAndParseInbound, planStatusUpdate } from "@/lib/business-line-forwarding";
+import { verifyAndParseInbound, planStatusUpdate, resolveAnsweredAt } from "@/lib/business-line-forwarding";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -82,7 +82,13 @@ export async function POST(req: NextRequest) {
       .update(phoneCallLogs)
       .set({
         status: plan.nextStatus,
-        answeredAt: plan.nextStatus === "answered" && !log.answeredAt ? new Date() : log.answeredAt,
+        answeredAt: resolveAnsweredAt({
+          currentAnsweredAt: log.answeredAt,
+          nextStatus: plan.nextStatus,
+          becameTerminal: plan.becameTerminal,
+          startedAt: log.startedAt,
+          now: new Date(),
+        }),
         endedAt: plan.becameTerminal ? new Date() : log.endedAt,
         durationSeconds: plan.durationSeconds ?? log.durationSeconds,
         billableSeconds: plan.becameTerminal ? plan.billableSeconds : log.billableSeconds,

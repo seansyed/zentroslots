@@ -253,3 +253,26 @@ export function planStatusUpdate(args: {
     usageDelta: delta,
   };
 }
+
+/**
+ * Decide the call log's `answered_at` when applying a status update. Keeps an
+ * existing value; sets it on the `answered` transition; and BACK-STAMPS it on
+ * the first terminal `completed` if it was never set (an event-ordering race can
+ * skip the intermediate `answered`) — using `startedAt` as the best-available
+ * answered timestamp, falling back to `now`. Returns null when the call was
+ * never answered (missed/failed/rejected).
+ */
+export function resolveAnsweredAt(args: {
+  currentAnsweredAt: Date | null;
+  nextStatus: CallStatus;
+  becameTerminal: boolean;
+  startedAt: Date | null;
+  now: Date;
+}): Date | null {
+  if (args.currentAnsweredAt) return args.currentAnsweredAt;
+  if (args.nextStatus === "answered") return args.now;
+  if (args.becameTerminal && args.nextStatus === "completed") {
+    return args.startedAt ?? args.now;
+  }
+  return null;
+}

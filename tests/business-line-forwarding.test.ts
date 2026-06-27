@@ -20,6 +20,7 @@ import {
   nextCallStatus,
   isTerminalCallStatus,
   planStatusUpdate,
+  resolveAnsweredAt,
   MAX_CALL_SECONDS,
   type ForwardingContext,
 } from "../lib/business-line-forwarding";
@@ -194,6 +195,36 @@ test("planStatusUpdate: duplicate terminal event does NOT double-count", () => {
   assert.equal(p?.nextStatus, "completed");
   assert.equal(p?.becameTerminal, false); // already terminal → no counter
   assert.deepEqual(p?.usageDelta, { answeredCalls: 0, missedCalls: 0, billableSeconds: 0, estimatedCostCents: 0 });
+});
+
+test("resolveAnsweredAt: back-stamps answered_at on completed, keeps/handles others", () => {
+  const started = new Date("2026-06-27T05:17:10Z");
+  const now = new Date("2026-06-27T05:17:46Z");
+  const existing = new Date("2026-06-27T05:17:15Z");
+
+  // already set → unchanged
+  assert.equal(
+    resolveAnsweredAt({ currentAnsweredAt: existing, nextStatus: "completed", becameTerminal: true, startedAt: started, now })?.toISOString(),
+    existing.toISOString(),
+  );
+  // answered transition → now
+  assert.equal(
+    resolveAnsweredAt({ currentAnsweredAt: null, nextStatus: "answered", becameTerminal: false, startedAt: started, now })?.toISOString(),
+    now.toISOString(),
+  );
+  // completed terminal w/ null answered_at → back-stamp from startedAt (the fix)
+  assert.equal(
+    resolveAnsweredAt({ currentAnsweredAt: null, nextStatus: "completed", becameTerminal: true, startedAt: started, now })?.toISOString(),
+    started.toISOString(),
+  );
+  // completed terminal but no startedAt → fall back to now
+  assert.equal(
+    resolveAnsweredAt({ currentAnsweredAt: null, nextStatus: "completed", becameTerminal: true, startedAt: null, now })?.toISOString(),
+    now.toISOString(),
+  );
+  // never answered (missed/failed) → null
+  assert.equal(resolveAnsweredAt({ currentAnsweredAt: null, nextStatus: "missed", becameTerminal: true, startedAt: started, now }), null);
+  assert.equal(resolveAnsweredAt({ currentAnsweredAt: null, nextStatus: "failed", becameTerminal: true, startedAt: started, now }), null);
 });
 
 test("planStatusUpdate: completed cannot regress to ringing; unknown status → null", () => {
