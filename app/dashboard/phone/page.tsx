@@ -41,9 +41,6 @@ export default async function PhonePage() {
   const vis = await getUserBusinessPhoneVisibility(tenant.id, user.id, user.role, tenant.currentPlan);
   if (!vis.hasPhoneAccess) redirect("/dashboard");
 
-  // The workspace call log is operator-only; staff see their own setup + dialer.
-  const canViewCallLog = user.role === "admin" || user.role === "manager";
-
   return (
     <Shell
       user={{ name: user.name, email: user.email, role: user.role }}
@@ -56,7 +53,8 @@ export default async function PhonePage() {
       title="Phone"
       crumbs={[{ label: "Dashboard", href: "/dashboard" }, { label: "Phone" }]}
     >
-      <PhoneClient canViewCallLog={canViewCallLog} />
+      {/* viewerRole drives operator-only sections (call log + staff access). */}
+      <PhoneClient viewerRole={user.role} />
     </Shell>
   );
 }

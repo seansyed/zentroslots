@@ -44,7 +44,9 @@ import {
   OUTBOUND_CALL_SUCCESS_MESSAGE,
   dialPreview,
   isSupportedKeypadKey,
+  canManageStaffAccess,
 } from "@/lib/business-phone-ui";
+import StaffPhoneAccess from "@/components/dashboard/StaffPhoneAccess";
 
 type MeView = {
   hasBusinessPhone: boolean;
@@ -59,7 +61,10 @@ type MeView = {
 const CALL_FILTERS = ["all", "completed", "missed", "answered", "failed", "rejected"] as const;
 const KEYPAD = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "*", "0", "#"] as const;
 
-export default function PhoneClient({ canViewCallLog = true }: { canViewCallLog?: boolean }) {
+export default function PhoneClient({ viewerRole }: { viewerRole: string }) {
+  // Operators (admin/manager) see the workspace call log + staff access admin;
+  // staff see only their own dialer + number setup.
+  const isOperator = canManageStaffAccess(viewerRole);
   const [me, setMe] = React.useState<MeView | null>(null);
   const [meLoading, setMeLoading] = React.useState(true);
   const [meError, setMeError] = React.useState(false);
@@ -126,12 +131,12 @@ export default function PhoneClient({ canViewCallLog = true }: { canViewCallLog?
 
   React.useEffect(() => {
     void loadMe();
-    if (canViewCallLog) void loadMissed();
-  }, [loadMe, loadMissed, canViewCallLog]);
+    if (isOperator) void loadMissed();
+  }, [loadMe, loadMissed, isOperator]);
 
   React.useEffect(() => {
-    if (canViewCallLog) void fetchCalls(statusFilter, 0, false);
-  }, [statusFilter, fetchCalls, canViewCallLog]);
+    if (isOperator) void fetchCalls(statusFilter, 0, false);
+  }, [statusFilter, fetchCalls, isOperator]);
 
   // ── actions ──────────────────────────────────────────────────────
   async function placeCall(payload: Record<string, unknown>, opts?: { rowId?: string }) {
@@ -371,7 +376,7 @@ export default function PhoneClient({ canViewCallLog = true }: { canViewCallLog?
           </Card>
 
           {/* Missed calls (operator-only call log) */}
-          {canViewCallLog && missed.length > 0 && (
+          {isOperator && missed.length > 0 && (
             <Card>
               <CardHeader title="Missed calls" subtitle="Recent inbound calls you missed." />
               <ul className="mt-3 divide-y divide-border">
@@ -407,7 +412,7 @@ export default function PhoneClient({ canViewCallLog = true }: { canViewCallLog?
           )}
 
           {/* Recent calls (operator-only call log) */}
-          {canViewCallLog && (
+          {isOperator && (
           <Card>
             <CardHeader title="Recent calls" subtitle="Inbound and outbound calls on your business line." />
             <div className="mt-3 flex flex-wrap gap-1.5">
@@ -627,6 +632,9 @@ export default function PhoneClient({ canViewCallLog = true }: { canViewCallLog?
           </div>
         </div>
       </div>
+
+      {/* Staff phone access — operator-only admin management (P1.2.2). */}
+      {isOperator && <StaffPhoneAccess />}
     </div>
   );
 }

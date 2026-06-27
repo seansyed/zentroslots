@@ -13,20 +13,24 @@ import { getTenantBusinessPhone, getStaffPhone } from "@/lib/business-phone-acce
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// Admin-only staff Business Phone access management (P1.1). Minimal by design:
-// list staff identities + toggle enabled/can_place_calls + set/clear a staff
-// member's bridge number. Numbers are returned MASKED only. No call placement,
-// no Telnyx here.
+// Operator (admin/manager) staff Business Phone access management. Minimal by
+// design: list staff identities + toggle enabled/can_place_calls + set/clear a
+// staff member's bridge number. Numbers are returned MASKED only. No call
+// placement, no Telnyx here.
 
-/** GET — list the tenant's staff Business Phone identities (masked). */
+/**
+ * GET — list the tenant's STAFF users with their Business Phone access state
+ * (masked numbers only). LEFT JOIN so staff WITHOUT an identity row appear too
+ * (default: no access) — that's how an operator grants access to someone new.
+ */
 export async function GET() {
   try {
-    const admin = await requireRole(["admin"]);
-    const tenantId = admin.tenantId;
+    const operator = await requireRole(["admin", "manager"]);
+    const tenantId = operator.tenantId;
 
     const rows = await db
       .select({
-        userId: tenantPhoneUsers.userId,
+        userId: users.id,
         name: users.name,
         email: users.email,
         role: users.role,
@@ -34,10 +38,14 @@ export async function GET() {
         canPlaceCalls: tenantPhoneUsers.canPlaceCalls,
         canReceiveCalls: tenantPhoneUsers.canReceiveCalls,
         bridgePhoneNumber: tenantPhoneUsers.bridgePhoneNumber,
+        updatedAt: tenantPhoneUsers.updatedAt,
       })
-      .from(tenantPhoneUsers)
-      .innerJoin(users, eq(users.id, tenantPhoneUsers.userId))
-      .where(eq(tenantPhoneUsers.tenantId, tenantId));
+      .from(users)
+      .leftJoin(
+        tenantPhoneUsers,
+        and(eq(tenantPhoneUsers.userId, users.id), eq(tenantPhoneUsers.tenantId, tenantId)),
+      )
+      .where(and(eq(users.tenantId, tenantId), eq(users.role, "staff")));
 
     return NextResponse.json({
       users: rows.map((r) => ({
@@ -45,11 +53,12 @@ export async function GET() {
         name: r.name,
         email: r.email,
         role: r.role,
-        enabled: r.enabled,
-        canPlaceCalls: r.canPlaceCalls,
-        canReceiveCalls: r.canReceiveCalls,
+        enabled: r.enabled ?? false,
+        canPlaceCalls: r.canPlaceCalls ?? false,
+        canReceiveCalls: r.canReceiveCalls ?? false,
         bridgePhoneNumberConfigured: Boolean(r.bridgePhoneNumber),
         bridgePhoneNumberMasked: maskPhoneNumber(r.bridgePhoneNumber),
+        updatedAt: r.updatedAt ? r.updatedAt.toISOString() : null,
       })),
     });
   } catch (err) {
@@ -69,10 +78,10 @@ const patchSchema = z
     { message: "Nothing to update." },
   );
 
-/** PATCH — admin sets a staff member's access / bridge number. */
+/** PATCH — an operator sets a staff member's access / bridge number. */
 export async function PATCH(req: NextRequest) {
   try {
-    const admin = await requireRole(["admin"]);
+    const admin = await requireRole(["admin", "manager"]);
     const tenantId = admin.tenantId;
     const body = patchSchema.parse(await req.json());
 

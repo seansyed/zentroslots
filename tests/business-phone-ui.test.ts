@@ -19,6 +19,10 @@ import {
   isSupportedKeypadKey,
   dialPreview,
   formatNanpForDisplay,
+  canManageStaffAccess,
+  staffPhoneNumberLabel,
+  staffAccessStatusLabel,
+  STAFF_PHONE_PRIVACY_NOTE,
 } from "../lib/business-phone-ui";
 
 // ── sidebar / page visibility ──────────────────────────────────────
@@ -113,4 +117,31 @@ test("phoneCallErrorMessage prefers the server message, else falls back per stat
 
 test("success message sets the bridge expectation", () => {
   assert.match(OUTBOUND_CALL_SUCCESS_MESSAGE, /calling your phone first/i);
+});
+
+// ── staff access admin (P1.2.2) ────────────────────────────────────
+test("staff access admin section is operator-only", () => {
+  assert.equal(canManageStaffAccess("admin"), true);
+  assert.equal(canManageStaffAccess("manager"), true);
+  assert.equal(canManageStaffAccess("staff"), false);
+  assert.equal(canManageStaffAccess("client"), false);
+});
+
+test("staff number label is masked-or-'Not set' — never a full number", () => {
+  assert.equal(staffPhoneNumberLabel({ configured: true, masked: "••• ••• 0182" }), "••• ••• 0182");
+  assert.equal(staffPhoneNumberLabel({ configured: false, masked: null }), "Not set");
+  // even if a configured flag is set without a masked value, no raw number is shown
+  assert.equal(staffPhoneNumberLabel({ configured: true, masked: null }), "Not set");
+});
+
+test("staff access status label reflects enabled / can-place state", () => {
+  assert.equal(staffAccessStatusLabel({ enabled: false, canPlaceCalls: false }), "Disabled");
+  assert.equal(staffAccessStatusLabel({ enabled: false, canPlaceCalls: true }), "Disabled");
+  assert.equal(staffAccessStatusLabel({ enabled: true, canPlaceCalls: false }), "Cannot place calls");
+  assert.equal(staffAccessStatusLabel({ enabled: true, canPlaceCalls: true }), "Active");
+});
+
+test("customer caller-ID copy is correct (staff privacy note)", () => {
+  assert.match(STAFF_PHONE_PRIVACY_NOTE, /Customers see your ZentroMeet business number/);
+  assert.match(STAFF_PHONE_PRIVACY_NOTE, /only to connect staff to outbound Business Phone calls/);
 });

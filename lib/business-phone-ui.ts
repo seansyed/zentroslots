@@ -29,6 +29,35 @@ export function shouldShowPhoneNav(args: {
  * the tenant entitled, the current user able to place calls right now
  * (`canPlaceCalls`), and the customer to have a phone number.
  */
+/**
+ * Whether the user may view + manage the Staff Phone Access admin section
+ * (P1.2.2). Operators only (admin/manager); staff/client never. The page itself
+ * is already entitlement-gated, so this is the role axis only.
+ */
+export function canManageStaffAccess(role: string): boolean {
+  return role === "admin" || role === "manager";
+}
+
+/** Admin copy for the Staff Phone Access section — privacy + caller-ID promise. */
+export const STAFF_PHONE_PRIVACY_NOTE =
+  "Staff phone numbers are used only to connect staff to outbound Business Phone calls. Customers see your ZentroMeet business number.";
+
+/**
+ * Display label for a staff member's bridge number in the admin table. NEVER
+ * returns a full number — only the masked form or "Not set" — so a personal
+ * number can't leak into the UI.
+ */
+export function staffPhoneNumberLabel(args: { configured: boolean; masked: string | null }): string {
+  return args.configured && args.masked ? args.masked : "Not set";
+}
+
+/** Status label for a staff member's access state. */
+export function staffAccessStatusLabel(args: { enabled: boolean; canPlaceCalls: boolean }): string {
+  if (!args.enabled) return "Disabled";
+  if (!args.canPlaceCalls) return "Cannot place calls";
+  return "Active";
+}
+
 export function canShowCustomerCallButton(args: {
   entitled: boolean;
   canPlaceCalls: boolean;
