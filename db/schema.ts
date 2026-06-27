@@ -2906,10 +2906,40 @@ export const phoneUsageMonthly = pgTable(
   })
 );
 
+// Per-staff Business Phone identity (migration 0079). Optional, tenant-scoped:
+// the bridge_phone_number is the leg-1 number ZentroMeet rings before dialing
+// the customer. The staff number is NEVER used as caller ID. can_receive_calls
+// is reserved for a later inbound/softphone phase.
+export const tenantPhoneUsers = pgTable(
+  "tenant_phone_users",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    bridgePhoneNumber: varchar("bridge_phone_number", { length: 40 }),
+    enabled: boolean("enabled").notNull().default(true),
+    canPlaceCalls: boolean("can_place_calls").notNull().default(true),
+    canReceiveCalls: boolean("can_receive_calls").notNull().default(false),
+    metadata: jsonb("metadata"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    tenantUserUnique: uniqueIndex("tenant_phone_users_tenant_user_unique").on(t.tenantId, t.userId),
+    userIdx: index("tenant_phone_users_user_idx").on(t.userId),
+  })
+);
+
 export type TenantPhoneNumber = typeof tenantPhoneNumbers.$inferSelect;
 export type NewTenantPhoneNumber = typeof tenantPhoneNumbers.$inferInsert;
 export type TenantPhoneSettings = typeof tenantPhoneSettings.$inferSelect;
 export type NewTenantPhoneSettings = typeof tenantPhoneSettings.$inferInsert;
+export type TenantPhoneUser = typeof tenantPhoneUsers.$inferSelect;
+export type NewTenantPhoneUser = typeof tenantPhoneUsers.$inferInsert;
 export type PhoneCallLog = typeof phoneCallLogs.$inferSelect;
 export type NewPhoneCallLog = typeof phoneCallLogs.$inferInsert;
 export type PhoneCallEvent = typeof phoneCallEvents.$inferSelect;

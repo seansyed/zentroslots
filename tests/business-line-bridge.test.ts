@@ -18,6 +18,7 @@ import { generateKeyPairSync, sign as nodeSign, type KeyObject } from "node:cryp
 
 import {
   decideOutboundBridge,
+  resolveStaffBridge,
   bridgeRejectToHttp,
   texmlBridgeDial,
   resolveBridgeTarget,
@@ -25,11 +26,14 @@ import {
   verifyBridgeToken,
   normalizeCallPurpose,
   callLogStatusForBridge,
+  maskPhoneNumber,
   type OutboundBridgeContext,
 } from "../lib/business-line-bridge";
 import { canOriginate, originateBridgeCall } from "../lib/telnyx-api";
 import { verifyAndParseInbound, planStatusUpdate } from "../lib/business-line-forwarding";
 import { type BusinessLineConfig } from "../lib/telnyx-business-line";
+import { readAddonActiveFlag } from "../lib/business-line-view";
+import { getPlan, meetsPlan } from "../lib/plans";
 
 // ── fixtures ───────────────────────────────────────────────────────
 const BUSINESS = "+14155550100";
@@ -42,7 +46,12 @@ const validCtx: OutboundBridgeContext = {
   ownedNumbers: [BUSINESS],
   settingsEnabled: true,
   entitlementActive: true,
-  staffNumber: STAFF,
+  // staff has their own bridge phone (P1.1)
+  staffRowExists: true,
+  staffEnabled: true,
+  staffCanPlaceCalls: true,
+  staffBridgeNumber: STAFF,
+  tenantFallbackNumber: null,
   destinationRaw: CUSTOMER,
   minutesUsed: 0,
   monthlyMinuteCap: 200,
@@ -65,12 +74,13 @@ function config(over: Partial<BusinessLineConfig> = {}): BusinessLineConfig {
 }
 
 // ── valid decision ─────────────────────────────────────────────────
-test("valid context → bridge decision with business number as caller ID", () => {
+test("valid context → bridge decision with business number as caller ID (staff phone)", () => {
   const d = decideOutboundBridge(validCtx);
   assert.deepEqual(d, {
     action: "bridge",
     customerNumber: CUSTOMER,
     staffNumber: STAFF,
+    staffSource: "staff", // the staff's own bridge phone was used
     callerId: BUSINESS, // never the staff or customer number
   });
 });
@@ -175,20 +185,109 @@ test("calling the staff forwarding number → reject staff_loop", () => {
   });
 });
 
-// ── staff-leg validation ───────────────────────────────────────────
-test("no staff/forwarding number → reject no_staff_number (HTTP 409)", () => {
-  assert.deepEqual(decideOutboundBridge(ctx({ staffNumber: null })), {
-    action: "reject",
-    reason: "no_staff_number",
-  });
-  assert.equal(bridgeRejectToHttp("no_staff_number").status, 409);
+// ── staff-leg resolution (P1.1) ────────────────────────────────────
+test("no staff phone AND no tenant fallback → reject setup_required (HTTP 409)", () => {
+  assert.deepEqual(
+    decideOutboundBridge(ctx({ staffRowExists: false, staffBridgeNumber: null, tenantFallbackNumber: null })),
+    { action: "reject", reason: "setup_required" },
+  );
+  assert.equal(bridgeRejectToHttp("setup_required").status, 409);
 });
 
 test("malformed staff number → reject invalid_staff_number", () => {
-  assert.deepEqual(decideOutboundBridge(ctx({ staffNumber: "+1555" })), {
+  assert.deepEqual(decideOutboundBridge(ctx({ staffBridgeNumber: "+1555" })), {
     action: "reject",
     reason: "invalid_staff_number",
   });
+});
+
+test("no staff row → falls back to the tenant forwarding number", () => {
+  const d = decideOutboundBridge(
+    ctx({ staffRowExists: false, staffBridgeNumber: null, tenantFallbackNumber: STAFF }),
+  );
+  assert.deepEqual(d, {
+    action: "bridge",
+    customerNumber: CUSTOMER,
+    staffNumber: STAFF,
+    staffSource: "tenant", // tenant fallback (pilot compatibility)
+    callerId: BUSINESS,
+  });
+});
+
+test("staff row enabled+can-place but no number set → uses tenant fallback", () => {
+  const d = decideOutboundBridge(ctx({ staffBridgeNumber: null, tenantFallbackNumber: STAFF }));
+  assert.equal(d.action === "bridge" && d.staffSource, "tenant");
+});
+
+test("disabled staff cannot place calls → reject staff_disabled (HTTP 403)", () => {
+  assert.deepEqual(decideOutboundBridge(ctx({ staffEnabled: false })), {
+    action: "reject",
+    reason: "staff_disabled",
+  });
+  // even with a tenant fallback available, an explicit disabled row never falls back
+  assert.deepEqual(decideOutboundBridge(ctx({ staffEnabled: false, tenantFallbackNumber: STAFF })), {
+    action: "reject",
+    reason: "staff_disabled",
+  });
+  assert.equal(bridgeRejectToHttp("staff_disabled").status, 403);
+});
+
+test("staff with can_place_calls=false → reject staff_disabled", () => {
+  assert.deepEqual(decideOutboundBridge(ctx({ staffCanPlaceCalls: false })), {
+    action: "reject",
+    reason: "staff_disabled",
+  });
+});
+
+test("resolveStaffBridge resolution order", () => {
+  // staff number wins
+  assert.deepEqual(
+    resolveStaffBridge({ staffRowExists: true, staffEnabled: true, staffCanPlaceCalls: true, staffBridgeNumber: STAFF, tenantFallbackNumber: "+15125550111" }),
+    { kind: "ok", number: STAFF, source: "staff" },
+  );
+  // fallback when staff has no number
+  assert.deepEqual(
+    resolveStaffBridge({ staffRowExists: true, staffEnabled: true, staffCanPlaceCalls: true, staffBridgeNumber: null, tenantFallbackNumber: STAFF }),
+    { kind: "ok", number: STAFF, source: "tenant" },
+  );
+  // no row at all → tenant fallback
+  assert.deepEqual(
+    resolveStaffBridge({ staffRowExists: false, staffEnabled: false, staffCanPlaceCalls: false, staffBridgeNumber: null, tenantFallbackNumber: STAFF }),
+    { kind: "ok", number: STAFF, source: "tenant" },
+  );
+  // disabled row never falls back
+  assert.deepEqual(
+    resolveStaffBridge({ staffRowExists: true, staffEnabled: false, staffCanPlaceCalls: true, staffBridgeNumber: STAFF, tenantFallbackNumber: STAFF }),
+    { kind: "disabled" },
+  );
+  // nothing configured
+  assert.deepEqual(
+    resolveStaffBridge({ staffRowExists: false, staffEnabled: false, staffCanPlaceCalls: false, staffBridgeNumber: null, tenantFallbackNumber: null }),
+    { kind: "setup_required" },
+  );
+});
+
+test("maskPhoneNumber reveals only the last 4 digits", () => {
+  assert.equal(maskPhoneNumber("+14155550182"), "••• ••• 0182");
+  assert.equal(maskPhoneNumber(null), null);
+  assert.equal(maskPhoneNumber(""), null);
+});
+
+// ── visibility / entitlement composition (mirrors isBusinessPhoneEntitled) ──
+// The Phone module is visible/usable ONLY when BOTH gates pass: Pro+ plan AND
+// the active add-on flag. This is the exact rule GET /api/auth/me surfaces.
+// canUseBusinessLine(plan) == meetsPlan(plan.id, "pro"); use the pure primitive
+// directly so the test doesn't drag in the DB-backed capabilities/auth module.
+function entitled(plan: string, metadata: unknown): boolean {
+  return meetsPlan(getPlan(plan).id, "pro") && readAddonActiveFlag(metadata);
+}
+test("visibility: false unless subscribed (Pro+) AND add-on active", () => {
+  assert.equal(entitled("free", { entitlementActive: true }), false); // plan too low
+  assert.equal(entitled("pro", {}), false); // add-on not active
+  assert.equal(entitled("pro", { entitlementActive: false }), false);
+  assert.equal(entitled("pro", null), false);
+  assert.equal(entitled("pro", { entitlementActive: true }), true); // both gates pass
+  assert.equal(entitled("enterprise", { entitlementActive: true }), true);
 });
 
 // ── customer-leg TeXML ─────────────────────────────────────────────
@@ -336,6 +435,9 @@ test("normalizeCallPurpose accepts the closed set, rejects anything else", () =>
 });
 
 test("callLogStatusForBridge: bridge→ringing, reject→rejected", () => {
-  assert.equal(callLogStatusForBridge({ action: "bridge", customerNumber: CUSTOMER, staffNumber: STAFF, callerId: BUSINESS }), "ringing");
+  assert.equal(
+    callLogStatusForBridge({ action: "bridge", customerNumber: CUSTOMER, staffNumber: STAFF, staffSource: "staff", callerId: BUSINESS }),
+    "ringing",
+  );
   assert.equal(callLogStatusForBridge({ action: "reject", reason: "over_cap" }), "rejected");
 });

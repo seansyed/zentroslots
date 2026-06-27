@@ -51,7 +51,8 @@ export type OutboundBridgeRejectReason =
   | "no_business_number"
   | "line_disabled"
   | "no_entitlement"
-  | "no_staff_number"
+  | "setup_required"
+  | "staff_disabled"
   | "invalid_staff_number"
   | "no_destination"
   | "invalid_destination"
@@ -62,8 +63,11 @@ export type OutboundBridgeRejectReason =
   | "over_cap"
   | "concurrency_limit";
 
+/** Where the leg-1 (staff) number came from — for logging/observability only. */
+export type StaffBridgeSource = "staff" | "tenant";
+
 export type OutboundBridgeDecision =
-  | { action: "bridge"; customerNumber: string; staffNumber: string; callerId: string }
+  | { action: "bridge"; customerNumber: string; staffNumber: string; staffSource: StaffBridgeSource; callerId: string }
   | { action: "reject"; reason: OutboundBridgeRejectReason };
 
 export type OutboundBridgeContext = {
@@ -75,8 +79,18 @@ export type OutboundBridgeContext = {
   settingsEnabled: boolean;
   /** Pro+ plan AND active add-on (the caller folds both gates into this bool). */
   entitlementActive: boolean;
-  /** Leg-1 target — the staff phone we ring first. MVP: the forwarding number. */
-  staffNumber: string | null;
+  // ── Staff identity (P1.1). The leg-1 number is resolved staff → tenant
+  //    fallback → setup_required (see resolveStaffBridge). ──
+  /** Whether a tenant_phone_users row exists for the calling staff member. */
+  staffRowExists: boolean;
+  /** The staff row's master switch (only meaningful when staffRowExists). */
+  staffEnabled: boolean;
+  /** The staff row's outbound permission (only meaningful when staffRowExists). */
+  staffCanPlaceCalls: boolean;
+  /** The staff member's own bridge phone (leg-1), if set. */
+  staffBridgeNumber: string | null;
+  /** Tenant forwarding number — leg-1 fallback for pilot compatibility. */
+  tenantFallbackNumber: string | null;
   /** Raw customer destination (from `toNumber` or a resolved customer phone). */
   destinationRaw: string | null;
   /** Billable minutes already used this period (for the hard cap). */
@@ -89,6 +103,42 @@ export type OutboundBridgeContext = {
   maxConcurrentCalls: number;
 };
 
+// ─── Staff bridge-number resolution (pure) ──────────────────────────────────
+
+export type StaffBridgeResolution =
+  | { kind: "ok"; number: string; source: StaffBridgeSource }
+  | { kind: "disabled" } // an explicit staff row that isn't allowed to place calls
+  | { kind: "setup_required" }; // neither a staff number nor a tenant fallback
+
+/**
+ * Resolve the leg-1 (staff) number, fail-closed:
+ *   1. an ENABLED staff row whose can_place_calls is true → use its bridge phone
+ *      (or, if it has none set, fall through to the tenant fallback);
+ *   2. otherwise the tenant forwarding number (P1.0 / pilot compatibility);
+ *   3. otherwise setup_required.
+ * An explicit staff row that is disabled OR not allowed to place calls is a hard
+ * "disabled" — it never silently falls back (so revoking a staff member actually
+ * stops them placing calls).
+ */
+export function resolveStaffBridge(args: {
+  staffRowExists: boolean;
+  staffEnabled: boolean;
+  staffCanPlaceCalls: boolean;
+  staffBridgeNumber: string | null;
+  tenantFallbackNumber: string | null;
+}): StaffBridgeResolution {
+  if (args.staffRowExists && (!args.staffEnabled || !args.staffCanPlaceCalls)) {
+    return { kind: "disabled" };
+  }
+  if (args.staffRowExists && args.staffBridgeNumber && args.staffBridgeNumber.trim() !== "") {
+    return { kind: "ok", number: args.staffBridgeNumber, source: "staff" };
+  }
+  if (args.tenantFallbackNumber && args.tenantFallbackNumber.trim() !== "") {
+    return { kind: "ok", number: args.tenantFallbackNumber, source: "tenant" };
+  }
+  return { kind: "setup_required" };
+}
+
 /**
  * Decide whether to place an outbound bridge call. Fail-closed: any missing or
  * invalid precondition returns a typed reject; only a fully-valid context yields
@@ -99,10 +149,19 @@ export function decideOutboundBridge(ctx: OutboundBridgeContext): OutboundBridge
   if (!ctx.settingsEnabled) return reject("line_disabled");
   if (!ctx.entitlementActive) return reject("no_entitlement");
 
-  // Leg 1: the staff phone we ring first.
-  if (!ctx.staffNumber || ctx.staffNumber.trim() === "") return reject("no_staff_number");
-  const staff = validateUSCanadaE164(ctx.staffNumber);
+  // Leg 1: resolve the staff phone we ring first (staff → tenant fallback).
+  const resolved = resolveStaffBridge({
+    staffRowExists: ctx.staffRowExists,
+    staffEnabled: ctx.staffEnabled,
+    staffCanPlaceCalls: ctx.staffCanPlaceCalls,
+    staffBridgeNumber: ctx.staffBridgeNumber,
+    tenantFallbackNumber: ctx.tenantFallbackNumber,
+  });
+  if (resolved.kind === "disabled") return reject("staff_disabled");
+  if (resolved.kind === "setup_required") return reject("setup_required");
+  const staff = validateUSCanadaE164(resolved.number);
   if (!staff.ok) return reject("invalid_staff_number");
+  const staffSource = resolved.source;
 
   // Leg 2: the customer destination. Check emergency/N11 on the RAW input first
   // (short codes don't survive normalization), then enforce US/CA E.164.
@@ -134,6 +193,7 @@ export function decideOutboundBridge(ctx: OutboundBridgeContext): OutboundBridge
     action: "bridge",
     customerNumber: dest.e164,
     staffNumber: staff.e164,
+    staffSource,
     callerId: ctx.businessNumber,
   };
 }
@@ -169,9 +229,12 @@ export function bridgeRejectToHttp(reason: OutboundBridgeRejectReason): {
       return { status: 400, message: "You can't call your own business number." };
     case "staff_loop":
       return { status: 400, message: "That number is your own forwarding line." };
-    case "no_staff_number":
+    case "staff_disabled":
+      return { status: 403, message: "Your account isn't allowed to place calls." };
+    case "setup_required":
+      return { status: 409, message: "Set up your calling number before placing calls." };
     case "invalid_staff_number":
-      return { status: 409, message: "Set a valid forwarding number before placing calls." };
+      return { status: 409, message: "Your calling number isn't a valid US or Canada number." };
     case "no_business_number":
       return { status: 409, message: "No business number is provisioned for your workspace." };
     case "no_destination":
@@ -254,4 +317,20 @@ export function verifyBridgeToken(
   const got = Buffer.from(token);
   if (expected.length !== got.length) return false;
   return timingSafeEqual(expected, got);
+}
+
+// ─── Display helpers ────────────────────────────────────────────────────────
+
+/**
+ * Mask a phone number for display, revealing only the last 4 digits — used so a
+ * staff member's personal bridge number is never returned in full to the client.
+ * Returns null when there's nothing to mask.
+ */
+export function maskPhoneNumber(input: string | null | undefined): string | null {
+  if (!input) return null;
+  const e164 = normalizeE164Phone(input);
+  if (!e164) return null;
+  const digits = e164.replace(/\D/g, "");
+  if (digits.length < 4) return "••••";
+  return `••• ••• ${digits.slice(-4)}`;
 }

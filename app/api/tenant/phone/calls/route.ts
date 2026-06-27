@@ -3,20 +3,11 @@ import { and, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "@/db/client";
-import {
-  tenants,
-  tenantPhoneNumbers,
-  tenantPhoneSettings,
-  phoneUsageMonthly,
-  phoneCallLogs,
-  customers,
-} from "@/db/schema";
+import { tenantPhoneNumbers, phoneUsageMonthly, phoneCallLogs, customers } from "@/db/schema";
 import { errorResponse, requireRole, HttpError } from "@/lib/auth";
 import { audit, ipFromHeaders } from "@/lib/audit";
-import { getPlan } from "@/lib/plans";
-import { canUseBusinessLine } from "@/lib/billing/capabilities";
 import { secondsToBillableMinutes } from "@/lib/business-line";
-import { readAddonActiveFlag, periodForDate } from "@/lib/business-line-view";
+import { periodForDate } from "@/lib/business-line-view";
 import {
   readBusinessLineConfig,
   buildStatusCallbackUrl,
@@ -31,6 +22,7 @@ import {
   DEFAULT_MAX_CONCURRENT_OUTBOUND,
   type OutboundBridgeContext,
 } from "@/lib/business-line-bridge";
+import { getTenantBusinessPhone, getStaffPhone } from "@/lib/business-phone-access";
 import { canOriginate, originateBridgeCall } from "@/lib/telnyx-api";
 
 export const runtime = "nodejs";
@@ -38,20 +30,22 @@ export const dynamic = "force-dynamic";
 
 /**
  * POST /api/tenant/phone/calls — place an OUTBOUND BRIDGE call (Business Phone
- * Phase 1 / P1.0). ZentroMeet rings the staff phone (the tenant's forwarding
- * number in MVP); when it answers, the bridge webhook dials the customer with
- * the tenant's business number as caller ID.
+ * Phase 1). ZentroMeet rings the STAFF phone first (P1.1: the caller's own
+ * bridge number, falling back to the tenant forwarding number); when it answers,
+ * the bridge webhook dials the customer with the tenant business number as
+ * caller ID. The staff's personal number is NEVER presented to the customer.
  *
  * Fully fail-closed + entitlement-gated:
  *   - admin/manager only;
- *   - requires the business_line capability (Pro+) AND the active add-on flag
- *     (else 402);
- *   - validates US/CA destination, blocks emergency/N11, international, self-call,
- *     and the staff-loop; enforces the monthly cap + a concurrency ceiling;
- *   - places the Telnyx leg ONLY when the feature flag is on and the API key +
- *     TeXML app id are configured (canOriginate). With the flag OFF — the default
- *     for every tenant except the pilot — this returns 503 and NO Telnyx call is
- *     made and NO row is written.
+ *   - requires the business_line capability (Pro+) AND the active add-on (402);
+ *   - resolves the staff leg (staff → tenant fallback → setup_required) and
+ *     refuses a disabled staff member;
+ *   - validates US/CA destination, blocks emergency/N11, international,
+ *     self-call, staff-loop; enforces monthly cap + concurrency;
+ *   - places the Telnyx leg ONLY when the flag is on and the API key + TeXML app
+ *     id are configured (canOriginate). With the flag OFF — the default for every
+ *     tenant except the pilot — this returns 503 and NO Telnyx call is made and
+ *     NO row is written.
  */
 
 const bodySchema = z
@@ -90,19 +84,12 @@ export async function POST(req: NextRequest) {
     }
 
     const period = periodForDate(new Date());
-    const [numberRow, settings, owned, usage, tenantRow, active] = await Promise.all([
-      db.query.tenantPhoneNumbers.findFirst({
-        where: and(eq(tenantPhoneNumbers.tenantId, tenantId), eq(tenantPhoneNumbers.status, "active")),
-      }),
-      db.query.tenantPhoneSettings.findFirst({ where: eq(tenantPhoneSettings.tenantId, tenantId) }),
-      db.query.tenantPhoneNumbers.findMany({
-        where: eq(tenantPhoneNumbers.tenantId, tenantId),
-        columns: { phoneNumber: true },
-      }),
+    const [bp, staff, usage, active, activeNumberRow] = await Promise.all([
+      getTenantBusinessPhone(tenantId),
+      getStaffPhone(tenantId, user.id),
       db.query.phoneUsageMonthly.findFirst({
         where: and(eq(phoneUsageMonthly.tenantId, tenantId), eq(phoneUsageMonthly.period, period)),
       }),
-      db.query.tenants.findFirst({ where: eq(tenants.id, tenantId), columns: { currentPlan: true } }),
       db.query.phoneCallLogs.findMany({
         where: and(
           eq(phoneCallLogs.tenantId, tenantId),
@@ -111,22 +98,27 @@ export async function POST(req: NextRequest) {
         ),
         columns: { id: true },
       }),
+      db.query.tenantPhoneNumbers.findFirst({
+        where: and(eq(tenantPhoneNumbers.tenantId, tenantId), eq(tenantPhoneNumbers.status, "active")),
+        columns: { id: true },
+      }),
     ]);
 
-    // Two-gate entitlement: Pro+ plan AND the active add-on flag.
-    const planEligible = canUseBusinessLine(getPlan(tenantRow?.currentPlan)).allowed;
-    const entitlementActive = planEligible && readAddonActiveFlag(settings?.metadata);
-
     const ctx: OutboundBridgeContext = {
-      businessNumber: numberRow?.phoneNumber ?? null,
-      ownedNumbers: owned.map((o) => o.phoneNumber),
-      settingsEnabled: settings?.enabled ?? false,
-      entitlementActive,
-      // MVP: ring the tenant's configured forwarding number as the staff leg.
-      staffNumber: settings?.forwardingNumber ?? null,
+      businessNumber: bp.businessNumber,
+      ownedNumbers: bp.ownedNumbers,
+      settingsEnabled: bp.settingsEnabled,
+      entitlementActive: bp.entitled,
+      // P1.1: prefer the staff member's own bridge phone; fall back to the tenant
+      // forwarding number (pilot compatibility); a disabled staff is rejected.
+      staffRowExists: Boolean(staff),
+      staffEnabled: staff?.enabled ?? false,
+      staffCanPlaceCalls: staff?.canPlaceCalls ?? false,
+      staffBridgeNumber: staff?.bridgePhoneNumber ?? null,
+      tenantFallbackNumber: bp.forwardingNumber,
       destinationRaw,
       minutesUsed: secondsToBillableMinutes(usage?.billableSeconds ?? 0),
-      monthlyMinuteCap: settings?.monthlyMinuteCap ?? 0,
+      monthlyMinuteCap: bp.monthlyMinuteCap,
       activeOutboundCalls: active.length,
       maxConcurrentCalls: DEFAULT_MAX_CONCURRENT_OUTBOUND,
     };
@@ -173,7 +165,7 @@ export async function POST(req: NextRequest) {
       .insert(phoneCallLogs)
       .values({
         tenantId,
-        phoneNumberId: numberRow?.id ?? null,
+        phoneNumberId: activeNumberRow?.id ?? null,
         direction: "outbound",
         fromNumber: decision.callerId, // business number (what the customer sees)
         toNumber: decision.customerNumber, // the customer dialed
@@ -195,7 +187,7 @@ export async function POST(req: NextRequest) {
       actorLabel: user.email,
       entityType: "phone_call",
       entityId: row?.id,
-      metadata: { callPurpose, hasCustomer: Boolean(customerId) },
+      metadata: { callPurpose, hasCustomer: Boolean(customerId), staffSource: decision.staffSource },
       ipAddress: ipFromHeaders(req.headers),
     });
 

@@ -5,6 +5,7 @@ import { z } from "zod";
 import { errorResponse, requireUser } from "@/lib/auth";
 import { getTenantById } from "@/lib/tenant";
 import { isGoogleConnected, isMicrosoftConnected } from "@/lib/calendar/connections";
+import { isBusinessPhoneEntitled } from "@/lib/business-phone-access";
 import { db } from "@/db/client";
 import { users } from "@/db/schema";
 
@@ -31,6 +32,9 @@ export async function GET() {
       isMicrosoftConnected(user.id),
     ]);
     const calendarConnected = googleConnected || microsoftConnected;
+    // Business Phone visibility (server is the source of truth). Web + mobile
+    // hide the Phone module unless `entitled` (Pro+ plan AND active add-on).
+    const businessPhoneEntitled = await isBusinessPhoneEntitled(user.tenantId, tenant?.plan ?? null);
 
     return NextResponse.json({
       id: user.id,
@@ -38,6 +42,9 @@ export async function GET() {
       name: user.name,
       role: user.role,
       timezone: user.timezone,
+      // Additive: Business Phone module visibility. Clients that don't know this
+      // field ignore it (backward-compatible); the API still enforces 402.
+      businessPhone: { entitled: businessPhoneEntitled },
       // Phase 17I-5 — surface the staff's uploaded avatar URL so the
       // Topbar profile chip + Sidebar footer can display the real
       // profile picture instead of always falling back to initials.
@@ -144,6 +151,7 @@ export async function PATCH(req: NextRequest) {
       isMicrosoftConnected(user.id),
     ]);
     const calendarConnected = googleConnected || microsoftConnected;
+    const businessPhoneEntitled = await isBusinessPhoneEntitled(user.tenantId, tenant?.plan ?? null);
 
     return NextResponse.json({
       id: updated.id,
@@ -151,6 +159,7 @@ export async function PATCH(req: NextRequest) {
       name: updated.name,
       role: updated.role,
       timezone: updated.timezone,
+      businessPhone: { entitled: businessPhoneEntitled },
       avatarUrl: updated.avatarUrl ?? null,
       googleConnected,
       microsoftConnected,
