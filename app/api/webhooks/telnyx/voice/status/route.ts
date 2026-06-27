@@ -12,13 +12,23 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * POST /api/webhooks/telnyx/voice/status — Business Line call status callbacks.
+ * POST /api/webhooks/telnyx/voice/status — Business Phone call status callbacks.
  *
  * Flag-gated. While OFF this just acks (200). While ON it verifies the Telnyx
  * signature, dedupes by telnyx_event_id (idempotent), advances the call log's
  * status monotonically (never regressing a completed call), computes duration +
  * billable seconds, and rolls the usage counters for the month. Status callbacks
  * never return TeXML — only a 2xx ack.
+ *
+ * Serves BOTH directions. Correlation is by the stable telnyx_call_session_id,
+ * so it is direction-agnostic:
+ *   - inbound forwarding: the DID leg's session.
+ *   - outbound bridge (P1.0): the originated STAFF-leg session. The customer leg
+ *     is dialed via the bridge <Dial> under that same parent session, so its
+ *     outcome (DialCallStatus/DialCallDuration) updates the SAME outbound log.
+ * The bridged conversation is therefore counted ONCE on its first terminal
+ * transition (planStatusUpdate guards becameTerminal), so the two legs never
+ * double-count usage; the per-minute cost estimate already models two legs.
  */
 export async function POST(req: NextRequest) {
   const raw = await req.text();

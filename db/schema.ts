@@ -2823,6 +2823,18 @@ export const phoneCallLogs = pgTable(
     forwardedToNumber: varchar("forwarded_to_number", { length: 40 }),
     // 'ringing'|'answered'|'completed'|'missed'|'failed'|'rejected'|'no_forwarding'
     status: varchar("status", { length: 20 }).notNull().default("ringing"),
+    // ── Outbound bridge attribution (migration 0078). All nullable; only
+    //    outbound bridge calls populate them, inbound rows leave them NULL. ──
+    placedByUserId: uuid("placed_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    customerId: uuid("customer_id").references(() => customers.id, {
+      onDelete: "set null",
+    }),
+    callPurpose: varchar("call_purpose", { length: 40 }), // new_call|callback_missed|customer_call
+    // Self-reference (two-leg correlation). The FK is declared in migration
+    // 0078; kept as a plain column here to avoid a circular type reference.
+    parentCallLogId: uuid("parent_call_log_id"),
     startedAt: timestamp("started_at", { withTimezone: true }),
     answeredAt: timestamp("answered_at", { withTimezone: true }),
     endedAt: timestamp("ended_at", { withTimezone: true }),
@@ -2841,6 +2853,7 @@ export const phoneCallLogs = pgTable(
     tenantStartedIdx: index("phone_call_logs_tenant_started_idx").on(t.tenantId, t.startedAt),
     statusIdx: index("phone_call_logs_status_idx").on(t.status),
     // Partial unique (session upsert key WHERE NOT NULL) is in migration 0077.
+    // Partial indexes on customer_id / parent_call_log_id are in migration 0078.
   })
 );
 

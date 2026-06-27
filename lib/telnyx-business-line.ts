@@ -25,8 +25,13 @@ export type BusinessLineConfig = {
   enabled: boolean;
   /** Telnyx Ed25519 public key (base64). Required only when enabled. */
   publicKey: string | null;
-  /** Telnyx API key — NOT used in this increment (no outbound API calls yet). */
+  /** Telnyx API key (Bearer). Required to PLACE an outbound bridge leg (P1.0);
+   *  still unused for inbound forwarding, which is purely TeXML-response driven. */
   apiKey: string | null;
+  /** Telnyx TeXML Application id used to originate the outbound staff leg
+   *  (POST /v2/texml/calls/{id}). Required to place a bridge call; optional on
+   *  the type so inbound-only config fixtures need not set it. */
+  texmlAppId?: string | null;
   /** Replay window for webhook timestamps, seconds. */
   replayToleranceSeconds: number;
 };
@@ -41,6 +46,7 @@ export function readBusinessLineConfig(
     enabled,
     publicKey: env.TELNYX_PUBLIC_KEY?.trim() || null,
     apiKey: env.TELNYX_API_KEY?.trim() || null,
+    texmlAppId: env.TELNYX_TEXML_APP_ID?.trim() || null,
     replayToleranceSeconds:
       Number.isFinite(tol) && tol > 0 ? tol : DEFAULT_REPLAY_TOLERANCE_SECONDS,
   };
@@ -214,6 +220,14 @@ export function selectCallerId(args: {
 /** Build the status-callback URL Telnyx should post call events to. */
 export function buildStatusCallbackUrl(baseUrl: string): string {
   return `${baseUrl.replace(/\/+$/, "")}/api/webhooks/telnyx/voice/status`;
+}
+
+/** Build the outbound-bridge TeXML URL Telnyx fetches when the staff leg
+ *  answers. It returns the customer-leg <Dial> (see the bridge webhook route).
+ *  The routing target (customer + business caller ID) is carried as query
+ *  params + an HMAC, NOT in the signed body. */
+export function buildBridgeCallbackUrl(baseUrl: string): string {
+  return `${baseUrl.replace(/\/+$/, "")}/api/webhooks/telnyx/voice/bridge`;
 }
 
 // ─── Defensive event parser ─────────────────────────────────────────────────
