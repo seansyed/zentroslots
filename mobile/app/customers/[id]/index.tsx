@@ -41,6 +41,13 @@ import {
   useCustomer,
   useUnarchiveCustomer,
 } from "@/hooks/useCustomers";
+import { useProfile } from "@/hooks/useProfile";
+import { phoneApi } from "@/api/phone";
+import {
+  canCallCustomerViaBusinessPhone,
+  phoneCallErrorMessage,
+  OUTBOUND_CALL_SUCCESS_MESSAGE,
+} from "@/lib/businessPhone";
 import { colors, layout, radius, spacing, typography } from "@/theme";
 
 import type { Appointment, BookingStatus } from "@/api/appointments";
@@ -203,6 +210,29 @@ export default function CustomerDetailScreen() {
   const [editOpen, setEditOpen] = React.useState(false);
   const archiveMut = useArchiveCustomer(id ?? "");
   const unarchiveMut = useUnarchiveCustomer(id ?? "");
+
+  // P1.3.1 — Business Phone "Call via Business Phone" (bridge-based).
+  const { data: profile } = useProfile();
+  const [callingBiz, setCallingBiz] = React.useState(false);
+  const showBizCall = canCallCustomerViaBusinessPhone(profile?.businessPhone, customer?.phone);
+
+  async function onCallViaBusinessPhone() {
+    if (!id) return;
+    void Haptics.selectionAsync().catch(() => {});
+    setCallingBiz(true);
+    try {
+      // Prefer the customerId path — the server resolves the phone tenant-scoped
+      // and presents the BUSINESS number as caller ID (never the staff phone).
+      await phoneApi.placeCall({ customerId: id, callPurpose: "customer_call" });
+      Alert.alert("Calling you now", OUTBOUND_CALL_SUCCESS_MESSAGE);
+    } catch (e) {
+      const status = e instanceof ApiError ? e.status : 0;
+      const serverMsg = e instanceof ApiError ? (e.data as { error?: string } | undefined)?.error : null;
+      Alert.alert("Couldn't place call", phoneCallErrorMessage(status, serverMsg));
+    } finally {
+      setCallingBiz(false);
+    }
+  }
 
   function onArchiveToggle() {
     if (!customer) return;
@@ -445,6 +475,25 @@ export default function CustomerDetailScreen() {
                   </>
                 ) : null}
               </View>
+              {/* Business Phone — bridge call. Hidden unless entitled + access +
+                  can place calls + a US/CA-valid customer phone. Customer sees
+                  the ZentroMeet business number, never the staff personal phone. */}
+              {showBizCall ? (
+                <View style={{ marginTop: spacing.sm }}>
+                  <Button
+                    label="Call via Business Phone"
+                    variant="primary"
+                    size="md"
+                    fullWidth
+                    loading={callingBiz}
+                    onPress={onCallViaBusinessPhone}
+                    leftIcon={<Ionicons name="call" size={16} color={colors.inkOnBrand} />}
+                  />
+                  <AppText variant="caption" color="muted" align="center" style={{ marginTop: spacing.xs }}>
+                    We&apos;ll ring your phone first. The customer sees your business number.
+                  </AppText>
+                </View>
+              ) : null}
             </SectionFade>
 
             {/* Stats */}

@@ -115,6 +115,21 @@ export function canShowCustomerCallButton(args: {
   );
 }
 
+/**
+ * Full gate for the customer-detail "Call via Business Phone" action (P1.3.1):
+ * the tenant must be entitled, the user must have phone access AND be able to
+ * place calls, and the customer must have a US/Canada-valid phone number. Hidden
+ * (false) otherwise — no locked button, no upsell.
+ */
+export function canCallCustomerViaBusinessPhone(
+  bp: { entitled?: boolean; hasPhoneAccess?: boolean; canPlaceCalls?: boolean } | null | undefined,
+  phone: string | null | undefined,
+): boolean {
+  if (bp?.entitled !== true || bp?.hasPhoneAccess !== true || bp?.canPlaceCalls !== true) return false;
+  if (!phone || phone.trim() === "") return false;
+  return validateDialInput(phone).ok;
+}
+
 // ── Outbound call messaging ──
 
 export const OUTBOUND_CALL_SUCCESS_MESSAGE =

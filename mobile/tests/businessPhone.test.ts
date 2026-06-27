@@ -12,6 +12,7 @@ import assert from "node:assert/strict";
 import {
   shouldShowPhoneTab,
   canShowCustomerCallButton,
+  canCallCustomerViaBusinessPhone,
   validateDialInput,
   dialPreview,
   formatNanpForDisplay,
@@ -39,6 +40,29 @@ test("customer call action requires entitled + canPlaceCalls + a phone", () => {
   assert.equal(canShowCustomerCallButton({ entitled: true, canPlaceCalls: false, phone: "+14155550182" }), false);
   assert.equal(canShowCustomerCallButton({ entitled: true, canPlaceCalls: true, phone: null }), false);
   assert.equal(canShowCustomerCallButton({ entitled: false, canPlaceCalls: true, phone: "+14155550182" }), false);
+});
+
+// ── customer-detail "Call via Business Phone" gate (P1.3.1) ──
+test("customer call action shown only when fully entitled + valid US/CA phone", () => {
+  const ok = { entitled: true, hasPhoneAccess: true, canPlaceCalls: true };
+  const phone = "+14155550182";
+  assert.equal(canCallCustomerViaBusinessPhone(ok, phone), true);
+  // hidden when not entitled
+  assert.equal(canCallCustomerViaBusinessPhone({ ...ok, entitled: false }, phone), false);
+  // hidden when no phone access
+  assert.equal(canCallCustomerViaBusinessPhone({ ...ok, hasPhoneAccess: false }, phone), false);
+  // hidden when cannot place calls
+  assert.equal(canCallCustomerViaBusinessPhone({ ...ok, canPlaceCalls: false }, phone), false);
+  // hidden when customer has no phone
+  assert.equal(canCallCustomerViaBusinessPhone(ok, null), false);
+  assert.equal(canCallCustomerViaBusinessPhone(ok, "   "), false);
+  // hidden when customer phone is invalid / international / emergency
+  assert.equal(canCallCustomerViaBusinessPhone(ok, "+1555"), false);
+  assert.equal(canCallCustomerViaBusinessPhone(ok, "+447911123456"), false);
+  assert.equal(canCallCustomerViaBusinessPhone(ok, "911"), false);
+  // fail-closed on missing businessPhone snapshot
+  assert.equal(canCallCustomerViaBusinessPhone(null, phone), false);
+  assert.equal(canCallCustomerViaBusinessPhone(undefined, phone), false);
 });
 
 // ── dial validation (call button disabled until valid) ──
