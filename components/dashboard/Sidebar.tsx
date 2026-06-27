@@ -177,7 +177,7 @@ function buildNav(
       role,
       hasPhoneAccess: businessPhone?.hasPhoneAccess === true,
     })
-      ? [{ label: "Phone", href: "/dashboard/phone", icon: Phone }]
+      ? [{ label: "Business Phone", href: "/dashboard/phone", icon: Phone }]
       : []),
     { label: "Tasks",         href: "/dashboard/tasks",          icon: Flag },
     { label: "Notifications", href: "/dashboard/notifications",  icon: Bell },

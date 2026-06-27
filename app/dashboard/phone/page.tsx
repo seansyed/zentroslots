@@ -50,8 +50,8 @@ export default async function PhonePage() {
         plan: tenant.currentPlan,
         logoUrl: tenant.logoUrl,
       }}
-      title="Phone"
-      crumbs={[{ label: "Dashboard", href: "/dashboard" }, { label: "Phone" }]}
+      title="Business Phone"
+      crumbs={[{ label: "Dashboard", href: "/dashboard" }, { label: "Business Phone" }]}
     >
       {/* viewerRole drives operator-only sections (call log + staff access). */}
       <PhoneClient viewerRole={user.role} />

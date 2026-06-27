@@ -23,6 +23,10 @@ import {
   staffPhoneNumberLabel,
   staffAccessStatusLabel,
   STAFF_PHONE_PRIVACY_NOTE,
+  BUSINESS_PHONE_TABS,
+  businessPhoneTabLabel,
+  CLICK_TO_CALL_EXPLAINER,
+  SOFTPHONE_COMING_COPY,
 } from "../lib/business-phone-ui";
 
 // ── sidebar / page visibility ──────────────────────────────────────
@@ -144,4 +148,24 @@ test("staff access status label reflects enabled / can-place state", () => {
 test("customer caller-ID copy is correct (staff privacy note)", () => {
   assert.match(STAFF_PHONE_PRIVACY_NOTE, /Customers see your ZentroMeet business number/);
   assert.match(STAFF_PHONE_PRIVACY_NOTE, /only to connect staff to outbound Business Phone calls/);
+});
+
+// ── honest relabel / tabs (P1.2.A) ─────────────────────────────────
+test("Business Phone tabs are forwarding / click-to-call / softphone", () => {
+  assert.deepEqual([...BUSINESS_PHONE_TABS], ["forwarding", "click_to_call", "softphone"]);
+  assert.equal(businessPhoneTabLabel("forwarding"), "Forwarding");
+  assert.equal(businessPhoneTabLabel("click_to_call"), "Click-to-Call");
+  assert.equal(businessPhoneTabLabel("softphone"), "Softphone");
+});
+
+test("click-to-call copy makes clear it is NOT in-browser talking (not a softphone)", () => {
+  assert.match(CLICK_TO_CALL_EXPLAINER, /calls your phone first/i);
+  assert.match(CLICK_TO_CALL_EXPLAINER, /not in the browser/i);
+  // never call the Phase 1 feature a softphone
+  assert.doesNotMatch(CLICK_TO_CALL_EXPLAINER, /softphone/i);
+});
+
+test("softphone placeholder copy says coming/not available — no false claim", () => {
+  assert.match(SOFTPHONE_COMING_COPY, /Phase 2/);
+  assert.match(SOFTPHONE_COMING_COPY, /not available yet/i);
 });

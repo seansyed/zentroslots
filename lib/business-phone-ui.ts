@@ -42,6 +42,34 @@ export function canManageStaffAccess(role: string): boolean {
 export const STAFF_PHONE_PRIVACY_NOTE =
   "Staff phone numbers are used only to connect staff to outbound Business Phone calls. Customers see your ZentroMeet business number.";
 
+// ─── Business Phone page tabs (P1.2.A relabel) ──────────────────────────────
+//
+// The deployed Phase 1 feature is inbound forwarding + a bridge "click-to-call"
+// — it is NOT a softphone (you can't talk in the browser yet). These tabs keep
+// the labels honest: the real in-browser softphone is Phase 2 (not available).
+
+export const BUSINESS_PHONE_TABS = ["forwarding", "click_to_call", "softphone"] as const;
+export type BusinessPhoneTab = (typeof BUSINESS_PHONE_TABS)[number];
+
+export function businessPhoneTabLabel(tab: BusinessPhoneTab): string {
+  switch (tab) {
+    case "forwarding":
+      return "Forwarding";
+    case "click_to_call":
+      return "Click-to-Call";
+    case "softphone":
+      return "Softphone";
+  }
+}
+
+/** Honest one-liner for the click-to-call flow — makes clear it is NOT a softphone. */
+export const CLICK_TO_CALL_EXPLAINER =
+  "ZentroMeet calls your phone first, then connects the customer — you talk on your phone, not in the browser.";
+
+/** Placeholder copy for the not-yet-built browser softphone (Phase 2). */
+export const SOFTPHONE_COMING_COPY =
+  "Talk to customers directly in your browser — no second phone needed. Coming in Phase 2; not available yet.";
+
 /**
  * Display label for a staff member's bridge number in the admin table. NEVER
  * returns a full number — only the masked form or "Not set" — so a personal
