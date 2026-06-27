@@ -230,6 +230,39 @@ export function buildBridgeCallbackUrl(baseUrl: string): string {
   return `${baseUrl.replace(/\/+$/, "")}/api/webhooks/telnyx/voice/bridge`;
 }
 
+// ─── Dark webhook diagnostic (P1.x) ─────────────────────────────────────────
+//
+// Safe, SECRETS-FREE summary of a webhook request for debugging signature
+// failures. Returns ONLY: route name, whether the signature/timestamp headers
+// were present (booleans, never the values), the raw body length (a number, not
+// the body), and the verification result string. NEVER includes the raw
+// signature, the public key, the API key, phone numbers, or any body content.
+// Gated by the caller behind TELNYX_WEBHOOK_DIAG so it's off by default.
+
+export type WebhookDiag = {
+  route: string;
+  hasSignature: boolean;
+  hasTimestamp: boolean;
+  bodyLength: number;
+  result: string;
+};
+
+export function summarizeWebhookRequest(args: {
+  route: string;
+  signature: string | null | undefined;
+  timestamp: string | null | undefined;
+  bodyLength: number;
+  result: string;
+}): WebhookDiag {
+  return {
+    route: args.route,
+    hasSignature: Boolean(args.signature),
+    hasTimestamp: Boolean(args.timestamp),
+    bodyLength: typeof args.bodyLength === "number" && args.bodyLength >= 0 ? args.bodyLength : 0,
+    result: args.result,
+  };
+}
+
 // ─── Defensive event parser ─────────────────────────────────────────────────
 
 export type TelnyxCallEvent = {

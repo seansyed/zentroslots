@@ -10,7 +10,6 @@ import { secondsToBillableMinutes } from "@/lib/business-line";
 import { periodForDate } from "@/lib/business-line-view";
 import {
   readBusinessLineConfig,
-  buildStatusCallbackUrl,
   buildBridgeCallbackUrl,
 } from "@/lib/telnyx-business-line";
 import {
@@ -148,12 +147,14 @@ export async function POST(req: NextRequest) {
       `${buildBridgeCallbackUrl(appBaseUrl)}?` +
       new URLSearchParams({ to: decision.customerNumber, cid: decision.callerId, t: token }).toString();
 
+    // No per-call StatusCallback — outbound status is reported via the TeXML
+    // app's configured status_callback (Ed25519-signed) → /voice/status, the
+    // same verified path as inbound. (P1.x signature fix.)
     const result = await originateBridgeCall({
       config,
       to: decision.staffNumber,
       from: decision.callerId,
       bridgeUrl,
-      statusCallbackUrl: buildStatusCallbackUrl(appBaseUrl),
       ringTimeoutSeconds: STAFF_RING_TIMEOUT_SECONDS,
     });
     if (!result.ok) {

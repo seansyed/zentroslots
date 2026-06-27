@@ -4,7 +4,7 @@ import { eq, sql } from "drizzle-orm";
 import { db } from "@/db/client";
 import { phoneCallLogs, phoneCallEvents, phoneUsageMonthly } from "@/db/schema";
 import { type CallStatus } from "@/lib/business-line";
-import { readBusinessLineConfig } from "@/lib/telnyx-business-line";
+import { readBusinessLineConfig, summarizeWebhookRequest } from "@/lib/telnyx-business-line";
 import { periodForDate } from "@/lib/business-line-view";
 import { verifyAndParseInbound, planStatusUpdate, resolveAnsweredAt } from "@/lib/business-line-forwarding";
 
@@ -40,6 +40,26 @@ export async function POST(req: NextRequest) {
     signatureB64: req.headers.get("telnyx-signature-ed25519"),
     timestamp: req.headers.get("telnyx-timestamp"),
   });
+
+  // Dark diagnostic (P1.x) — secrets-free summary to debug signature failures.
+  // Off unless TELNYX_WEBHOOK_DIAG=true. Logs only header-presence booleans,
+  // body length, and the result string — never the signature, key, body, or
+  // phone numbers.
+  if (process.env.TELNYX_WEBHOOK_DIAG === "true") {
+    console.log(
+      "[telnyx/voice/status] diag " +
+        JSON.stringify(
+          summarizeWebhookRequest({
+            route: "voice/status",
+            signature: req.headers.get("telnyx-signature-ed25519"),
+            timestamp: req.headers.get("telnyx-timestamp"),
+            bodyLength: raw.length,
+            result: vp.ok ? "ok" : vp.reason,
+          }),
+        ),
+    );
+  }
+
   if (!vp.ok) {
     if (vp.reason === "disabled") return NextResponse.json({ ok: true, disabled: true });
     // Bad signature → do not process. Ack so Telnyx doesn't retry-storm.

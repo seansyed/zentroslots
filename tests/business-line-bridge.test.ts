@@ -29,9 +29,9 @@ import {
   maskPhoneNumber,
   type OutboundBridgeContext,
 } from "../lib/business-line-bridge";
-import { canOriginate, originateBridgeCall } from "../lib/telnyx-api";
+import { canOriginate, originateBridgeCall, buildOriginatePayload } from "../lib/telnyx-api";
 import { verifyAndParseInbound, planStatusUpdate } from "../lib/business-line-forwarding";
-import { type BusinessLineConfig } from "../lib/telnyx-business-line";
+import { summarizeWebhookRequest, type BusinessLineConfig } from "../lib/telnyx-business-line";
 import { readAddonActiveFlag } from "../lib/business-line-view";
 import { getPlan, meetsPlan } from "../lib/plans";
 
@@ -335,6 +335,43 @@ test("originateBridgeCall short-circuits (no fetch) when unconfigured", async ()
     bridgeUrl: "https://example.invalid/should-never-be-fetched",
   });
   assert.deepEqual(r, { ok: false, reason: "unconfigured" });
+});
+
+// ── P1.x: originate payload no longer sets a per-call StatusCallback ──
+test("buildOriginatePayload omits StatusCallback — outbound status uses the app-level callback", () => {
+  const p = buildOriginatePayload({ to: STAFF, from: BUSINESS, bridgeUrl: "https://app.test/bridge?to=x", ringTimeoutSeconds: 30 });
+  assert.equal(p.To, STAFF);
+  assert.equal(p.From, BUSINESS);
+  assert.equal(p.Url, "https://app.test/bridge?to=x");
+  assert.equal(p.UrlMethod, "POST");
+  assert.equal(p.Timeout, 30);
+  assert.equal("StatusCallback" in p, false); // the fix: no per-call status callback
+  assert.equal("StatusCallbackMethod" in p, false);
+});
+
+// ── P1.x: dark webhook diagnostic is secrets-free ──
+test("summarizeWebhookRequest exposes only safe metadata (no secrets/body)", () => {
+  const d = summarizeWebhookRequest({
+    route: "voice/status",
+    signature: "RAWSIG_must_not_leak",
+    timestamp: "1700000000",
+    bodyLength: 512,
+    result: "bad_signature",
+  });
+  assert.deepEqual(Object.keys(d).sort(), ["bodyLength", "hasSignature", "hasTimestamp", "result", "route"]);
+  assert.equal(d.hasSignature, true);
+  assert.equal(d.hasTimestamp, true);
+  assert.equal(d.bodyLength, 512);
+  assert.equal(d.result, "bad_signature");
+  const json = JSON.stringify(d);
+  assert.doesNotMatch(json, /RAWSIG_must_not_leak/); // raw signature never included
+  assert.doesNotMatch(json, /1700000000/); // raw timestamp value never included
+});
+
+test("summarizeWebhookRequest reports missing headers as false", () => {
+  const d = summarizeWebhookRequest({ route: "voice/status", signature: null, timestamp: null, bodyLength: 0, result: "missing_headers" });
+  assert.equal(d.hasSignature, false);
+  assert.equal(d.hasTimestamp, false);
 });
 
 // ── HMAC bridge token (URL-param integrity) ────────────────────────

@@ -19,6 +19,36 @@ export function canOriginate(config: BusinessLineConfig): boolean {
   return Boolean(config.enabled && config.apiKey && config.texmlAppId);
 }
 
+/**
+ * Build the TeXML originate (create-call) payload for the staff leg. PURE +
+ * testable.
+ *
+ * P1.x — IMPORTANT: we deliberately do NOT set a per-call `StatusCallback`.
+ * Call status for BOTH inbound and outbound flows through the TeXML
+ * Application's configured `status_callback` (→ /api/webhooks/telnyx/voice/status,
+ * Ed25519-signed, which our verifier handles). A per-call `StatusCallback` set
+ * here was delivered with a signature our Ed25519 verifier rejected
+ * (invalid_signature), so outbound calls never advanced past `ringing`. Relying
+ * on the app-level status_callback uses the one known-verified path.
+ */
+export function buildOriginatePayload(args: {
+  to: string;
+  from: string;
+  bridgeUrl: string;
+  ringTimeoutSeconds?: number;
+}): Record<string, string | number> {
+  const payload: Record<string, string | number> = {
+    To: args.to,
+    From: args.from,
+    Url: args.bridgeUrl,
+    UrlMethod: "POST",
+  };
+  if (args.ringTimeoutSeconds && args.ringTimeoutSeconds > 0) {
+    payload.Timeout = Math.floor(args.ringTimeoutSeconds);
+  }
+  return payload;
+}
+
 export type OriginateResult =
   | { ok: true; callSid: string | null; callSessionId: string | null }
   | { ok: false; reason: "disabled" | "unconfigured" | "telnyx_error" | "network_error"; detail?: string };
@@ -39,8 +69,6 @@ export async function originateBridgeCall(args: {
   from: string;
   /** TeXML URL fetched when the staff leg answers (carries customer + cid + token). */
   bridgeUrl: string;
-  /** Call-progress events callback (status/usage). */
-  statusCallbackUrl?: string | null;
   /** Staff-leg ring timeout (seconds). */
   ringTimeoutSeconds?: number;
 }): Promise<OriginateResult> {
@@ -48,19 +76,14 @@ export async function originateBridgeCall(args: {
   if (!config.enabled) return { ok: false, reason: "disabled" };
   if (!config.apiKey || !config.texmlAppId) return { ok: false, reason: "unconfigured" };
 
-  const payload: Record<string, string | number> = {
-    To: args.to,
-    From: args.from,
-    Url: args.bridgeUrl,
-    UrlMethod: "POST",
-  };
-  if (args.statusCallbackUrl) {
-    payload.StatusCallback = args.statusCallbackUrl;
-    payload.StatusCallbackMethod = "POST";
-  }
-  if (args.ringTimeoutSeconds && args.ringTimeoutSeconds > 0) {
-    payload.Timeout = Math.floor(args.ringTimeoutSeconds);
-  }
+  // No per-call StatusCallback — outbound status flows through the TeXML app's
+  // configured status_callback (Ed25519-signed). See buildOriginatePayload.
+  const payload = buildOriginatePayload({
+    to: args.to,
+    from: args.from,
+    bridgeUrl: args.bridgeUrl,
+    ringTimeoutSeconds: args.ringTimeoutSeconds,
+  });
 
   let res: Response;
   try {
