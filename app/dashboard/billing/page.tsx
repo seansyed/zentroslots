@@ -74,6 +74,8 @@ import {
 import { billingConfigSnapshot, isStripeConfigured, priceIdFor } from "@/lib/stripe";
 import BillingActions from "@/components/BillingActions";
 import BillingComparisonDrawer from "@/components/dashboard/BillingComparisonDrawer";
+import BusinessPhoneAddonCard from "@/components/dashboard/BusinessPhoneAddonCard";
+import { getBusinessPhoneStatus } from "@/lib/business-phone-status";
 import Shell from "@/components/dashboard/Shell";
 import { PremiumCard } from "@/components/ui/Card";
 import { FadeIn } from "@/components/ui/Motion";
@@ -157,6 +159,17 @@ export default async function BillingPage(props: {
   const hasSubscription = Boolean(tenant.stripeSubscriptionId);
   const subscriptionStatus = tenant.subscriptionStatus ?? null;
   const trialEnd = tenant.trialEnd ? new Date(tenant.trialEnd).toISOString() : null;
+
+  // Phase 4 — Business Phone add-on status (admin card). Server-computed safe
+  // DTO (no Stripe/Telnyx ids). Card is shown only to admins AND only when the
+  // add-on price is configured (dark otherwise → hidden).
+  const bpStatus = await getBusinessPhoneStatus({
+    id: tenant.id,
+    currentPlan: tenant.currentPlan,
+    subscriptionStatus: tenant.subscriptionStatus,
+    stripeSubscriptionId: tenant.stripeSubscriptionId,
+  });
+  const showBusinessPhoneCard = isAdmin && bpStatus.addonConfigured;
 
   return (
     <Shell
@@ -252,6 +265,22 @@ export default async function BillingPage(props: {
             isAdmin={isAdmin}
           />
         </FadeIn>
+
+        {/* ── Business Phone add-on (admin-only; hidden when dark) ── */}
+        {showBusinessPhoneCard && (
+          <FadeIn delay={2}>
+            <div>
+              <SectionHead
+                eyebrow="Add-on"
+                title="Business Phone"
+                hint="A dedicated business number with inbound forwarding + click-to-call. Softphone coming soon."
+              />
+              <div className="mt-3">
+                <BusinessPhoneAddonCard status={bpStatus} />
+              </div>
+            </div>
+          </FadeIn>
+        )}
 
         {/* ── Monthly / Yearly toggle + Compare drawer trigger ───── */}
         <FadeIn delay={3}>

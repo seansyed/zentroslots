@@ -22,6 +22,7 @@ import { db } from "@/db/client";
 import { tenants, users } from "@/db/schema";
 import { getSession } from "@/lib/auth";
 import { getUserBusinessPhoneVisibility } from "@/lib/business-phone-access";
+import { getBusinessPhoneStatus } from "@/lib/business-phone-status";
 import Shell from "@/components/dashboard/Shell";
 import PhoneClient from "@/components/dashboard/PhoneClient";
 
@@ -41,6 +42,15 @@ export default async function PhonePage() {
   const vis = await getUserBusinessPhoneVisibility(tenant.id, user.id, user.role, tenant.currentPlan);
   if (!vis.hasPhoneAccess) redirect("/dashboard");
 
+  // Phase 4 — setup state (setup_pending / disabled / cap_reached / active) so
+  // the client shows the right banner and never fake controls.
+  const status = await getBusinessPhoneStatus({
+    id: tenant.id,
+    currentPlan: tenant.currentPlan,
+    subscriptionStatus: tenant.subscriptionStatus,
+    stripeSubscriptionId: tenant.stripeSubscriptionId,
+  });
+
   return (
     <Shell
       user={{ name: user.name, email: user.email, role: user.role }}
@@ -53,8 +63,9 @@ export default async function PhonePage() {
       title="Business Phone"
       crumbs={[{ label: "Dashboard", href: "/dashboard" }, { label: "Business Phone" }]}
     >
-      {/* viewerRole drives operator-only sections (call log + staff access). */}
-      <PhoneClient viewerRole={user.role} />
+      {/* viewerRole drives operator-only sections (call log + staff access).
+          setupState/capReached drive the Phase 4 state banners. */}
+      <PhoneClient viewerRole={user.role} setupState={status.setupState} capReached={status.capReached} />
     </Shell>
   );
 }

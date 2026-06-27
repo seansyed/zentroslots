@@ -87,6 +87,19 @@ export function readEntitlementSource(
   return null;
 }
 
+/** Whether the Stripe webhook recorded the add-on line item as present
+ *  (metadata.businessPhoneAddon.subscribed === true). Used to distinguish a
+ *  billing-suspended tenant from one that never subscribed. */
+export function readAddonSubscribedFlag(metadata: unknown): boolean {
+  if (metadata && typeof metadata === "object" && !Array.isArray(metadata)) {
+    const a = (metadata as Record<string, unknown>).businessPhoneAddon;
+    if (a && typeof a === "object" && !Array.isArray(a)) {
+      return (a as Record<string, unknown>).subscribed === true;
+    }
+  }
+  return false;
+}
+
 // ── Add-on Price ID mapping (server-side, env-backed) ───────────────────────
 // SERVER-SIDE ONLY — never imported into client code. Lives here (not lib/stripe)
 // so it stays free of DB imports and is unit-testable. lib/stripe re-exports

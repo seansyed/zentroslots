@@ -20,7 +20,9 @@ import {
   isSuspendedSubscriptionStatus,
   assignEnabledState,
   canManuallyEnable,
+  shapeBusinessPhoneStatus,
 } from "../lib/business-phone-admin";
+import { readAddonSubscribedFlag } from "../lib/business-phone-addon";
 
 const BIZ = "+14155550123";
 const FWD = "+16475550123";
@@ -153,4 +155,134 @@ test("pending route: filters to entitled tenants without an active number", () =
   assert.match(src, /readAddonActiveFlag/);
   assert.match(src, /hasActiveNumber/);
   assert.doesNotMatch(src, /from ["']@\/lib\/telnyx/);
+});
+
+// ════════════════════════════════════════════════════════════════════
+// Phase 4 — client-facing status shaper + billing/Phone UI contracts
+// ════════════════════════════════════════════════════════════════════
+function statusInput(over: Partial<Parameters<typeof shapeBusinessPhoneStatus>[0]> = {}) {
+  return {
+    planEligible: true,
+    addonActive: true,
+    manualSource: false,
+    addonSubscribed: true,
+    businessNumber: "+14155550123",
+    settingsEnabled: true,
+    monthlyMinuteCap: 200,
+    minutesUsed: 0,
+    subscriptionStatus: "active" as string | null,
+    baseSubscriptionActive: true,
+    addonConfigured: true,
+    ...over,
+  };
+}
+
+test("status: entitled + assigned + enabled → active, number is MASKED (never raw)", () => {
+  const s = shapeBusinessPhoneStatus(statusInput());
+  assert.equal(s.setupState, "active");
+  assert.equal(s.entitled, true);
+  assert.equal(s.numberAssigned, true);
+  assert.equal(s.capReached, false);
+  assert.equal(s.suspended, false);
+  assert.match(s.businessNumberMasked ?? "", /0123$/);
+  assert.doesNotMatch(s.businessNumberMasked ?? "", /4155550123/); // never the full number
+});
+
+test("status: entitled but no number → setup_pending, masked null", () => {
+  const s = shapeBusinessPhoneStatus(statusInput({ businessNumber: null }));
+  assert.equal(s.setupState, "setup_pending");
+  assert.equal(s.numberAssigned, false);
+  assert.equal(s.businessNumberMasked, null);
+});
+
+test("status: subscribed but billing-suspended → suspended", () => {
+  const s = shapeBusinessPhoneStatus(
+    statusInput({ addonActive: false, addonSubscribed: true, subscriptionStatus: "unpaid" }),
+  );
+  assert.equal(s.entitled, false);
+  assert.equal(s.suspended, true);
+  assert.equal(s.setupState, "suspended");
+});
+
+test("status: cap reached → cap_reached + capReached flag", () => {
+  const s = shapeBusinessPhoneStatus(statusInput({ minutesUsed: 200, monthlyMinuteCap: 200 }));
+  assert.equal(s.capReached, true);
+  assert.equal(s.setupState, "cap_reached");
+});
+
+test("status: disabled by operator → disabled", () => {
+  const s = shapeBusinessPhoneStatus(statusInput({ settingsEnabled: false }));
+  assert.equal(s.setupState, "disabled");
+});
+
+test("status exposes only safe fields — no raw number, no Stripe/Telnyx ids", () => {
+  const s = shapeBusinessPhoneStatus(statusInput());
+  assert.deepEqual(
+    Object.keys(s).sort(),
+    [
+      "addonConfigured",
+      "addonSubscribed",
+      "baseSubscriptionActive",
+      "businessNumberMasked",
+      "capReached",
+      "entitled",
+      "includedMinutes",
+      "minutesUsed",
+      "numberAssigned",
+      "setupState",
+      "subscriptionStatus",
+      "suspended",
+    ].sort(),
+  );
+  const json = JSON.stringify(s);
+  assert.doesNotMatch(json, /4155550123/); // full number never present
+  assert.doesNotMatch(json, /sk_|whsec_|apiKey|stripeSubscriptionId|stripeCustomerId/i);
+});
+
+test("readAddonSubscribedFlag reads metadata.businessPhoneAddon.subscribed", () => {
+  assert.equal(readAddonSubscribedFlag({ businessPhoneAddon: { subscribed: true } }), true);
+  assert.equal(readAddonSubscribedFlag({ businessPhoneAddon: { subscribed: false } }), false);
+  assert.equal(readAddonSubscribedFlag({ businessPhoneAddon: {} }), false);
+  assert.equal(readAddonSubscribedFlag({}), false);
+  assert.equal(readAddonSubscribedFlag(null), false);
+});
+
+// ── UI source-contract guards ───────────────────────────────────────
+function fileSrc(rel: string): string {
+  return readFileSync(join(process.cwd(), rel), "utf8");
+}
+
+test("billing add-on card: posts add/remove, handles 403/409/503, no secrets", () => {
+  const src = fileSrc("components/dashboard/BusinessPhoneAddonCard.tsx");
+  assert.match(src, /\/api\/tenant\/phone\/addon/);
+  assert.match(src, /action:\s*"add"|act\("add"\)/);
+  assert.match(src, /act\("remove"\)|action:\s*"remove"/);
+  assert.match(src, /Subscribe to a base plan first/);
+  assert.match(src, /503/);
+  assert.match(src, /403/);
+  assert.doesNotMatch(src, /sk_|whsec_|TELNYX_API_KEY/i);
+});
+
+test("billing page renders the add-on card admin-only and only when configured", () => {
+  const src = fileSrc("app/dashboard/billing/page.tsx");
+  // gated on isAdmin AND addonConfigured
+  assert.match(src, /showBusinessPhoneCard\s*=\s*isAdmin\s*&&\s*bpStatus\.addonConfigured/);
+  assert.match(src, /showBusinessPhoneCard\s*&&/);
+});
+
+test("phone page passes server setupState/capReached to PhoneClient", () => {
+  const src = fileSrc("app/dashboard/phone/page.tsx");
+  assert.match(src, /getBusinessPhoneStatus/);
+  assert.match(src, /setupState=\{status\.setupState\}/);
+  assert.match(src, /capReached=\{status\.capReached\}/);
+});
+
+test("PhoneClient branches on setup_pending/suspended/disabled and gates calls on capReached", () => {
+  const src = fileSrc("components/dashboard/PhoneClient.tsx");
+  assert.match(src, /setupState === "setup_pending"/);
+  assert.match(src, /setupState === "suspended"/);
+  assert.match(src, /setupState === "disabled"/);
+  assert.match(src, /\|\| capReached/); // call buttons gated
+  // honest: still never claims the softphone is live
+  assert.match(src, /SOFTPHONE_COMING_COPY/);
 });

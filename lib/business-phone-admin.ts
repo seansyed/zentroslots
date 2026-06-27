@@ -11,6 +11,7 @@
 // N11/international are rejected (reusing the same validator the bridge uses).
 
 import { validateUSCanadaE164 } from "./business-line";
+import { maskPhoneNumber } from "./business-line-bridge";
 import { ADDON_SUSPENDED_STATUSES } from "./business-phone-addon";
 
 // ── assign input validation ─────────────────────────────────────────────────
@@ -141,4 +142,75 @@ export function assignEnabledState(args: {
  *  number already assigned. Disabling never needs entitlement. */
 export function canManuallyEnable(args: { entitledOrManual: boolean; numberAssigned: boolean }): boolean {
   return args.entitledOrManual && args.numberAssigned;
+}
+
+// ── client-facing safe status (Phase 4) ─────────────────────────────────────
+
+/** The safe Business Phone status surfaced to the tenant billing card + Phone
+ *  page. Contains NO Stripe IDs, NO Telnyx keys, NO secrets — only booleans,
+ *  the masked business number, and minute counters. */
+export type BusinessPhoneClientStatus = {
+  /** Add-on price configured server-side. When false the whole feature is dark. */
+  addonConfigured: boolean;
+  /** Plan + add-on active (or manual pilot). */
+  entitled: boolean;
+  /** Add-on line item present on the subscription (billing). */
+  addonSubscribed: boolean;
+  subscriptionStatus: string | null;
+  /** Tenant has a base subscription we can attach the add-on item to. */
+  baseSubscriptionActive: boolean;
+  numberAssigned: boolean;
+  /** Masked (••• ••• 1234) — never the full number to the client billing card. */
+  businessNumberMasked: string | null;
+  includedMinutes: number;
+  minutesUsed: number;
+  capReached: boolean;
+  suspended: boolean;
+  setupState: BusinessPhoneAdminSetupState;
+};
+
+/**
+ * Shape the tenant-facing Business Phone status from raw entitlement + usage
+ * inputs. PURE + testable. Emits ONLY safe fields (the business number is
+ * masked); never a Stripe/Telnyx id or secret.
+ */
+export function shapeBusinessPhoneStatus(input: {
+  planEligible: boolean;
+  addonActive: boolean;
+  manualSource: boolean;
+  addonSubscribed: boolean;
+  businessNumber: string | null;
+  settingsEnabled: boolean;
+  monthlyMinuteCap: number;
+  minutesUsed: number;
+  subscriptionStatus: string | null | undefined;
+  baseSubscriptionActive: boolean;
+  addonConfigured: boolean;
+}): BusinessPhoneClientStatus {
+  const entitled = (input.planEligible && input.addonActive) || input.manualSource;
+  const numberAssigned = Boolean(input.businessNumber);
+  const capReached = input.monthlyMinuteCap > 0 && input.minutesUsed >= input.monthlyMinuteCap;
+  const suspended =
+    !entitled && input.addonSubscribed && isSuspendedSubscriptionStatus(input.subscriptionStatus);
+  const setupState = resolveBusinessPhoneSetupState({
+    entitled,
+    numberAssigned,
+    settingsEnabled: input.settingsEnabled,
+    suspended,
+    capReached,
+  });
+  return {
+    addonConfigured: input.addonConfigured,
+    entitled,
+    addonSubscribed: input.addonSubscribed,
+    subscriptionStatus: input.subscriptionStatus ?? null,
+    baseSubscriptionActive: input.baseSubscriptionActive,
+    numberAssigned,
+    businessNumberMasked: maskPhoneNumber(input.businessNumber),
+    includedMinutes: input.monthlyMinuteCap,
+    minutesUsed: input.minutesUsed,
+    capReached,
+    suspended,
+    setupState,
+  };
 }

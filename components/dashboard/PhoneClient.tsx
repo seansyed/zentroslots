@@ -59,6 +59,7 @@ import {
   type BusinessPhoneTab,
 } from "@/lib/business-phone-ui";
 import StaffPhoneAccess from "@/components/dashboard/StaffPhoneAccess";
+import type { BusinessPhoneAdminSetupState } from "@/lib/business-phone-admin";
 
 type MeView = {
   hasBusinessPhone: boolean;
@@ -73,7 +74,17 @@ type MeView = {
 const CALL_FILTERS = ["all", "completed", "missed", "answered", "failed", "rejected"] as const;
 const KEYPAD = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "*", "0", "#"] as const;
 
-export default function PhoneClient({ viewerRole }: { viewerRole: string }) {
+export default function PhoneClient({
+  viewerRole,
+  setupState,
+  capReached,
+}: {
+  viewerRole: string;
+  /** Server-authoritative setup state — drives the Phase 4 banners. */
+  setupState: BusinessPhoneAdminSetupState;
+  /** Monthly included-minute cap reached → outbound is blocked server-side. */
+  capReached: boolean;
+}) {
   // Operators (admin/manager) see the workspace call log + staff access admin;
   // staff see only their own dialer + number setup.
   const isOperator = canManageStaffAccess(viewerRole);
@@ -219,6 +230,37 @@ export default function PhoneClient({ viewerRole }: { viewerRole: string }) {
     }
   }
 
+  // ── Phase 4 setup states (server-authoritative) ─────────────────
+  // Non-active states render a clear banner and NO working controls — never a
+  // fake dialer. (Hooks above always run; these returns are after them.)
+  if (setupState === "setup_pending") {
+    return (
+      <PhoneStateCard
+        tone="pending"
+        title="Business Phone is active — setup pending"
+        body="Your number setup is pending. ParaFort will assign your business number and forwarding line shortly. You'll be able to make and receive calls as soon as it's ready."
+      />
+    );
+  }
+  if (setupState === "suspended") {
+    return (
+      <PhoneStateCard
+        tone="alert"
+        title="Business Phone is suspended"
+        body="There's a billing issue with your subscription. Update your payment method on the Billing page to restore Business Phone."
+      />
+    );
+  }
+  if (setupState === "disabled") {
+    return (
+      <PhoneStateCard
+        tone="alert"
+        title="Business Phone is disabled"
+        body="Business Phone is currently turned off for your workspace. Contact support if you think this is a mistake."
+      />
+    );
+  }
+
   // ── render ───────────────────────────────────────────────────────
   if (meLoading) {
     return (
@@ -256,6 +298,17 @@ export default function PhoneClient({ viewerRole }: { viewerRole: string }) {
         Inbound forwarding and outbound <span className="font-medium text-ink">click-to-call</span> through your
         ZentroMeet business number. In-browser calling (softphone) is coming in Phase 2.
       </p>
+
+      {/* Cap reached — outbound blocked server-side; inbound still works. */}
+      {capReached && (
+        <div className="flex items-start gap-2.5 rounded-xl border border-red-200 bg-red-50 p-3.5 text-sm text-red-800">
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-600" strokeWidth={1.75} />
+          <p>
+            You&apos;ve reached this month&apos;s included-minute limit. Outbound calling is paused until your next
+            billing cycle. Inbound forwarding still works.
+          </p>
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="flex gap-1 border-b border-border">
@@ -416,7 +469,7 @@ export default function PhoneClient({ viewerRole }: { viewerRole: string }) {
                   </div>
 
                   <div className="flex flex-col items-stretch justify-center gap-3 sm:w-44">
-                    <Button variant="primary" onClick={onNewCall} disabled={placing || !me.canPlaceCalls} className="h-12">
+                    <Button variant="primary" onClick={onNewCall} disabled={placing || !me.canPlaceCalls || capReached} className="h-12">
                       {placing ? (
                         <Loader2 className="h-5 w-5 animate-spin" />
                       ) : (
@@ -472,7 +525,7 @@ export default function PhoneClient({ viewerRole }: { viewerRole: string }) {
                           <Button
                             variant="secondary"
                             onClick={() => onCallBack(c)}
-                            disabled={callingBackId === c.id || !me.canPlaceCalls}
+                            disabled={callingBackId === c.id || !me.canPlaceCalls || capReached}
                             className="h-8 shrink-0"
                           >
                             {callingBackId === c.id ? (
@@ -567,7 +620,7 @@ export default function PhoneClient({ viewerRole }: { viewerRole: string }) {
                                       <button
                                         type="button"
                                         onClick={() => onCallBack(c)}
-                                        disabled={callingBackId === c.id || !me.canPlaceCalls}
+                                        disabled={callingBackId === c.id || !me.canPlaceCalls || capReached}
                                         className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-brand-accent transition-colors hover:bg-brand-subtle disabled:opacity-50"
                                       >
                                         {callingBackId === c.id ? (
@@ -747,4 +800,44 @@ function formatTime(iso: string | null): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
   return d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
+
+/** Phase 4 — non-active state card (setup pending / disabled / suspended). No
+ *  working controls — honest about what's available. */
+function PhoneStateCard({
+  tone,
+  title,
+  body,
+}: {
+  tone: "pending" | "alert";
+  title: string;
+  body: string;
+}) {
+  return (
+    <div className="mx-auto max-w-2xl">
+      <Card>
+        <div className="flex flex-col items-center gap-3 py-8 text-center">
+          <span
+            className={cn(
+              "inline-flex h-12 w-12 items-center justify-center rounded-full",
+              tone === "pending" ? "bg-amber-50 text-amber-700" : "bg-surface-inset text-ink-subtle",
+            )}
+          >
+            {tone === "pending" ? (
+              <Hourglass className="h-6 w-6" strokeWidth={1.75} />
+            ) : (
+              <ShieldAlert className="h-6 w-6" strokeWidth={1.75} />
+            )}
+          </span>
+          <div>
+            <div className="text-base font-semibold text-ink">{title}</div>
+            <p className="mx-auto mt-1.5 max-w-sm text-sm text-ink-muted">{body}</p>
+          </div>
+          <Badge tone={tone === "pending" ? "amber" : "neutral"}>
+            {tone === "pending" ? "Setup pending" : "Unavailable"}
+          </Badge>
+        </div>
+      </Card>
+    </div>
+  );
 }
