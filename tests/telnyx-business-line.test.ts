@@ -85,7 +85,9 @@ test("texmlDial escapes interpolated values and presents callerId + <Number>", (
   assert.match(xml, /<Dial /);
   assert.match(xml, /callerId="\+1&lt;&amp;&gt;415"/);
   assert.match(xml, /timeLimit="600"/);
-  assert.match(xml, /action="https:\/\/x\.test\/cb\?a=1&amp;b=2"/);
+  // `action` is intentionally NOT emitted — TeXML `action` expects a TeXML
+  // response; status flows via the app-level Call-progress-events webhook.
+  assert.doesNotMatch(xml, /action=|method=/);
   assert.match(xml, /<Number>\+1415555&lt;&amp;&gt;&quot;&apos;0100<\/Number>/);
   // raw special chars must not survive unescaped inside the document body
   assert.ok(!/[<>&"']0100/.test(xml.replace(/&(amp|lt|gt|quot|apos);/g, "")));

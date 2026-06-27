@@ -165,7 +165,11 @@ export type DialResponseArgs = {
   forwardingNumber: string;
   /** E.164 caller ID to present (MVP: the tenant's business number). */
   callerId: string;
-  /** Optional status-callback URL Telnyx posts dial events to. */
+  /** Deprecated/unused: status is delivered via the TeXML app's "Call progress
+   *  events URL" (app-level webhook), NOT via a <Dial action>. In TeXML the
+   *  `action` attribute is the "what TeXML to run next" URL and expects a TeXML
+   *  response — pointing it at our JSON status route made Telnyx play an error
+   *  announcement after the dial. So we intentionally do NOT emit `action`. */
   statusCallbackUrl?: string | null;
   /** Optional hard per-call cap (seconds) for cost control. */
   timeLimitSeconds?: number;
@@ -173,18 +177,16 @@ export type DialResponseArgs = {
 
 /**
  * Build a TeXML <Dial> that bridges the inbound caller to the forwarding number.
- * PURE string builder — returning this from a webhook is what would forward a
- * call, but THIS INCREMENT'S ROUTES NEVER CALL IT (they return reject/disabled).
- * All interpolated values are XML-escaped.
+ * PURE string builder. All interpolated values are XML-escaped.
+ *
+ * No `action` attribute is emitted (see DialResponseArgs.statusCallbackUrl):
+ * call status flows through the app-level Call-progress-events webhook, so after
+ * the dial ends the parent call simply hangs up cleanly.
  */
 export function texmlDial(args: DialResponseArgs): string {
   const attrs: string[] = [`callerId="${escapeXml(args.callerId)}"`];
   if (args.timeLimitSeconds && args.timeLimitSeconds > 0) {
     attrs.push(`timeLimit="${Math.floor(args.timeLimitSeconds)}"`);
-  }
-  if (args.statusCallbackUrl) {
-    attrs.push(`action="${escapeXml(args.statusCallbackUrl)}"`);
-    attrs.push(`method="POST"`);
   }
   const number = escapeXml(args.forwardingNumber);
   return `${XML_DECL}<Response><Dial ${attrs.join(" ")}><Number>${number}</Number></Dial></Response>`;
