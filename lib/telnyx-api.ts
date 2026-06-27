@@ -112,18 +112,42 @@ export async function originateBridgeCall(args: {
     return { ok: false, reason: "telnyx_error", detail: `Telnyx ${res.status}: ${detail}`.slice(0, 500) };
   }
 
-  // TeXML create-call responses are Twilio-compatible; correlation ids live under
-  // a few possible keys depending on the API surface. Parse defensively.
-  let callSid: string | null = null;
-  let callSessionId: string | null = null;
-  try {
-    const data = (JSON.parse(text) as { data?: Record<string, unknown> }).data ?? {};
-    callSid = pickStr(data, "call_sid", "sid", "call_control_id", "call_leg_id");
-    callSessionId = pickStr(data, "call_session_id", "session_id");
-  } catch {
-    /* ids stay null — the status webhook can still correlate by what we stored */
+  // Resolve the call id used to correlate later status callbacks. The TeXML
+  // create-call response is Twilio-compatible (top-level `sid`/`CallSid`).
+  const { callSid, callSessionId } = parseOriginateResponse(text);
+  if (!callSid && !callSessionId) {
+    // Safe diagnostic only (no body / secrets). The leg was placed, but status
+    // callbacks won't have a stored id to correlate against.
+    console.warn("[phone/calls] originate ok but no call id found in response");
   }
   return { ok: true, callSid, callSessionId };
+}
+
+/**
+ * Parse the TeXML create-call (originate) response for the call id. PURE +
+ * testable. Telnyx's TeXML endpoint is Twilio-compatible, so the call id is the
+ * TOP-LEVEL `sid` / `CallSid`; we prefer that and fall back to the Call-Control
+ * `data.*` shape for back-compat. Never throws.
+ */
+export function parseOriginateResponse(text: string): { callSid: string | null; callSessionId: string | null } {
+  let obj: unknown;
+  try {
+    obj = JSON.parse(text);
+  } catch {
+    return { callSid: null, callSessionId: null };
+  }
+  const root = isRecord(obj) ? obj : {};
+  const data = isRecord(root.data) ? root.data : {};
+  const callSid =
+    pickStr(root, "sid", "CallSid", "call_sid", "call_control_id", "call_leg_id") ??
+    pickStr(data, "call_sid", "sid", "call_control_id", "call_leg_id");
+  const callSessionId =
+    pickStr(root, "call_session_id", "session_id") ?? pickStr(data, "call_session_id", "session_id");
+  return { callSid, callSessionId };
+}
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null;
 }
 
 function pickStr(obj: Record<string, unknown>, ...keys: string[]): string | null {

@@ -177,7 +177,10 @@ export async function POST(req: NextRequest) {
         placedByUserId: user.id,
         customerId,
         callPurpose,
-        telnyxCallSessionId: result.callSessionId,
+        // Correlate status callbacks by the call id Telnyx returns. TeXML status
+        // callbacks carry `CallSid`, which equals the originate response's
+        // top-level `sid`; store that (falling back to an explicit session id).
+        telnyxCallSessionId: result.callSessionId ?? result.callSid,
         telnyxCallControlId: result.callSid,
       } as typeof phoneCallLogs.$inferInsert)
       .returning({ id: phoneCallLogs.id });

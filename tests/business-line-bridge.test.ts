@@ -29,9 +29,10 @@ import {
   maskPhoneNumber,
   type OutboundBridgeContext,
 } from "../lib/business-line-bridge";
-import { canOriginate, originateBridgeCall, buildOriginatePayload } from "../lib/telnyx-api";
+import { canOriginate, originateBridgeCall, buildOriginatePayload, parseOriginateResponse } from "../lib/telnyx-api";
 import { verifyAndParseInbound, planStatusUpdate } from "../lib/business-line-forwarding";
-import { summarizeWebhookRequest, type BusinessLineConfig } from "../lib/telnyx-business-line";
+import { summarizeWebhookRequest, extractTelnyxCallEvent, type BusinessLineConfig } from "../lib/telnyx-business-line";
+import { normalizeCallStatus } from "../lib/business-line";
 import { readAddonActiveFlag } from "../lib/business-line-view";
 import { getPlan, meetsPlan } from "../lib/plans";
 
@@ -347,6 +348,86 @@ test("buildOriginatePayload omits StatusCallback — outbound status uses the ap
   assert.equal(p.Timeout, 30);
   assert.equal("StatusCallback" in p, false); // the fix: no per-call status callback
   assert.equal("StatusCallbackMethod" in p, false);
+});
+
+// ── P1.x.2: originate-response correlation id (Twilio-compatible) ──
+// The bug fixed here: the originate response's call id is the TOP-LEVEL `sid` /
+// `CallSid` (TeXML is Twilio-compatible), but the old parser only read
+// `response.data.*`, so it stored NULL and status callbacks could never match a
+// row. These tests prove the id is now read and that it lines up with what the
+// status webhook extracts as its correlation key.
+test("parseOriginateResponse reads the top-level Twilio `sid`", () => {
+  const r = parseOriginateResponse(JSON.stringify({ sid: "v3:CALLSID-top-1", status: "queued", to: "+1", from: "+1" }));
+  assert.equal(r.callSid, "v3:CALLSID-top-1");
+});
+
+test("parseOriginateResponse reads the top-level `CallSid`", () => {
+  const r = parseOriginateResponse(JSON.stringify({ CallSid: "CA-callsid-2" }));
+  assert.equal(r.callSid, "CA-callsid-2");
+});
+
+test("parseOriginateResponse still reads the legacy data.* fallback", () => {
+  const r = parseOriginateResponse(
+    JSON.stringify({ data: { call_sid: "cc-leg-3", call_session_id: "sess-3" } }),
+  );
+  assert.equal(r.callSid, "cc-leg-3");
+  assert.equal(r.callSessionId, "sess-3");
+});
+
+test("parseOriginateResponse never throws on garbage / empty bodies", () => {
+  assert.deepEqual(parseOriginateResponse("not json at all"), { callSid: null, callSessionId: null });
+  assert.deepEqual(parseOriginateResponse("{}"), { callSid: null, callSessionId: null });
+  assert.deepEqual(parseOriginateResponse("[]"), { callSid: null, callSessionId: null });
+  assert.deepEqual(parseOriginateResponse(""), { callSid: null, callSessionId: null });
+});
+
+test("the calls route stores telnyx_call_session_id from the top-level sid", () => {
+  // Mirror the route's persisted value exactly: `result.callSessionId ?? result.callSid`.
+  const parsed = parseOriginateResponse(JSON.stringify({ sid: "CA-store-4", status: "queued" }));
+  const storedSessionId = parsed.callSessionId ?? parsed.callSid; // → telnyx_call_session_id
+  assert.equal(storedSessionId, "CA-store-4");
+  assert.notEqual(storedSessionId, null); // the bug was NULL here
+});
+
+test("stored correlation id matches the status webhook's CallSid → events correlate", () => {
+  // 1) what the route stores when originate returns a top-level sid:
+  const parsed = parseOriginateResponse(JSON.stringify({ sid: "CA-correlate-5", status: "queued" }));
+  const storedSessionId = parsed.callSessionId ?? parsed.callSid;
+  // 2) what the status webhook extracts as its correlation key from a TeXML form:
+  const ev = extractTelnyxCallEvent(
+    new URLSearchParams({
+      CallSid: "CA-correlate-5",
+      DialCallStatus: "completed",
+      DialCallDuration: "95",
+      From: BUSINESS,
+      To: CUSTOMER,
+    }).toString(),
+  );
+  // they MUST be equal — that equality is the whole fix.
+  assert.equal(ev.callSessionId, storedSessionId);
+});
+
+test("a completed status event advances ringing → completed with duration/billable/usage", () => {
+  const ev = extractTelnyxCallEvent(
+    new URLSearchParams({
+      CallSid: "CA-correlate-6",
+      DialCallStatus: "completed",
+      DialCallDuration: "95",
+      From: BUSINESS,
+      To: CUSTOMER,
+    }).toString(),
+  );
+  assert.equal(normalizeCallStatus(ev.eventType), "completed");
+  const plan = planStatusUpdate({
+    currentStatus: "ringing",
+    incomingStatusRaw: ev.eventType,
+    durationSeconds: ev.durationSeconds,
+  });
+  assert.equal(plan?.nextStatus, "completed");
+  assert.equal(plan?.becameTerminal, true);
+  assert.equal(plan?.durationSeconds, 95);
+  assert.equal(plan?.billableSeconds, 120); // ceil(95/60)*60
+  assert.deepEqual(plan?.usageDelta, { answeredCalls: 1, missedCalls: 0, billableSeconds: 120, estimatedCostCents: 4 });
 });
 
 // ── P1.x: dark webhook diagnostic is secrets-free ──
