@@ -173,6 +173,9 @@ export type DialResponseArgs = {
   statusCallbackUrl?: string | null;
   /** Optional hard per-call cap (seconds) for cost control. */
   timeLimitSeconds?: number;
+  /** Optional ring timeout (seconds) — how long the forwarded leg rings before
+   *  Telnyx reports no-answer. Maps to TeXML <Dial timeout>. */
+  ringTimeoutSeconds?: number;
 };
 
 /**
@@ -187,6 +190,9 @@ export function texmlDial(args: DialResponseArgs): string {
   const attrs: string[] = [`callerId="${escapeXml(args.callerId)}"`];
   if (args.timeLimitSeconds && args.timeLimitSeconds > 0) {
     attrs.push(`timeLimit="${Math.floor(args.timeLimitSeconds)}"`);
+  }
+  if (args.ringTimeoutSeconds && args.ringTimeoutSeconds > 0) {
+    attrs.push(`timeout="${Math.floor(args.ringTimeoutSeconds)}"`);
   }
   const number = escapeXml(args.forwardingNumber);
   return `${XML_DECL}<Response><Dial ${attrs.join(" ")}><Number>${number}</Number></Dial></Response>`;

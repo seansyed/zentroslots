@@ -92,6 +92,9 @@ test("texmlForDecision: Dial only for the valid case, business number as callerI
   assert.match(dial, /callerId="\+14155550100"/);
   assert.match(dial, /<Number>\+16475550123<\/Number>/);
   assert.match(dial, /timeLimit="3600"/);
+  assert.match(dial, /timeout="30"/); // explicit ring timeout
+  // exact element shape (callerId, timeLimit, timeout — no action)
+  assert.match(dial, /<Dial callerId="\+14155550100" timeLimit="3600" timeout="30"><Number>\+16475550123<\/Number><\/Dial>/);
 
   for (const reason of ["line_disabled", "no_entitlement", "over_cap", "forwarding_loop"] as const) {
     const xml = texmlForDecision({ action: "reject", reason });

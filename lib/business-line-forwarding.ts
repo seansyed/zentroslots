@@ -33,6 +33,10 @@ import {
  *  control + a backstop against stuck calls. 1 hour. */
 export const MAX_CALL_SECONDS = 3600;
 
+/** How long the forwarded leg rings before Telnyx reports no-answer
+ *  (TeXML <Dial timeout>). */
+export const RING_TIMEOUT_SECONDS = 30;
+
 // ─── Inbound forwarding decision ────────────────────────────────────────────
 
 export type ForwardingRejectReason =
@@ -99,7 +103,7 @@ export function callLogStatusForDecision(d: ForwardingDecision): CallStatus {
  *  safe reject. Never includes any secret. */
 export function texmlForDecision(
   decision: ForwardingDecision,
-  opts: { statusCallbackUrl?: string | null; timeLimitSeconds?: number } = {},
+  opts: { statusCallbackUrl?: string | null; timeLimitSeconds?: number; ringTimeoutSeconds?: number } = {},
 ): string {
   if (decision.action === "dial") {
     return texmlDial({
@@ -107,6 +111,7 @@ export function texmlForDecision(
       callerId: decision.callerId,
       statusCallbackUrl: opts.statusCallbackUrl ?? null,
       timeLimitSeconds: opts.timeLimitSeconds ?? MAX_CALL_SECONDS,
+      ringTimeoutSeconds: opts.ringTimeoutSeconds ?? RING_TIMEOUT_SECONDS,
     });
   }
   if (decision.reason === "no_forwarding_number") return texmlNoForwarding();
