@@ -9,6 +9,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db/client";
 import { tenants, type Tenant } from "@/db/schema";
 import { getPlan, PLANS, type PlanId } from "@/lib/plans";
+import { pickFirstMatch, businessPhoneAddonPriceId, isBusinessPhoneAddonPrice } from "./business-phone-addon";
 
 let _stripe: Stripe | null = null;
 let _initTried = false;
@@ -147,6 +148,9 @@ export function billingConfigSnapshot(): {
       legacyMonthly: boolean;
     }
   >;
+  /** Phase 1 — whether the Business Phone add-on Price is wired. When false the
+   *  add-on is dark (no purchase path, no billing-driven entitlement). */
+  businessPhoneAddon: boolean;
 } {
   const planIds = Object.keys(PLANS) as PlanId[];
   const prices = {} as Record<
@@ -165,6 +169,7 @@ export function billingConfigSnapshot(): {
     stripeKey: !!process.env.STRIPE_SECRET_KEY,
     webhookSecret: !!process.env.STRIPE_WEBHOOK_SECRET,
     prices,
+    businessPhoneAddon: !!businessPhoneAddonPriceId(),
   };
 }
 
@@ -209,3 +214,29 @@ export function priceIdFor(
   }
   return null;
 }
+
+/**
+ * Scan a subscription's line-item Price IDs for the FIRST one that maps to a
+ * known plan tier. A subscription may carry multiple items (e.g. base plan +
+ * the Business Phone add-on); the webhook must not assume `items[0]` is the
+ * plan. Returns null when no item matches a configured plan price (the webhook
+ * then leaves `currentPlan` unchanged — same defensive posture as before). The
+ * generic first-match scan lives in lib/business-phone-addon (pure +
+ * unit-tested); here we bind it to the plan-price resolver.
+ */
+export function pickPlanFromPriceIds(
+  priceIds: Array<string | null | undefined>,
+): { plan: PlanId; interval: "month" | "year" } | null {
+  return pickFirstMatch(priceIds, planFromStripePriceId);
+}
+
+// ── Business Phone add-on (Phase 1 — billing foundation) ────────────────────
+// SERVER-SIDE ONLY. The env-backed price helpers live in the PURE,
+// unit-testable lib/business-phone-addon module (it imports no DB, so the test
+// runner can load it). Re-exported here so callers keep a single Stripe surface.
+// While STRIPE_PRICE_BUSINESS_PHONE_MONTH is UNSET, businessPhoneAddonPriceId()
+// returns null and the add-on stays DARK: no checkout path resolves a price and
+// the webhook can never match an add-on line item, so billing grants NO
+// entitlement. Never import these into client code. This is the billing
+// foundation ONLY; it does NOT enable a browser softphone (Phase 2, coming soon).
+export { businessPhoneAddonPriceId, isBusinessPhoneAddonPrice };

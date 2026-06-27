@@ -2,8 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 
 import { db } from "@/db/client";
-import { bookings, tenants } from "@/db/schema";
-import { getStripe, isStripeConfigured, planFromStripePriceId } from "@/lib/stripe";
+import { bookings, tenants, tenantPhoneSettings } from "@/db/schema";
+import { getStripe, isStripeConfigured, pickPlanFromPriceIds } from "@/lib/stripe";
+import {
+  resolveAddonEntitlement,
+  shouldStripeWriteEntitlement,
+  readEntitlementSource,
+  isBusinessPhoneAddonPrice,
+} from "@/lib/business-phone-addon";
 import { recordBillingEvent } from "@/lib/billing/recordBillingEvent";
 import {
   autoRefundCharge,
@@ -21,15 +27,85 @@ import { PLAN_RANK, type PlanId } from "@/lib/plans";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// Phase 16B — delegated to lib/stripe.ts so the mapping stays in sync
-// with the plan catalog. Returns plan + interval (interval currently
-// informational; reserved for future per-interval analytics). When a
-// Stripe Price ID isn't recognized (e.g. a brand-new product not yet
-// wired in env), this returns null and the webhook leaves
-// `tenants.currentPlan` UNCHANGED — never clobbers with a wrong
-// value or a `free` default.
-function planFromPriceId(priceId: string | null | undefined): string | null {
-  return planFromStripePriceId(priceId)?.plan ?? null;
+// Phase 16B / Phase 1 add-on — delegated to lib/stripe.ts so the mapping stays
+// in sync with the plan catalog. A subscription may carry MULTIPLE line items
+// (base plan + the Business Phone add-on), so we scan ALL item price ids for the
+// first that maps to a plan tier rather than assuming items[0]. When no item
+// maps to a known plan, this returns null and the webhook leaves
+// `tenants.currentPlan` UNCHANGED — never clobbers with a wrong value or `free`.
+function planLabelFromItems(priceIds: Array<string | null | undefined>): string | null {
+  return pickPlanFromPriceIds(priceIds)?.plan ?? null;
+}
+
+/**
+ * Phase 1 — sync the BILLING-DRIVEN Business Phone add-on entitlement into
+ * `tenant_phone_settings.metadata` (no schema change, no entitlement-reader
+ * change). Writes ONLY the entitlement flag derived from the subscription's
+ * line items + status. NEVER overwrites a MANUAL pilot grant (docs-demo).
+ * Idempotent — sets the flag to the computed value, so re-delivered events are
+ * harmless. Wrapped in try/catch so add-on sync can never break the core
+ * billing webhook. While STRIPE_PRICE_BUSINESS_PHONE_MONTH is unset,
+ * isBusinessPhoneAddonPrice() is always false ⇒ subscribed=false ⇒ no row is
+ * ever created and the feature stays fully dark.
+ */
+async function syncBusinessPhoneAddon(args: {
+  tenantId: string;
+  priceIds: Array<string | null | undefined>;
+  subscriptionStatus: string | null | undefined;
+}): Promise<void> {
+  try {
+    const settings = await db.query.tenantPhoneSettings.findFirst({
+      where: eq(tenantPhoneSettings.tenantId, args.tenantId),
+      columns: { id: true, metadata: true },
+    });
+    // Manual pilot/comp grants are operator-owned — billing logic never touches.
+    if (!shouldStripeWriteEntitlement(readEntitlementSource(settings?.metadata))) return;
+
+    const { subscribed, active } = resolveAddonEntitlement({
+      items: args.priceIds.map((priceId) => ({ priceId })),
+      subscriptionStatus: args.subscriptionStatus,
+      isAddonPrice: isBusinessPhoneAddonPrice,
+    });
+
+    // No settings row yet AND not subscribed → nothing to do (don't spawn rows
+    // for every unrelated subscription event).
+    if (!settings && !subscribed) return;
+
+    const baseMeta =
+      settings?.metadata && typeof settings.metadata === "object" && !Array.isArray(settings.metadata)
+        ? (settings.metadata as Record<string, unknown>)
+        : {};
+    const nextMeta = {
+      ...baseMeta,
+      entitlementActive: active,
+      entitlementSource: "stripe",
+      businessPhoneAddon: {
+        subscribed,
+        subscriptionStatus: args.subscriptionStatus ?? null,
+      },
+    };
+
+    if (settings) {
+      await db
+        .update(tenantPhoneSettings)
+        .set({ metadata: nextMeta, updatedAt: new Date() })
+        .where(eq(tenantPhoneSettings.tenantId, args.tenantId));
+    } else {
+      await db
+        .insert(tenantPhoneSettings)
+        .values({
+          tenantId: args.tenantId,
+          enabled: true,
+          metadata: nextMeta,
+        } as typeof tenantPhoneSettings.$inferInsert)
+        .onConflictDoNothing({ target: tenantPhoneSettings.tenantId });
+    }
+  } catch (err) {
+    console.error(
+      "[stripe-webhook] business phone add-on sync failed:",
+      err instanceof Error ? err.message : err,
+    );
+  }
 }
 
 export async function POST(req: NextRequest) {
@@ -276,8 +352,11 @@ export async function POST(req: NextRequest) {
       case "customer.subscription.created": {
         const sub = event.data.object;
         const customerId = typeof sub.customer === "string" ? sub.customer : sub.customer.id;
-        const priceId = sub.items?.data?.[0]?.price?.id;
-        const planLabel = planFromPriceId(priceId);
+        // Scan ALL line items — a subscription may carry the base plan AND the
+        // Business Phone add-on, so we must not assume items[0] is the plan.
+        const itemPriceIds = (sub.items?.data ?? []).map((it) => it?.price?.id ?? null);
+        const priceId = itemPriceIds[0] ?? undefined; // primary item (admin-notify metadata only)
+        const planLabel = planLabelFromItems(itemPriceIds);
         const trialEnd = sub.trial_end ? new Date(sub.trial_end * 1000) : null;
 
         // Resolve tenant by customer id BEFORE the mutation so the
@@ -327,6 +406,13 @@ export async function POST(req: NextRequest) {
               })
               .where(eq(tenants.id, tenantRow.id));
           },
+        });
+        // Phase 1 — sync the billing-driven Business Phone add-on entitlement
+        // (no-op while the add-on price is unset; never touches manual pilots).
+        await syncBusinessPhoneAddon({
+          tenantId: tenantRow.id,
+          priceIds: itemPriceIds,
+          subscriptionStatus: sub.status,
         });
         // Phase 3 — admin alert on new + updated subscriptions. We
         // discriminate "new" vs "updated" using the event.type. The
@@ -428,6 +514,14 @@ export async function POST(req: NextRequest) {
               })
               .where(eq(tenants.id, tenantRow.id));
           },
+        });
+        // Phase 1 — subscription gone ⇒ revoke the billing-driven add-on
+        // entitlement (empty items + canceled ⇒ inactive). Manual pilots are
+        // left untouched by the guard inside syncBusinessPhoneAddon.
+        await syncBusinessPhoneAddon({
+          tenantId: tenantRow.id,
+          priceIds: [],
+          subscriptionStatus: "canceled",
         });
         // Phase 3 — admin alert on cancellation. Warning severity:
         // not catastrophic (existing customer pause), but worth
