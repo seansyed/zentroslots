@@ -71,6 +71,24 @@ export const SOFTPHONE_COMING_COPY =
   "Talk to customers directly in your browser — no second phone needed. Coming in Phase 2; not available yet.";
 
 /**
+ * Billing-page card copy for the Business Phone add-on (Phase 2 prep — defined
+ * here, pure, so the Phase 4 UI just renders it). Honest: the softphone is
+ * "coming soon", NOT available; emergency + international calling are excluded.
+ */
+export const BUSINESS_PHONE_ADDON_CARD = {
+  title: "Business Phone",
+  price: "$19/month",
+  features: [
+    "200 US & Canada minutes included",
+    "Inbound call forwarding to your phone",
+    "Click-to-call from ZentroMeet (rings your phone first)",
+    "Call logs and monthly usage",
+    "Softphone — coming soon",
+  ],
+  limitations: ["No emergency (911) calling", "No international calls"],
+} as const;
+
+/**
  * Display label for a staff member's bridge number in the admin table. NEVER
  * returns a full number — only the masked form or "Not set" — so a personal
  * number can't leak into the UI.

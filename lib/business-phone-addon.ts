@@ -128,3 +128,85 @@ export function pickFirstMatch<T>(
   }
   return null;
 }
+
+// ── Add / remove add-on action planner (Phase 2) ────────────────────────────
+// PURE decision logic for POST /api/tenant/phone/addon. The route is a thin I/O
+// shell: it loads the live Stripe subscription, calls planAddonAction() to
+// decide WHAT to do, then performs the single Stripe mutation. Entitlement is
+// NOT written here — the resulting customer.subscription.updated webhook syncs
+// it (Phase 1). This keeps the decision unit-testable with synthetic items.
+
+/** Subscription statuses on which we may add/remove an item (the base sub is
+ *  live). Mirrors the add-on grace policy — `past_due` is still modifiable;
+ *  canceled/unpaid/incomplete(_expired) are treated as "no active base". */
+export const MODIFIABLE_SUBSCRIPTION_STATUSES: ReadonlySet<string> = new Set([
+  "active",
+  "trialing",
+  "past_due",
+]);
+
+export function isModifiableSubscriptionStatus(status: string | null | undefined): boolean {
+  return MODIFIABLE_SUBSCRIPTION_STATUSES.has(String(status ?? "").toLowerCase().trim());
+}
+
+/** A live Stripe subscription line item (only the fields the planner needs). */
+export type SubscriptionItemRef = { id: string; priceId: string | null | undefined };
+
+export type AddonActionPlan =
+  /** Add-on price not configured → feature dark; route returns 503, NO Stripe call. */
+  | { kind: "disabled" }
+  /** "add" but the tenant has no modifiable base subscription → 409. */
+  | { kind: "no_subscription" }
+  /** "add" and the add-on item is already present → idempotent success. */
+  | { kind: "already_present" }
+  /** "add": create one subscription item with this price on this subscription. */
+  | { kind: "add"; priceId: string; subscriptionId: string }
+  /** "remove" but the add-on item isn't present → idempotent success. */
+  | { kind: "already_absent" }
+  /** "remove": delete exactly this subscription item (never the base plan). */
+  | { kind: "remove"; subscriptionItemId: string; subscriptionId: string };
+
+/**
+ * Decide the add/remove action. PURE + fail-closed. Scans ALL items (never
+ * assumes items[0]) to find the add-on item via the injected predicate, and
+ * never returns a plan that would touch a non-add-on (base plan) item.
+ */
+export function planAddonAction(input: {
+  action: "add" | "remove";
+  /** businessPhoneAddonPriceId() — null ⇒ feature dark. */
+  addonPriceId: string | null;
+  subscriptionId: string | null | undefined;
+  subscriptionStatus: string | null | undefined;
+  /** Live items from the Stripe subscription (empty when no subscription). */
+  items: SubscriptionItemRef[];
+  isAddonPrice: (priceId: string | null | undefined) => boolean;
+}): AddonActionPlan {
+  if (!input.addonPriceId) return { kind: "disabled" };
+
+  // The add-on item, if present (scans every item — the base plan is ignored).
+  const existing = (input.items ?? []).find((it) => input.isAddonPrice(it?.priceId));
+
+  if (input.action === "remove") {
+    if (!existing) return { kind: "already_absent" };
+    return { kind: "remove", subscriptionItemId: existing.id, subscriptionId: input.subscriptionId! };
+  }
+
+  // action === "add"
+  const hasActiveBase =
+    Boolean(input.subscriptionId) && isModifiableSubscriptionStatus(input.subscriptionStatus);
+  if (!hasActiveBase) return { kind: "no_subscription" };
+  if (existing) return { kind: "already_present" };
+  return { kind: "add", priceId: input.addonPriceId, subscriptionId: input.subscriptionId! };
+}
+
+/** Tenant-facing Business Phone setup state (Phase 2 prep; wired in Phase 4).
+ *  Entitlement alone does NOT enable calls — a number must be assigned. */
+export type BusinessPhoneSetupState = "not_entitled" | "setup_pending" | "ready";
+
+export function businessPhoneSetupState(args: {
+  entitled: boolean;
+  numberAssigned: boolean;
+}): BusinessPhoneSetupState {
+  if (!args.entitled) return "not_entitled";
+  return args.numberAssigned ? "ready" : "setup_pending";
+}
