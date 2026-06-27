@@ -89,6 +89,7 @@ test("shapeCallLogRow exposes ONLY safe fields — no Telnyx IDs / metadata / pa
     "answeredAt",
     "billableSeconds",
     "costEstimateCents",
+    "direction",
     "durationSeconds",
     "endedAt",
     "forwardedToNumber",

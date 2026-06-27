@@ -108,6 +108,7 @@ function parseDate(raw: string | null): Date | null {
 
 export type CallLogRowView = {
   id: string;
+  direction: string;
   fromNumber: string | null;
   toNumber: string | null;
   forwardedToNumber: string | null;
@@ -129,6 +130,7 @@ export type CallLogRowView = {
  */
 export function shapeCallLogRow(row: {
   id: string;
+  direction?: string | null;
   fromNumber?: string | null;
   toNumber?: string | null;
   forwardedToNumber?: string | null;
@@ -142,6 +144,7 @@ export function shapeCallLogRow(row: {
 }): CallLogRowView {
   return {
     id: row.id,
+    direction: row.direction ?? "inbound",
     fromNumber: row.fromNumber ?? null,
     toNumber: row.toNumber ?? null,
     forwardedToNumber: row.forwardedToNumber ?? null,

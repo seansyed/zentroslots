@@ -44,6 +44,8 @@ import {
   ArrowRight,
   CalendarClock,
   Filter as FilterIcon,
+  PhoneCall,
+  Loader2,
 } from "lucide-react";
 
 import { Avatar, Badge, Button, Drawer, Skeleton, toast } from "@/components/ui/primitives";
@@ -52,6 +54,12 @@ import { FadeIn } from "@/components/ui/Motion";
 import ActivityTimeline from "@/components/dashboard/ActivityTimeline";
 import { STATUS_BADGE, STATUS_LABEL, type Status } from "@/lib/status-colors";
 import { cn } from "@/lib/cn";
+import { useBusinessPhoneEntitled } from "@/components/dashboard/useBusinessPhone";
+import {
+  canShowCustomerCallButton,
+  phoneCallErrorMessage,
+  OUTBOUND_CALL_SUCCESS_MESSAGE,
+} from "@/lib/business-phone-ui";
 
 // ─── Types ──────────────────────────────────────────────────────────
 
@@ -1302,6 +1310,31 @@ function CustomerDrawer({
   const [tab, setTab] = React.useState<DrawerTab>("overview");
   const [savingNotes, setSavingNotes] = React.useState(false);
   const [notes, setNotes] = React.useState("");
+  // P1.2 — Business Phone "Call via Business Phone" entry point.
+  const { entitled: phoneEntitled } = useBusinessPhoneEntitled();
+  const [callingCustomer, setCallingCustomer] = React.useState(false);
+
+  async function callCustomer() {
+    if (!data) return;
+    setCallingCustomer(true);
+    try {
+      const res = await fetch("/api/tenant/phone/calls", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ customerId: data.customer.id, callPurpose: "customer_call" }),
+      });
+      const d = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) {
+        toast(phoneCallErrorMessage(res.status, d?.error), "error");
+        return;
+      }
+      toast(OUTBOUND_CALL_SUCCESS_MESSAGE, "success");
+    } catch {
+      toast("Couldn't place the call right now. Please try again.", "error");
+    } finally {
+      setCallingCustomer(false);
+    }
+  }
 
   React.useEffect(() => {
     if (!id) { setData(null); return; }
@@ -1397,6 +1430,22 @@ function CustomerDrawer({
                   </a>
                   {data.customer.phone && (
                     <div className="mt-0.5 text-[11px] text-ink-muted">{data.customer.phone}</div>
+                  )}
+                  {canShowCustomerCallButton({ entitled: phoneEntitled, phone: data.customer.phone }) && (
+                    <button
+                      type="button"
+                      onClick={() => void callCustomer()}
+                      disabled={callingCustomer}
+                      className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-brand-accent px-2.5 py-1 text-[11px] font-semibold text-white transition-colors hover:bg-brand-hover disabled:opacity-60"
+                      title="We'll ring your phone first, then connect the customer"
+                    >
+                      {callingCustomer ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <PhoneCall className="h-3.5 w-3.5" strokeWidth={2} />
+                      )}
+                      Call via Business Phone
+                    </button>
                   )}
                 </div>
               </div>
