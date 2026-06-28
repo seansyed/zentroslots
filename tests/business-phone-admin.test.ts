@@ -21,6 +21,7 @@ import {
   assignEnabledState,
   canManuallyEnable,
   shapeBusinessPhoneStatus,
+  shapeMobilePhoneStatus,
 } from "../lib/business-phone-admin";
 import { readAddonSubscribedFlag } from "../lib/business-phone-addon";
 
@@ -306,6 +307,117 @@ test("billing card: internal account shows manual message, NOT 'subscribe first'
   assert.match(src, /act\("add"\)/);
   assert.match(src, /act\("remove"\)/);
   assert.match(src, /Subscribe to a base plan first/);
+});
+
+// ════════════════════════════════════════════════════════════════════
+// M1 — mobile GET /api/tenant/phone/status DTO (shapeMobilePhoneStatus)
+// ════════════════════════════════════════════════════════════════════
+const WEB_BILLING = "https://app.zentromeet.com/dashboard/billing";
+function mobile(over: Partial<Parameters<typeof shapeMobilePhoneStatus>[0]> = {}) {
+  return shapeMobilePhoneStatus({
+    basePlan: "pro",
+    paidPlan: true,
+    status: shapeBusinessPhoneStatus(statusInput()),
+    businessNumber: "+14155550123",
+    forwardingNumber: "+16475550123",
+    hasPhoneAccess: true,
+    canPlaceCalls: true,
+    softphoneAvailable: false,
+    webBillingUrl: WEB_BILLING,
+    ...over,
+  });
+}
+
+test("mobile status exposes ONLY safe fields — no Stripe/Telnyx ids or secrets", () => {
+  const m = mobile();
+  assert.deepEqual(
+    Object.keys(m).sort(),
+    [
+      "basePaid",
+      "basePlan",
+      "businessNumber",
+      "businessPhoneActive",
+      "businessPhoneAddonSubscribed",
+      "canClickToCall",
+      "canPlaceCalls",
+      "capReached",
+      "forwardingNumber",
+      "hasPhoneAccess",
+      "includedMinutes",
+      "minutesRemaining",
+      "minutesUsed",
+      "setupState",
+      "softphoneAvailable",
+      "webBillingUrl",
+    ].sort(),
+  );
+  const json = JSON.stringify(m);
+  assert.doesNotMatch(json, /sk_|whsec_|price_|sub_|cus_|stripe|telnyx|apiKey|KEY[0-9A-F]/i);
+});
+
+test("mobile status: active line → businessPhoneActive + canClickToCall; number full, forwarding masked", () => {
+  const m = mobile(); // statusInput() = active
+  assert.equal(m.setupState, "active");
+  assert.equal(m.businessPhoneActive, true);
+  assert.equal(m.canClickToCall, true);
+  assert.equal(m.businessNumber, "+14155550123"); // full caller-id to authorized user
+  assert.match(m.forwardingNumber ?? "", /•••.*0123/); // forwarding masked
+  assert.equal(m.webBillingUrl, WEB_BILLING);
+});
+
+test("mobile status: cap reached → businessPhoneActive true but canClickToCall false", () => {
+  const m = mobile({ status: shapeBusinessPhoneStatus(statusInput({ minutesUsed: 200, monthlyMinuteCap: 200 })) });
+  assert.equal(m.setupState, "cap_reached");
+  assert.equal(m.capReached, true);
+  assert.equal(m.businessPhoneActive, true);
+  assert.equal(m.canClickToCall, false);
+  assert.equal(m.minutesRemaining, 0);
+});
+
+test("mobile status: setup pending → not active, no click-to-call", () => {
+  const m = mobile({ status: shapeBusinessPhoneStatus(statusInput({ businessNumber: null })) });
+  assert.equal(m.setupState, "setup_pending");
+  assert.equal(m.businessPhoneActive, false);
+  assert.equal(m.canClickToCall, false);
+});
+
+test("mobile status: basePaid via internal account; free plan → not basePaid", () => {
+  const internal = mobile({
+    basePlan: "enterprise",
+    paidPlan: true,
+    status: shapeBusinessPhoneStatus(statusInput({ subscriptionStatus: "internal", addonActive: false, addonSubscribed: false, businessNumber: null })),
+  });
+  assert.equal(internal.basePaid, true);
+  const free = mobile({
+    basePlan: "free",
+    paidPlan: false,
+    hasPhoneAccess: false,
+    status: shapeBusinessPhoneStatus(statusInput({ planEligible: false, addonActive: false, addonSubscribed: false, businessNumber: null, subscriptionStatus: null, baseSubscriptionActive: false })),
+  });
+  assert.equal(free.basePaid, false);
+  assert.equal(free.basePlan, "free");
+});
+
+test("mobile status: numbers hidden when the user has no phone access", () => {
+  const m = mobile({ hasPhoneAccess: false });
+  assert.equal(m.businessNumber, null);
+  assert.equal(m.forwardingNumber, null);
+});
+
+test("mobile status: softphoneAvailable passes through (default false)", () => {
+  assert.equal(mobile().softphoneAvailable, false);
+  assert.equal(mobile({ softphoneAvailable: true }).softphoneAvailable, true);
+});
+
+test("phone status route: authenticated, safe, flag-driven softphone, no secrets", () => {
+  const src = fileSrc("app/api/tenant/phone/status/route.ts");
+  assert.match(src, /requireUser\(\)/);
+  assert.match(src, /shapeMobilePhoneStatus/);
+  assert.match(src, /BUSINESS_PHONE_SOFTPHONE_AVAILABLE/);
+  assert.match(src, /APP_BASE_URL/);
+  assert.match(src, /dashboard\/billing/);
+  // never reads Stripe/Telnyx secrets or returns raw ids
+  assert.doesNotMatch(src, /STRIPE_SECRET_KEY|TELNYX_API_KEY|whsec_|stripeCustomerId|stripeSubscriptionId\b.*NextResponse/i);
 });
 
 test("phone page passes server setupState/capReached to PhoneClient", () => {

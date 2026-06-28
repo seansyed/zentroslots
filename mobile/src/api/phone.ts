@@ -5,6 +5,9 @@
  */
 
 import { apiGet, apiPatch, apiPost } from "./client";
+import type { MobilePhoneStatus } from "../lib/businessPhone";
+
+export type { MobilePhoneStatus };
 
 export type PhoneMe = {
   hasBusinessPhone: boolean;
@@ -41,6 +44,10 @@ export type PlaceCallResult = {
 };
 
 export const phoneApi = {
+  /** Mobile-ready Business Phone status (drives the Phone screen state). */
+  status(): Promise<MobilePhoneStatus> {
+    return apiGet<MobilePhoneStatus>("/api/tenant/phone/status");
+  },
   me(): Promise<PhoneMe> {
     return apiGet<PhoneMe>("/api/tenant/phone/me");
   },

@@ -74,6 +74,8 @@ export const queryKeys = {
   me: ["me"] as const,
   /** Business Phone per-user capability (P1.3). */
   phoneMe: ["phoneMe"] as const,
+  /** Business Phone mobile status — drives the Phone screen state (M2). */
+  phoneStatus: ["phoneStatus"] as const,
   /** Business Phone recent/missed calls (operators). */
   phoneCalls: (status?: string) =>
     status ? (["phoneCalls", status] as const) : (["phoneCalls"] as const),

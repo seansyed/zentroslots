@@ -168,3 +168,113 @@ export function phoneCallErrorMessage(status: number, serverMessage?: string | n
       return msg ?? "Couldn't place the call right now. Please try again.";
   }
 }
+
+// ── Mobile Business Phone status + screen-state machine (M2) ─────────────────
+// PURE — no React, no API client, no secrets. Mirrors the safe DTO returned by
+// GET /api/tenant/phone/status. Mobile NEVER sells/activates the add-on; the
+// only purchase path is opening the web billing page.
+
+export type BusinessPhoneSetupState =
+  | "no_addon"
+  | "setup_pending"
+  | "active"
+  | "disabled"
+  | "suspended"
+  | "cap_reached";
+
+export type MobilePhoneStatus = {
+  basePlan: string;
+  basePaid: boolean;
+  businessPhoneAddonSubscribed: boolean;
+  businessPhoneActive: boolean;
+  setupState: BusinessPhoneSetupState;
+  businessNumber: string | null;
+  forwardingNumber: string | null;
+  includedMinutes: number;
+  minutesUsed: number;
+  minutesRemaining: number;
+  capReached: boolean;
+  canClickToCall: boolean;
+  hasPhoneAccess: boolean;
+  canPlaceCalls: boolean;
+  softphoneAvailable: boolean;
+  webBillingUrl: string;
+};
+
+/** Which Phone screen the mobile app should render for a given status. */
+export type PhoneScreenState =
+  /** Not subscribed → info/marketing only; the CTA opens web billing. */
+  | { kind: "marketing"; cta: "setup_web" | "add_web"; webBillingUrl: string }
+  /** Add-on active but no number yet → "setup pending", no controls. */
+  | { kind: "setup_pending" }
+  /** Live → show number/forwarding/usage/logs; dialer enabled iff canClickToCall. */
+  | { kind: "active"; canClickToCall: boolean }
+  /** Provisioned but this month's minutes are used up → block outbound. */
+  | { kind: "cap_reached" }
+  /** Operator-disabled or billing-suspended → locked, no controls. */
+  | { kind: "locked"; reason: "disabled" | "suspended" };
+
+/**
+ * Map the safe status DTO to a mobile screen state. PURE + exhaustive.
+ *   - no_addon + not paid base  → marketing, "Set up on web"
+ *   - no_addon + paid base      → marketing, "Add Business Phone on web"
+ *   - setup_pending             → setup pending (no controls)
+ *   - active                    → active (dialer gated by canClickToCall)
+ *   - cap_reached               → cap reached (outbound blocked)
+ *   - disabled / suspended      → locked
+ */
+export function resolvePhoneScreenState(s: MobilePhoneStatus): PhoneScreenState {
+  switch (s.setupState) {
+    case "active":
+      return { kind: "active", canClickToCall: s.canClickToCall };
+    case "cap_reached":
+      return { kind: "cap_reached" };
+    case "setup_pending":
+      return { kind: "setup_pending" };
+    case "disabled":
+      return { kind: "locked", reason: "disabled" };
+    case "suspended":
+      return { kind: "locked", reason: "suspended" };
+    case "no_addon":
+    default:
+      return { kind: "marketing", cta: s.basePaid ? "add_web" : "setup_web", webBillingUrl: s.webBillingUrl };
+  }
+}
+
+/** Softphone tab/menu may appear ONLY when the line is active AND the backend
+ *  flag says the softphone is available. Default (flag off) → never. */
+export function shouldShowSoftphone(s: MobilePhoneStatus): boolean {
+  return s.businessPhoneActive && s.softphoneAvailable;
+}
+
+/** The Business Phone entry is shown to ALL signed-in users (marketing for the
+ *  non-entitled; functional screen for the entitled). */
+export function shouldShowPhoneEntry(): boolean {
+  return true;
+}
+
+/** Label for the web CTA button on the marketing screen. */
+export function webCtaLabel(cta: "setup_web" | "add_web"): string {
+  return cta === "add_web" ? "Add Business Phone on web" : "Set up on web";
+}
+
+/** Marketing copy for the non-subscribed info screen (honest — softphone is
+ *  "coming soon", emergency + international excluded). */
+export const BUSINESS_PHONE_MARKETING = {
+  title: "Business Phone",
+  price: "$19/month",
+  features: [
+    "Dedicated business number",
+    "Inbound call forwarding",
+    "Click-to-call from ZentroMeet",
+    "Call logs and monthly usage",
+    "200 US & Canada minutes included",
+    "Softphone — coming soon",
+  ],
+  limitations: ["No emergency (911) calling", "No international calls"],
+  note: "Business Phone is set up on the ZentroMeet web app — you can't purchase it in the mobile app.",
+} as const;
+
+/** Honest one-liner for the active screen (NOT a softphone). */
+export const CLICK_TO_CALL_NOTE =
+  "Calls ring your phone first, then connect the customer. There's no in-app audio.";

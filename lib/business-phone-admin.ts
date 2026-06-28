@@ -225,3 +225,75 @@ export function shapeBusinessPhoneStatus(input: {
     setupState,
   };
 }
+
+// ── Mobile-ready phone status DTO (M1) ──────────────────────────────────────
+// Safe payload for GET /api/tenant/phone/status, consumed by the Expo app.
+// PURE shaper (the route gathers the inputs). Contains ONLY display-safe fields:
+// NO Stripe ids, NO Telnyx ids/keys, NO webhook secrets, NO internal metadata.
+// The forwarding number is masked; the business number (the public caller ID) is
+// returned in full only to users with phone access, else null.
+
+export type MobilePhoneStatus = {
+  /** Plan tier slug (free/solo/pro/team/enterprise). */
+  basePlan: string;
+  /** Tenant is on a usable PAID base plan (Stripe-active or internal). */
+  basePaid: boolean;
+  businessPhoneAddonSubscribed: boolean;
+  /** Line is provisioned + enabled (active or cap_reached). */
+  businessPhoneActive: boolean;
+  setupState: BusinessPhoneAdminSetupState;
+  /** Public caller-ID number (full) — only when the user has phone access. */
+  businessNumber: string | null;
+  /** Forwarding/staff number — MASKED — only when the user has phone access. */
+  forwardingNumber: string | null;
+  includedMinutes: number;
+  minutesUsed: number;
+  minutesRemaining: number;
+  capReached: boolean;
+  /** This user may place a click-to-call right now (active, under cap, permitted). */
+  canClickToCall: boolean;
+  hasPhoneAccess: boolean;
+  canPlaceCalls: boolean;
+  /** Softphone (Phase 2) — flag-driven, default false until built. */
+  softphoneAvailable: boolean;
+  /** Where the mobile "Set up / Add on web" CTA should open. */
+  webBillingUrl: string;
+};
+
+export function shapeMobilePhoneStatus(input: {
+  basePlan: string | null;
+  /** plan !== free */
+  paidPlan: boolean;
+  status: BusinessPhoneClientStatus;
+  /** Full numbers from getTenantBusinessPhone; gated/masked here. */
+  businessNumber: string | null;
+  forwardingNumber: string | null;
+  hasPhoneAccess: boolean;
+  canPlaceCalls: boolean;
+  softphoneAvailable: boolean;
+  webBillingUrl: string;
+}): MobilePhoneStatus {
+  const s = input.status;
+  const basePaid = input.paidPlan && (s.baseSubscriptionActive || s.internalAccount);
+  const businessPhoneActive = s.setupState === "active" || s.setupState === "cap_reached";
+  const canClickToCall = s.setupState === "active" && input.canPlaceCalls && !s.capReached;
+  const minutesRemaining = Math.max(0, s.includedMinutes - s.minutesUsed);
+  return {
+    basePlan: input.basePlan ?? "free",
+    basePaid,
+    businessPhoneAddonSubscribed: s.addonSubscribed,
+    businessPhoneActive,
+    setupState: s.setupState,
+    businessNumber: input.hasPhoneAccess ? input.businessNumber : null,
+    forwardingNumber: input.hasPhoneAccess ? maskPhoneNumber(input.forwardingNumber) : null,
+    includedMinutes: s.includedMinutes,
+    minutesUsed: s.minutesUsed,
+    minutesRemaining,
+    capReached: s.capReached,
+    canClickToCall,
+    hasPhoneAccess: input.hasPhoneAccess,
+    canPlaceCalls: input.canPlaceCalls,
+    softphoneAvailable: input.softphoneAvailable,
+    webBillingUrl: input.webBillingUrl,
+  };
+}
