@@ -227,6 +227,7 @@ test("status exposes only safe fields — no raw number, no Stripe/Telnyx ids", 
       "capReached",
       "entitled",
       "includedMinutes",
+      "internalAccount",
       "minutesUsed",
       "numberAssigned",
       "setupState",
@@ -268,6 +269,43 @@ test("billing page renders the add-on card admin-only and only when configured",
   // gated on isAdmin AND addonConfigured
   assert.match(src, /showBusinessPhoneCard\s*=\s*isAdmin\s*&&\s*bpStatus\.addonConfigured/);
   assert.match(src, /showBusinessPhoneCard\s*&&/);
+});
+
+// ── internal Enterprise account (super-admin testing, no Stripe) ────
+test("internal account (status=internal) is flagged; normal tenants never are", () => {
+  // internal enterprise: enterprise plan, no add-on flag, no stripe sub, status 'internal'
+  const internal = shapeBusinessPhoneStatus(
+    statusInput({
+      addonActive: false,
+      addonSubscribed: false,
+      businessNumber: null,
+      subscriptionStatus: "internal",
+      baseSubscriptionActive: false,
+    }),
+  );
+  assert.equal(internal.internalAccount, true);
+  assert.equal(internal.baseSubscriptionActive, false);
+
+  // normal free tenant
+  assert.equal(shapeBusinessPhoneStatus(statusInput({ subscriptionStatus: null, baseSubscriptionActive: false, addonSubscribed: false })).internalAccount, false);
+  // normal paid tenant (active stripe sub)
+  assert.equal(shapeBusinessPhoneStatus(statusInput({ subscriptionStatus: "active", baseSubscriptionActive: true })).internalAccount, false);
+  // case/space tolerant
+  assert.equal(shapeBusinessPhoneStatus(statusInput({ subscriptionStatus: " INTERNAL " })).internalAccount, true);
+});
+
+test("billing card: internal account shows manual message, NOT 'subscribe first', no Stripe button", () => {
+  const src = fileSrc("components/dashboard/BusinessPhoneAddonCard.tsx");
+  // internal branch is checked FIRST in the action area
+  assert.match(src, /status\.internalAccount\s*\?/);
+  assert.match(src, /enabled manually by a super admin/i);
+  // the internal branch renders no act() button (it's a <p>, not a button) — the
+  // Stripe add/remove buttons live only in the non-internal branches.
+  assert.match(src, /Internal Enterprise account/);
+  // normal Stripe controls still exist for non-internal tenants
+  assert.match(src, /act\("add"\)/);
+  assert.match(src, /act\("remove"\)/);
+  assert.match(src, /Subscribe to a base plan first/);
 });
 
 test("phone page passes server setupState/capReached to PhoneClient", () => {

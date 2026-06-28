@@ -94,7 +94,14 @@ export default function BusinessPhoneAddonCard({ status }: { status: BusinessPho
 
       {/* Actions */}
       <div className="mt-4">
-        {status.suspended ? (
+        {status.internalAccount ? (
+          // Internal/super-admin tenant: no Stripe purchase path. Managed by a
+          // super admin via /admin/business-phone. Never calls the Stripe route.
+          <p className="text-[12px] text-ink-muted">
+            <span className="font-medium text-ink">Internal Enterprise account.</span> Business Phone can be
+            enabled manually by a super admin — no Stripe purchase required.
+          </p>
+        ) : status.suspended ? (
           <p className="text-[12px] font-medium text-red-700">
             Billing is suspended — update your payment method to restore Business Phone.
           </p>
@@ -136,6 +143,9 @@ export default function BusinessPhoneAddonCard({ status }: { status: BusinessPho
 }
 
 function StatusBadge({ status }: { status: BusinessPhoneClientStatus }) {
+  if (status.internalAccount) {
+    return <Badge tone="slate" icon={CheckCircle2} label="Internal" />;
+  }
   if (status.suspended) {
     return <Badge tone="red" icon={AlertTriangle} label="Suspended" />;
   }

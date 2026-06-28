@@ -159,6 +159,12 @@ export type BusinessPhoneClientStatus = {
   subscriptionStatus: string | null;
   /** Tenant has a base subscription we can attach the add-on item to. */
   baseSubscriptionActive: boolean;
+  /** Internal/super-admin tenant (subscription_status='internal', no Stripe).
+   *  Business Phone is enabled MANUALLY by a super admin — never via Stripe — so
+   *  the billing card must not show "Subscribe to a base plan first" or a Stripe
+   *  Add button. A normal tenant can never reach this (Stripe never sets the
+   *  status to 'internal'). */
+  internalAccount: boolean;
   numberAssigned: boolean;
   /** Masked (••• ••• 1234) — never the full number to the client billing card. */
   businessNumberMasked: string | null;
@@ -190,6 +196,10 @@ export function shapeBusinessPhoneStatus(input: {
   const entitled = (input.planEligible && input.addonActive) || input.manualSource;
   const numberAssigned = Boolean(input.businessNumber);
   const capReached = input.monthlyMinuteCap > 0 && input.minutesUsed >= input.monthlyMinuteCap;
+  // Internal/super-admin tenant marker. Stripe never sets the status to
+  // 'internal' (its values are active/trialing/past_due/canceled/unpaid/
+  // incomplete[_expired]/paused), so this can only be a manual grant.
+  const internalAccount = String(input.subscriptionStatus ?? "").toLowerCase().trim() === "internal";
   const suspended =
     !entitled && input.addonSubscribed && isSuspendedSubscriptionStatus(input.subscriptionStatus);
   const setupState = resolveBusinessPhoneSetupState({
@@ -205,6 +215,7 @@ export function shapeBusinessPhoneStatus(input: {
     addonSubscribed: input.addonSubscribed,
     subscriptionStatus: input.subscriptionStatus ?? null,
     baseSubscriptionActive: input.baseSubscriptionActive,
+    internalAccount,
     numberAssigned,
     businessNumberMasked: maskPhoneNumber(input.businessNumber),
     includedMinutes: input.monthlyMinuteCap,
