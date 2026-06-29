@@ -23,6 +23,7 @@ import { useQuery } from "@tanstack/react-query";
 import { AppText } from "@/components/ui/Text";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
+import { GradientHeroCard } from "@/components/ui/GradientHeroCard";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ScreenContainer } from "@/components/ui/ScreenContainer";
 import { ApiError } from "@/api/client";
@@ -171,42 +172,62 @@ export default function PhoneScreen() {
     );
   }
 
-  // ── MARKETING (free / paid-no-addon): info + web CTA, no controls ──
+  // ── MARKETING (free / paid-no-addon): premium info card + web CTA, no
+  //    controls. Mobile NEVER sells the add-on — the CTA opens web billing. ──
   if (screen.kind === "marketing") {
     return (
       <ScreenContainer scrollable refreshControl={refreshControl} contentContainerStyle={{ paddingTop: spacing.sm }}>
         <PageHeader
           title="Business Phone"
-          subtitle="Business calls, forwarding, and call logs."
+          subtitle={BUSINESS_PHONE_MARKETING.headline}
           subtitleLines={2}
         />
-        <Card style={styles.section}>
-          <View style={styles.rowBetween}>
-            <AppText variant="h3">{BUSINESS_PHONE_MARKETING.title}</AppText>
-            <AppText variant="bodyStrong" color="brand">{BUSINESS_PHONE_MARKETING.price}</AppText>
+
+        <GradientHeroCard style={styles.section}>
+          {/* Phone-in-circle visual — premium, no new image asset */}
+          <View style={styles.heroIcon}>
+            <Ionicons name="call" size={28} color={colors.inkOnBrand} />
           </View>
-          <View style={{ marginTop: spacing.md }}>
-            {BUSINESS_PHONE_MARKETING.features.map((f) => (
-              <View key={f} style={styles.featureRow}>
-                <Ionicons name="checkmark-circle" size={16} color={colors.success} />
-                <AppText variant="small" style={{ flex: 1 }}>{f}</AppText>
+          <AppText variant="h2" align="center" style={{ marginTop: spacing.md }}>
+            {BUSINESS_PHONE_MARKETING.price}
+          </AppText>
+          <View style={styles.minutesBadge}>
+            <Ionicons name="time-outline" size={13} color={colors.brand} />
+            <AppText variant="smallStrong" color="brand">
+              {BUSINESS_PHONE_MARKETING.minutes}
+            </AppText>
+          </View>
+
+          {/* Benefits */}
+          <View style={styles.heroDivider} />
+          {BUSINESS_PHONE_MARKETING.features.map((f) => (
+            <View key={f} style={styles.featureRow}>
+              <Ionicons name="checkmark-circle" size={18} color={colors.success} />
+              <AppText variant="small" style={{ flex: 1 }}>{f}</AppText>
+            </View>
+          ))}
+
+          {/* Trust / limits */}
+          <View style={styles.limitsBox}>
+            {BUSINESS_PHONE_MARKETING.limitations.map((l) => (
+              <View key={l} style={styles.limitRow}>
+                <Ionicons name="information-circle-outline" size={14} color={colors.inkSubtle} />
+                <AppText variant="caption" color="muted" style={{ flex: 1 }}>{l}</AppText>
               </View>
             ))}
           </View>
-          <AppText variant="caption" color="muted" style={{ marginTop: spacing.sm }}>
-            {BUSINESS_PHONE_MARKETING.limitations.join(" · ")}.
-          </AppText>
+
           <Button
             label={webCtaLabel(screen.cta)}
             rightIcon={<Ionicons name="open-outline" size={16} color={colors.inkOnBrand} />}
             fullWidth
             onPress={() => openWeb(screen.webBillingUrl)}
-            style={{ marginTop: spacing.md }}
+            style={{ marginTop: spacing.lg }}
           />
           <AppText variant="caption" color="subtle" align="center" style={{ marginTop: spacing.sm }}>
             {BUSINESS_PHONE_MARKETING.note}
           </AppText>
-        </Card>
+        </GradientHeroCard>
       </ScreenContainer>
     );
   }
@@ -503,7 +524,26 @@ const styles = StyleSheet.create({
   center: { paddingVertical: spacing["5xl"], alignItems: "center" },
   section: { marginTop: spacing.lg },
   rowBetween: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: spacing.xs },
-  featureRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingVertical: 3 },
+  featureRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingVertical: 4 },
+  // Marketing hero — phone-in-circle badge + included-minutes pill + dividers.
+  heroIcon: {
+    alignSelf: "center", width: 56, height: 56, borderRadius: radius.full,
+    backgroundColor: colors.brand, alignItems: "center", justifyContent: "center",
+  },
+  minutesBadge: {
+    alignSelf: "center", flexDirection: "row", alignItems: "center", gap: spacing.xs,
+    marginTop: spacing.sm, paddingHorizontal: spacing.md, paddingVertical: 5,
+    borderRadius: radius.full, backgroundColor: colors.brandSubtle,
+  },
+  heroDivider: {
+    height: StyleSheet.hairlineWidth, backgroundColor: colors.border,
+    marginTop: spacing.lg, marginBottom: spacing.md,
+  },
+  limitsBox: {
+    marginTop: spacing.md, paddingTop: spacing.md, gap: 4,
+    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border,
+  },
+  limitRow: { flexDirection: "row", alignItems: "center", gap: spacing.xs },
   stateIcon: { alignSelf: "center", marginBottom: spacing.sm },
   dialField: {
     marginTop: spacing.md, height: 56, borderRadius: radius.lg, borderWidth: 1, borderColor: colors.border,

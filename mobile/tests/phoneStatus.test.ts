@@ -101,9 +101,9 @@ test("Phone entry is shown to all signed-in users", () => {
   assert.equal(shouldShowPhoneEntry(), true);
 });
 
-test("marketing copy is honest: 200 min, softphone coming soon, no emergency/intl, web-only purchase", () => {
+test("marketing copy is honest: 500 min, softphone coming soon, no emergency/intl, web-only purchase", () => {
   const blob = JSON.stringify(BUSINESS_PHONE_MARKETING).toLowerCase();
-  assert.match(blob, /200 us & canada minutes/);
+  assert.match(blob, /500 us & canada minutes/);
   assert.match(blob, /softphone — coming soon|softphone .* coming soon/);
   assert.match(blob, /no emergency/);
   assert.match(blob, /no international/);

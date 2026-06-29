@@ -259,19 +259,32 @@ export function webCtaLabel(cta: "setup_web" | "add_web"): string {
 }
 
 /** Marketing copy for the non-subscribed info screen (honest — softphone is
- *  "coming soon", emergency + international excluded). */
+ *  "coming soon", emergency + international excluded).
+ *
+ *  ⚠️ MINUTES NOTE: `minutes` is MARKETING copy for the intended package. The
+ *  minutes a tenant actually gets is the per-tenant `monthlyMinuteCap` set at
+ *  provisioning (admin default is still 200). Keep this string in sync with the
+ *  real cap once it is raised — until then, mobile advertises 500 while the
+ *  provisioned cap may be 200. See lib/business-line.ts (cap math) +
+ *  lib/business-phone-ui.ts (web copy, still 200). */
 export const BUSINESS_PHONE_MARKETING = {
   title: "Business Phone",
+  headline: "Give your business a dedicated line for client calls.",
   price: "$19/month",
+  minutes: "500 US & Canada minutes included",
   features: [
     "Dedicated business number",
-    "Inbound call forwarding",
+    "Forward calls to your phone",
     "Click-to-call from ZentroMeet",
-    "Call logs and monthly usage",
-    "200 US & Canada minutes included",
+    "Track call logs and usage",
+    "Keep personal numbers private",
     "Softphone — coming soon",
   ],
-  limitations: ["No emergency (911) calling", "No international calls"],
+  limitations: [
+    "No emergency (911) calling",
+    "No international calls",
+    "No surprise overage billing — usage is capped",
+  ],
   note: "Business Phone is set up on the ZentroMeet web app — you can't purchase it in the mobile app.",
 } as const;
 
