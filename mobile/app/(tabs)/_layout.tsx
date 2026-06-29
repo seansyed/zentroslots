@@ -80,6 +80,11 @@ export default function TabsLayout() {
       }}
       screenOptions={{
         headerShown: false,
+        // Icons-only bottom nav — hide the text labels under each icon. The
+        // per-screen `title` is kept (it still drives the tab's
+        // accessibilityLabel for screen readers); React Navigation centers the
+        // icon automatically when the label is hidden.
+        tabBarShowLabel: false,
         tabBarActiveTintColor: colors.brand,
         tabBarInactiveTintColor: colors.inkSubtle,
         tabBarStyle: [
