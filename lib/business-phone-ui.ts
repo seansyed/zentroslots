@@ -77,15 +77,20 @@ export const SOFTPHONE_COMING_COPY =
  */
 export const BUSINESS_PHONE_ADDON_CARD = {
   title: "Business Phone",
-  price: "$19/month",
+  price: "$29/month",
   features: [
-    "200 US & Canada minutes included",
-    "Inbound call forwarding to your phone",
-    "Click-to-call from ZentroMeet (rings your phone first)",
+    "Dedicated business number",
+    "Inbound call forwarding",
+    "Click-to-call from ZentroMeet",
     "Call logs and monthly usage",
+    "1,000 US & Canada minutes included",
     "Softphone — coming soon",
   ],
-  limitations: ["No emergency (911) calling", "No international calls"],
+  limitations: [
+    "No emergency (911) calling",
+    "No international calls",
+    "No surprise overage billing — usage is capped",
+  ],
 } as const;
 
 /**

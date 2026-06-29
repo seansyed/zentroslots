@@ -122,8 +122,8 @@ test("normalizeCallStatus: canonical + Telnyx synonyms, unknown → null", () =>
 });
 
 // ── package assumption is documented in code (no billing logic) ────
-test("BUSINESS_LINE_DEFAULT_PACKAGE encodes the $19 / 200-min assumption", () => {
-  assert.equal(BUSINESS_LINE_DEFAULT_PACKAGE.monthlyPriceCents, 1900);
-  assert.equal(BUSINESS_LINE_DEFAULT_PACKAGE.includedMinutes, 200);
-  assert.equal(BUSINESS_LINE_DEFAULT_PACKAGE.hardCapMinutes, 200);
+test("BUSINESS_LINE_DEFAULT_PACKAGE encodes the $29 / 1,000-min launch plan", () => {
+  assert.equal(BUSINESS_LINE_DEFAULT_PACKAGE.monthlyPriceCents, 2900);
+  assert.equal(BUSINESS_LINE_DEFAULT_PACKAGE.includedMinutes, 1000);
+  assert.equal(BUSINESS_LINE_DEFAULT_PACKAGE.hardCapMinutes, 1000);
 });

@@ -29,9 +29,9 @@ const BIZ = "+14155550123";
 const FWD = "+16475550123";
 
 // ── validateAssignInput ─────────────────────────────────────────────
-test("valid US/CA business + forwarding numbers → normalized E.164, default 200 min", () => {
+test("valid US/CA business + forwarding numbers → normalized E.164, default 1,000 min", () => {
   const v = validateAssignInput({ businessPhoneNumber: "(415) 555-0123", forwardingNumber: "647-555-0123" });
-  assert.deepEqual(v, { ok: true, businessE164: BIZ, forwardingE164: FWD, includedMinutes: 200 });
+  assert.deepEqual(v, { ok: true, businessE164: BIZ, forwardingE164: FWD, includedMinutes: 1000 });
 });
 
 test("included-minutes override is honored; invalid values rejected", () => {

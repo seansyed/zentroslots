@@ -12,12 +12,12 @@
 
 // ─── Recommended add-on package (data-model assumption ONLY; no billing) ────
 export const BUSINESS_LINE_DEFAULT_PACKAGE = {
-  /** $19/mo — pricing assumption for the data model; Stripe is wired later. */
-  monthlyPriceCents: 1900,
-  /** 150–200 US/Canada minutes; 200 is the recommended package figure. */
-  includedMinutes: 200,
+  /** $29/mo — single launch plan (was $19); Stripe price is owner-managed. */
+  monthlyPriceCents: 2900,
+  /** 1,000 US/Canada minutes — single launch package (was 200). */
+  includedMinutes: 1000,
   /** Hard cap → graceful disable BEFORE any overage billing. */
-  hardCapMinutes: 200,
+  hardCapMinutes: 1000,
 } as const;
 
 // ─── Phone-number normalization + validation ────────────────────────────────

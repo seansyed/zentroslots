@@ -2796,8 +2796,8 @@ export const tenantPhoneSettings = pgTable(
     forwardingStaffId: uuid("forwarding_staff_id").references(() => users.id, {
       onDelete: "set null",
     }),
-    includedMinutes: integer("included_minutes").notNull().default(200),
-    monthlyMinuteCap: integer("monthly_minute_cap").notNull().default(200),
+    includedMinutes: integer("included_minutes").notNull().default(1000),
+    monthlyMinuteCap: integer("monthly_minute_cap").notNull().default(1000),
     metadata: jsonb("metadata"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),

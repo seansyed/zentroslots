@@ -41,11 +41,11 @@ test("entitlement is LOCKED unless plan eligible AND add-on active", () => {
   assert.equal(ok.reason, "active");
 });
 
-test("entitlement carries included minutes (200) + $19/mo price + Pro requirement", () => {
+test("entitlement carries included minutes (1,000) + $29/mo price + Pro requirement", () => {
   const e = resolveBusinessLineEntitlement({ planEligible: true, addonActive: true });
-  assert.equal(e.includedMinutes, 200);
-  assert.equal(e.hardCapMinutes, 200);
-  assert.equal(e.monthlyPriceCents, 1900);
+  assert.equal(e.includedMinutes, 1000);
+  assert.equal(e.hardCapMinutes, 1000);
+  assert.equal(e.monthlyPriceCents, 2900);
   assert.equal(e.requiredPlan, "pro");
 });
 
@@ -58,11 +58,11 @@ test("readAddonActiveFlag only true for an explicit metadata flag", () => {
 });
 
 // ── UI copy ────────────────────────────────────────────────────────
-test("businessLineAddonCopy renders $19/month + 200 minutes + reason", () => {
+test("businessLineAddonCopy renders $29/month + 1,000 minutes + reason", () => {
   const locked = businessLineAddonCopy(resolveBusinessLineEntitlement({ planEligible: false, addonActive: false }));
   assert.equal(locked.title, "Business Line add-on");
-  assert.equal(locked.price, "$19/month");
-  assert.equal(locked.minutes, "200 US/Canada minutes");
+  assert.equal(locked.price, "$29/month");
+  assert.equal(locked.minutes, "1,000 US/Canada minutes");
   assert.match(locked.reasonText, /Pro and above/);
 
   const addonInactive = businessLineAddonCopy(resolveBusinessLineEntitlement({ planEligible: true, addonActive: false }));

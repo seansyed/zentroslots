@@ -123,7 +123,7 @@ export default function BusinessPhoneAddonCard({ status }: { status: BusinessPho
             className="inline-flex items-center gap-1.5 rounded-md bg-brand-accent px-3 py-1.5 text-[12px] font-semibold text-white shadow-soft hover:bg-brand-hover disabled:opacity-50"
           >
             {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
-            Add Business Phone — $19/mo
+            Add Business Phone — $29/mo
           </button>
         ) : (
           <div>
@@ -132,7 +132,7 @@ export default function BusinessPhoneAddonCard({ status }: { status: BusinessPho
               disabled
               className="inline-flex cursor-not-allowed items-center gap-1.5 rounded-md border border-border bg-surface-inset/40 px-3 py-1.5 text-[12px] font-medium text-ink-subtle"
             >
-              Add Business Phone — $19/mo
+              Add Business Phone — $29/mo
             </button>
             <p className="mt-1.5 text-[11.5px] text-ink-muted">Subscribe to a base plan first.</p>
           </div>

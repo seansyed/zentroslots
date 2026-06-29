@@ -55,7 +55,7 @@ export function validateAssignInput(input: {
     return { ok: false, field: "forwardingNumber", reason: "Forwarding number can't be the business number." };
   }
 
-  let includedMinutes = 200;
+  let includedMinutes = 1000; // single launch plan default (was 200)
   if (input.includedMinutes != null) {
     if (!Number.isInteger(input.includedMinutes) || input.includedMinutes < 0 || input.includedMinutes > 100_000) {
       return { ok: false, field: "includedMinutes", reason: "Included minutes must be a whole number between 0 and 100000." };

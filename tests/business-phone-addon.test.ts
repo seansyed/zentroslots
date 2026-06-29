@@ -201,13 +201,14 @@ test("softphone copy says coming soon / not available — never claims it's live
   assert.match(CLICK_TO_CALL_EXPLAINER, /not in the browser|phone first/i);
 });
 
-test("add-on card copy is honest: $19, 200 min, no emergency/intl, softphone coming soon", () => {
-  assert.equal(BUSINESS_PHONE_ADDON_CARD.price, "$19/month");
+test("add-on card copy is honest: $29, 1,000 min, no emergency/intl/overage, softphone coming soon", () => {
+  assert.equal(BUSINESS_PHONE_ADDON_CARD.price, "$29/month");
   const blob = JSON.stringify(BUSINESS_PHONE_ADDON_CARD).toLowerCase();
-  assert.match(blob, /200 us & canada minutes/);
+  assert.match(blob, /1,000 us & canada minutes/);
   assert.match(blob, /softphone — coming soon|softphone .* coming soon/);
   assert.match(blob, /no emergency/);
   assert.match(blob, /no international/);
+  assert.match(blob, /no surprise overage/);
   // never claims a working/available softphone
   assert.doesNotMatch(blob, /softphone (now|available|included|ready)/);
 });

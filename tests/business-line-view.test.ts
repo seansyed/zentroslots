@@ -116,7 +116,7 @@ test("shapeBusinessLineView: defaults are safe + locked when no rows exist", () 
   assert.equal(v.entitlement.reason, "plan_not_eligible");
   assert.equal(v.settings.enabled, false);
   assert.equal(v.settings.forwardingNumber, null);
-  assert.equal(v.settings.includedMinutes, 200); // package default
+  assert.equal(v.settings.includedMinutes, 1000); // package default
   assert.equal(v.recentCalls.length, 0);
   assert.equal(v.usage.minutesUsed, 0);
 });

@@ -63,7 +63,7 @@ export function resolveBusinessLineEntitlement(args: {
   return { active: true, locked: false, reason: "active", ...base };
 }
 
-/** Single source for the locked/upgrade UI copy ("$19/month · 200 minutes"). */
+/** Single source for the locked/upgrade UI copy ("$29/month · 1,000 minutes"). */
 export function businessLineAddonCopy(e: BusinessLineEntitlement): {
   title: string;
   price: string;
@@ -73,7 +73,7 @@ export function businessLineAddonCopy(e: BusinessLineEntitlement): {
   return {
     title: "Business Line add-on",
     price: `$${Math.round(e.monthlyPriceCents / 100)}/month`,
-    minutes: `${e.includedMinutes} US/Canada minutes`,
+    minutes: `${e.includedMinutes.toLocaleString("en-US")} US/Canada minutes`,
     reasonText:
       e.reason === "plan_not_eligible"
         ? `Available on ${capitalize(e.requiredPlan)} and above.`

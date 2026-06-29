@@ -14,7 +14,7 @@ export const dynamic = "force-dynamic";
 
 /**
  * POST /api/tenant/phone/addon — add or remove the Business Phone add-on
- * ($19/mo, 200 US/CA minutes) on the tenant's EXISTING Stripe subscription.
+ * ($29/mo, 1,000 US/CA minutes) on the tenant's EXISTING Stripe subscription.
  *
  * The add-on is a second LINE ITEM on the base subscription (not a separate
  * subscription). This route performs ONLY the Stripe mutation; ENTITLEMENT IS

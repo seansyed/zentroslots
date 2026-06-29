@@ -261,17 +261,17 @@ export function webCtaLabel(cta: "setup_web" | "add_web"): string {
 /** Marketing copy for the non-subscribed info screen (honest — softphone is
  *  "coming soon", emergency + international excluded).
  *
- *  ⚠️ MINUTES NOTE: `minutes` is MARKETING copy for the intended package. The
- *  minutes a tenant actually gets is the per-tenant `monthlyMinuteCap` set at
- *  provisioning (admin default is still 200). Keep this string in sync with the
- *  real cap once it is raised — until then, mobile advertises 500 while the
- *  provisioned cap may be 200. See lib/business-line.ts (cap math) +
- *  lib/business-phone-ui.ts (web copy, still 200). */
+ *  Single launch plan: $29/month, 1,000 US & Canada minutes. This matches the
+ *  new provisioning default (lib/business-line.ts BUSINESS_LINE_DEFAULT_PACKAGE
+ *  + lib/business-phone-admin.ts + db/schema.ts default = 1000) and the web card
+ *  (lib/business-phone-ui.ts BUSINESS_PHONE_ADDON_CARD). NOTE: pre-existing
+ *  pilots provisioned before this change (e.g. docs-demo at 200) keep their cap;
+ *  the active/setup screens show the REAL per-tenant cap via status.includedMinutes. */
 export const BUSINESS_PHONE_MARKETING = {
   title: "Business Phone",
   headline: "Give your business a dedicated line for client calls.",
-  price: "$19/month",
-  minutes: "500 US & Canada minutes included",
+  price: "$29/month",
+  minutes: "1,000 US & Canada minutes included",
   features: [
     "Dedicated business number",
     "Forward calls to your phone",

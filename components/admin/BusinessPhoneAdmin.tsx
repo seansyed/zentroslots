@@ -66,7 +66,7 @@ export default function BusinessPhoneAdmin({ rows }: { rows: Row[] }) {
   const [tenantId, setTenantId] = React.useState("");
   const [businessPhoneNumber, setBusinessPhoneNumber] = React.useState("");
   const [forwardingNumber, setForwardingNumber] = React.useState("");
-  const [includedMinutes, setIncludedMinutes] = React.useState("200");
+  const [includedMinutes, setIncludedMinutes] = React.useState("1000");
   const [label, setLabel] = React.useState("");
 
   async function post(url: string, payload: unknown) {
