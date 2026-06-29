@@ -51,6 +51,10 @@ type Props = {
   /** Show the availability presence pill between title + trailing.
    *  Default off — pages opt in. */
   showPresence?: boolean;
+  /** Max lines for the subtitle before it truncates. Default 1 (unchanged for
+   *  every existing screen). A roomy screen can pass 2 so a longer subtitle
+   *  wraps instead of clipping. */
+  subtitleLines?: number;
 };
 
 export function PageHeader({
@@ -58,6 +62,7 @@ export function PageHeader({
   subtitle,
   trailing,
   showPresence = false,
+  subtitleLines = 1,
 }: Props) {
   const router = useRouter();
   const { data: profile } = useProfile();
@@ -82,7 +87,7 @@ export function PageHeader({
           <AppText
             variant="small"
             color="muted"
-            numberOfLines={1}
+            numberOfLines={subtitleLines}
             style={styles.subtitle}
           >
             {subtitle}

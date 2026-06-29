@@ -174,8 +174,12 @@ export default function PhoneScreen() {
   // ── MARKETING (free / paid-no-addon): info + web CTA, no controls ──
   if (screen.kind === "marketing") {
     return (
-      <ScreenContainer scrollable refreshControl={refreshControl}>
-        <PageHeader title="Business Phone" subtitle="A dedicated business line for your workspace" />
+      <ScreenContainer scrollable refreshControl={refreshControl} contentContainerStyle={{ paddingTop: spacing.sm }}>
+        <PageHeader
+          title="Business Phone"
+          subtitle="Business calls, forwarding, and call logs."
+          subtitleLines={2}
+        />
         <Card style={styles.section}>
           <View style={styles.rowBetween}>
             <AppText variant="h3">{BUSINESS_PHONE_MARKETING.title}</AppText>
