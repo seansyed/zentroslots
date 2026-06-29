@@ -40,11 +40,11 @@ export default async function BusinessLinePage() {
         plan: tenant.currentPlan,
         logoUrl: tenant.logoUrl,
       }}
-      title="Business Line"
+      title="Business Phone settings"
       crumbs={[
         { label: "Dashboard", href: "/dashboard" },
         { label: "Settings" },
-        { label: "Business Line" },
+        { label: "Business Phone" },
       ]}
     >
       <BusinessLineClient />

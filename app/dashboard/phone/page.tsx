@@ -38,9 +38,13 @@ export default async function PhonePage() {
   const tenant = await db.query.tenants.findFirst({ where: eq(tenants.id, user.tenantId) });
   if (!tenant) redirect("/dashboard");
 
-  // Hard gate: hidden completely for unentitled tenants / unpermitted staff.
+  // Gate: operators (admin/manager) always reach the page — they see the
+  // marketing/upgrade card when Business Phone isn't active yet, and the live
+  // controls once it is. Staff reach it only with admin-granted phone access.
+  // Everyone else (e.g. client role) is redirected away.
   const vis = await getUserBusinessPhoneVisibility(tenant.id, user.id, user.role, tenant.currentPlan);
-  if (!vis.hasPhoneAccess) redirect("/dashboard");
+  const isOperator = user.role === "admin" || user.role === "manager";
+  if (!vis.hasPhoneAccess && !isOperator) redirect("/dashboard");
 
   // Phase 4 — setup state (setup_pending / disabled / cap_reached / active) so
   // the client shows the right banner and never fake controls.
@@ -64,8 +68,9 @@ export default async function PhonePage() {
       crumbs={[{ label: "Dashboard", href: "/dashboard" }, { label: "Business Phone" }]}
     >
       {/* viewerRole drives operator-only sections (call log + staff access).
-          setupState/capReached drive the Phase 4 state banners. */}
-      <PhoneClient viewerRole={user.role} setupState={status.setupState} capReached={status.capReached} />
+          The full status drives the hero, marketing/upgrade card, and the
+          Phase 4 state banners. */}
+      <PhoneClient viewerRole={user.role} status={status} />
     </Shell>
   );
 }

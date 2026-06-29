@@ -71,7 +71,7 @@ export function businessLineAddonCopy(e: BusinessLineEntitlement): {
   reasonText: string;
 } {
   return {
-    title: "Business Line add-on",
+    title: "Business Phone add-on",
     price: `$${Math.round(e.monthlyPriceCents / 100)}/month`,
     minutes: `${e.includedMinutes.toLocaleString("en-US")} US/Canada minutes`,
     reasonText:

@@ -24,6 +24,7 @@ import {
 import { Card, CardHeader, Button, Badge, Skeleton, toast } from "@/components/ui/primitives";
 import { cn } from "@/lib/cn";
 import { businessLineAddonCopy, type BusinessLineView } from "@/lib/business-line-view";
+import { BUSINESS_PHONE_EMERGENCY_NOTICE } from "@/lib/business-phone-ui";
 import {
   callStatusLabel,
   callStatusTone,
@@ -144,7 +145,7 @@ export default function BusinessLineClient() {
     return (
       <div className="max-w-2xl">
         <Card>
-          <CardHeader title="Business Line isn't available yet" subtitle="This feature is being set up. Check back soon." />
+          <CardHeader title="Business Phone isn't available yet" subtitle="This feature is being set up. Check back soon." />
           <div className="mt-4">
             <Button variant="secondary" onClick={() => void load()}>
               Retry
@@ -173,14 +174,12 @@ export default function BusinessLineClient() {
                 Add a ZentroMeet business number that rings your phone. Includes {addonCopy.minutes}{" "}
                 with a hard cap (no surprise overage). {addonCopy.reasonText}
               </p>
-              <button
-                type="button"
-                disabled
-                title="Coming soon — contact support to enable the Business Line add-on"
-                className="mt-3 inline-flex h-8 cursor-not-allowed items-center rounded-lg bg-amber-200/70 px-3 text-xs font-semibold text-amber-800 opacity-80"
+              <a
+                href="/dashboard/phone"
+                className="mt-3 inline-flex h-8 items-center rounded-lg bg-amber-600 px-3 text-xs font-semibold text-white hover:bg-amber-700"
               >
-                Coming soon
-              </button>
+                Add Business Phone
+              </a>
             </div>
           </div>
         </div>
@@ -385,11 +384,7 @@ export default function BusinessLineClient() {
       {/* Emergency disclaimer */}
       <div className="flex items-start gap-2.5 rounded-xl border border-border bg-surface-inset/40 p-4 text-xs text-ink-muted">
         <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-ink-subtle" strokeWidth={1.75} />
-        <p>
-          <span className="font-semibold text-ink">This is not an emergency calling service.</span> Do not use it to
-          call 911 or any emergency number. The Business Line forwards inbound calls only and does not provide
-          emergency (E911) location services.
-        </p>
+        <p>{BUSINESS_PHONE_EMERGENCY_NOTICE}</p>
       </div>
     </div>
   );

@@ -27,6 +27,15 @@ import {
   businessPhoneTabLabel,
   CLICK_TO_CALL_EXPLAINER,
   SOFTPHONE_COMING_COPY,
+  BUSINESS_PHONE_HERO,
+  BUSINESS_PHONE_FEATURES,
+  BUSINESS_PHONE_EMERGENCY_NOTICE,
+  BUSINESS_PHONE_USAGE_RESET_NOTE,
+  BUSINESS_PHONE_NO_OVERAGE_NOTE,
+  BUSINESS_PHONE_CALLS_EMPTY,
+  webPhoneStatusBadge,
+  resolveWebPhoneView,
+  resolveAddonCardAction,
 } from "../lib/business-phone-ui";
 
 // ── sidebar / page visibility ──────────────────────────────────────
@@ -168,4 +177,91 @@ test("click-to-call copy makes clear it is NOT in-browser talking (not a softpho
 test("softphone placeholder copy says coming/not available — no false claim", () => {
   assert.match(SOFTPHONE_COMING_COPY, /Phase 2/);
   assert.match(SOFTPHONE_COMING_COPY, /not available yet/i);
+});
+
+// ── launch page copy ($29 / 1,000 single plan) ─────────────────────
+test("hero copy is the $29 / 1,000-minute Business Phone launch plan", () => {
+  assert.equal(BUSINESS_PHONE_HERO.title, "Business Phone");
+  assert.equal(BUSINESS_PHONE_HERO.price, "$29/month");
+  assert.match(BUSINESS_PHONE_HERO.minutes, /1,000 US & Canada minutes/);
+  assert.match(BUSINESS_PHONE_HERO.subtitle, /dedicated business number/i);
+  // no stale price/minutes/naming anywhere in the hero
+  const blob = JSON.stringify(BUSINESS_PHONE_HERO).toLowerCase();
+  assert.doesNotMatch(blob, /\$19|19\/month|200 us|200 minutes|business line/);
+});
+
+test("feature bullets use the launch copy, not Business Line", () => {
+  const blob = JSON.stringify(BUSINESS_PHONE_FEATURES).toLowerCase();
+  assert.match(blob, /dedicated business number/);
+  assert.match(blob, /click-to-call from zentromeet/);
+  assert.match(blob, /softphone — coming soon|softphone .* coming soon/);
+  assert.doesNotMatch(blob, /business line|\$19|200 minutes/);
+});
+
+test("emergency notice is honest — not 'inbound only' (click-to-call exists)", () => {
+  assert.match(BUSINESS_PHONE_EMERGENCY_NOTICE, /not an emergency calling service/i);
+  assert.match(BUSINESS_PHONE_EMERGENCY_NOTICE, /911/);
+  assert.match(BUSINESS_PHONE_EMERGENCY_NOTICE, /location services are not supported/i);
+  assert.doesNotMatch(BUSINESS_PHONE_EMERGENCY_NOTICE, /inbound (calls )?only/i);
+  assert.doesNotMatch(BUSINESS_PHONE_EMERGENCY_NOTICE.toLowerCase(), /business line/);
+});
+
+test("usage + recent-calls helper copy", () => {
+  assert.match(BUSINESS_PHONE_USAGE_RESET_NOTE, /reset each billing period/i);
+  assert.match(BUSINESS_PHONE_NO_OVERAGE_NOTE, /no surprise overage/i);
+  assert.equal(BUSINESS_PHONE_CALLS_EMPTY.title, "No calls yet");
+  assert.match(BUSINESS_PHONE_CALLS_EMPTY.body, /after your first Business Phone call/i);
+});
+
+// ── hero status badge ──────────────────────────────────────────────
+test("webPhoneStatusBadge maps every setup state to a label + tone", () => {
+  assert.deepEqual(webPhoneStatusBadge("no_addon"), { label: "Not active", tone: "neutral" });
+  assert.deepEqual(webPhoneStatusBadge("setup_pending"), { label: "Setup pending", tone: "amber" });
+  assert.deepEqual(webPhoneStatusBadge("active"), { label: "Active", tone: "green" });
+  assert.deepEqual(webPhoneStatusBadge("cap_reached"), { label: "Cap reached", tone: "amber" });
+  assert.deepEqual(webPhoneStatusBadge("disabled"), { label: "Disabled", tone: "neutral" });
+  assert.deepEqual(webPhoneStatusBadge("suspended"), { label: "Suspended", tone: "red" });
+});
+
+// ── page view state machine ────────────────────────────────────────
+test("resolveWebPhoneView: only active/cap_reached expose working controls", () => {
+  assert.deepEqual(resolveWebPhoneView({ setupState: "no_addon" }), { kind: "marketing", showActiveControls: false });
+  assert.deepEqual(resolveWebPhoneView({ setupState: "setup_pending" }), { kind: "setup_pending", showActiveControls: false });
+  assert.deepEqual(resolveWebPhoneView({ setupState: "disabled" }), { kind: "disabled", showActiveControls: false });
+  assert.deepEqual(resolveWebPhoneView({ setupState: "suspended" }), { kind: "suspended", showActiveControls: false });
+  assert.deepEqual(resolveWebPhoneView({ setupState: "active" }), { kind: "active", showActiveControls: true });
+  assert.deepEqual(resolveWebPhoneView({ setupState: "cap_reached" }), { kind: "active", showActiveControls: true });
+});
+
+test("setup-pending hides active controls; active shows them", () => {
+  assert.equal(resolveWebPhoneView({ setupState: "setup_pending" }).showActiveControls, false);
+  assert.equal(resolveWebPhoneView({ setupState: "active" }).showActiveControls, true);
+});
+
+// ── add-on card action (internal Enterprise never sees 'subscribe to base') ──
+test("resolveAddonCardAction: internal Enterprise → internal (no Stripe / no base-plan prompt)", () => {
+  // internal wins even with no base subscription — never "need_base"
+  assert.equal(
+    resolveAddonCardAction({ internalAccount: true, suspended: false, addonSubscribed: false, baseSubscriptionActive: false }),
+    "internal",
+  );
+});
+
+test("resolveAddonCardAction: suspended / remove / add / need_base", () => {
+  assert.equal(
+    resolveAddonCardAction({ internalAccount: false, suspended: true, addonSubscribed: true, baseSubscriptionActive: true }),
+    "suspended",
+  );
+  assert.equal(
+    resolveAddonCardAction({ internalAccount: false, suspended: false, addonSubscribed: true, baseSubscriptionActive: true }),
+    "remove",
+  );
+  assert.equal(
+    resolveAddonCardAction({ internalAccount: false, suspended: false, addonSubscribed: false, baseSubscriptionActive: true }),
+    "add",
+  );
+  assert.equal(
+    resolveAddonCardAction({ internalAccount: false, suspended: false, addonSubscribed: false, baseSubscriptionActive: false }),
+    "need_base",
+  );
 });

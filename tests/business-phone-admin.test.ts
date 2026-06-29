@@ -297,8 +297,10 @@ test("internal account (status=internal) is flagged; normal tenants never are", 
 
 test("billing card: internal account shows manual message, NOT 'subscribe first', no Stripe button", () => {
   const src = fileSrc("components/dashboard/BusinessPhoneAddonCard.tsx");
-  // internal branch is checked FIRST in the action area
-  assert.match(src, /status\.internalAccount\s*\?/);
+  // action is decided by the pure resolveAddonCardAction() helper — unit-tested
+  // in business-phone-ui.test.ts (internal → "internal", never "need_base").
+  assert.match(src, /resolveAddonCardAction/);
+  assert.match(src, /action === "internal"/);
   assert.match(src, /enabled manually by a super admin/i);
   // the internal branch renders no act() button (it's a <p>, not a button) — the
   // Stripe add/remove buttons live only in the non-internal branches.
@@ -420,18 +422,19 @@ test("phone status route: authenticated, safe, flag-driven softphone, no secrets
   assert.doesNotMatch(src, /STRIPE_SECRET_KEY|TELNYX_API_KEY|whsec_|stripeCustomerId|stripeSubscriptionId\b.*NextResponse/i);
 });
 
-test("phone page passes server setupState/capReached to PhoneClient", () => {
+test("phone page passes the full server status to PhoneClient", () => {
   const src = fileSrc("app/dashboard/phone/page.tsx");
   assert.match(src, /getBusinessPhoneStatus/);
-  assert.match(src, /setupState=\{status\.setupState\}/);
-  assert.match(src, /capReached=\{status\.capReached\}/);
+  assert.match(src, /status=\{status\}/);
 });
 
-test("PhoneClient branches on setup_pending/suspended/disabled and gates calls on capReached", () => {
+test("PhoneClient is state-driven (resolveWebPhoneView), gates calls on capReached, honest softphone", () => {
   const src = fileSrc("components/dashboard/PhoneClient.tsx");
-  assert.match(src, /setupState === "setup_pending"/);
-  assert.match(src, /setupState === "suspended"/);
-  assert.match(src, /setupState === "disabled"/);
+  assert.match(src, /resolveWebPhoneView/);
+  assert.match(src, /view\.kind === "marketing"/);
+  assert.match(src, /view\.kind === "setup_pending"/);
+  assert.match(src, /view\.kind === "suspended"/);
+  assert.match(src, /view\.kind === "disabled"/);
   assert.match(src, /\|\| capReached/); // call buttons gated
   // honest: still never claims the softphone is live
   assert.match(src, /SOFTPHONE_COMING_COPY/);

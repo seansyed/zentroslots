@@ -14,7 +14,7 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import { Phone, CheckCircle2, Hourglass, AlertTriangle, Loader2 } from "lucide-react";
 
-import { BUSINESS_PHONE_ADDON_CARD } from "@/lib/business-phone-ui";
+import { BUSINESS_PHONE_ADDON_CARD, resolveAddonCardAction } from "@/lib/business-phone-ui";
 import type { BusinessPhoneClientStatus } from "@/lib/business-phone-admin";
 
 export default function BusinessPhoneAddonCard({ status }: { status: BusinessPhoneClientStatus }) {
@@ -54,7 +54,7 @@ export default function BusinessPhoneAddonCard({ status }: { status: BusinessPho
   }
 
   const card = BUSINESS_PHONE_ADDON_CARD;
-  const active = status.addonSubscribed && !status.suspended;
+  const action = resolveAddonCardAction(status);
 
   return (
     <div className="rounded-2xl border border-border/60 bg-surface p-4 shadow-soft sm:p-5">
@@ -92,20 +92,20 @@ export default function BusinessPhoneAddonCard({ status }: { status: BusinessPho
         </div>
       ) : null}
 
-      {/* Actions */}
+      {/* Actions — driven by the pure resolveAddonCardAction() helper. */}
       <div className="mt-4">
-        {status.internalAccount ? (
+        {action === "internal" ? (
           // Internal/super-admin tenant: no Stripe purchase path. Managed by a
           // super admin via /admin/business-phone. Never calls the Stripe route.
           <p className="text-[12px] text-ink-muted">
             <span className="font-medium text-ink">Internal Enterprise account.</span> Business Phone can be
             enabled manually by a super admin — no Stripe purchase required.
           </p>
-        ) : status.suspended ? (
+        ) : action === "suspended" ? (
           <p className="text-[12px] font-medium text-red-700">
             Billing is suspended — update your payment method to restore Business Phone.
           </p>
-        ) : active ? (
+        ) : action === "remove" ? (
           <button
             type="button"
             onClick={() => act("remove")}
@@ -115,7 +115,7 @@ export default function BusinessPhoneAddonCard({ status }: { status: BusinessPho
             {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
             Remove Business Phone
           </button>
-        ) : status.baseSubscriptionActive ? (
+        ) : action === "add" ? (
           <button
             type="button"
             onClick={() => act("add")}

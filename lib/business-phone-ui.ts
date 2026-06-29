@@ -3,6 +3,7 @@
 // unit-testable (the repo has no React test runner). NO DB, NO Telnyx, NO React.
 
 import { validateUSCanadaE164, type PhoneValidationReason } from "./business-line";
+import type { BusinessPhoneAdminSetupState } from "./business-phone-admin";
 
 // ─── Visibility ─────────────────────────────────────────────────────────────
 
@@ -69,6 +70,115 @@ export const CLICK_TO_CALL_EXPLAINER =
 /** Placeholder copy for the not-yet-built browser softphone (Phase 2). */
 export const SOFTPHONE_COMING_COPY =
   "Talk to customers directly in your browser — no second phone needed. Coming in Phase 2; not available yet.";
+
+// ─── Launch page copy ($29 / 1,000-min single plan) ─────────────────────────
+//
+// Single source of the premium /dashboard/phone hero + notices, so the page and
+// its tests agree. PRODUCT MARKETING copy: the hero advertises the product
+// default (1,000 minutes). The Usage card separately shows the tenant's REAL
+// provisioned cap (which may differ for legacy pilots) — never marketing copy.
+
+export const BUSINESS_PHONE_HERO = {
+  title: "Business Phone",
+  subtitle: "A dedicated business number for client calls, forwarding, and click-to-call.",
+  price: "$29/month",
+  /** Marketing minutes (product default). NOT the per-tenant cap — see Usage. */
+  minutes: "1,000 US & Canada minutes",
+} as const;
+
+/** Marketing feature bullets for the hero / upgrade surfaces (launch plan). */
+export const BUSINESS_PHONE_FEATURES = [
+  "Dedicated business number",
+  "Forward calls to your phone",
+  "Click-to-call from ZentroMeet",
+  "Call logs and monthly usage",
+  "Softphone — coming soon",
+] as const;
+
+/** Honest 911 notice — Phase 1 has click-to-call, so it is NOT "inbound only". */
+export const BUSINESS_PHONE_EMERGENCY_NOTICE =
+  "This is not an emergency calling service. Do not use ZentroMeet Business Phone to call 911 or any emergency number. Emergency location services are not supported.";
+
+/** Helper under the usage meter — included minutes are not metered overage. */
+export const BUSINESS_PHONE_USAGE_RESET_NOTE = "Your included minutes reset each billing period.";
+
+/** Empty-state copy for the recent-calls card. */
+export const BUSINESS_PHONE_CALLS_EMPTY = {
+  title: "No calls yet",
+  body: "Calls will appear here after your first Business Phone call.",
+} as const;
+
+/** No-surprise-billing assurance shown on the usage card. */
+export const BUSINESS_PHONE_NO_OVERAGE_NOTE = "No surprise overage billing — usage is capped.";
+
+export type WebPhoneBadgeTone = "neutral" | "amber" | "green" | "red";
+
+/** Hero status badge (label + tone) for a setup state. PURE. */
+export function webPhoneStatusBadge(
+  setupState: BusinessPhoneAdminSetupState,
+): { label: string; tone: WebPhoneBadgeTone } {
+  switch (setupState) {
+    case "active":
+      return { label: "Active", tone: "green" };
+    case "setup_pending":
+      return { label: "Setup pending", tone: "amber" };
+    case "cap_reached":
+      return { label: "Cap reached", tone: "amber" };
+    case "suspended":
+      return { label: "Suspended", tone: "red" };
+    case "disabled":
+      return { label: "Disabled", tone: "neutral" };
+    case "no_addon":
+    default:
+      return { label: "Not active", tone: "neutral" };
+  }
+}
+
+export type WebPhoneViewKind = "marketing" | "setup_pending" | "active" | "disabled" | "suspended";
+
+/**
+ * Which /dashboard/phone view to render for a given status. PURE + exhaustive.
+ * Only `active`/`cap_reached` expose the working call controls; every other
+ * state shows a marketing/upgrade card or a state banner with NO fake controls.
+ */
+export function resolveWebPhoneView(status: {
+  setupState: BusinessPhoneAdminSetupState;
+}): { kind: WebPhoneViewKind; showActiveControls: boolean } {
+  switch (status.setupState) {
+    case "active":
+    case "cap_reached":
+      return { kind: "active", showActiveControls: true };
+    case "setup_pending":
+      return { kind: "setup_pending", showActiveControls: false };
+    case "disabled":
+      return { kind: "disabled", showActiveControls: false };
+    case "suspended":
+      return { kind: "suspended", showActiveControls: false };
+    case "no_addon":
+    default:
+      return { kind: "marketing", showActiveControls: false };
+  }
+}
+
+export type AddonCardAction = "internal" | "suspended" | "remove" | "add" | "need_base";
+
+/**
+ * Decide the add-on card's primary action for a status. PURE. Internal Enterprise
+ * accounts NEVER see the Stripe purchase / "Subscribe to a base plan first" path
+ * — they're managed manually by a super admin.
+ */
+export function resolveAddonCardAction(status: {
+  internalAccount: boolean;
+  suspended: boolean;
+  addonSubscribed: boolean;
+  baseSubscriptionActive: boolean;
+}): AddonCardAction {
+  if (status.internalAccount) return "internal";
+  if (status.suspended) return "suspended";
+  if (status.addonSubscribed) return "remove";
+  if (status.baseSubscriptionActive) return "add";
+  return "need_base";
+}
 
 /**
  * Billing-page card copy for the Business Phone add-on (Phase 2 prep — defined

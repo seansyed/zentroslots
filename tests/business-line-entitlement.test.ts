@@ -60,7 +60,7 @@ test("readAddonActiveFlag only true for an explicit metadata flag", () => {
 // ── UI copy ────────────────────────────────────────────────────────
 test("businessLineAddonCopy renders $29/month + 1,000 minutes + reason", () => {
   const locked = businessLineAddonCopy(resolveBusinessLineEntitlement({ planEligible: false, addonActive: false }));
-  assert.equal(locked.title, "Business Line add-on");
+  assert.equal(locked.title, "Business Phone add-on");
   assert.equal(locked.price, "$29/month");
   assert.equal(locked.minutes, "1,000 US/Canada minutes");
   assert.match(locked.reasonText, /Pro and above/);
