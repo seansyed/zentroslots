@@ -12,7 +12,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.zentromeet.app",
-      "buildNumber": "16",
+      "buildNumber": "17",
       "config": {
         "usesNonExemptEncryption": false
       },
@@ -34,7 +34,7 @@
         "backgroundColor": "#2563EB"
       },
       "package": "com.zentromeet.app",
-      "versionCode": 20,
+      "versionCode": 21,
       "permissions": [
         "INTERNET",
         "POST_NOTIFICATIONS",
