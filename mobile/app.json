@@ -2,7 +2,7 @@
   "expo": {
     "name": "ZentroMeet",
     "slug": "zentromeet-mobile",
-    "version": "0.3.1",
+    "version": "1.0",
     "description": "Mobile command center for ZentroMeet — manage bookings, confirm appointments, message customers, and run your schedule from anywhere.",
     "primaryColor": "#2563EB",
     "orientation": "portrait",
@@ -12,7 +12,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.zentromeet.app",
-      "buildNumber": "17",
+      "buildNumber": "18",
       "config": {
         "usesNonExemptEncryption": false
       },
