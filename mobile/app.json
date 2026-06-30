@@ -35,6 +35,7 @@
       },
       "package": "com.zentromeet.app",
       "versionCode": 21,
+      "softwareKeyboardLayoutMode": "pan",
       "permissions": [
         "INTERNET",
         "POST_NOTIFICATIONS",
