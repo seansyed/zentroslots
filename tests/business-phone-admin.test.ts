@@ -260,7 +260,7 @@ test("billing add-on card: posts add/remove, handles 403/409/503, no secrets", (
   assert.match(src, /\/api\/tenant\/phone\/addon/);
   assert.match(src, /action:\s*"add"|act\("add"\)/);
   assert.match(src, /act\("remove"\)|action:\s*"remove"/);
-  assert.match(src, /Subscribe to a base plan first/);
+  assert.match(src, /409/);
   assert.match(src, /503/);
   assert.match(src, /403/);
   assert.doesNotMatch(src, /sk_|whsec_|TELNYX_API_KEY/i);
@@ -299,7 +299,7 @@ test("internal account (status=internal) is flagged; normal tenants never are", 
 test("billing card: internal account shows manual message, NOT 'subscribe first', no Stripe button", () => {
   const src = fileSrc("components/dashboard/BusinessPhoneAddonCard.tsx");
   // action is decided by the pure resolveAddonCardAction() helper — unit-tested
-  // in business-phone-ui.test.ts (internal → "internal", never "need_base").
+  // in business-phone-ui.test.ts (internal → "internal", never "upgrade_required").
   assert.match(src, /resolveAddonCardAction/);
   assert.match(src, /action === "internal"/);
   assert.match(src, /enabled manually by a super admin/i);
@@ -309,7 +309,8 @@ test("billing card: internal account shows manual message, NOT 'subscribe first'
   // normal Stripe controls still exist for non-internal tenants
   assert.match(src, /act\("add"\)/);
   assert.match(src, /act\("remove"\)/);
-  assert.match(src, /Subscribe to a base plan first/);
+  // the no-base-plan path is the polished upgrade notice, never harsh plain text
+  assert.match(src, /Upgrade required/);
 });
 
 // ════════════════════════════════════════════════════════════════════
@@ -502,12 +503,13 @@ test("internal Enterprise on /dashboard/phone → marketing card, NOT 'subscribe
   assert.equal(s.setupState, "no_addon");
   // the page renders the add-on/marketing card for this state...
   assert.equal(resolveWebPhoneView(s).kind, "marketing");
-  // ...and the card resolves to the internal (manual) message — never need_base.
+  // ...and the card resolves to the internal (manual) message — never the
+  // upgrade-required notice or a Stripe button.
   assert.equal(resolveAddonCardAction(s), "internal");
-  assert.notEqual(resolveAddonCardAction(s), "need_base");
+  assert.notEqual(resolveAddonCardAction(s), "upgrade_required");
 });
 
-test("free normal tenant still shows 'subscribe to a base plan first' (need_base)", () => {
+test("free / ineligible tenant → upgrade_required (polished notice, not the harsh plain text)", () => {
   const s = shapeBusinessPhoneStatus(statusInput({
     planEligible: false,
     addonActive: false,
@@ -519,7 +521,21 @@ test("free normal tenant still shows 'subscribe to a base plan first' (need_base
     baseSubscriptionActive: false,
   }));
   assert.equal(s.internalAccount, false);
-  assert.equal(resolveAddonCardAction(s), "need_base");
+  assert.equal(resolveAddonCardAction(s), "upgrade_required");
+
+  // The card renders the colored upgrade notice + CTA — and NEVER the old plain
+  // disabled-button / "Subscribe to a base plan first." display text.
+  const card = fileSrc("components/dashboard/BusinessPhoneAddonCard.tsx");
+  assert.match(card, /Upgrade required/);
+  assert.match(card, /Business Phone is available on Pro and higher plans/);
+  assert.match(card, /View plans/);
+  assert.match(card, /href="\/dashboard\/billing"/);
+  // no displayed "Subscribe to a base plan first." paragraph
+  assert.doesNotMatch(card, /text-ink-muted">Subscribe to a base plan first\./);
+  // the upgrade_required branch must not render a (disabled) Add button — the
+  // only Add buttons are the active act("add") path. Spot-check the disabled
+  // "cursor-not-allowed" Add button is gone.
+  assert.doesNotMatch(card, /cursor-not-allowed[\s\S]{0,120}Add Business Phone/);
 });
 
 test("paid normal tenant (active base sub, no add-on) still shows Add Business Phone (add)", () => {

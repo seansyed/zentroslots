@@ -160,12 +160,14 @@ export function resolveWebPhoneView(status: {
   }
 }
 
-export type AddonCardAction = "internal" | "suspended" | "remove" | "add" | "need_base";
+export type AddonCardAction = "internal" | "suspended" | "remove" | "add" | "upgrade_required";
 
 /**
  * Decide the add-on card's primary action for a status. PURE. Internal Enterprise
- * accounts NEVER see the Stripe purchase / "Subscribe to a base plan first" path
- * — they're managed manually by a super admin.
+ * accounts NEVER see the Stripe purchase path — they're managed manually by a
+ * super admin. Tenants without an active base subscription get the polished
+ * "upgrade_required" notice (Business Phone needs a Pro+ paid plan first) — never
+ * a disabled button + harsh plain text.
  */
 export function resolveAddonCardAction(status: {
   internalAccount: boolean;
@@ -177,7 +179,7 @@ export function resolveAddonCardAction(status: {
   if (status.suspended) return "suspended";
   if (status.addonSubscribed) return "remove";
   if (status.baseSubscriptionActive) return "add";
-  return "need_base";
+  return "upgrade_required";
 }
 
 /**

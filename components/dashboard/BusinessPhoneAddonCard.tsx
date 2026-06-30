@@ -12,7 +12,7 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import { Phone, CheckCircle2, Hourglass, AlertTriangle, Loader2 } from "lucide-react";
+import { Phone, CheckCircle2, Hourglass, AlertTriangle, Loader2, Sparkles, ArrowUpRight } from "lucide-react";
 
 import { BUSINESS_PHONE_ADDON_CARD, resolveAddonCardAction } from "@/lib/business-phone-ui";
 import type { BusinessPhoneClientStatus } from "@/lib/business-phone-admin";
@@ -39,7 +39,7 @@ export default function BusinessPhoneAddonCard({ status }: { status: BusinessPho
             (res.status === 503
               ? "The Business Phone add-on isn't available yet."
               : res.status === 409
-                ? "Subscribe to a base plan first."
+                ? "Upgrade your plan first, then add Business Phone."
                 : res.status === 403
                   ? "Only the workspace admin can change this."
                   : "Something went wrong. Please try again."),
@@ -126,15 +126,25 @@ export default function BusinessPhoneAddonCard({ status }: { status: BusinessPho
             Add Business Phone — $29/mo
           </button>
         ) : (
-          <div>
-            <button
-              type="button"
-              disabled
-              className="inline-flex cursor-not-allowed items-center gap-1.5 rounded-md border border-border bg-surface-inset/40 px-3 py-1.5 text-[12px] font-medium text-ink-subtle"
-            >
-              Add Business Phone — $29/mo
-            </button>
-            <p className="mt-1.5 text-[11.5px] text-ink-muted">Subscribe to a base plan first.</p>
+          // upgrade_required — no active paid base plan. Polished amber upgrade
+          // notice (NOT a disabled button / harsh plain text). CTA → billing.
+          <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
+            <div className="flex items-start gap-2.5">
+              <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" strokeWidth={1.75} />
+              <div className="min-w-0">
+                <div className="text-[13px] font-medium text-amber-900">Upgrade required</div>
+                <p className="mt-0.5 text-[12px] text-amber-800">
+                  Business Phone is available on Pro and higher plans. Upgrade your ZentroMeet plan first, then add
+                  Business Phone from billing.
+                </p>
+                <a
+                  href="/dashboard/billing"
+                  className="mt-2.5 inline-flex items-center gap-1.5 rounded-md bg-amber-600 px-3 py-1.5 text-[12px] font-semibold text-white hover:bg-amber-700"
+                >
+                  View plans <ArrowUpRight className="h-3.5 w-3.5" strokeWidth={2} />
+                </a>
+              </div>
+            </div>
           </div>
         )}
       </div>

@@ -240,14 +240,14 @@ test("setup-pending hides active controls; active shows them", () => {
 
 // ── add-on card action (internal Enterprise never sees 'subscribe to base') ──
 test("resolveAddonCardAction: internal Enterprise → internal (no Stripe / no base-plan prompt)", () => {
-  // internal wins even with no base subscription — never "need_base"
+  // internal wins even with no base subscription — never "upgrade_required"
   assert.equal(
     resolveAddonCardAction({ internalAccount: true, suspended: false, addonSubscribed: false, baseSubscriptionActive: false }),
     "internal",
   );
 });
 
-test("resolveAddonCardAction: suspended / remove / add / need_base", () => {
+test("resolveAddonCardAction: suspended / remove / add / upgrade_required", () => {
   assert.equal(
     resolveAddonCardAction({ internalAccount: false, suspended: true, addonSubscribed: true, baseSubscriptionActive: true }),
     "suspended",
@@ -262,6 +262,6 @@ test("resolveAddonCardAction: suspended / remove / add / need_base", () => {
   );
   assert.equal(
     resolveAddonCardAction({ internalAccount: false, suspended: false, addonSubscribed: false, baseSubscriptionActive: false }),
-    "need_base",
+    "upgrade_required",
   );
 });
