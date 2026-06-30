@@ -23,7 +23,8 @@ test("the asset is a valid PNG and byte-identical to the attached logo", () => {
   // PNG signature
   assert.equal(buf.subarray(0, 8).toString("hex"), "89504e470d0a1a0a");
   // Exact attached-asset size — locks "use the exact attached logo asset".
-  assert.equal(buf.length, 217130);
+  // Updated 2026-06-29: new official white-Z-on-royal-blue badge (was 217130).
+  assert.equal(buf.length, 180062);
 });
 
 test("the superseded logo-mark.png is removed (no dead/duplicate brand asset)", () => {
