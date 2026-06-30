@@ -439,3 +439,40 @@ test("PhoneClient is state-driven (resolveWebPhoneView), gates calls on capReach
   // honest: still never claims the softphone is live
   assert.match(src, /SOFTPHONE_COMING_COPY/);
 });
+
+test("no user-facing 'Business Line' remains in key web copy", () => {
+  const view = fileSrc("lib/business-line-view.ts");
+  // the entitlement gate reason is renamed
+  assert.doesNotMatch(view, /Business Line add-on isn't active/);
+  assert.match(view, /Business Phone add-on isn't active/);
+  // the upgrade copy title is renamed
+  assert.match(view, /title: "Business Phone add-on"/);
+  // the marketing copy lib carries no "Business Line"
+  assert.doesNotMatch(fileSrc("lib/business-phone-ui.ts"), /Business Line/);
+  // sidebar nav has no "Business Line" label
+  assert.doesNotMatch(fileSrc("components/dashboard/Sidebar.tsx"), /label: "Business Line/);
+});
+
+test("legacy settings/business-line page redirects to /dashboard/phone (consolidated)", () => {
+  const src = fileSrc("app/dashboard/settings/business-line/page.tsx");
+  assert.match(src, /redirect\("\/dashboard\/phone"\)/);
+  // no longer renders the old flat settings client
+  assert.doesNotMatch(src, /BusinessLineClient/);
+});
+
+test("PhoneClient: forwarding controls are admin-only + active-only; usage + recent calls present", () => {
+  const src = fileSrc("components/dashboard/PhoneClient.tsx");
+  // forwarding config writes the admin-gated business-line API
+  assert.match(src, /saveForwarding/);
+  assert.match(src, /toggleForwarding/);
+  assert.match(src, /"\/api\/tenant\/business-line"/);
+  // forwarding card is admin-only
+  assert.match(src, /isAdmin = viewerRole === "admin"/);
+  assert.match(src, /isAdmin &&[\s\S]{0,200}Call forwarding/);
+  // active-only: marketing / setup_pending / disabled / suspended return BEFORE the controls
+  assert.match(src, /view\.kind === "marketing"/);
+  assert.match(src, /Usage this month/);
+  assert.match(src, /Recent calls/);
+  // forwarding fetch only fires for the active controls + admin
+  assert.match(src, /if \(isAdmin\) void loadForwarding\(\)/);
+});

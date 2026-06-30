@@ -95,7 +95,7 @@ export function evaluateBusinessLinePatchGate(args: {
 }): { allowed: true } | { allowed: false; reason: string } {
   if (args.entitlementActive) return { allowed: true };
   if (args.setsEnabledTrue || args.setsNonEmptyForwarding) {
-    return { allowed: false, reason: "The Business Line add-on isn't active on your plan." };
+    return { allowed: false, reason: "The Business Phone add-on isn't active on your plan." };
   }
   return { allowed: true };
 }

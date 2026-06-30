@@ -36,7 +36,6 @@ import {
   AlertCircle,
   SmartphoneNfc,
   Hourglass,
-  ArrowUpRight,
   Info,
 } from "lucide-react";
 
@@ -94,12 +93,23 @@ export default function PhoneClient({
   // Operators (admin/manager) see the workspace call log + staff access admin;
   // staff see only their own dialer + number setup.
   const isOperator = canManageStaffAccess(viewerRole);
+  // Forwarding configuration (number + on/off) is an admin-only setting — it
+  // writes /api/tenant/business-line, which is admin-gated server-side.
+  const isAdmin = viewerRole === "admin";
   const view = resolveWebPhoneView(status);
   const capReached = status.capReached;
 
   const [me, setMe] = React.useState<MeView | null>(null);
   const [meLoading, setMeLoading] = React.useState(true);
   const [meError, setMeError] = React.useState(false);
+
+  // Call-forwarding settings (admin-only; loaded from /api/tenant/business-line).
+  const [fwdLoaded, setFwdLoaded] = React.useState(false);
+  const [fwdSaved, setFwdSaved] = React.useState<string | null>(null);
+  const [fwdInput, setFwdInput] = React.useState("");
+  const [fwdEnabled, setFwdEnabled] = React.useState(false);
+  const [fwdSaving, setFwdSaving] = React.useState(false);
+  const [fwdToggling, setFwdToggling] = React.useState(false);
 
   // Dialer
   const [dial, setDial] = React.useState("");
@@ -161,13 +171,30 @@ export default function PhoneClient({
     }
   }, []);
 
+  const loadForwarding = React.useCallback(async () => {
+    try {
+      const res = await fetch("/api/tenant/business-line", { cache: "no-store" });
+      if (!res.ok) throw new Error("forwarding load failed");
+      const data = (await res.json()) as { settings?: { forwardingNumber?: string | null; enabled?: boolean } };
+      const fwd = data.settings?.forwardingNumber ?? null;
+      setFwdSaved(fwd);
+      setFwdInput(fwd ?? "");
+      setFwdEnabled(Boolean(data.settings?.enabled));
+    } catch {
+      // soft-fail: the rest of the page still works without the forwarding card
+    } finally {
+      setFwdLoaded(true);
+    }
+  }, []);
+
   // Only the active state hits the entitlement-gated /me + calls endpoints —
   // marketing / pending / disabled / suspended render from `status` alone.
   React.useEffect(() => {
     if (!view.showActiveControls) return;
     void loadMe();
     if (isOperator) void loadMissed();
-  }, [view.showActiveControls, loadMe, loadMissed, isOperator]);
+    if (isAdmin) void loadForwarding();
+  }, [view.showActiveControls, loadMe, loadMissed, loadForwarding, isOperator, isAdmin]);
 
   React.useEffect(() => {
     if (view.showActiveControls && isOperator) void fetchCalls(statusFilter, 0, false);
@@ -219,6 +246,48 @@ export default function PhoneClient({
     const payload = buildCallBackPayload(row.fromNumber);
     if (!payload) return;
     void placeCall(payload, { rowId: row.id });
+  }
+
+  async function saveForwarding() {
+    setFwdSaving(true);
+    try {
+      const res = await fetch("/api/tenant/business-line", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ forwardingNumber: fwdInput.trim() === "" ? null : fwdInput.trim() }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { forwardingNumber?: string | null; error?: string };
+      if (!res.ok) throw new Error(data?.error ?? "Couldn't save the forwarding number.");
+      setFwdSaved(data.forwardingNumber ?? null);
+      setFwdInput(data.forwardingNumber ?? "");
+      toast("Forwarding number saved.", "success");
+      void loadMe();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Couldn't save.", "error");
+    } finally {
+      setFwdSaving(false);
+    }
+  }
+
+  async function toggleForwarding() {
+    const next = !fwdEnabled;
+    setFwdToggling(true);
+    try {
+      const res = await fetch("/api/tenant/business-line", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: next }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { enabled?: boolean; error?: string };
+      if (!res.ok) throw new Error(data?.error ?? "Couldn't update forwarding.");
+      setFwdEnabled(Boolean(data.enabled));
+      toast(next ? "Forwarding enabled." : "Forwarding disabled.", "success");
+      void loadMe();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Couldn't update.", "error");
+    } finally {
+      setFwdToggling(false);
+    }
   }
 
   async function saveBridge(clear: boolean) {
@@ -656,15 +725,74 @@ export default function PhoneClient({
                 <span className="font-medium text-ink">{me.lineEnabled ? "Forwarding on" : "Forwarding off"}</span>.
               </span>
             </div>
-            {isOperator && (
-              <a
-                href="/dashboard/settings/business-line"
-                className="mt-3 inline-flex items-center gap-1.5 text-sm font-medium text-brand-accent hover:text-brand-hover"
-              >
-                Manage forwarding number <ArrowUpRight className="h-4 w-4" strokeWidth={2} />
-              </a>
-            )}
           </Card>
+
+          {/* Call forwarding settings — admin-only (writes /api/tenant/business-line) */}
+          {isAdmin && (
+            <Card>
+              <div className="flex items-center justify-between">
+                <CardHeader title="Call forwarding" subtitle="Calls to your business number ring this phone." />
+                <span className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-surface-inset text-ink-subtle">
+                  <PhoneForwarded className="h-5 w-5" strokeWidth={1.75} />
+                </span>
+              </div>
+
+              <div className="mt-3">
+                <label htmlFor="bp-fwd" className="block text-sm font-medium text-ink">
+                  Forwarding number
+                </label>
+                <p className="mt-0.5 text-xs text-ink-muted">US &amp; Canada numbers only.</p>
+                <div className="mt-2 flex gap-2">
+                  <input
+                    id="bp-fwd"
+                    type="tel"
+                    inputMode="tel"
+                    placeholder="+1 (555) 123-4567"
+                    value={fwdInput}
+                    disabled={!fwdLoaded || fwdSaving}
+                    onChange={(e) => setFwdInput(e.target.value)}
+                    className="h-10 flex-1 rounded-lg border border-border bg-surface px-3 text-sm text-ink outline-none transition-colors placeholder:text-ink-subtle focus:border-brand-accent disabled:opacity-60"
+                  />
+                  <Button
+                    variant="primary"
+                    onClick={() => void saveForwarding()}
+                    disabled={!fwdLoaded || fwdSaving || fwdInput.trim() === (fwdSaved ?? "")}
+                  >
+                    {fwdSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Save"}
+                  </Button>
+                </div>
+              </div>
+
+              <div className="mt-3 flex items-center justify-between rounded-lg border border-border p-3">
+                <div>
+                  <div className="text-sm font-medium text-ink">Forwarding</div>
+                  <div className="text-xs text-ink-muted">
+                    {fwdEnabled ? "Enabled" : "Disabled"} for your business number.
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={fwdEnabled}
+                  aria-label="Toggle call forwarding"
+                  disabled={!fwdLoaded || fwdToggling}
+                  onClick={() => void toggleForwarding()}
+                  className={cn(
+                    "relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors",
+                    fwdEnabled ? "bg-brand-accent" : "bg-surface-inset",
+                    (!fwdLoaded || fwdToggling) && "cursor-not-allowed opacity-60",
+                  )}
+                >
+                  <span
+                    className={cn(
+                      "inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform",
+                      fwdEnabled ? "translate-x-5" : "translate-x-0.5",
+                    )}
+                  />
+                </button>
+              </div>
+            </Card>
+          )}
 
           {/* My calling number */}
           <Card>
