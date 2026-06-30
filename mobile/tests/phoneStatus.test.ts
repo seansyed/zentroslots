@@ -16,6 +16,8 @@ import {
   shouldShowPhoneEntry,
   webCtaLabel,
   BUSINESS_PHONE_MARKETING,
+  BUSINESS_PHONE_UPGRADE_NOTICE,
+  BUSINESS_PHONE_INTERNAL_NOTICE,
   type MobilePhoneStatus,
 } from "../src/lib/businessPhone";
 
@@ -25,6 +27,7 @@ function status(over: Partial<MobilePhoneStatus> = {}): MobilePhoneStatus {
   return {
     basePlan: "pro",
     basePaid: true,
+    internalAccount: false,
     businessPhoneAddonSubscribed: true,
     businessPhoneActive: true,
     setupState: "active",
@@ -44,20 +47,36 @@ function status(over: Partial<MobilePhoneStatus> = {}): MobilePhoneStatus {
 }
 
 // ── screen-state mapping ────────────────────────────────────────────
-test("free / no paid base → marketing with 'Set up on web' CTA", () => {
+test("free / ineligible base → marketing with 'upgrade_required' (View plans, no purchase)", () => {
   const s = resolvePhoneScreenState(
-    status({ setupState: "no_addon", basePaid: false, businessPhoneActive: false, businessPhoneAddonSubscribed: false }),
+    status({ setupState: "no_addon", basePaid: false, internalAccount: false, businessPhoneActive: false, businessPhoneAddonSubscribed: false }),
   );
-  assert.deepEqual(s, { kind: "marketing", cta: "setup_web", webBillingUrl: WEB });
-  assert.equal(webCtaLabel("setup_web"), "Set up on web");
+  assert.deepEqual(s, { kind: "marketing", cta: "upgrade_required", webBillingUrl: WEB });
+  assert.equal(webCtaLabel("upgrade_required"), "View plans");
 });
 
 test("paid base, no add-on → marketing with 'Add Business Phone on web' CTA", () => {
   const s = resolvePhoneScreenState(
-    status({ setupState: "no_addon", basePaid: true, businessPhoneActive: false, businessPhoneAddonSubscribed: false }),
+    status({ setupState: "no_addon", basePaid: true, internalAccount: false, businessPhoneActive: false, businessPhoneAddonSubscribed: false }),
   );
   assert.deepEqual(s, { kind: "marketing", cta: "add_web", webBillingUrl: WEB });
   assert.equal(webCtaLabel("add_web"), "Add Business Phone on web");
+});
+
+test("internal Enterprise → marketing 'internal' (manual super-admin; no purchase button, never upgrade_required)", () => {
+  // internalAccount wins even though basePaid is true for an internal tenant
+  const s = resolvePhoneScreenState(
+    status({ setupState: "no_addon", internalAccount: true, basePaid: true, businessPhoneActive: false, businessPhoneAddonSubscribed: false }),
+  );
+  assert.deepEqual(s, { kind: "marketing", cta: "internal", webBillingUrl: WEB });
+  assert.equal(webCtaLabel("internal"), ""); // no button
+});
+
+test("internal flag absent (older backend) falls back gracefully — not 'internal'", () => {
+  const s = resolvePhoneScreenState(
+    status({ setupState: "no_addon", internalAccount: undefined, basePaid: false, businessPhoneActive: false, businessPhoneAddonSubscribed: false }),
+  );
+  assert.equal(s.kind === "marketing" && s.cta, "upgrade_required");
 });
 
 test("add-on active but setup pending → setup_pending, no controls", () => {
@@ -110,4 +129,16 @@ test("marketing copy is honest: $29 / 1,000 min, softphone coming soon, no emerg
   assert.match(blob, /no international/);
   assert.match(blob, /web app/); // purchase only on web
   assert.doesNotMatch(blob, /softphone (now|available|live|included)/);
+  // never the harsh web phrase anywhere in the marketing copy
+  assert.doesNotMatch(blob, /subscribe to a base plan first/);
+});
+
+test("upgrade-required + internal notices: amber upgrade copy + manual super-admin; no harsh phrase", () => {
+  assert.equal(BUSINESS_PHONE_UPGRADE_NOTICE.title, "Upgrade required");
+  assert.match(BUSINESS_PHONE_UPGRADE_NOTICE.body, /available on Pro and higher plans/);
+  assert.match(BUSINESS_PHONE_UPGRADE_NOTICE.body, /Upgrade your ZentroMeet plan first/);
+  assert.match(BUSINESS_PHONE_INTERNAL_NOTICE, /Internal Enterprise account/);
+  assert.match(BUSINESS_PHONE_INTERNAL_NOTICE, /enabled manually by a super admin/i);
+  const blob = (JSON.stringify(BUSINESS_PHONE_UPGRADE_NOTICE) + " " + BUSINESS_PHONE_INTERNAL_NOTICE).toLowerCase();
+  assert.doesNotMatch(blob, /subscribe to a base plan first/);
 });

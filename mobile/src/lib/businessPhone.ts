@@ -185,6 +185,9 @@ export type BusinessPhoneSetupState =
 export type MobilePhoneStatus = {
   basePlan: string;
   basePaid: boolean;
+  /** Internal/super-admin tenant — managed manually, NO Stripe purchase path.
+   *  (Backend may omit this on older deploys; treated as false when absent.) */
+  internalAccount?: boolean;
   businessPhoneAddonSubscribed: boolean;
   businessPhoneActive: boolean;
   setupState: BusinessPhoneSetupState;
@@ -203,8 +206,12 @@ export type MobilePhoneStatus = {
 
 /** Which Phone screen the mobile app should render for a given status. */
 export type PhoneScreenState =
-  /** Not subscribed → info/marketing only; the CTA opens web billing. */
-  | { kind: "marketing"; cta: "setup_web" | "add_web"; webBillingUrl: string }
+  /** Not subscribed → info/marketing only; the CTA opens web billing.
+   *  cta variants mirror the web add-on card:
+   *   - upgrade_required → Free/ineligible base plan (amber notice + "View plans")
+   *   - add_web          → paid eligible base plan, no add-on ("Add Business Phone on web")
+   *   - internal         → internal Enterprise (manual super-admin message, no button) */
+  | { kind: "marketing"; cta: "add_web" | "upgrade_required" | "internal"; webBillingUrl: string }
   /** Add-on active but no number yet → "setup pending", no controls. */
   | { kind: "setup_pending" }
   /** Live → show number/forwarding/usage/logs; dialer enabled iff canClickToCall. */
@@ -216,8 +223,9 @@ export type PhoneScreenState =
 
 /**
  * Map the safe status DTO to a mobile screen state. PURE + exhaustive.
- *   - no_addon + not paid base  → marketing, "Set up on web"
- *   - no_addon + paid base      → marketing, "Add Business Phone on web"
+ *   - no_addon + internal       → marketing, "internal" (manual super-admin msg)
+ *   - no_addon + paid base      → marketing, "add_web" (Add Business Phone on web)
+ *   - no_addon + not paid base  → marketing, "upgrade_required" (Upgrade required)
  *   - setup_pending             → setup pending (no controls)
  *   - active                    → active (dialer gated by canClickToCall)
  *   - cap_reached               → cap reached (outbound blocked)
@@ -236,8 +244,13 @@ export function resolvePhoneScreenState(s: MobilePhoneStatus): PhoneScreenState 
     case "suspended":
       return { kind: "locked", reason: "suspended" };
     case "no_addon":
-    default:
-      return { kind: "marketing", cta: s.basePaid ? "add_web" : "setup_web", webBillingUrl: s.webBillingUrl };
+    default: {
+      // Mirror the web add-on card: internal Enterprise is managed manually (no
+      // Stripe path); paid-eligible tenants get "Add Business Phone on web";
+      // Free/ineligible tenants get the polished "Upgrade required" notice.
+      const cta = s.internalAccount === true ? "internal" : s.basePaid ? "add_web" : "upgrade_required";
+      return { kind: "marketing", cta, webBillingUrl: s.webBillingUrl };
+    }
   }
 }
 
@@ -253,10 +266,30 @@ export function shouldShowPhoneEntry(): boolean {
   return true;
 }
 
-/** Label for the web CTA button on the marketing screen. */
-export function webCtaLabel(cta: "setup_web" | "add_web"): string {
-  return cta === "add_web" ? "Add Business Phone on web" : "Set up on web";
+/** Label for the web CTA button on the marketing screen. "internal" has no
+ *  button (the internal notice is informational), so it returns "". */
+export function webCtaLabel(cta: "add_web" | "upgrade_required" | "internal"): string {
+  switch (cta) {
+    case "add_web":
+      return "Add Business Phone on web";
+    case "upgrade_required":
+      return "View plans";
+    case "internal":
+    default:
+      return "";
+  }
 }
+
+/** Amber "Upgrade required" notice for Free/ineligible base plans — mirrors the
+ *  web add-on card. The CTA ("View plans") opens web billing externally. */
+export const BUSINESS_PHONE_UPGRADE_NOTICE = {
+  title: "Upgrade required",
+  body: "Business Phone is available on Pro and higher plans. Upgrade your ZentroMeet plan first, then add Business Phone from billing.",
+} as const;
+
+/** Internal/super-admin tenant message — no Stripe purchase path on mobile. */
+export const BUSINESS_PHONE_INTERNAL_NOTICE =
+  "Internal Enterprise account — Business Phone can be enabled manually by a super admin.";
 
 /** Marketing copy for the non-subscribed info screen (honest — softphone is
  *  "coming soon", emergency + international excluded).

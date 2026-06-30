@@ -42,6 +42,8 @@ import {
   resolvePhoneScreenState,
   webCtaLabel,
   BUSINESS_PHONE_MARKETING,
+  BUSINESS_PHONE_UPGRADE_NOTICE,
+  BUSINESS_PHONE_INTERNAL_NOTICE,
   CLICK_TO_CALL_NOTE,
   OUTBOUND_CALL_SUCCESS_MESSAGE,
 } from "@/lib/businessPhone";
@@ -217,16 +219,48 @@ export default function PhoneScreen() {
             ))}
           </View>
 
-          <Button
-            label={webCtaLabel(screen.cta)}
-            rightIcon={<Ionicons name="open-outline" size={16} color={colors.inkOnBrand} />}
-            fullWidth
-            onPress={() => openWeb(screen.webBillingUrl)}
-            style={{ marginTop: spacing.lg }}
-          />
-          <AppText variant="caption" color="subtle" align="center" style={{ marginTop: spacing.sm }}>
-            {BUSINESS_PHONE_MARKETING.note}
-          </AppText>
+          {/* Action area — mirrors the web add-on card (mobile NEVER sells; the
+              only CTA opens web billing externally). */}
+          {screen.cta === "upgrade_required" ? (
+            <View style={styles.upgradeNotice}>
+              <View style={styles.upgradeHeader}>
+                <Ionicons name="sparkles-outline" size={16} color={colors.warningInk} />
+                <AppText variant="smallStrong" style={{ color: colors.warningInk }}>
+                  {BUSINESS_PHONE_UPGRADE_NOTICE.title}
+                </AppText>
+              </View>
+              <AppText variant="caption" style={{ color: colors.warningInk, marginTop: spacing.xs }}>
+                {BUSINESS_PHONE_UPGRADE_NOTICE.body}
+              </AppText>
+              <Button
+                label="View plans"
+                rightIcon={<Ionicons name="open-outline" size={16} color={colors.inkOnBrand} />}
+                fullWidth
+                onPress={() => openWeb(screen.webBillingUrl)}
+                style={{ marginTop: spacing.md }}
+              />
+            </View>
+          ) : screen.cta === "internal" ? (
+            <View style={styles.internalNotice}>
+              <Ionicons name="shield-checkmark-outline" size={16} color={colors.brand} />
+              <AppText variant="small" color="muted" style={{ flex: 1 }}>
+                {BUSINESS_PHONE_INTERNAL_NOTICE}
+              </AppText>
+            </View>
+          ) : (
+            <>
+              <Button
+                label={webCtaLabel(screen.cta)}
+                rightIcon={<Ionicons name="open-outline" size={16} color={colors.inkOnBrand} />}
+                fullWidth
+                onPress={() => openWeb(screen.webBillingUrl)}
+                style={{ marginTop: spacing.lg }}
+              />
+              <AppText variant="caption" color="subtle" align="center" style={{ marginTop: spacing.sm }}>
+                {BUSINESS_PHONE_MARKETING.note}
+              </AppText>
+            </>
+          )}
         </GradientHeroCard>
       </ScreenContainer>
     );
@@ -544,6 +578,17 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border,
   },
   limitRow: { flexDirection: "row", alignItems: "center", gap: spacing.xs },
+  // Free/ineligible — amber "Upgrade required" notice (not red/error).
+  upgradeNotice: {
+    marginTop: spacing.lg, padding: spacing.md, borderRadius: radius.md,
+    borderWidth: 1, borderColor: colors.warning, backgroundColor: colors.warningSubtle,
+  },
+  upgradeHeader: { flexDirection: "row", alignItems: "center", gap: spacing.xs },
+  // Internal Enterprise — soft info notice, no purchase button.
+  internalNotice: {
+    marginTop: spacing.lg, flexDirection: "row", alignItems: "flex-start", gap: spacing.sm,
+    padding: spacing.md, borderRadius: radius.md, backgroundColor: colors.brandSubtle,
+  },
   stateIcon: { alignSelf: "center", marginBottom: spacing.sm },
   dialField: {
     marginTop: spacing.md, height: 56, borderRadius: radius.lg, borderWidth: 1, borderColor: colors.border,

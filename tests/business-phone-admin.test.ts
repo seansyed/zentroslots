@@ -348,6 +348,7 @@ test("mobile status exposes ONLY safe fields — no Stripe/Telnyx ids or secrets
       "forwardingNumber",
       "hasPhoneAccess",
       "includedMinutes",
+      "internalAccount",
       "minutesRemaining",
       "minutesUsed",
       "setupState",
@@ -392,6 +393,9 @@ test("mobile status: basePaid via internal account; free plan → not basePaid",
     status: shapeBusinessPhoneStatus(statusInput({ subscriptionStatus: "internal", addonActive: false, addonSubscribed: false, businessNumber: null })),
   });
   assert.equal(internal.basePaid, true);
+  // internalAccount is surfaced to mobile so it can show the manual super-admin
+  // message instead of an upgrade/purchase prompt.
+  assert.equal(internal.internalAccount, true);
   const free = mobile({
     basePlan: "free",
     paidPlan: false,
@@ -400,6 +404,7 @@ test("mobile status: basePaid via internal account; free plan → not basePaid",
   });
   assert.equal(free.basePaid, false);
   assert.equal(free.basePlan, "free");
+  assert.equal(free.internalAccount, false);
 });
 
 test("mobile status: numbers hidden when the user has no phone access", () => {

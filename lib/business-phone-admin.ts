@@ -238,6 +238,8 @@ export type MobilePhoneStatus = {
   basePlan: string;
   /** Tenant is on a usable PAID base plan (Stripe-active or internal). */
   basePaid: boolean;
+  /** Internal/super-admin tenant — managed manually, NO Stripe purchase path. */
+  internalAccount: boolean;
   businessPhoneAddonSubscribed: boolean;
   /** Line is provisioned + enabled (active or cap_reached). */
   businessPhoneActive: boolean;
@@ -281,6 +283,7 @@ export function shapeMobilePhoneStatus(input: {
   return {
     basePlan: input.basePlan ?? "free",
     basePaid,
+    internalAccount: s.internalAccount,
     businessPhoneAddonSubscribed: s.addonSubscribed,
     businessPhoneActive,
     setupState: s.setupState,
