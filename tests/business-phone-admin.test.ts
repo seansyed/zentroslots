@@ -24,6 +24,7 @@ import {
   shapeMobilePhoneStatus,
 } from "../lib/business-phone-admin";
 import { readAddonSubscribedFlag } from "../lib/business-phone-addon";
+import { resolveAddonCardAction, resolveWebPhoneView } from "../lib/business-phone-ui";
 
 const BIZ = "+14155550123";
 const FWD = "+16475550123";
@@ -475,4 +476,63 @@ test("PhoneClient: forwarding controls are admin-only + active-only; usage + rec
   assert.match(src, /Recent calls/);
   // forwarding fetch only fires for the active controls + admin
   assert.match(src, /if \(isAdmin\) void loadForwarding\(\)/);
+});
+
+// ── internal Enterprise add-on card behavior (zentromeet) ───────────
+// Models sean@parafort.com / zentromeet on /dashboard/phone EXACTLY:
+// plan=enterprise (planEligible), subscription_status=internal, no Stripe
+// customer/sub (baseSubscriptionActive=false), no settings row (addon inactive).
+function internalEnterpriseStatus() {
+  return shapeBusinessPhoneStatus(statusInput({
+    planEligible: true,
+    addonActive: false,
+    manualSource: false,
+    addonSubscribed: false,
+    businessNumber: null,
+    settingsEnabled: false,
+    monthlyMinuteCap: 0,
+    subscriptionStatus: "internal",
+    baseSubscriptionActive: false,
+  }));
+}
+
+test("internal Enterprise on /dashboard/phone → marketing card, NOT 'subscribe to a base plan'", () => {
+  const s = internalEnterpriseStatus();
+  assert.equal(s.internalAccount, true);
+  assert.equal(s.setupState, "no_addon");
+  // the page renders the add-on/marketing card for this state...
+  assert.equal(resolveWebPhoneView(s).kind, "marketing");
+  // ...and the card resolves to the internal (manual) message — never need_base.
+  assert.equal(resolveAddonCardAction(s), "internal");
+  assert.notEqual(resolveAddonCardAction(s), "need_base");
+});
+
+test("free normal tenant still shows 'subscribe to a base plan first' (need_base)", () => {
+  const s = shapeBusinessPhoneStatus(statusInput({
+    planEligible: false,
+    addonActive: false,
+    manualSource: false,
+    addonSubscribed: false,
+    businessNumber: null,
+    settingsEnabled: false,
+    subscriptionStatus: null,
+    baseSubscriptionActive: false,
+  }));
+  assert.equal(s.internalAccount, false);
+  assert.equal(resolveAddonCardAction(s), "need_base");
+});
+
+test("paid normal tenant (active base sub, no add-on) still shows Add Business Phone (add)", () => {
+  const s = shapeBusinessPhoneStatus(statusInput({
+    planEligible: true,
+    addonActive: false,
+    manualSource: false,
+    addonSubscribed: false,
+    businessNumber: null,
+    settingsEnabled: false,
+    subscriptionStatus: "active",
+    baseSubscriptionActive: true,
+  }));
+  assert.equal(s.internalAccount, false);
+  assert.equal(resolveAddonCardAction(s), "add");
 });
