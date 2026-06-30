@@ -41,6 +41,7 @@ export function Input({
   ...rest
 }: Props) {
   const [focused, setFocused] = React.useState(false);
+  const innerRef = React.useRef<TextInput>(null);
   return (
     <View style={[styles.wrap, containerStyle]}>
       {label ? (
@@ -49,6 +50,16 @@ export function Input({
         </AppText>
       ) : null}
       <View
+        // New-Architecture (Fabric) Android regression: tapping a TextInput can
+        // fail to focus it, so the soft keyboard never opens (confirmed on the
+        // login screen — tap does nothing). Force programmatic focus on tap-down
+        // in the responder CAPTURE phase, returning false so we never steal the
+        // gesture: the TextInput still handles caret placement where native focus
+        // works, and on iOS this is just a harmless redundant focus().
+        onStartShouldSetResponderCapture={() => {
+          innerRef.current?.focus();
+          return false;
+        }}
         style={[
           styles.field,
           multiline && styles.fieldMultiline,
@@ -58,6 +69,7 @@ export function Input({
       >
         {leftIcon ? <View style={styles.icon}>{leftIcon}</View> : null}
         <TextInput
+          ref={innerRef}
           placeholderTextColor={colors.inkSubtle}
           {...rest}
           multiline={multiline}
