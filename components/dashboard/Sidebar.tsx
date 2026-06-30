@@ -416,7 +416,7 @@ export default function Sidebar({
             // on-brand instead of generic.
             // eslint-disable-next-line @next/next/no-img-element
             <img
-              src="/zentromeet-mark.svg"
+              src="/zentromeet-mark.png"
               alt="ZentroMeet"
               className="h-9 w-9 shrink-0 rounded-full object-contain shadow-sm"
             />

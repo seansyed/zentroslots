@@ -36,9 +36,9 @@ export const metadata: Metadata = {
   // Apple touch icon reuses the same file — circular shape masks
   // gracefully on iOS home screens.
   icons: {
-    icon: "/zentromeet-mark.svg",
-    apple: "/zentromeet-mark.svg",
-    shortcut: "/zentromeet-mark.svg",
+    icon: "/zentromeet-mark.png",
+    apple: "/zentromeet-mark.png",
+    shortcut: "/zentromeet-mark.png",
   },
 };
 
