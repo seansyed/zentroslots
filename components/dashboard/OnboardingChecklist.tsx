@@ -495,7 +495,7 @@ function PremiumStepCard({ item }: { item: ChecklistItem }) {
 
   return (
     <Link
-      href="/dashboard/settings/billing"
+      href="/dashboard/billing"
       className="group relative block overflow-hidden rounded-xl border border-amber-200/70 bg-gradient-to-br from-amber-50/40 to-surface p-3.5 transition-all duration-200 ease-out hover:-translate-y-0.5 hover:border-amber-300 hover:shadow-soft"
       aria-label={`${item.label} — upgrade to ${planLabel}`}
     >
@@ -626,7 +626,7 @@ function CompletionCard({
             {/* Soft (NOT aggressive) upsell — only when premium tasks exist */}
             {hasPremiumOpportunities ? (
               <Link
-                href="/dashboard/settings/billing"
+                href="/dashboard/billing"
                 className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50/60 px-3 text-[12px] font-medium text-amber-800 transition-colors hover:bg-amber-50"
               >
                 Unlock more features

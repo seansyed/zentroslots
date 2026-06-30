@@ -13,6 +13,8 @@
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 import { partitionByPlan } from "../lib/onboarding/completion";
 import {
@@ -25,6 +27,19 @@ import {
 const FREE = PLANS.free;
 const SOLO = PLANS.solo;
 const PRO = PLANS.pro;
+
+// ─── upgrade CTA route (regression: was 404 /dashboard/settings/billing) ──
+describe("OnboardingChecklist upgrade CTAs route to a real billing page", () => {
+  const src = readFileSync(
+    join(process.cwd(), "components/dashboard/OnboardingChecklist.tsx"),
+    "utf8",
+  );
+  it("links to /dashboard/billing (the existing page), not the 404 route", () => {
+    assert.match(src, /href="\/dashboard\/billing"/);
+    // the old route 404s — must not be referenced anywhere in the component
+    assert.doesNotMatch(src, /\/dashboard\/settings\/billing/);
+  });
+});
 
 // ─── partitionByPlan ─────────────────────────────────────────────────
 
