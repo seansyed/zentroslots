@@ -744,14 +744,20 @@ workflows:
       - name: Set up code signing (use-profiles)
         script: |
           set -euo pipefail
-          # Export as TestFlight INTERNAL-testing-only so the upload is NOT
-          # submitted for external beta review (which requires Beta App Review
-          # Information / Feedback Email that isn't filled in). This is the
-          # documented fix for the "Complete test information is required ...
-          # for external testing" publish failure — the build still uploads to
-          # TestFlight and is available to internal testers.
-          xcode-project use-profiles --project "ios/*.xcodeproj" --warn-only \
-            --custom-export-options '{"testFlightInternalTestingOnly": true}'
+          # Standard App Store export (method=app-store, derived from the App
+          # Store distribution profile). We previously passed
+          #   --custom-export-options '{"testFlightInternalTestingOnly": true}'
+          # to dodge a "Complete test information is required for external
+          # testing" publish error — but that Xcode export option marks the
+          # build "internal testing only", which per Apple makes it INELIGIBLE
+          # FOR APP STORE SUBMISSION. That is exactly why builds 17/18/19
+          # uploaded + ran in internal TestFlight yet stayed greyed-out in the
+          # App Store version's Build picker (older builds 6/14/15, exported
+          # before this flag, are selectable). Removed so builds are
+          # App-Store-submittable. Internal TestFlight still works: publish
+          # --testflight assigns no external groups, so no external-review /
+          # test-information is required.
+          xcode-project use-profiles --project "ios/*.xcodeproj" --warn-only
           # Make the use-profiles → build-ipa export-options contract explicit
           # and fail-closed: if signing setup didn't produce the plist, stop
           # here (instead of burning a 20-min archive that exports the wrong way).
@@ -762,7 +768,7 @@ workflows:
             exit 1
           fi
           echo "Export options method: $(/usr/libexec/PlistBuddy -c 'Print :method' "$EXPORT_PLIST" 2>/dev/null || echo '(unreadable)')"
-          echo "TestFlight internal-only: $(/usr/libexec/PlistBuddy -c 'Print :testFlightInternalTestingOnly' "$EXPORT_PLIST" 2>/dev/null || echo '(not set)')"
+          echo "TestFlight internal-only (must be not-set for App Store eligibility): $(/usr/libexec/PlistBuddy -c 'Print :testFlightInternalTestingOnly' "$EXPORT_PLIST" 2>/dev/null || echo 'not set OK')"
 
       # ----- 9. Build + archive + export the signed App Store IPA ----------
       # Must use --workspace (CocoaPods produces it), NOT --project. Paths are

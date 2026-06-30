@@ -12,7 +12,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.zentromeet.app",
-      "buildNumber": "19",
+      "buildNumber": "20",
       "config": {
         "usesNonExemptEncryption": false
       },
