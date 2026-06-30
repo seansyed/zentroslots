@@ -8,18 +8,21 @@ import type { BusinessPhoneAdminSetupState } from "./business-phone-admin";
 // ─── Visibility ─────────────────────────────────────────────────────────────
 
 /**
- * Whether to show the "Phone" sidebar item / page (P1.2.1). Requires tenant
- * `entitled` (Pro+ plan AND active add-on). Operators (admin/manager) always
- * qualify; staff qualify only when they have Business Phone access
- * (`hasPhoneAccess` — an enabled, can-place staff identity granted by an admin).
- * Fail-closed: anything else, or a missing flag, → hidden.
+ * Whether to show the "Business Phone" sidebar item. Mirrors the /dashboard/phone
+ * page's own gate so the nav never leads to a redirect:
+ *   • Operators (admin/manager) ALWAYS see it — even when the add-on isn't active
+ *     yet — because the page shows the marketing / "Upgrade required" / "Add
+ *     Business Phone" / internal states, which is how operators discover + buy it.
+ *   • Staff see it only with admin-granted access (`hasPhoneAccess`).
+ *   • Everyone else (e.g. client role) → hidden.
+ * `entitled` is accepted for back-compat but no longer gates operators (the page
+ * is reachable + useful to them regardless of entitlement).
  */
 export function shouldShowPhoneNav(args: {
-  entitled: boolean;
+  entitled?: boolean;
   role: string;
   hasPhoneAccess?: boolean;
 }): boolean {
-  if (args.entitled !== true) return false;
   if (args.role === "admin" || args.role === "manager") return true;
   if (args.role === "staff") return args.hasPhoneAccess === true;
   return false;

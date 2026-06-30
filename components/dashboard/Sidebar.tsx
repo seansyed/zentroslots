@@ -80,6 +80,9 @@ type Item = {
    *  with grandfathered rows still need to reach the page to view
    *  their existing data read-only. */
   premium?: boolean;
+  /** Highlight a new/high-value feature with a "New & Popular" pill (expanded)
+   *  and a small gradient dot on the icon (collapsed). */
+  newPopular?: boolean;
 };
 type Group = {
   /** Stable id used as the localStorage key for collapsed state. */
@@ -177,7 +180,7 @@ function buildNav(
       role,
       hasPhoneAccess: businessPhone?.hasPhoneAccess === true,
     })
-      ? [{ label: "Business Phone", href: "/dashboard/phone", icon: Phone }]
+      ? [{ label: "Business Phone", href: "/dashboard/phone", icon: Phone, newPopular: true }]
       : []),
     { label: "Tasks",         href: "/dashboard/tasks",          icon: Flag },
     { label: "Notifications", href: "/dashboard/notifications",  icon: Bell },
@@ -562,7 +565,23 @@ function NavGroup({
                 <Link
                   href={it.href}
                   aria-current={active ? "page" : undefined}
-                  title={collapsed ? it.label : undefined}
+                  // Collapsed mode hides the text label, so supply an accessible
+                  // name (and a hover tooltip). Business Phone advertises its
+                  // New & Popular status in both.
+                  title={
+                    collapsed
+                      ? it.newPopular
+                        ? `${it.label} — New & Popular`
+                        : it.label
+                      : undefined
+                  }
+                  aria-label={
+                    collapsed
+                      ? it.newPopular
+                        ? `${it.label}, New and Popular`
+                        : it.label
+                      : undefined
+                  }
                   className={cn(
                     "group relative flex items-center rounded-lg text-[13px] font-medium transition-all duration-150 ease-out",
                     collapsed
@@ -586,9 +605,21 @@ function NavGroup({
                     )}
                     strokeWidth={1.75}
                   />
+                  {/* Collapsed: a compact gradient dot stands in for the badge. */}
+                  {collapsed && it.newPopular && (
+                    <span
+                      aria-hidden
+                      className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-gradient-to-r from-blue-500 to-violet-500 ring-2 ring-surface"
+                    />
+                  )}
                   {!collapsed && (
                     <>
                       <span className="flex-1 truncate">{it.label}</span>
+                      {it.newPopular && (
+                        <span className="shrink-0 rounded-full bg-gradient-to-r from-blue-500 to-violet-500 px-1.5 py-0.5 text-[9px] font-semibold text-white shadow-sm">
+                          New &amp; Popular
+                        </span>
+                      )}
                       {it.soon && (
                         <span className="rounded bg-surface-inset px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-ink-subtle">
                           Soon

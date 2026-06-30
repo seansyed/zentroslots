@@ -557,3 +557,25 @@ test("paid normal tenant (active base sub, no add-on) still shows Add Business P
   assert.equal(s.internalAccount, false);
   assert.equal(resolveAddonCardAction(s), "add");
 });
+
+// ── dashboard sidebar: Business Phone nav + New & Popular badge ──────
+test("sidebar has the Business Phone nav item with the New & Popular badge; no legacy Business Line entries", () => {
+  const src = fileSrc("components/dashboard/Sidebar.tsx");
+  // the nav item points at /dashboard/phone and is flagged new+popular
+  assert.match(src, /label: "Business Phone", href: "\/dashboard\/phone"/);
+  assert.match(src, /newPopular: true/);
+  // expanded pill, collapsed aria-label, and collapsed tooltip variants
+  assert.match(src, /New &amp; Popular/); // expanded gradient pill
+  assert.match(src, /New and Popular/);   // collapsed accessible name
+  assert.match(src, /New & Popular/);     // collapsed hover tooltip
+  // collapsed mode keeps a subtle dot indicator
+  assert.match(src, /collapsed && it\.newPopular/);
+  // no duplicate / legacy nav entries
+  assert.doesNotMatch(src, /label: "Business Line/);
+  assert.doesNotMatch(src, /Business Phone settings/);
+});
+
+test("sidebar nav gating uses shouldShowPhoneNav (operators always; mirrors page gate)", () => {
+  const src = fileSrc("components/dashboard/Sidebar.tsx");
+  assert.match(src, /shouldShowPhoneNav/);
+});

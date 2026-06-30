@@ -39,17 +39,19 @@ import {
 } from "../lib/business-phone-ui";
 
 // ── sidebar / page visibility ──────────────────────────────────────
-test("Phone nav: operators when entitled; staff only with access; hidden otherwise", () => {
+test("Phone nav: operators ALWAYS (even unentitled, for the upgrade/marketing page); staff with access; others hidden", () => {
+  // operators (admin/manager) always — they reach the marketing / Upgrade
+  // required / Add Business Phone / internal page even before the add-on is active
   assert.equal(shouldShowPhoneNav({ entitled: true, role: "admin" }), true);
+  assert.equal(shouldShowPhoneNav({ entitled: false, role: "admin" }), true);
   assert.equal(shouldShowPhoneNav({ entitled: true, role: "manager" }), true);
-  // staff need granted Business Phone access
-  assert.equal(shouldShowPhoneNav({ entitled: true, role: "staff", hasPhoneAccess: true }), true);
-  assert.equal(shouldShowPhoneNav({ entitled: true, role: "staff", hasPhoneAccess: false }), false);
-  assert.equal(shouldShowPhoneNav({ entitled: true, role: "staff" }), false); // missing flag → hidden
+  assert.equal(shouldShowPhoneNav({ entitled: false, role: "manager" }), true);
+  // staff only with admin-granted Business Phone access
+  assert.equal(shouldShowPhoneNav({ role: "staff", hasPhoneAccess: true }), true);
+  assert.equal(shouldShowPhoneNav({ role: "staff", hasPhoneAccess: false }), false);
+  assert.equal(shouldShowPhoneNav({ role: "staff" }), false); // missing flag → hidden
+  // never for client role (clients use the /client portal, not the dashboard)
   assert.equal(shouldShowPhoneNav({ entitled: true, role: "client", hasPhoneAccess: true }), false);
-  // not subscribed → hidden for everyone
-  assert.equal(shouldShowPhoneNav({ entitled: false, role: "admin" }), false);
-  assert.equal(shouldShowPhoneNav({ entitled: false, role: "staff", hasPhoneAccess: true }), false);
 });
 
 // ── customer call button ───────────────────────────────────────────
