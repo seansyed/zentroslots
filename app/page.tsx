@@ -110,6 +110,58 @@ export default async function HomePage() {
         </div>
       </section>
 
+      {/* Business Phone — major launch feature */}
+      <section className="border-t bg-slate-50 py-16">
+        <div className="mx-auto max-w-5xl px-6">
+          <div className="rounded-2xl border bg-white p-8 shadow-sm sm:p-10">
+            <div className="grid items-center gap-8 lg:grid-cols-2">
+              <div>
+                <span className="inline-flex items-center rounded-full bg-blue-50 px-3 py-1 text-xs font-medium text-blue-700 ring-1 ring-blue-200">
+                  New · Business Phone
+                </span>
+                <h2 className="mt-4 text-3xl font-semibold tracking-tight text-slate-900">
+                  Meetings, scheduling, and business calls — all in one place.
+                </h2>
+                <p className="mt-3 text-slate-600">
+                  ZentroMeet now gives service businesses more than online booking. Manage appointments, reminders,
+                  client communication, and a dedicated business phone line from one modern platform.
+                </p>
+                <Link
+                  href="/business-phone"
+                  className="mt-6 inline-flex rounded-md bg-brand-accent px-5 py-2.5 text-sm font-medium text-white hover:bg-blue-700"
+                >
+                  Explore Business Phone →
+                </Link>
+              </div>
+
+              <div className="rounded-xl border bg-slate-50 p-6">
+                <div className="flex items-center gap-3">
+                  <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-brand-accent text-white">
+                    <PhoneIcon className="h-6 w-6" />
+                  </span>
+                  <div>
+                    <div className="font-medium text-slate-900">Business Phone</div>
+                    <div className="text-sm text-slate-600">$29/month · 1,000 US &amp; Canada minutes</div>
+                  </div>
+                </div>
+                <p className="mt-3 text-sm text-slate-600">
+                  Add a dedicated business number, forward calls to your phone, click-to-call clients, and track call
+                  usage inside ZentroMeet.
+                </p>
+                <ul className="mt-4 grid grid-cols-1 gap-1.5 text-sm text-slate-700 sm:grid-cols-2">
+                  <li className="flex gap-2"><span className="text-green-600">✓</span>Dedicated business number</li>
+                  <li className="flex gap-2"><span className="text-green-600">✓</span>Call forwarding</li>
+                  <li className="flex gap-2"><span className="text-green-600">✓</span>Click-to-call</li>
+                  <li className="flex gap-2"><span className="text-green-600">✓</span>Call logs and usage</li>
+                  <li className="flex gap-2"><span className="text-green-600">✓</span>1,000 US &amp; Canada minutes</li>
+                  <li className="flex gap-2 text-slate-500"><span aria-hidden>•</span>Softphone coming soon</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
       {/*
         Testimonials section removed: the previous fake quote with
         a "Real testimonial coming soon" disclaimer was misleading
@@ -141,6 +193,24 @@ function Feature({ title, body }: { title: string; body: string }) {
       <div className="text-base font-medium text-slate-900">{title}</div>
       <p className="mt-2 text-sm text-slate-600">{body}</p>
     </div>
+  );
+}
+
+/** Inline phone-handset glyph (outline) — keeps the marketing page dep-free. */
+function PhoneIcon({ className = "" }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden
+    >
+      <path d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 0 0 2.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 0 1-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 0 0-1.091-.852H4.5A2.25 2.25 0 0 0 2.25 4.5v2.25Z" />
+    </svg>
   );
 }
 

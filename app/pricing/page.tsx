@@ -62,6 +62,45 @@ export default function PricingPage() {
         </div>
       </section>
 
+      {/* Add-ons */}
+      <section className="mx-auto max-w-5xl px-6 pb-16">
+        <h2 className="text-2xl font-semibold tracking-tight text-slate-900">Add-ons</h2>
+        <p className="mt-2 text-sm text-slate-600">Optional extras you can add from your dashboard.</p>
+        <div className="mt-6 max-w-md">
+          <div className="flex flex-col rounded-2xl border bg-white p-6 shadow-sm">
+            <div className="flex items-baseline justify-between">
+              <div className="text-sm font-medium uppercase tracking-wider text-slate-500">Business Phone</div>
+              <div className="text-3xl font-semibold">
+                $29<span className="text-base font-normal text-slate-500">/mo</span>
+              </div>
+            </div>
+            <p className="mt-2 text-sm text-slate-600">1,000 US &amp; Canada minutes included.</p>
+            <ul className="mt-5 space-y-2 text-sm text-slate-700">
+              <li className="flex gap-2"><span className="text-green-600">✓</span>Dedicated number</li>
+              <li className="flex gap-2"><span className="text-green-600">✓</span>Forward calls to your phone</li>
+              <li className="flex gap-2"><span className="text-green-600">✓</span>Click-to-call from ZentroMeet</li>
+              <li className="flex gap-2"><span className="text-green-600">✓</span>Call logs and usage</li>
+              <li className="flex gap-2"><span className="text-green-600">✓</span>No surprise overage billing</li>
+              <li className="flex gap-2 text-slate-500"><span aria-hidden>•</span>Softphone coming soon</li>
+            </ul>
+            <div className="mt-6 flex gap-2">
+              <Link
+                href="/dashboard/login"
+                className="flex-1 rounded-md bg-brand-accent px-4 py-2 text-center text-sm font-medium text-white hover:bg-blue-700"
+              >
+                Add Business Phone
+              </Link>
+              <Link
+                href="/business-phone"
+                className="rounded-md border bg-white px-4 py-2 text-center text-sm font-medium hover:bg-slate-50"
+              >
+                Learn more
+              </Link>
+            </div>
+          </div>
+        </div>
+      </section>
+
       {/* FAQ */}
       <section className="border-t bg-slate-50 py-16">
         <div className="mx-auto max-w-3xl px-6">

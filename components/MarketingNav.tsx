@@ -22,6 +22,7 @@ export default function MarketingNav() {
         </Link>
         <div className="hidden gap-5 text-sm text-slate-600 sm:flex">
           <Link href="/features" className="hover:text-slate-900">Features</Link>
+          <Link href="/business-phone" className="hover:text-slate-900">Business Phone</Link>
           <Link href="/pricing" className="hover:text-slate-900">Pricing</Link>
           <Link href="/about" className="hover:text-slate-900">About</Link>
         </div>
