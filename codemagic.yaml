@@ -786,11 +786,31 @@ workflows:
       # build/ios/ipa and the raw xcodebuild log to /tmp/xcodebuild_logs.
       - name: Build signed IPA (Xcode archive → App Store export)
         script: |
-          set -euo pipefail
+          set -uo pipefail
+          # build-ipa filters xcodebuild through xcbeautify, so on an archive
+          # failure only warnings + "Failed to archive" reach this console — the
+          # real `error:` (compile / code-sign / entitlement) lives ONLY in the
+          # raw log under /tmp/xcodebuild_logs. Run it under +e and, on failure,
+          # surface the actual error lines + tail inline so we don't have to dig
+          # into the artifact zip to know why the archive broke.
+          set +e
           xcode-project build-ipa \
             --workspace "ios/$XCODE_WORKSPACE" \
             --scheme "$XCODE_SCHEME" \
             --export-options-plist "$HOME/export_options.plist"
+          RC=$?
+          if [ "$RC" != "0" ]; then
+            echo "================ ARCHIVE FAILED (rc=$RC) — raw xcodebuild log ================"
+            for f in /tmp/xcodebuild_logs/*.log; do
+              [ -f "$f" ] || continue
+              echo "----- ERROR / signing lines in $f -----"
+              grep -nE "error:|Provisioning profile|entitlement|Code ?Sign|requires a provisioning|doesn't (support|include)|No profiles|No signing certificate|Signing for|The following build commands failed" "$f" || echo "(no matching error lines found)"
+              echo "----- last 150 lines of $f -----"
+              tail -150 "$f" || true
+            done
+            echo "=============================================================================="
+            exit "$RC"
+          fi
 
       # ----- 10. Validate the IPA (HARD gates) -----------------------------
       # Fails the build unless the IPA exists, is a believable size, has the
