@@ -44,7 +44,12 @@ import { recordSessionEvent, userAgentFromHeaders } from "@/lib/security/session
 import { deviceLabelFor } from "@/lib/security/heuristics";
 import { fetchAndStoreAvatar, unlinkAvatarFile } from "@/lib/auth/avatar-fetch";
 
-export type OAuthProvider = "google" | "microsoft";
+// "apple" is the NATIVE Sign in with Apple flow (App Store Guideline 4.8) —
+// the iOS app verifies nothing itself; it POSTs Apple's identity token to
+// /api/auth/oauth/apple/native, which verifies it against Apple's JWKS and
+// reuses findOrCreateUserForOAuth + mintMobileOAuthToken below. Apple has no
+// web start/callback routes (no state cookie, no redirect URI).
+export type OAuthProvider = "google" | "microsoft" | "apple";
 
 const STATE_COOKIE_PREFIX = "zm_oauth_state_";
 const STATE_COOKIE_TTL_SECONDS = 600; // 10 minutes

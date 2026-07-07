@@ -17,6 +17,7 @@ import * as React from "react";
 import { Platform, StyleSheet, View } from "react-native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import * as AppleAuthentication from "expo-apple-authentication";
 import * as Haptics from "expo-haptics";
 
 // OAuth on web is intentionally disabled: expo-web-browser's
@@ -25,6 +26,11 @@ import * as Haptics from "expo-haptics";
 // {type: "cancel"} immediately. On native the same flow works fine.
 // Web testers use email + password — that path is fully wired.
 const OAUTH_AVAILABLE = Platform.OS !== "web";
+
+// Sign in with Apple (App Store Guideline 4.8) — iOS only. Uses the native
+// OS sheet (no browser leg) and the official HIG button component. Shown
+// FIRST, above the third-party providers, per Apple's guidance.
+const APPLE_AVAILABLE = Platform.OS === "ios";
 
 import { consumePendingOAuthError } from "./_layout";
 import { Button } from "@/components/ui/Button";
@@ -42,7 +48,7 @@ type Mode = "login" | "forgot";
 
 export default function LoginScreen() {
   const router = useRouter();
-  const { signInWithPassword, signInWithOAuth } = useAuth();
+  const { signInWithPassword, signInWithOAuth, signInWithApple } = useAuth();
 
   const [mode, setMode] = React.useState<Mode>("login");
   const [email, setEmail] = React.useState("");
@@ -50,7 +56,7 @@ export default function LoginScreen() {
   const [error, setError] = React.useState<string | null>(null);
   const [notice, setNotice] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(false);
-  const [oauthLoading, setOauthLoading] = React.useState<null | "google" | "microsoft">(null);
+  const [oauthLoading, setOauthLoading] = React.useState<null | "google" | "microsoft" | "apple">(null);
 
   // Surface any OAuth deep-link error captured during cold-start
   // before the screen mounted. consumePendingOAuthError() is a
@@ -116,6 +122,23 @@ export default function LoginScreen() {
     setMode((m) => (m === "login" ? "forgot" : "login"));
   }
 
+  async function onApple() {
+    setError(null);
+    setOauthLoading("apple");
+    void Haptics.selectionAsync().catch(() => {});
+    try {
+      await signInWithApple();
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      router.replace("/(tabs)");
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Sign-in failed";
+      setError(msg);
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
+    } finally {
+      setOauthLoading(null);
+    }
+  }
+
   async function onOAuth(provider: "google" | "microsoft") {
     setError(null);
     setOauthLoading(provider);
@@ -154,6 +177,24 @@ export default function LoginScreen() {
             is email-only). */}
         {mode === "login" && OAUTH_AVAILABLE ? (
           <>
+            {/* Sign in with Apple — iOS only, FIRST, official HIG button
+                (Guideline 4.8: equivalent login option alongside the
+                third-party providers). Disabled-look while another
+                provider is mid-flight via pointerEvents. */}
+            {APPLE_AVAILABLE ? (
+              <View
+                pointerEvents={oauthLoading || loading ? "none" : "auto"}
+                style={[styles.providerBtn, (oauthLoading || loading) && styles.appleBtnBusy]}
+              >
+                <AppleAuthentication.AppleAuthenticationButton
+                  buttonType={AppleAuthentication.AppleAuthenticationButtonType.CONTINUE}
+                  buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.BLACK}
+                  cornerRadius={14}
+                  style={styles.appleBtn}
+                  onPress={() => void onApple()}
+                />
+              </View>
+            ) : null}
             <Button
               label={oauthLoading === "google" ? "Opening Google…" : "Continue with Google"}
               variant="secondary"
@@ -319,6 +360,14 @@ const styles = StyleSheet.create({
   },
   providerBtn: {
     marginBottom: spacing.sm,
+  },
+  // Official Apple button — height matches the size="lg" provider buttons.
+  appleBtn: {
+    width: "100%",
+    height: 52,
+  },
+  appleBtnBusy: {
+    opacity: 0.5,
   },
   dividerRow: {
     flexDirection: "row",

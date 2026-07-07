@@ -85,4 +85,18 @@ export const authApi = {
   async forgotPassword(email: string): Promise<{ ok: true }> {
     return apiPost("/api/auth/forgot-password", { email });
   },
+
+  /**
+   * Sign in with Apple (iOS, Guideline 4.8). The device-side
+   * AppleAuthentication.signInAsync() already produced Apple's signed
+   * identity token; the backend verifies it against Apple's JWKS and
+   * returns the same bearer-token shape as the OAuth deep-link flow.
+   * Private-relay emails pass through as ordinary emails.
+   */
+  async appleNative(
+    identityToken: string,
+    fullName: string | null,
+  ): Promise<{ ok: boolean; token: string; user: AuthUser }> {
+    return apiPost("/api/auth/oauth/apple/native", { identityToken, fullName });
+  },
 };

@@ -28,7 +28,7 @@
  */
 
 import * as React from "react";
-import { Alert, Linking, Pressable, StyleSheet, View } from "react-native";
+import { Alert, Linking, Platform, Pressable, StyleSheet, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
@@ -164,25 +164,31 @@ export default function SettingsScreen() {
           source: "settings.brandStudio",
         }),
     },
-    {
-      icon: "card-outline",
-      label: "Billing & plan",
-      description: tenant?.plan
-        ? `Current plan: ${tenant.plan} · manage on desktop`
-        : "Upgrade, invoices · best on desktop",
-      tone: "success",
-      onPress: () =>
-        setSheet({
-          icon: "card-outline",
-          tone: "success",
-          title: "Billing & plan",
-          body:
-            "Plan changes, invoices, and payment-method updates run through Stripe Checkout. We keep that on the web so card entry happens in the most secure surface.",
-          url: `${env.apiBaseUrl}/dashboard/billing`,
-          source: "settings.billing",
-        }),
-      accessory: tenant?.plan ? <Pill tone="brand">{tenant.plan}</Pill> : null,
-    },
+    // Billing & plan — HIDDEN ON iOS (App Store Guideline 3.1.1: no links
+    // out to purchase/upgrade flows). Android/web keep the handoff.
+    ...(Platform.OS !== "ios"
+      ? [
+          {
+            icon: "card-outline",
+            label: "Billing & plan",
+            description: tenant?.plan
+              ? `Current plan: ${tenant.plan} · manage on desktop`
+              : "Upgrade, invoices · best on desktop",
+            tone: "success",
+            onPress: () =>
+              setSheet({
+                icon: "card-outline",
+                tone: "success",
+                title: "Billing & plan",
+                body:
+                  "Plan changes, invoices, and payment-method updates run through Stripe Checkout. We keep that on the web so card entry happens in the most secure surface.",
+                url: `${env.apiBaseUrl}/dashboard/billing`,
+                source: "settings.billing",
+              }),
+            accessory: tenant?.plan ? <Pill tone="brand">{tenant.plan}</Pill> : null,
+          } satisfies Row,
+        ]
+      : []),
   ];
 
   // About / legal — small "boring but required for app stores" section.

@@ -254,6 +254,26 @@ export function resolvePhoneScreenState(s: MobilePhoneStatus): PhoneScreenState 
   }
 }
 
+// ── App Store Guideline 3.1.1 — iOS purchase-UI gate ────────────────────────
+
+/**
+ * Whether the app may show pricing or external purchase CTAs. Apple's
+ * Guideline 3.1.1 forbids an iOS app from displaying the price of — or
+ * linking out to purchase — digital functionality, so on iOS the Business
+ * Phone marketing screen is informational only (no "$29/month", no "Add
+ * Business Phone on web", no "View plans", no purchased-on-web note) and
+ * Settings hides the "Billing & plan" web handoff. Android is unchanged.
+ * PURE (takes the platform string) so it's unit-testable off-device.
+ */
+export function canShowPurchaseUi(platform: string): boolean {
+  return platform !== "ios";
+}
+
+/** Neutral, purchase-free notice for the iOS marketing screen (3.1.1) —
+ *  states availability without pricing or an upgrade/purchase path. */
+export const BUSINESS_PHONE_IOS_UNAVAILABLE_NOTICE =
+  "Business Phone isn't enabled for this workspace. A workspace administrator can manage availability.";
+
 /** Softphone tab/menu may appear ONLY when the line is active AND the backend
  *  flag says the softphone is available. Default (flag off) → never. */
 export function shouldShowSoftphone(s: MobilePhoneStatus): boolean {

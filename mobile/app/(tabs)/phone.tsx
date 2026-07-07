@@ -16,7 +16,7 @@
  */
 
 import * as React from "react";
-import { ActivityIndicator, Linking, Pressable, RefreshControl, StyleSheet, TextInput, View } from "react-native";
+import { ActivityIndicator, Linking, Platform, Pressable, RefreshControl, StyleSheet, TextInput, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useQuery } from "@tanstack/react-query";
 
@@ -41,9 +41,11 @@ import {
   buildCallBackPayload,
   resolvePhoneScreenState,
   webCtaLabel,
+  canShowPurchaseUi,
   BUSINESS_PHONE_MARKETING,
   BUSINESS_PHONE_UPGRADE_NOTICE,
   BUSINESS_PHONE_INTERNAL_NOTICE,
+  BUSINESS_PHONE_IOS_UNAVAILABLE_NOTICE,
   CLICK_TO_CALL_NOTE,
   OUTBOUND_CALL_SUCCESS_MESSAGE,
 } from "@/lib/businessPhone";
@@ -52,6 +54,10 @@ import { colors, radius, spacing } from "@/theme";
 function openWeb(url: string) {
   void Linking.openURL(url).catch(() => {});
 }
+
+// App Store Guideline 3.1.1 — iOS shows NO pricing and NO external purchase
+// CTAs; the marketing screen becomes informational only. Android unchanged.
+const SHOW_PURCHASE_UI = canShowPurchaseUi(Platform.OS);
 
 export default function PhoneScreen() {
   const { data: profile } = useProfile();
@@ -190,15 +196,21 @@ export default function PhoneScreen() {
           <View style={styles.heroIcon}>
             <Ionicons name="call" size={28} color={colors.inkOnBrand} />
           </View>
-          <AppText variant="h2" align="center" style={{ marginTop: spacing.md }}>
-            {BUSINESS_PHONE_MARKETING.price}
-          </AppText>
-          <View style={styles.minutesBadge}>
-            <Ionicons name="time-outline" size={13} color={colors.brand} />
-            <AppText variant="smallStrong" color="brand">
-              {BUSINESS_PHONE_MARKETING.minutes}
-            </AppText>
-          </View>
+          {/* Price + plan-package line — Android/web only (Guideline 3.1.1:
+              no digital-goods pricing inside the iOS app). */}
+          {SHOW_PURCHASE_UI ? (
+            <>
+              <AppText variant="h2" align="center" style={{ marginTop: spacing.md }}>
+                {BUSINESS_PHONE_MARKETING.price}
+              </AppText>
+              <View style={styles.minutesBadge}>
+                <Ionicons name="time-outline" size={13} color={colors.brand} />
+                <AppText variant="smallStrong" color="brand">
+                  {BUSINESS_PHONE_MARKETING.minutes}
+                </AppText>
+              </View>
+            </>
+          ) : null}
 
           {/* Benefits */}
           <View style={styles.heroDivider} />
@@ -220,8 +232,24 @@ export default function PhoneScreen() {
           </View>
 
           {/* Action area — mirrors the web add-on card (mobile NEVER sells; the
-              only CTA opens web billing externally). */}
-          {screen.cta === "upgrade_required" ? (
+              only CTA opens web billing externally). On iOS (3.1.1) there is
+              NO purchase path at all: internal keeps its manual notice, and
+              every other cta collapses to a neutral availability note. */}
+          {screen.cta === "internal" ? (
+            <View style={styles.internalNotice}>
+              <Ionicons name="shield-checkmark-outline" size={16} color={colors.brand} />
+              <AppText variant="small" color="muted" style={{ flex: 1 }}>
+                {BUSINESS_PHONE_INTERNAL_NOTICE}
+              </AppText>
+            </View>
+          ) : !SHOW_PURCHASE_UI ? (
+            <View style={styles.internalNotice}>
+              <Ionicons name="information-circle-outline" size={16} color={colors.brand} />
+              <AppText variant="small" color="muted" style={{ flex: 1 }}>
+                {BUSINESS_PHONE_IOS_UNAVAILABLE_NOTICE}
+              </AppText>
+            </View>
+          ) : screen.cta === "upgrade_required" ? (
             <View style={styles.upgradeNotice}>
               <View style={styles.upgradeHeader}>
                 <Ionicons name="sparkles-outline" size={16} color={colors.warningInk} />
@@ -239,13 +267,6 @@ export default function PhoneScreen() {
                 onPress={() => openWeb(screen.webBillingUrl)}
                 style={{ marginTop: spacing.md }}
               />
-            </View>
-          ) : screen.cta === "internal" ? (
-            <View style={styles.internalNotice}>
-              <Ionicons name="shield-checkmark-outline" size={16} color={colors.brand} />
-              <AppText variant="small" color="muted" style={{ flex: 1 }}>
-                {BUSINESS_PHONE_INTERNAL_NOTICE}
-              </AppText>
             </View>
           ) : (
             <>

@@ -27,6 +27,7 @@
  */
 
 import { useCallback } from "react";
+import * as AppleAuthentication from "expo-apple-authentication";
 import * as WebBrowser from "expo-web-browser";
 
 import { ApiError } from "@/api/client";
@@ -174,6 +175,42 @@ export function useAuth() {
     [],
   );
 
+  /**
+   * Sign in with Apple — NATIVE flow (iOS only; Guideline 4.8). No
+   * WebBrowser leg: the OS sheet returns a signed identity token which
+   * the backend verifies against Apple's JWKS. Apple only provides the
+   * user's name on the FIRST authorization, so we forward it then; the
+   * backend links by email (private-relay addresses included) exactly
+   * like Google/Microsoft. Apple login data is used only to
+   * authenticate — never for tracking.
+   */
+  const signInWithApple = useCallback(async () => {
+    let credential: AppleAuthentication.AppleAuthenticationCredential;
+    try {
+      credential = await AppleAuthentication.signInAsync({
+        requestedScopes: [
+          AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+          AppleAuthentication.AppleAuthenticationScope.EMAIL,
+        ],
+      });
+    } catch (err) {
+      const code = (err as { code?: string })?.code;
+      if (code === "ERR_REQUEST_CANCELED") {
+        throw new Error(OAUTH_ERROR_LABELS.cancelled);
+      }
+      throw new Error("Couldn't start Apple sign-in. Please try again.");
+    }
+    if (!credential.identityToken) {
+      throw new Error("Apple didn't return a sign-in token. Please try again.");
+    }
+    const fullName = [credential.fullName?.givenName, credential.fullName?.familyName]
+      .filter(Boolean)
+      .join(" ")
+      .trim();
+    const res = await authApi.appleNative(credential.identityToken, fullName || null);
+    await signInToStore({ user: res.user, token: res.token });
+  }, [signInToStore]);
+
   const signOut = useCallback(async () => {
     // Best-effort push token detach BEFORE we drop the auth token —
     // the DELETE endpoint requires auth.
@@ -198,6 +235,7 @@ export function useAuth() {
     isAuthenticated: Boolean(user && token),
     signInWithPassword,
     signInWithOAuth,
+    signInWithApple,
     signOut,
   };
 }
